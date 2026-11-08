@@ -22,9 +22,9 @@ This repository builds a browser-based housing consultation service using SolidC
 
 ## Checks and handoff
 
-- Use the pinned tools through mise and the commands in README. `pnpm check:fast` runs static checks; `pnpm check` also builds and tests the service. Run `pnpm check:security` after dependency changes. Run the checks relevant to a change before committing; never claim checks that were not run.
+- Use the pinned tools through mise and the commands in README. `pnpm check --fast` autofixes and checks TypeScript and Rust; `pnpm check` also runs both test suites. Use `pnpm check --full` for builds, local integration and dependency audits, including after dependency, upstream or Wasm API changes. Checks run locally; do not depend on GitHub Actions. Run the checks relevant to a change before committing; never claim checks that were not run.
 - Keep TypeScript apps and scripts under type-aware ESLint and strict type checking. Parse untrusted JSON at its boundary. Keep dependency catalogs and tool pins consistent; review lockfile changes.
-- Use `pnpm format` for service files. Do not bulk-format upstream source, historical verification records, or generated files. Pre-commit hooks check staged files without rewriting them; they do not replace whole-project checks.
+- All `pnpm check` modes format service files and apply automatic ESLint/Clippy fixes; review the resulting diff before staging. Do not bulk-format upstream source, historical verification records, or generated files. Pre-commit hooks check staged files without rewriting them; they do not replace whole-project checks.
 - New non-test Rust must avoid `unsafe`, `unwrap`, `expect`, and panic-based error handling. Validate external input at its boundary.
 - Test behavior and meaningful integration boundaries, not mechanical wrappers. Leave generated Wasm output and build caches untracked.
 - Update `docs/status.md` when a stage finishes: what works, what was actually checked, remaining limitations, and the next step. Update `docs/plan.md` when requirements or architecture change.

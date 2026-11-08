@@ -7,7 +7,7 @@ try {
   const version = execFileSync(bindgen, ["--version"], { encoding: "utf8" }).trim();
   if (version !== "wasm-bindgen 0.2.129") throw new Error(`Unexpected version: ${version}`);
 } catch (error) {
-  throw new Error("Run pnpm setup:wasm to install the matching wasm-bindgen CLI.", {
+  throw new Error("Run pnpm setup to install the matching wasm-bindgen CLI.", {
     cause: error,
   });
 }

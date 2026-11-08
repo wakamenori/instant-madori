@@ -35,48 +35,53 @@ mise exec -- pnpm dev
 
 ## 日常のコマンド
 
-| コマンド                                                 | 確認・実行するもの                                                                                                                                       |
-| -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pnpm format`                                            | 自作コード・設定・文書をPrettierとrustfmtで整形                                                                                                          |
-| `pnpm lint:fix`                                          | ESLintが安全に自動修正できる指摘を反映                                                                                                                   |
-| `pnpm check:fast`                                        | 整形、型付きlint、型確認、native/WasmのClippy、未使用コード・依存、CI/Dockerfile、配置を検査。ビルドとテストは省くが、初回のClippyは依存をコンパイルする |
-| `pnpm check`                                             | `check:fast`に加え、全ビルド、Rustテスト、JS/Rustの依存ポリシー、秘密情報、ローカル接続のsmoke test                                                      |
-| `pnpm check:security`                                    | Git管理対象の現在のファイルの秘密情報と、JS/Rust依存の既知の脆弱性。監査データを取得するためネットワークが必要                                           |
-| `pnpm build`                                             | Wasm、Web、Workerのdry-runビルド、ネイティブRust                                                                                                         |
-| `pnpm typecheck`                                         | 共通スキーマ、Web、Worker、開発用TypeScriptスクリプト。初回は先に`pnpm setup`を実行                                                                      |
-| `pnpm check:rust`                                        | 自作Rust workspaceの整形・native/WasmのClippy・テスト                                                                                                    |
-| `pnpm smoke`                                             | ビルド済みのRust・Workerを空きポートで起動して検査し、終了する                                                                                           |
-| `pnpm dev:web` / `pnpm dev:worker` / `pnpm dev:geometry` | 各プロセスの個別起動                                                                                                                                     |
-| `pnpm build:wasm`                                        | WasmとJS/TSバインディングの再生成                                                                                                                        |
-| `pnpm upstream:check`                                    | upstreamの更新を取得して、採用版からの変更を表示                                                                                                         |
+検査の入口は `pnpm check` にまとめています。すべてのモードで最初にPrettier・rustfmt・ESLintの自動修正を行い、RustもClippyが自動適用できる修正を行ってから再整形・再検査します。修正できない問題が残れば失敗して後続処理を止めます。作業ツリーを書き換えるので、完了後に差分を確認してから必要な変更をステージしてください。コマンドはGitのステージ内容を変更しません。
 
-本番デプロイ用のコマンドと認証情報はまだ用意していません。Workerの`build`は`--dry-run`で、リモートのリソースを作成しません。
+| コマンド            | 用途                                                                                                                                          |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm check --fast` | 作業中。自動修正、TypeScriptの型付きlint・型確認、Rustのnative/Wasm Clippy、未使用コード・依存、Dockerfile、upstream境界、秘密情報を検査      |
+| `pnpm check`        | 通常の作業確認。軽い検査にTypeScriptとRustのテストを追加                                                                                      |
+| `pnpm check --full` | 全体確認。Wasmの再生成、Web・Worker・Rustのビルド、ローカル接続テスト、依存のライセンス・取得元・脆弱性監査も実行。監査にはネットワークが必要 |
+| `pnpm dev`          | Web・Worker・Rustをまとめて起動                                                                                                               |
+| `pnpm build`        | Wasm・Web・Worker・ネイティブRustの成果物だけをビルド                                                                                         |
+
+初期設定は `pnpm setup`、引数の確認は `pnpm check --help`。upstreamの取得・取り込みには後述の `pnpm upstream:check` / `pnpm upstream:update` を使います。個別ツールを順に手動実行する必要はありません。
+
+`--fast` はテスト実行・アプリのビルド・ネットワーク監査を省きます。Rustの型付き検査自体には依存のコンパイルが必要で、初回は時間がかかります。繰り返し実行ではCargoのキャッシュを再利用し、変更されたクレートを検査します。検査ごとの所要時間を出力します。
+
+`pnpm setup` で生成したWasmの型定義を通常・軽いモードで使います。初期生成がなければ準備手順を示して停止します。Wasmの公開API・依存・ビルド設定・upstreamを変更した場合は `--full` を実行してください。全体モードではWasmを再生成してからTypeScriptを検査し、実際に生成したWasmも接続テストで確認します。
+
+TypeScriptのテストはNode.js標準のtest runnerを使います。`apps/*/{src,tests}/**/*.test.ts`、`packages/*/{src,tests}/**/*.test.ts`、`scripts/**/*.test.ts` が対象です。現在はWorkerのAPIと共有契約を確認するテストがあります。Node.jsの型だけを使うテストには専用のtsconfigを用意し、Worker本体の実行環境の型から分けています。DOM描画のテスト基盤はUI実装時に追加します。
+
+全体モードもローカル実行で、Cloudflareへの配備や本番リソースの作成はしません。Workerのビルドは `--dry-run` です。Dockerイメージのビルド・Linuxでの実行確認は含みません。
 
 ## 検査の担当と範囲
 
-| 対象                              | 検査                                                                                                                                                                     |
-| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| TypeScript・React・開発スクリプト | TypeScriptのstrict設定、型情報を使うESLint、React Hooksルール                                                                                                            |
-| 整形                              | Prettier、rustfmt、EditorConfig。文章は文字数による自動改行をしない                                                                                                      |
-| Rust                              | Clippyで警告をエラーにする。自作コードのunsafe・unwrap・expect・panicなどを禁止                                                                                          |
-| 未使用コード・依存                | Knipとcargo-machete                                                                                                                                                      |
-| 依存の脆弱性                      | pnpm audit、cargo-deny。JSはlow以上、Rustは脆弱性・yankedを検査し、unmaintainedはworkspaceの直接依存を対象にする                                                         |
-| 依存のライセンス・取得元          | pnpmのメタデータでJSのGPL/LGPL/AGPL・不明ライセンスを拒否し、Rustはcargo-denyの許可リストで検査。Rustは実際に使うSolidCraft側の依存も対象                                |
-| 秘密情報                          | Gitleaks。`check:secrets`で追跡済み・未追跡のGit管理対象ファイル、コミット時にステージ済みの差分を検査。gitignoreされたローカル認証情報は除く。Gitの全履歴の監査ではない |
-| GitHub Actions・Dockerfile        | actionlint、hadolint                                                                                                                                                     |
-| upstreamとの境界                  | 採用版とのファイル照合、独自変更の記録、Cargo workspaceと依存先の検査                                                                                                    |
+| 対象                              | 検査                                                                                                                                                                       |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| TypeScript・React・開発スクリプト | TypeScriptのstrict設定、型情報を使うESLint、React Hooksルール                                                                                                              |
+| 整形                              | Prettier、rustfmt、EditorConfig。文章は文字数による自動改行をしない                                                                                                        |
+| Rust                              | Clippyで警告をエラーにする。自作コードのunsafe・unwrap・expect・panicなどを禁止                                                                                            |
+| 未使用コード・依存                | Knipとcargo-machete                                                                                                                                                        |
+| 依存の脆弱性                      | pnpm audit、cargo-deny。JSはlow以上、Rustは脆弱性・yankedを検査し、unmaintainedはworkspaceの直接依存を対象にする                                                           |
+| 依存のライセンス・取得元          | pnpmのメタデータでJSのGPL/LGPL/AGPL・不明ライセンスを拒否し、Rustはcargo-denyの許可リストで検査。Rustは実際に使うSolidCraft側の依存も対象                                  |
+| 秘密情報                          | Gitleaks。`check`の全モードで追跡済み・未追跡のGit管理対象ファイル、コミット時にステージ済みの差分を検査。gitignoreされたローカル認証情報は除く。Gitの全履歴の監査ではない |
+| Dockerfile                        | hadolint                                                                                                                                                                   |
+| upstreamとの境界                  | 採用版とのファイル照合、独自変更の記録、Cargo workspaceと依存先の検査                                                                                                      |
 
 自作コードのlint・一括整形・未使用検査は、`third_party/solidcraft`を対象にしません。生成物も除外し、過去の検証記録・証拠は一括整形しません。依存の脆弱性やライセンスの検査対象はソースの配置で除外せず、サービスのlockfileから決めます。
 
-Lefthookのコミット前検査は、ステージした自作ファイルの整形・lint、Rust変更時のworkspace整形、秘密情報です。ファイルを自動で書き換えません。全体の型確認・ビルド・テストは`pnpm check`とCIが担当します。GitHubではPR・main更新時にサービスCIと依存監査を実行し、依存監査は週次にも実行します。Dependabotはルートのnpm・Cargo・Actionsの更新を提案します。SolidCraft本体はsubtreeの手順で更新します。
+Lefthookのコミット前検査は、ステージした自作ファイルの整形・lint、自作Rustの整形、秘密情報です。自動修正は先に `pnpm check` で行い、整形・lintはステージ対象ファイルの作業ツリーを、秘密情報はステージ済みの差分を検査します。フックはファイルやGitのステージ内容を書き換えません。部分ステージした変更をまとめてステージすることはありません。フックだけでは全体の型確認・テストを代替できません。
 
-VS Code向けの推奨拡張・保存時整形・Rust Analyzer設定を`.vscode/`に用意しています。他のエディタでも同じCLI検査とEditorConfigを使えます。
+GitHub Actionsを実行・合否判定の前提にしません。サービス用workflowを削除し、ローカルの `check` に検査を集約しています。Dependabotはnpm・Cargoの更新提案用に残し、upstream本体はsubtreeの手順で更新します。
+
+VS Code向けの推奨拡張・保存時整形・ESLint自動修正・Rust Analyzer設定を `.vscode/` に用意しています。他のエディタやエージェントによる直接編集でも、同じ `pnpm check` を使えます。
 
 ## 依存とツールを更新する
 
 Node.js・pnpm・CLI検査ツールの版は`mise.toml`、共有するTypeScript・Node型・Zodの版は`pnpm-workspace.yaml`のcatalogで変更します。Node.jsは`.node-version`とも揃えます。TypeScriptは型付きlintの対応範囲に合わせて6.0系を採用しています。
 
-pnpmは厳密なpeer dependency検査と、公開後24時間未満のパッケージを採用しない設定です。インストールスクリプトの実行は必要なパッケージだけ許可します。manifestや設定が変わったら明示的に`pnpm install`を実行し、コマンド実行時の自動インストールはしません。生成されたlockfileを確認してコミットします。
+pnpmは厳密なpeer dependency検査と、公開後24時間未満のパッケージを採用しない設定です。インストールスクリプトの実行は必要なパッケージだけ許可します。manifestや設定が変わったら明示的に`pnpm install`を実行し、コマンド実行時の自動インストールはしません。生成されたlockfileを確認し、`pnpm check --full` で依存監査も通してからコミットします。
 
 一時的な依存上書きには理由を残します。現在のminimatchの上書きは[GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249)への対応です。ESLint/typescript-eslint側が修正版を採用したら取り除きます。
 

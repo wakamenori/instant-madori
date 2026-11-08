@@ -33,10 +33,10 @@ upstreamの更新は原則取り込む。住宅サービスの機能、データ
 3. `pnpm upstream:update <確認した40桁のSHA>`で取り込む。これはsubtreeのマージコミットを作る。競合したら独自変更の目的を保って解消し、マージを完了させる。
 4. `solidcraft.json`の採用コミットと独自変更ファイル一覧を確認する。自動マージが競合で止まった場合、採用コミットの更新は手動で行う。
 5. 依存関係が変わったらルートのCargo.lockを更新する。upstreamの`[patch]`・プロファイルも確認する。現在のegui-wgpu・winitパッチはサービスの依存経路に入らないため、親には設定していない。
-6. `pnpm check`を実行する。住宅機能の実装後は、計画5.5の保存・再編集・見た目・ジョブ復帰の確認も実施する。通過した結果、採用コミット、必要な調整を記録してコミットする。
+6. `pnpm check --full`を実行する。住宅機能の実装後は、計画5.5の保存・再編集・見た目・ジョブ復帰の確認も実施する。通過した結果、採用コミット、必要な調整を記録してコミットする。
 
 問題が出た場合は、無関係な作業を巻き戻さず、更新用ブランチで修正・保留を判断する。公開ブランチの履歴を書き換えない。
 
-`pnpm check:layout`は採用版の全ファイルと取り込み領域を照合する。記録した独自変更以外の欠落・書換えや、upstreamアプリの自作workspaceへの混入を検出する。
+`pnpm check`の全モードに含む配置検査は、採用版の全ファイルと取り込み領域を照合する。記録した独自変更以外の欠落・書換えや、upstreamアプリの自作workspaceへの混入を検出する。
 
 参照：[Git subtree](https://raw.githubusercontent.com/git/git/master/contrib/subtree/git-subtree.adoc)、[Cargo workspace](https://doc.rust-lang.org/cargo/reference/workspaces.html)。

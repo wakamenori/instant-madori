@@ -3,10 +3,16 @@
   "ignoreBinaries": ["mise"],
   "workspaces": {
     ".": {
+      "entry": [
+        "scripts/{build-wasm,check,dev,upstream,check-layout,check-licenses,check-secrets,smoke}.ts"
+      ],
       "project": ["scripts/**/*.ts", "*.mjs"]
     },
     "apps/web": { "project": ["src/**/*.{ts,tsx}"] },
-    "apps/worker": { "project": ["src/**/*.ts"] },
+    "apps/worker": {
+      "entry": ["tests/**/*.test.ts"],
+      "project": ["src/**/*.ts", "tests/**/*.ts"]
+    },
     "packages/contracts": { "project": ["src/**/*.ts"] }
   }
 }

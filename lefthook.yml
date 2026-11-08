@@ -12,6 +12,6 @@ pre-commit:
     rust-format:
       glob: "*.rs"
       exclude: "^third_party/solidcraft/"
-      run: cargo fmt --all -- --check
+      run: cargo fmt -p madori-geometry -p madori-housing -p madori-modeling -p madori-viewer -- --check
     secrets:
       run: mise exec -- gitleaks git --pre-commit --staged --redact --verbose --no-banner

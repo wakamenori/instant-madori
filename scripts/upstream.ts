@@ -31,7 +31,7 @@ if (command === "check") {
     });
     writeFileSync(file, `${JSON.stringify({ ...pin, commit: target }, null, 2)}\n`);
     console.log(
-      "Upstream merged. Review patches and run pnpm check; record the result and commit the updated pin.",
+      "Upstream merged. Review patches and run pnpm check --full; record the result and commit the updated pin.",
     );
   }
 } else {
