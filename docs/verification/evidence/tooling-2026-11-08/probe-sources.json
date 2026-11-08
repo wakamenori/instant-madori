@@ -1,0 +1,14 @@
+{
+  "floating-local.ts": "export function ignored() { fetch(\"/api/health\"); }\n",
+  "floating-imported.ts": "import { loadArea } from \"./support\";\nexport function ignored() { loadArea(); }\n",
+  "unsafe-json.ts": "export function area(raw: string): number { const value = JSON.parse(raw); return value.area; }\n",
+  "unsafe-call.ts": "export function invoke(raw: string) { const callback = JSON.parse(raw); callback(); }\n",
+  "unsafe-argument.ts": "export function append(raw: string) { const items: string[] = []; items.push(JSON.parse(raw)); return items; }\n",
+  "async-event.ts": "export function listen(button: HTMLButtonElement) { button.addEventListener(\"click\", async () => { await fetch(\"/api/health\"); }); }\n",
+  "switch-missing.ts": "export function label(status: \"queued\" | \"running\" | \"done\") { switch (status) { case \"queued\": return \"Waiting\"; case \"running\": return \"Working\"; } return \"Unknown\"; }\n",
+  "hook-conditional.tsx": "import { useState } from \"react\";\nexport function Conditional({ enabled }: { enabled: boolean }) { if (enabled) useState(0); return null; }\n",
+  "effect-dependencies.tsx": "import { useEffect } from \"react\";\nexport function Title({ name }: { name: string }) { useEffect(() => { document.title = name; }, []); return null; }\n",
+  "ref-in-render.tsx": "import { useRef } from \"react\";\nexport function RefValue() { const ref = useRef(0); return <span>{ref.current}</span>; }\n",
+  "set-state-effect.tsx": "import { useEffect, useState } from \"react\";\nexport function Initial() { const [count, setCount] = useState(0); useEffect(() => { setCount(1); }, []); return <span>{count}</span>; }\n",
+  "valid.tsx": "import { useEffect, useState } from \"react\";\nimport { z } from \"zod\";\nimport { loadArea } from \"./support\";\nexport async function handled() { return await loadArea(); }\nexport function area(raw: string): number { return z.object({ area: z.number() }).parse(JSON.parse(raw)).area; }\nexport function label(status: \"queued\" | \"running\" | \"done\") { switch (status) { case \"queued\": return \"Waiting\"; case \"running\": return \"Working\"; case \"done\": return \"Complete\"; } }\nexport function Title({ name }: { name: string }) { const [count] = useState(0); useEffect(() => { document.title = name; }, [name]); return <span>{count}</span>; }\n"
+}

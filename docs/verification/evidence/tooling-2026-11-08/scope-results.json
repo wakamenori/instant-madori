@@ -1,0 +1,11 @@
+{
+  "autoMigrationIgnoredDirectoryFailure": true,
+  "correctedIgnoredPathsUnchanged": [
+    "third_party/solidcraft/keep.ts",
+    "docs/verification/keep.ts",
+    "target/keep.ts",
+    "crates/viewer/pkg/keep.ts",
+    "apps/worker/worker-configuration.d.ts"
+  ],
+  "formattedActionlintExit": 0
+}

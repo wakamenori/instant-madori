@@ -1,0 +1,18 @@
+[
+  {
+    "file": ".github/dependabot.yml",
+    "diff": "--- .github/dependabot.yml\n+++ .github/dependabot.yml\n@@ -6,7 +6,7 @@\n       interval: weekly\n     groups:\n       compatible-updates:\n-        update-types: [minor, patch]\n+        update-types: [ minor, patch ]\n   - package-ecosystem: cargo\n     directory: /\n     schedule:\n"
+  },
+  {
+    "file": ".github/workflows/ci.yml",
+    "diff": "--- .github/workflows/ci.yml\n+++ .github/workflows/ci.yml\n@@ -1,7 +1,7 @@\n name: Service CI\n on:\n   push:\n-    branches: [main]\n+    branches: [ main ]\n   pull_request:\n   workflow_dispatch:\n \n"
+  },
+  {
+    "file": ".github/workflows/security.yml",
+    "diff": "--- .github/workflows/security.yml\n+++ .github/workflows/security.yml\n@@ -2,7 +2,7 @@\n on:\n   pull_request:\n   push:\n-    branches: [main]\n+    branches: [ main ]\n   schedule:\n     - cron: \"42 3 * * 1\"\n   workflow_dispatch:\n"
+  },
+  {
+    "file": "apps/worker/wrangler.jsonc",
+    "diff": "--- apps/worker/wrangler.jsonc\n+++ apps/worker/wrangler.jsonc\n@@ -9,6 +9,6 @@\n     \"directory\": \"../web/dist\",\n     \"binding\": \"ASSETS\",\n     \"not_found_handling\": \"single-page-application\",\n-    \"run_worker_first\": [\"/api/*\"],\n-  },\n+    \"run_worker_first\": [\"/api/*\"]\n+  }\n }\n"
+  }
+]

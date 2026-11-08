@@ -55,6 +55,10 @@ macOS arm64、Rust 1.99.1、Node.js 24.22.1、pnpm 11.9.0で確認した。
 
 意図的なPromiseの処理漏れ・条件付きReact Hookを一時ファイルへ入れ、ESLintが該当ルールで拒否することを確認した。生成した偽の認証情報も検出され、出力は秘匿された。同じ情報をgitignoreされた一時ファイルに置いた場合は検査を通過した。これらの一時ファイルは削除した。`pnpm setup`、一括起動、APIプロキシ、Ctrl-Cでの終了、ステージした変更へのコミット前フックも確認した。
 
+## 整形・lintの比較検証
+
+[Prettier・Biomeの比較](verification/tooling-comparison.md)を実施した。実ファイル42件では整形チェックが約337msから49msへ短縮した。一方、検証用に選んだ問題11種類のうち、現在のESLintは11種類、移行したBiomeは5種類を検出した。整形だけをBiomeに移し、型付きESLintとReact Hooks検査を維持する構成を推奨する。採用は未決定で、現在の設定・依存はPrettier＋ESLintのまま。自動移行した除外設定の修正方法も記録した。
+
 ## 残る実行環境の確認
 
 Wasmの実行確認は生成したバインディングをNode.jsから初期化して行い、HTTPでの配信も確認した。実ブラウザでのGPU描画確認は今回の対象に含まない。Linux用CIは設定済みだが、今回の作業ではGitHub上で実行していない。Docker daemonは停止していたためContainerのビルド・実行は未確認で、6.1bで確認する。
