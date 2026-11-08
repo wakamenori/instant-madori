@@ -1,0 +1,12 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "ignoreBinaries": ["mise"],
+  "workspaces": {
+    ".": {
+      "project": ["scripts/**/*.ts", "*.mjs"]
+    },
+    "apps/web": { "project": ["src/**/*.{ts,tsx}"] },
+    "apps/worker": { "project": ["src/**/*.ts"] },
+    "packages/contracts": { "project": ["src/**/*.ts"] }
+  }
+}

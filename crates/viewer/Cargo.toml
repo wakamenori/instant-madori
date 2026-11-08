@@ -16,3 +16,7 @@ solidcraft-render.workspace = true
 solidcraft-gpu.workspace = true
 wasm-bindgen.workspace = true
 wgpu.workspace = true
+
+[package.metadata.cargo-machete]
+# Enables the WebGPU backend on SolidCraft's shared wgpu dependency.
+ignored = ["wgpu"]

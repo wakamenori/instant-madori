@@ -1,0 +1,11 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Upstream source and generated/dependency directories are maintained separately."
+paths = [
+  '''(^|/)third_party/solidcraft(/|$)''',
+  '''(^|/)(node_modules|target|\.tools|\.git|\.wrangler|dist)(/|$)''',
+  '''(^|/)crates/viewer/pkg(/|$)''',
+  '''(^|/)apps/worker/worker-configuration\.d\.ts$''',
+]

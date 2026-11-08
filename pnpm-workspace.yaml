@@ -4,4 +4,22 @@ packages:
   - packages/contracts
 allowBuilds:
   esbuild: true
+  # Hook installation is explicit in pnpm setup, not a dependency-install side effect.
+  lefthook: false
   workerd: true
+
+# Keep commands read-only when dependencies are stale; install explicitly.
+verifyDepsBeforeRun: error
+strictPeerDependencies: true
+minimumReleaseAge: 1440
+# GHSA-g3hv-75wg-m249: remove once ESLint/typescript-eslint require a fixed release.
+# Their current Minimatch/match calls do not use the APIs removed in v11.
+overrides:
+  "minimatch@>=10.0.0 <11.0.1": 11.0.5
+  # Images bindings/cf.image emulation are unused; sharp bundles LGPL libvips.
+  # Revisit the license policy before enabling those local image transformations.
+  "miniflare>sharp": "-"
+catalog:
+  typescript: 6.0.3
+  "@types/node": 24.19.2
+  zod: 4.6.7

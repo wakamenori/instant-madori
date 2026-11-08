@@ -1021,7 +1021,6 @@ version = "0.1.0"
 name = "madori-modeling"
 version = "0.1.0"
 dependencies = [
- "madori-housing",
  "serde_json",
  "solidcraft-doc",
  "solidcraft-engine",

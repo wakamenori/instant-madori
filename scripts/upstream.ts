@@ -1,9 +1,10 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
+import { readUpstreamPin } from "./repository.ts";
 
 const file = "third_party/solidcraft.json";
-const pin = JSON.parse(readFileSync(file, "utf8"));
-const git = (args) => execFileSync("git", args, { encoding: "utf8" }).trim();
+const pin = readUpstreamPin();
+const git = (args: string[]) => execFileSync("git", args, { encoding: "utf8" }).trim();
 const command = process.argv[2];
 if (command === "check") {
   execFileSync("git", ["fetch", "--no-tags", pin.repository, "main"], { stdio: "inherit" });
@@ -13,8 +14,10 @@ if (command === "check") {
   console.log(`Review the changes, then run: pnpm upstream:update ${latest}`);
 } else if (command === "update") {
   const requested = process.argv[3];
-  if (!requested || !/^[0-9a-f]{40}$/.test(requested)) throw new Error("Pass the full, reviewed upstream commit SHA.");
-  if (git(["status", "--porcelain"])) throw new Error("Commit current work before an upstream update.");
+  if (!requested || !/^[0-9a-f]{40}$/.test(requested))
+    throw new Error("Pass the full, reviewed upstream commit SHA.");
+  if (git(["status", "--porcelain"]))
+    throw new Error("Commit current work before an upstream update.");
   execFileSync("git", ["fetch", "--no-tags", pin.repository, "main"], { stdio: "inherit" });
   const target = git(["rev-parse", `${requested}^{commit}`]);
   // A service commit can also descend from the adopted pin; it is not an upstream update.
@@ -23,10 +26,14 @@ if (command === "check") {
   if (target === pin.commit) {
     console.log("Already at the requested upstream commit.");
   } else {
-    execFileSync("git", ["subtree", "merge", "--prefix=third_party/solidcraft", target], { stdio: "inherit" });
+    execFileSync("git", ["subtree", "merge", "--prefix=third_party/solidcraft", target], {
+      stdio: "inherit",
+    });
     writeFileSync(file, `${JSON.stringify({ ...pin, commit: target }, null, 2)}\n`);
-    console.log("Upstream merged. Review patches and run pnpm check; record the result and commit the updated pin.");
+    console.log(
+      "Upstream merged. Review patches and run pnpm check; record the result and commit the updated pin.",
+    );
   }
 } else {
-  throw new Error("Usage: node scripts/upstream.mjs check | update <commit>");
+  throw new Error("Usage: node scripts/upstream.ts check | update <commit>");
 }

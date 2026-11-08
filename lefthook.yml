@@ -1,0 +1,17 @@
+pre-commit:
+  parallel: true
+  commands:
+    format:
+      glob: "*.{ts,tsx,js,mjs,json,jsonc,yml,yaml,md,css,html}"
+      exclude: "^(third_party/solidcraft/|docs/verification/|pnpm-lock.yaml)"
+      run: pnpm exec prettier --check {staged_files}
+    lint:
+      glob: "*.{ts,tsx,mjs}"
+      exclude: "^third_party/solidcraft/"
+      run: pnpm exec eslint --max-warnings 0 {staged_files}
+    rust-format:
+      glob: "*.rs"
+      exclude: "^third_party/solidcraft/"
+      run: cargo fmt --all -- --check
+    secrets:
+      run: mise exec -- gitleaks git --pre-commit --staged --redact --verbose --no-banner
