@@ -1,0 +1,17 @@
+[package]
+name = "madori-modeling"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+madori-housing.workspace = true
+solidcraft-doc.workspace = true
+solidcraft-engine.workspace = true
+solidcraft-io.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

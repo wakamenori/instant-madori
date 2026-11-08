@@ -1,0 +1,128 @@
+{
+  "analytic_area_m2": 2.046307065990919,
+  "analytic_tolerance_m2": 0.05,
+  "passed": true,
+  "sampled_area_m2": 2.04,
+  "samples": [
+    {
+      "approx_lit_floor_m2": 1.94625,
+      "day": 21,
+      "direction": [
+        0.08480275769938507,
+        0.8557734808046498,
+        0.5103530560681234
+      ],
+      "elevation_deg": 30.68734949041861,
+      "grid_mm": 25,
+      "hour_jst": 12.0,
+      "latitude": 35.68,
+      "lit_cells": 3114,
+      "longitude": 139.76,
+      "method": "exact planar B-rep rays sampled on floor; roof included; glass transmits",
+      "month": 12,
+      "neighbor": false,
+      "north": "-Y",
+      "server_ms": 1122.482875
+    },
+    {
+      "approx_lit_floor_m2": 0.028125,
+      "day": 21,
+      "direction": [
+        0.07082758502619127,
+        0.21020455472612953,
+        0.9750884566908519
+      ],
+      "elevation_deg": 77.18426047463454,
+      "grid_mm": 25,
+      "hour_jst": 12.0,
+      "latitude": 35.68,
+      "lit_cells": 45,
+      "longitude": 139.76,
+      "method": "exact planar B-rep rays sampled on floor; roof included; glass transmits",
+      "month": 6,
+      "neighbor": false,
+      "north": "-Y",
+      "server_ms": 212.276792
+    },
+    {
+      "approx_lit_floor_m2": 1.6143750000000001,
+      "day": 21,
+      "direction": [
+        -0.5859383643804186,
+        0.7347342855860233,
+        0.34182124382723145
+      ],
+      "elevation_deg": 19.98787298878456,
+      "grid_mm": 25,
+      "hour_jst": 9.0,
+      "latitude": 35.68,
+      "lit_cells": 2583,
+      "longitude": 139.76,
+      "method": "exact planar B-rep rays sampled on floor; roof included; glass transmits",
+      "month": 12,
+      "neighbor": false,
+      "north": "-Y",
+      "server_ms": 2360.472417
+    },
+    {
+      "approx_lit_floor_m2": 0.001875,
+      "day": 21,
+      "direction": [
+        0.7058857256555522,
+        0.6648279244185717,
+        0.24439552620501964
+      ],
+      "elevation_deg": 14.146114030516337,
+      "grid_mm": 25,
+      "hour_jst": 15.0,
+      "latitude": 35.68,
+      "lit_cells": 3,
+      "longitude": 139.76,
+      "method": "exact planar B-rep rays sampled on floor; roof included; glass transmits",
+      "month": 12,
+      "neighbor": false,
+      "north": "-Y",
+      "server_ms": 203.266583
+    },
+    {
+      "approx_lit_floor_m2": 0.0,
+      "day": 21,
+      "direction": [
+        0.08480275769938507,
+        0.8557734808046498,
+        0.5103530560681234
+      ],
+      "elevation_deg": 30.68734949041861,
+      "grid_mm": 25,
+      "hour_jst": 12.0,
+      "latitude": 35.68,
+      "lit_cells": 0,
+      "longitude": 139.76,
+      "method": "exact planar B-rep rays sampled on floor; roof included; glass transmits",
+      "month": 12,
+      "neighbor": true,
+      "north": "-Y",
+      "server_ms": 1302.966375
+    },
+    {
+      "approx_lit_floor_m2": 0.0,
+      "day": 21,
+      "direction": [
+        -0.08573302336656621,
+        -0.21011152050028647,
+        -0.9739111857132999
+      ],
+      "elevation_deg": -76.88363374224441,
+      "grid_mm": 25,
+      "hour_jst": 0.0,
+      "latitude": 35.68,
+      "lit_cells": 0,
+      "longitude": 139.76,
+      "method": "exact planar B-rep rays sampled on floor; roof included; glass transmits",
+      "month": 12,
+      "neighbor": false,
+      "north": "-Y",
+      "server_ms": 79.933958
+    }
+  ]
+}

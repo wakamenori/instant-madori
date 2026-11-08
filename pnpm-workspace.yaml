@@ -1,0 +1,7 @@
+packages:
+  - apps/web
+  - apps/worker
+  - packages/contracts
+allowBuilds:
+  esbuild: true
+  workerd: true

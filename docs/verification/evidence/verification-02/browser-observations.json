@@ -1,0 +1,280 @@
+{
+  "split": {
+    "error": "",
+    "metrics": {
+      "frames": 3,
+      "lastTransferBytes": 112,
+      "lastUpdateMs": 126.5,
+      "requests": 3
+    },
+    "selection": {
+      "body": "table.top",
+      "label": "furniture-1",
+      "logical_id": "furniture-1",
+      "method": "exact planar B-rep",
+      "revision": 2
+    },
+    "state": {
+      "areas": [
+        22.2,
+        17.2
+      ],
+      "bindings": {
+        "furniture-1": [
+          "table.top",
+          "table.leg.1",
+          "table.leg.2",
+          "table.leg.3",
+          "table.leg.4"
+        ],
+        "north-1": [
+          "wall.north",
+          "wall.north (1)"
+        ],
+        "partition-1": [
+          "wall.divider"
+        ],
+        "window-1": [
+          "wall.north",
+          "wall.north (1)",
+          "window.glass"
+        ]
+      },
+      "bodies": [
+        "floor",
+        "wall.south",
+        "wall.north",
+        "wall.west",
+        "wall.east",
+        "wall.divider",
+        "window.glass",
+        "table.top",
+        "table.leg.1",
+        "table.leg.2",
+        "table.leg.3",
+        "table.leg.4",
+        "wall.north (1)"
+      ],
+      "revision": 2
+    }
+  },
+  "merge": {
+    "error": "",
+    "metrics": {
+      "frames": 4,
+      "lastTransferBytes": 93994,
+      "lastUpdateMs": 136.89999997615814,
+      "requests": 4
+    },
+    "state": {
+      "areas": [
+        40
+      ],
+      "bindings": {
+        "furniture-1": [
+          "table.top",
+          "table.leg.1",
+          "table.leg.2",
+          "table.leg.3",
+          "table.leg.4"
+        ],
+        "north-1": [
+          "wall.north",
+          "wall.north (1)"
+        ],
+        "window-1": [
+          "wall.north",
+          "wall.north (1)",
+          "window.glass"
+        ]
+      },
+      "bodies": [
+        "floor",
+        "wall.south",
+        "wall.north",
+        "wall.west",
+        "wall.east",
+        "window.glass",
+        "table.top",
+        "table.leg.1",
+        "table.leg.2",
+        "table.leg.3",
+        "table.leg.4",
+        "wall.north (1)"
+      ],
+      "revision": 3
+    }
+  },
+  "removed": {
+    "error": "",
+    "metrics": {
+      "frames": 3,
+      "lastTransferBytes": 74157,
+      "lastUpdateMs": 133,
+      "requests": 2
+    },
+    "state": {
+      "areas": [
+        40
+      ],
+      "bindings": {
+        "furniture-1": [
+          "table.top",
+          "table.leg.1",
+          "table.leg.2",
+          "table.leg.3",
+          "table.leg.4"
+        ]
+      },
+      "bodies": [
+        "floor",
+        "wall.south",
+        "wall.west",
+        "wall.east",
+        "table.top",
+        "table.leg.1",
+        "table.leg.2",
+        "table.leg.3",
+        "table.leg.4"
+      ],
+      "revision": 4
+    }
+  },
+  "restored": {
+    "error": "",
+    "metrics": {
+      "frames": 4,
+      "lastTransferBytes": 94963,
+      "lastUpdateMs": 154.19999992847443,
+      "requests": 3
+    },
+    "state": {
+      "areas": [
+        22.2,
+        17.2
+      ],
+      "bindings": {
+        "furniture-1": [
+          "table.top",
+          "table.leg.1",
+          "table.leg.2",
+          "table.leg.3",
+          "table.leg.4"
+        ],
+        "north-1": [
+          "wall.north"
+        ],
+        "partition-1": [
+          "wall.divider"
+        ],
+        "window-1": [
+          "wall.north",
+          "window.glass"
+        ]
+      },
+      "bodies": [
+        "floor",
+        "wall.south",
+        "wall.north",
+        "wall.west",
+        "wall.east",
+        "wall.divider",
+        "window.glass",
+        "table.top",
+        "table.leg.1",
+        "table.leg.2",
+        "table.leg.3",
+        "table.leg.4"
+      ],
+      "revision": 5
+    },
+    "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) T3CodeBeta/0.1.7 Chrome/152.0.7977.169 Electron/44.10.1 Safari/537.36"
+  },
+  "sun_winter": {
+    "error": "",
+    "metrics": {
+      "frames": 5,
+      "lastTransferBytes": 104273,
+      "lastUpdateMs": 1174.3999999761581,
+      "requests": 2
+    },
+    "sunlight": {
+      "approx_lit_floor_m2": 1.94625,
+      "day": 21,
+      "direction": [
+        0.08480275769938507,
+        0.8557734808046498,
+        0.5103530560681234
+      ],
+      "elevation_deg": 30.68734949041861,
+      "grid_mm": 25,
+      "hour_jst": 12,
+      "latitude": 35.68,
+      "lit_cells": 3114,
+      "longitude": 139.76,
+      "method": "exact planar B-rep rays sampled on floor; roof included; glass transmits",
+      "month": 12,
+      "neighbor": false,
+      "north": "-Y",
+      "server_ms": 1168.598708
+    }
+  },
+  "sun_summer": {
+    "error": "",
+    "metrics": {
+      "frames": 7,
+      "lastTransferBytes": 102935,
+      "lastUpdateMs": 228.30000007152557,
+      "requests": 3
+    },
+    "sunlight": {
+      "approx_lit_floor_m2": 0.028125,
+      "day": 21,
+      "direction": [
+        0.07082758502619127,
+        0.21020455472612953,
+        0.9750884566908519
+      ],
+      "elevation_deg": 77.18426047463454,
+      "grid_mm": 25,
+      "hour_jst": 12,
+      "latitude": 35.68,
+      "lit_cells": 45,
+      "longitude": 139.76,
+      "method": "exact planar B-rep rays sampled on floor; roof included; glass transmits",
+      "month": 6,
+      "neighbor": false,
+      "north": "-Y",
+      "server_ms": 224.10345800000002
+    }
+  },
+  "sun_neighbor": {
+    "error": "",
+    "metrics": {
+      "frames": 11,
+      "lastTransferBytes": 102296,
+      "lastUpdateMs": 1309.1000000238419,
+      "requests": 5
+    },
+    "sunlight": {
+      "approx_lit_floor_m2": 0,
+      "day": 21,
+      "direction": [
+        0.08480275769938507,
+        0.8557734808046498,
+        0.5103530560681234
+      ],
+      "elevation_deg": 30.68734949041861,
+      "grid_mm": 25,
+      "hour_jst": 12,
+      "latitude": 35.68,
+      "lit_cells": 0,
+      "longitude": 139.76,
+      "method": "exact planar B-rep rays sampled on floor; roof included; glass transmits",
+      "month": 12,
+      "neighbor": true,
+      "north": "-Y",
+      "server_ms": 1305.172417
+    }
+  }
+}

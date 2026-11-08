@@ -1,0 +1,9 @@
+{
+  "name": "@madori/contracts",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "scripts": { "typecheck": "tsc -p tsconfig.json" },
+  "dependencies": { "zod": "^4.0.0" },
+  "devDependencies": { "typescript": "7.0.2" }
+}

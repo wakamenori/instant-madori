@@ -1,0 +1,7 @@
+{
+  "wasm_bytes": 1043049,
+  "gzip_bytes": 300303,
+  "profile": "ci",
+  "wasm_opt": false,
+  "served_compressed": false
+}

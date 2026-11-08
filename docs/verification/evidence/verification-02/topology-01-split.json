@@ -1,0 +1,639 @@
+{
+  "schema": 1,
+  "house": {
+    "split_mm": 4500.0,
+    "divider_present": true,
+    "north_present": true,
+    "north_cut_mm": 2250.0
+  },
+  "bindings": {
+    "furniture-1": [
+      "table.top",
+      "table.leg.1",
+      "table.leg.2",
+      "table.leg.3",
+      "table.leg.4"
+    ],
+    "north-1": [
+      "wall.north",
+      "wall.north (1)"
+    ],
+    "partition-1": [
+      "wall.divider"
+    ],
+    "window-1": [
+      "wall.north",
+      "wall.north (1)",
+      "window.glass"
+    ]
+  },
+  "solidcraft": {
+    "appearances": {
+      "bodies": {
+        "floor": {
+          "color": [
+            224,
+            213,
+            194
+          ],
+          "name": "Custom",
+          "opacity": 1.0
+        },
+        "table.leg.1": {
+          "color": [
+            134,
+            92,
+            58
+          ],
+          "name": "Custom",
+          "opacity": 1.0
+        },
+        "table.leg.2": {
+          "color": [
+            134,
+            92,
+            58
+          ],
+          "name": "Custom",
+          "opacity": 1.0
+        },
+        "table.leg.3": {
+          "color": [
+            134,
+            92,
+            58
+          ],
+          "name": "Custom",
+          "opacity": 1.0
+        },
+        "table.leg.4": {
+          "color": [
+            134,
+            92,
+            58
+          ],
+          "name": "Custom",
+          "opacity": 1.0
+        },
+        "table.top": {
+          "color": [
+            134,
+            92,
+            58
+          ],
+          "name": "Custom",
+          "opacity": 1.0
+        },
+        "wall.divider": {
+          "color": [
+            205,
+            163,
+            83
+          ],
+          "name": "Custom",
+          "opacity": 1.0
+        },
+        "wall.east": {
+          "color": [
+            232,
+            232,
+            225
+          ],
+          "name": "Custom",
+          "opacity": 1.0
+        },
+        "wall.north": {
+          "color": [
+            190,
+            112,
+            83
+          ],
+          "name": "Custom",
+          "opacity": 1.0
+        },
+        "wall.north (1)": {
+          "color": [
+            190,
+            112,
+            83
+          ],
+          "name": "Custom",
+          "opacity": 1.0
+        },
+        "wall.south": {
+          "color": [
+            232,
+            232,
+            225
+          ],
+          "name": "Custom",
+          "opacity": 1.0
+        },
+        "wall.west": {
+          "color": [
+            232,
+            232,
+            225
+          ],
+          "name": "Custom",
+          "opacity": 1.0
+        },
+        "window.glass": {
+          "color": [
+            100,
+            185,
+            210
+          ],
+          "name": "Custom",
+          "opacity": 0.25
+        }
+      },
+      "faces": [
+        {
+          "body": "wall.divider",
+          "look": {
+            "color": [
+              54,
+              111,
+              168
+            ],
+            "name": "Custom",
+            "opacity": 1.0
+          },
+          "name": "F6:-x",
+          "point": [
+            3940.0,
+            1000.0,
+            1200.0
+          ]
+        },
+        {
+          "body": "wall.north",
+          "look": {
+            "color": [
+              72,
+              150,
+              110
+            ],
+            "name": "Custom",
+            "opacity": 1.0
+          },
+          "name": "F3:-y",
+          "point": [
+            1000.0,
+            5000.0,
+            1200.0
+          ]
+        },
+        {
+          "body": "wall.north",
+          "look": {
+            "color": [
+              72,
+              150,
+              110
+            ],
+            "name": "Custom",
+            "opacity": 1.0
+          },
+          "name": "F3:-y",
+          "point": [
+            5224.999999999998,
+            5000.0,
+            500.0
+          ]
+        },
+        {
+          "body": "wall.north (1)",
+          "look": {
+            "color": [
+              72,
+              150,
+              110
+            ],
+            "name": "Custom",
+            "opacity": 1.0
+          },
+          "name": "F3:-y",
+          "point": [
+            1025.0,
+            5000.0,
+            500.0
+          ]
+        }
+      ]
+    },
+    "features": [
+      {
+        "body_names": [
+          "floor"
+        ],
+        "corner": [
+          -200.0,
+          -200.0,
+          -120.0
+        ],
+        "height": "120",
+        "id": 1,
+        "length": "8400",
+        "name": "floor",
+        "operation": "new_body",
+        "param_names": [
+          "d1",
+          "d2",
+          "d3"
+        ],
+        "suppressed": false,
+        "type": "box",
+        "width": "5400"
+      },
+      {
+        "body_names": [
+          "wall.south"
+        ],
+        "corner": [
+          -200.0,
+          -200.0,
+          0.0
+        ],
+        "height": "2400",
+        "id": 2,
+        "length": "8400",
+        "name": "wall.south",
+        "operation": "new_body",
+        "param_names": [
+          "d4",
+          "d5",
+          "d6"
+        ],
+        "suppressed": false,
+        "type": "box",
+        "width": "200"
+      },
+      {
+        "body_names": [
+          "wall.north"
+        ],
+        "corner": [
+          -200.0,
+          5000.0,
+          0.0
+        ],
+        "height": "2400",
+        "id": 3,
+        "length": "8400",
+        "name": "wall.north",
+        "operation": "new_body",
+        "param_names": [
+          "d7",
+          "d8",
+          "d9"
+        ],
+        "suppressed": false,
+        "type": "box",
+        "width": "200"
+      },
+      {
+        "body_names": [
+          "wall.west"
+        ],
+        "corner": [
+          -200.0,
+          0.0,
+          0.0
+        ],
+        "height": "2400",
+        "id": 4,
+        "length": "200",
+        "name": "wall.west",
+        "operation": "new_body",
+        "param_names": [
+          "d10",
+          "d11",
+          "d12"
+        ],
+        "suppressed": false,
+        "type": "box",
+        "width": "5000"
+      },
+      {
+        "body_names": [
+          "wall.east"
+        ],
+        "corner": [
+          8000.0,
+          0.0,
+          0.0
+        ],
+        "height": "2400",
+        "id": 5,
+        "length": "200",
+        "name": "wall.east",
+        "operation": "new_body",
+        "param_names": [
+          "d13",
+          "d14",
+          "d15"
+        ],
+        "suppressed": false,
+        "type": "box",
+        "width": "5000"
+      },
+      {
+        "body_names": [
+          "wall.divider"
+        ],
+        "corner": [
+          "split - 60 mm",
+          0.0,
+          0.0
+        ],
+        "height": "2400",
+        "id": 6,
+        "length": "120",
+        "name": "wall.divider",
+        "operation": "new_body",
+        "param_names": [
+          "d16",
+          "d17",
+          "d18"
+        ],
+        "suppressed": false,
+        "type": "box",
+        "width": "5000"
+      },
+      {
+        "corner": [
+          "split - 100 mm",
+          1800.0,
+          0.0
+        ],
+        "height": "2050",
+        "id": 7,
+        "length": "200",
+        "name": "door.opening",
+        "operation": "cut",
+        "param_names": [
+          "d19",
+          "d20",
+          "d21"
+        ],
+        "participants": [
+          "wall.divider"
+        ],
+        "suppressed": false,
+        "type": "box",
+        "width": "900"
+      },
+      {
+        "corner": [
+          "split / 2 - 600 mm",
+          4950.0,
+          900.0
+        ],
+        "height": "1100",
+        "id": 8,
+        "length": "1200",
+        "name": "window.opening",
+        "operation": "cut",
+        "param_names": [
+          "d22",
+          "d23",
+          "d24"
+        ],
+        "participants": [
+          "wall.north"
+        ],
+        "suppressed": false,
+        "type": "box",
+        "width": "300"
+      },
+      {
+        "body_names": [
+          "window.glass"
+        ],
+        "corner": [
+          "split / 2 - 600 mm",
+          5090.0,
+          900.0
+        ],
+        "height": "1100",
+        "id": 9,
+        "length": "1200",
+        "name": "window.glass",
+        "operation": "new_body",
+        "param_names": [
+          "d25",
+          "d26",
+          "d27"
+        ],
+        "suppressed": false,
+        "type": "box",
+        "width": "20"
+      },
+      {
+        "body_names": [
+          "table.top"
+        ],
+        "corner": [
+          5800.0,
+          900.0,
+          700.0
+        ],
+        "height": "60",
+        "id": 10,
+        "length": "table_width",
+        "name": "table.top",
+        "operation": "new_body",
+        "param_names": [
+          "d28",
+          "d29",
+          "d30"
+        ],
+        "suppressed": false,
+        "type": "box",
+        "width": "800"
+      },
+      {
+        "body_names": [
+          "table.leg.1"
+        ],
+        "corner": [
+          5850.0,
+          950.0,
+          0.0
+        ],
+        "height": "700",
+        "id": 11,
+        "length": "80",
+        "name": "table.leg.1",
+        "operation": "new_body",
+        "param_names": [
+          "d31",
+          "d32",
+          "d33"
+        ],
+        "suppressed": false,
+        "type": "box",
+        "width": "80"
+      },
+      {
+        "body_names": [
+          "table.leg.2"
+        ],
+        "corner": [
+          "5800 mm + table_width - 130 mm",
+          950.0,
+          0.0
+        ],
+        "height": "700",
+        "id": 12,
+        "length": "80",
+        "name": "table.leg.2",
+        "operation": "new_body",
+        "param_names": [
+          "d34",
+          "d35",
+          "d36"
+        ],
+        "suppressed": false,
+        "type": "box",
+        "width": "80"
+      },
+      {
+        "body_names": [
+          "table.leg.3"
+        ],
+        "corner": [
+          5850.0,
+          1570.0,
+          0.0
+        ],
+        "height": "700",
+        "id": 13,
+        "length": "80",
+        "name": "table.leg.3",
+        "operation": "new_body",
+        "param_names": [
+          "d37",
+          "d38",
+          "d39"
+        ],
+        "suppressed": false,
+        "type": "box",
+        "width": "80"
+      },
+      {
+        "body_names": [
+          "table.leg.4"
+        ],
+        "corner": [
+          "5800 mm + table_width - 130 mm",
+          1570.0,
+          0.0
+        ],
+        "height": "700",
+        "id": 14,
+        "length": "80",
+        "name": "table.leg.4",
+        "operation": "new_body",
+        "param_names": [
+          "d40",
+          "d41",
+          "d42"
+        ],
+        "suppressed": false,
+        "type": "box",
+        "width": "80"
+      },
+      {
+        "corner": [
+          "5800 mm + table_width / 2 - 100 mm",
+          900.0,
+          700.0
+        ],
+        "height": "60",
+        "id": 15,
+        "length": "200",
+        "name": "table.custom-notch",
+        "operation": "cut",
+        "param_names": [
+          "d43",
+          "d44",
+          "d45"
+        ],
+        "participants": [
+          "table.top"
+        ],
+        "suppressed": false,
+        "type": "box",
+        "width": "180"
+      },
+      {
+        "body": "wall.north",
+        "body_names": [
+          "wall.north (1)"
+        ],
+        "id": 16,
+        "name": "north.split",
+        "plane": {
+          "plane": {
+            "origin": [
+              2250.0,
+              0.0,
+              0.0
+            ],
+            "x_dir": [
+              0.0,
+              1.0,
+              0.0
+            ],
+            "y_dir": [
+              0.0,
+              0.0,
+              1.0
+            ]
+          },
+          "type": "custom"
+        },
+        "suppressed": false,
+        "type": "split"
+      }
+    ],
+    "format": "solidcraft/51",
+    "format_pending": [
+      "bridged-counterbore",
+      "cpu-output-presentation",
+      "embedded-surface-textures",
+      "fillet-turn",
+      "glass-material-models",
+      "hole-direction-own-faces",
+      "intersection-curve-sketch-curves",
+      "plane-at-angle-direction-only",
+      "point-cloud-segments-and-triangles",
+      "point-cloud-source",
+      "revolve-axis-origin-expressions",
+      "sketch-point-along",
+      "transferred-profile-frame",
+      "two-sided-extrude-fixed-sides"
+    ],
+    "name": "Untitled",
+    "next_component_color_index": 0,
+    "next_id": 17,
+    "params": [
+      {
+        "expr": "4500 mm",
+        "model": false,
+        "name": "split",
+        "unit": "mm"
+      },
+      {
+        "expr": "1800 mm",
+        "model": false,
+        "name": "table_width",
+        "unit": "mm"
+      }
+    ],
+    "units": "mm"
+  }
+}

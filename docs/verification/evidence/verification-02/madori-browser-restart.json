@@ -1,0 +1,13 @@
+{
+  "server_restart": true,
+  "revision": 3,
+  "same_fields": [
+    "bodies",
+    "house",
+    "areas",
+    "bindings"
+  ],
+  "areas": [
+    40.0
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "name": "instant-madori",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.9.0",
+  "engines": { "node": "24.x" },
+  "scripts": {
+    "setup:wasm": "cargo install wasm-bindgen-cli --version 0.2.129 --locked --root .tools -j 4",
+    "build:wasm": "node scripts/build-wasm.mjs",
+    "build:web": "pnpm --filter @madori/web build",
+    "build:worker": "pnpm --filter @madori/worker build",
+    "build:geometry": "cargo build --locked -p madori-geometry",
+    "build": "pnpm build:wasm && pnpm build:web && pnpm build:worker && pnpm build:geometry",
+    "typecheck": "pnpm --filter @madori/contracts typecheck && pnpm --filter @madori/web typecheck && pnpm --filter @madori/worker typecheck",
+    "check:rust": "cargo fmt --all -- --check && cargo clippy --locked --workspace --all-targets --no-deps -- -D warnings && cargo test --locked --workspace",
+    "check:layout": "node scripts/check-layout.mjs",
+    "check": "pnpm check:layout && pnpm build && pnpm typecheck && pnpm check:rust && pnpm smoke",
+    "dev": "pnpm build:wasm && pnpm build:web && node scripts/dev.mjs",
+    "dev:web": "pnpm --filter @madori/web dev",
+    "dev:worker": "pnpm --filter @madori/worker dev",
+    "dev:geometry": "cargo run --locked -p madori-geometry",
+    "smoke": "node scripts/smoke.mjs",
+    "upstream:check": "node scripts/upstream.mjs check",
+    "upstream:update": "node scripts/upstream.mjs update"
+  }
+}
