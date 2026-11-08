@@ -1,0 +1,46 @@
+{
+  "fileCount": 42,
+  "warmups": 2,
+  "runs": 10,
+  "identicalInputBytes": true,
+  "identicalFormattedOutputBytes": true,
+  "note": "Final comparison with matched YAML/JSONC style, corrected directory exclusions; fresh CLI processes, startup included; no daemon or pnpm wrapper.",
+  "samplesMs": {
+    "prettier": [
+      335.82245802972466,
+      334.7408330300823,
+      356.21366696432233,
+      357.66229208093137,
+      360.28470809105784,
+      358.51416701916605,
+      364.3386249896139,
+      341.5390830487013,
+      345.8725420059636,
+      341.87333402223885
+    ],
+    "biome": [
+      48.783833044581115,
+      49.162792041897774,
+      51.56475002877414,
+      51.398333045654,
+      53.172457963228226,
+      53.416249924339354,
+      55.297042010352015,
+      52.21795791294426,
+      48.680500010959804,
+      48.71308302972466
+    ]
+  },
+  "summary": {
+    "prettier": {
+      "medianMs": 351.043104485143,
+      "minMs": 334.7408330300823,
+      "maxMs": 364.3386249896139
+    },
+    "biome": {
+      "medianMs": 51.48154153721407,
+      "minMs": 48.680500010959804,
+      "maxMs": 55.297042010352015
+    }
+  }
+}

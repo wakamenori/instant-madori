@@ -57,7 +57,7 @@ macOS arm64、Rust 1.99.1、Node.js 24.22.1、pnpm 11.9.0で確認した。
 
 ## 整形・lintの比較検証
 
-[Prettier・Biomeの比較](verification/tooling-comparison.md)を実施した。実ファイル42件では整形チェックが約337msから49msへ短縮した。一方、検証用に選んだ問題11種類のうち、現在のESLintは11種類、移行したBiomeは5種類を検出した。整形だけをBiomeに移し、型付きESLintとReact Hooks検査を維持する構成を推奨する。採用は未決定で、現在の設定・依存はPrettier＋ESLintのまま。自動移行した除外設定の修正方法も記録した。
+[Prettier・Biomeの比較](verification/tooling-comparison.md)を実施した。設定を揃え、実ファイル42件の入力・整形出力が両ツールで一致した状態では、整形チェックが約351msから51msへ短縮した。lintは移行設定の結果だけで判断せず、対応する2ルールだけを明示的に有効にした追加試験を行った。JSONのプロパティ返却やDOMのasyncイベント処理で検出範囲の差が残った。整形だけをBiomeに移し、現在の型付きESLintとReact Hooks検査を維持する構成を推奨する。採用は未決定で、設定・依存はPrettier＋ESLintのまま。自動移行した除外設定の修正方法も記録した。
 
 ## 残る実行環境の確認
 

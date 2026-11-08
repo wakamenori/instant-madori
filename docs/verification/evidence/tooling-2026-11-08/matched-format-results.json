@@ -1,0 +1,8 @@
+{
+  "files": 42,
+  "outputDifferences": [],
+  "adjustments": {
+    "yaml.formatter.bracketSpacing": false,
+    "jsonc.formatter.trailingCommas": "all"
+  }
+}

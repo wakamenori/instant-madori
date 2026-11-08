@@ -1,0 +1,156 @@
+{
+  "sources": {
+    "json-direct.ts": "export function parse(raw: string): number { return JSON.parse(raw); }\n",
+    "json-variable.ts": "export function parse(raw: string): number { const data = JSON.parse(raw); return data; }\n",
+    "json-property.ts": "export function parse(raw: string): number { const data = JSON.parse(raw); return data.area; }\n",
+    "explicit-any.ts": "declare const data: any; export function parse(): number { return data; }\n",
+    "callback-local.ts": "function invoke(callback: () => void) { callback(); } export function run() { invoke(async () => { await Promise.resolve(1); }); }\n",
+    "callback-array.ts": "export function run() { [1, 2].forEach(async value => { await Promise.resolve(value); }); }\n",
+    "callback-dom.ts": "export function run(button: HTMLButtonElement) { button.addEventListener(\"click\", async () => { await fetch(\"/api/health\"); }); }\n",
+    "promise-condition.ts": "export function run() { const promise = Promise.resolve(1); if (promise) return 1; return 0; }\n",
+    "valid.ts": "export function parse(raw: string): unknown { return JSON.parse(raw); } export async function run() { for (const value of [1, 2]) await Promise.resolve(value); }\n"
+  },
+  "results": {
+    "biome-catalog-False": {
+      "configuration": {
+        "$schema": "https://biomejs.dev/schemas/2.6.6/schema.json",
+        "vcs": {
+          "enabled": false
+        },
+        "files": {
+          "ignoreUnknown": true
+        },
+        "formatter": {
+          "enabled": false
+        },
+        "assist": {
+          "enabled": false
+        },
+        "javascript": {
+          "resolver": {
+            "experimentalPnpmCatalogs": false
+          }
+        },
+        "linter": {
+          "enabled": true,
+          "rules": {
+            "preset": "none",
+            "nursery": {
+              "noMisusedPromises": "error",
+              "noUnsafeReturn": "error"
+            }
+          }
+        }
+      },
+      "diagnostics": {
+        "json-direct.ts": [
+          "lint/nursery/noUnsafeReturn"
+        ],
+        "json-variable.ts": [
+          "lint/nursery/noUnsafeReturn"
+        ],
+        "json-property.ts": [],
+        "explicit-any.ts": [
+          "lint/nursery/noUnsafeReturn"
+        ],
+        "callback-local.ts": [
+          "lint/nursery/noMisusedPromises"
+        ],
+        "callback-array.ts": [
+          "lint/nursery/noMisusedPromises"
+        ],
+        "callback-dom.ts": [],
+        "promise-condition.ts": [
+          "lint/nursery/noMisusedPromises"
+        ],
+        "valid.ts": []
+      }
+    },
+    "biome-catalog-True": {
+      "configuration": {
+        "$schema": "https://biomejs.dev/schemas/2.6.6/schema.json",
+        "vcs": {
+          "enabled": false
+        },
+        "files": {
+          "ignoreUnknown": true
+        },
+        "formatter": {
+          "enabled": false
+        },
+        "assist": {
+          "enabled": false
+        },
+        "javascript": {
+          "resolver": {
+            "experimentalPnpmCatalogs": true
+          }
+        },
+        "linter": {
+          "enabled": true,
+          "rules": {
+            "preset": "none",
+            "nursery": {
+              "noMisusedPromises": "error",
+              "noUnsafeReturn": "error"
+            }
+          }
+        }
+      },
+      "diagnostics": {
+        "json-direct.ts": [
+          "lint/nursery/noUnsafeReturn"
+        ],
+        "json-variable.ts": [
+          "lint/nursery/noUnsafeReturn"
+        ],
+        "json-property.ts": [],
+        "explicit-any.ts": [
+          "lint/nursery/noUnsafeReturn"
+        ],
+        "callback-local.ts": [
+          "lint/nursery/noMisusedPromises"
+        ],
+        "callback-array.ts": [
+          "lint/nursery/noMisusedPromises"
+        ],
+        "callback-dom.ts": [],
+        "promise-condition.ts": [
+          "lint/nursery/noMisusedPromises"
+        ],
+        "valid.ts": []
+      }
+    },
+    "eslint": {
+      "callback-array.ts": [
+        "@typescript-eslint/no-misused-promises"
+      ],
+      "callback-dom.ts": [
+        "@typescript-eslint/no-misused-promises"
+      ],
+      "callback-local.ts": [
+        "@typescript-eslint/no-misused-promises"
+      ],
+      "explicit-any.ts": [
+        "@typescript-eslint/no-explicit-any",
+        "@typescript-eslint/no-unsafe-return"
+      ],
+      "json-direct.ts": [
+        "@typescript-eslint/no-unsafe-return"
+      ],
+      "json-property.ts": [
+        "@typescript-eslint/no-unsafe-assignment",
+        "@typescript-eslint/no-unsafe-return",
+        "@typescript-eslint/no-unsafe-member-access"
+      ],
+      "json-variable.ts": [
+        "@typescript-eslint/no-unsafe-assignment",
+        "@typescript-eslint/no-unsafe-return"
+      ],
+      "promise-condition.ts": [
+        "@typescript-eslint/no-misused-promises"
+      ],
+      "valid.ts": []
+    }
+  }
+}
