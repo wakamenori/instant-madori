@@ -9,6 +9,8 @@ license.workspace = true
 workspace = true
 
 [features]
+# A parent workspace owns dependency resolution; its build is not described by our cache key.
+external-workspace = []
 # Tests only: trust a model cache even when the build has no git commit.
 trust-unknown-source = []
 

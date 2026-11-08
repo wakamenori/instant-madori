@@ -78,7 +78,7 @@ fn main() {
     let root = crate_dir.join("../..");
     let commit = git(&crate_dir, &["rev-parse", "HEAD"]).map(|s| s.trim().to_string()).unwrap_or_else(|| "unknown".into());
     println!("cargo:rustc-env=SOLIDCRAFT_SOURCE_COMMIT={commit}");
-    let source = evaluation_source(&root).unwrap_or_else(|| "unknown".into());
+    let source = if cfg!(feature = "external-workspace") { None } else { evaluation_source(&root) }.unwrap_or_else(|| "unknown".into());
     println!("cargo:rustc-env=SOLIDCRAFT_EVALUATION_SOURCE={source}");
     println!("cargo:rustc-env=SOLIDCRAFT_EVALUATION_CRATES={}", EVALUATION_CRATES.join(","));
     // A new commit in this checkout (or worktree) restamps the build.
