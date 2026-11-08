@@ -16,9 +16,11 @@ upstreamの更新は原則取り込む。住宅サービスの機能、データ
 
 最初に公式の`git subtree add --prefix=third_party/solidcraft <初回コミット>`で取り込み、取り込み先のGitツリーが元のツリーと一致することを確認した。その後、`ae1d85e5d4e32183258b3d301fb26b8687f4b969`までの115コミットを`git subtree merge`で取り込み、再びツリーの一致を確認した。元からの履歴は保持している。
 
+移行元と取り込み元が同じコミットだと、初回の`git-subtree-mainline`と`git-subtree-split`が同一になり、後の`git subtree split`が失敗した。そのため、移行開始を示す空コミットを挟む形に今回の未公開コミットだけを組み直し、両者を区別した。組み直し前後で作業ツリーの一致を確認した。通常の`git subtree split --prefix=third_party/solidcraft`が成功し、切り出した履歴が採用済みupstreamを祖先に持つこと、差分が記録した2ファイルだけであることも確認済み。
+
 ## 独自変更
 
-コミット`966920097`で、`crates/io`に`external-workspace`機能を追加した。サービス側の依存指定で有効にすると、upstreamの評価キャッシュの識別値を`unknown`とし、そのキャッシュを信頼しない。
+コミット`bebc1a443`で、`crates/io`に`external-workspace`機能を追加した。サービス側の依存指定で有効にすると、upstreamの評価キャッシュの識別値を`unknown`とし、そのキャッシュを信頼しない。
 
 理由は、upstreamのbuild.rsが自身のCargo.lock・設定から識別値を作る一方、サービスのビルドでは親workspaceのCargo.lock・プロファイルで依存を解決するため。識別値が同じでも実際のビルドが異なる可能性がある。upstreamを単独でビルドするときの既定動作は変えない。`trust-unknown-source`機能はサービスで有効にしない。
 

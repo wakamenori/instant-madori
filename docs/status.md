@@ -30,6 +30,7 @@ macOS arm64、Rust 1.99.1、Node.js 24.22.1、pnpm 11.9.0で確認した。
 | 確認 | 結果 |
 | --- | --- |
 | upstreamの保持 | 採用版の6,794ファイルを照合。記録したキャッシュ対応の2ファイル以外は一致 |
+| subtreeの履歴 | 通常のsplitが成功し、採用版を祖先として維持。更新コマンドの同一版指定と、サービス側コミットの誤指定を拒否する動作も確認 |
 | 過去の検証証拠 | 26ファイルすべて移行前と同じSHA-256。文書のローカルリンクも確認 |
 | `pnpm install --frozen-lockfile` | 成功 |
 | `pnpm check` | Rust・Wasm・Web・Workerビルド、型確認、Rust整形・Clippy・テスト、smoke testが成功 |
