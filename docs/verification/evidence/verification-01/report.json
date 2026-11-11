@@ -1,0 +1,719 @@
+{
+  "committed_state_unchanged_after_failures": true,
+  "fixture_only": true,
+  "operation_timings": {
+    "create_ms": 61.937125,
+    "customize_ms": 16.047417000000003,
+    "edit_after_reopen_ms": 29.419291,
+    "failed_transaction_ms": 29.650833000000002,
+    "move_partition_ms": 29.4,
+    "reopen_ms": 39.470541999999995
+  },
+  "passed": true,
+  "rejected_transactions": [
+    "fixture partition must be between 2000 and 5500 mm",
+    "fixture partition must be between 2000 and 5500 mm",
+    "solid.box {\"height\":1,\"length\":\"missing_dimension\",\"width\":1}: invalid parameters for `solid.box`: length: expression: unknown parameter `missing_dimension`"
+  ],
+  "save_reopen_document_equal": true,
+  "saved_bytes": 10602,
+  "stages": [
+    {
+      "image_ms": 197.874083,
+      "stage": "01-baseline",
+      "verification": {
+        "bindings_resolve": true,
+        "body_count": 12,
+        "checks": [
+          {
+            "actual": 3940.0,
+            "expected": 3940.0,
+            "name": "partition min x (mm)",
+            "passed": true,
+            "tolerance": 0.01
+          },
+          {
+            "actual": 4060.0,
+            "expected": 4060.0,
+            "name": "partition max x (mm)",
+            "passed": true,
+            "tolerance": 0.01
+          },
+          {
+            "actual": 2400.0,
+            "expected": 2400.0,
+            "name": "partition height (mm)",
+            "passed": true,
+            "tolerance": 0.01
+          },
+          {
+            "actual": 3940.0,
+            "expected": 3940.0,
+            "name": "room A drawn right = CAD wall left (mm)",
+            "passed": true,
+            "tolerance": 0.01
+          },
+          {
+            "actual": 4060.0,
+            "expected": 4060.0,
+            "name": "room B drawn left = CAD wall right (mm)",
+            "passed": true,
+            "tolerance": 0.01
+          },
+          {
+            "actual": 19.7,
+            "expected": 19.7,
+            "name": "room A housing area (m2)",
+            "passed": true,
+            "tolerance": 1e-8
+          },
+          {
+            "actual": 19.7,
+            "expected": 19.7,
+            "name": "room A CAD clear area (m2)",
+            "passed": true,
+            "tolerance": 0.0001
+          },
+          {
+            "actual": 19.7,
+            "expected": 19.7,
+            "name": "room B housing area (m2)",
+            "passed": true,
+            "tolerance": 1e-8
+          },
+          {
+            "actual": 19.7,
+            "expected": 19.7,
+            "name": "room B CAD clear area (m2)",
+            "passed": true,
+            "tolerance": 0.0001
+          },
+          {
+            "actual": 2000.0,
+            "expected": 2000.0,
+            "name": "window center x (mm)",
+            "passed": true,
+            "tolerance": 0.01
+          },
+          {
+            "actual": 1218600000.0,
+            "expected": 1218600000.0,
+            "name": "partition volume minus door (mm3)",
+            "passed": true,
+            "tolerance": 20.0
+          },
+          {
+            "actual": 3768000000.0,
+            "expected": 3768000000.0,
+            "name": "north wall volume minus window (mm3)",
+            "passed": true,
+            "tolerance": 50.0
+          },
+          {
+            "actual": 5800.0,
+            "expected": 5800.0,
+            "name": "table x (mm)",
+            "passed": true,
+            "tolerance": 0.01
+          },
+          {
+            "actual": 900.0,
+            "expected": 900.0,
+            "name": "table y (mm)",
+            "passed": true,
+            "tolerance": 0.01
+          },
+          {
+            "actual": 1400.0,
+            "expected": 1400.0,
+            "name": "table width (mm)",
+            "passed": true,
+            "tolerance": 0.01
+          },
+          {
+            "actual": 85120000.0,
+            "expected": 85120000.0,
+            "name": "furniture total volume (mm3)",
+            "passed": true,
+            "tolerance": 5.0
+          }
+        ],
+        "feature_count": 14,
+        "feature_errors": 0,
+        "measurement": "exact B-rep (SMLib)",
+        "point_classification_checks_passed": 9,
+        "resolved_colored_faces": 0
+      },
+      "verification_ms": 3.809458
+    },
+    {
+      "image_ms": 193.134583,
+      "stage": "02-customized",
+      "verification": {
+        "bindings_resolve": true,
+        "body_count": 12,
+        "checks": [
+          {
+            "actual": 3940.0,
+            "expected": 3940.0,
+            "name": "partition min x (mm)",
+            "passed": true,
+            "tolerance": 0.01
+          },
+          {
+            "actual": 4060.0,
+            "expected": 4060.0,
+            "name": "partition max x (mm)",
+            "passed": true,
+            "tolerance": 0.01
+          },
+          {
+            "actual": 2400.0,
+            "expected": 2400.0,
+            "name": "partition height (mm)",
+            "passed": true,
+            "tolerance": 0.01
+          },
+          {
+            "actual": 3940.0,
+            "expected": 3940.0,
+            "name": "room A drawn right = CAD wall left (mm)",
+            "passed": true,
+            "tolerance": 0.01
+          },
+          {
+            "actual": 4060.0,
+            "expected": 4060.0,
+            "name": "room B drawn left = CAD wall right (mm)",
+            "passed": true,
+            "tolerance": 0.01
+          },
+          {
+            "actual": 19.7,
+            "expected": 19.7,
+            "name": "room A housing area (m2)",
+            "passed": true,
+            "tolerance": 1e-8
+          },
+          {
+            "actual": 19.7,
+            "expected": 19.7,
+            "name": "room A CAD clear area (m2)",
+            "passed": true,
+            "tolerance": 0.0001
+          },
+          {
+            "actual": 19.7,
+            "expected": 19.7,
+            "name": "room B housing area (m2)",
+            "passed": true,
+            "tolerance": 1e-8
+          },
+          {
+            "actual": 19.7,
+            "expected": 19.7,
+            "name": "room B CAD clear area (m2)",
+            "passed": true,
+            "tolerance": 0.0001
+          },
+          {
+            "actual": 2000.0,
+            "expected": 2000.0,
+            "name": "window center x (mm)",
+            "passed": true,
+            "tolerance": 0.01
+          },
+          {
+            "actual": 1218600000.0,
+            "expected": 1218600000.0,
+            "name": "partition volume minus door (mm3)",
+            "passed": true,
+            "tolerance": 20.0
+          },
+          {
+            "actual": 3768000000.0,
+            "expected": 3768000000.0,
+            "name": "north wall volume minus window (mm3)",
+            "passed": true,
+            "tolerance": 50.0
+          },
+          {
+            "actual": 5800.0,
+            "expected": 5800.0,
+            "name": "table x (mm)",
+            "passed": true,
+            "tolerance": 0.01
+          },
+          {
+            "actual": 900.0,
+            "expected": 900.0,
+            "name": "table y (mm)",
+            "passed": true,
+            "tolerance": 0.01
+          },
+          {
+            "actual": 1800.0,
+            "expected": 1800.0,
+            "name": "table width (mm)",
+            "passed": true,
+            "tolerance": 0.01
+          },
+          {
+            "actual": 102160000.00000001,
+            "expected": 102160000.0,
+            "name": "furniture total volume (mm3)",
+            "passed": true,
+            "tolerance": 5.0
+          },
+          {
+            "actual": 3940.0,
+            "expected": 3940.0,
+            "name": "colored face x (mm)",
+            "passed": true,
+            "tolerance": 0.01
+          },
+          {
+            "actual": -1.0,
+            "expected": -1.0,
+            "name": "colored face normal x",
+            "passed": true,
+            "tolerance": 1e-8
+          }
+        ],
+        "feature_count": 15,
+        "feature_errors": 0,
+        "measurement": "exact B-rep (SMLib)",
+        "point_classification_checks_passed": 9,
+        "resolved_colored_faces": 1
+      },
+      "verification_ms": 3.194208
+    },
+    {
+      "image_ms": 193.153209,
+      "stage": "03-moved",
+      "verification": {
+        "bindings_resolve": true,
+        "body_count": 12,
+        "checks": [
+          {
+            "actual": 4440.0,
+            "expected": 4440.0,
+            "name": "partition min x (mm)",
+            "passed": true,
+            "tolerance": 0.01
+          },
+          {
+            "actual": 4560.0,
+            "expected": 4560.0,
+            "name": "partition max x (mm)",
+            "passed": true,
+            "tolerance": 0.01
+          },
+          {
+            "actual": 2400.0,
+            "expected": 2400.0,
+            "name": "partition height (mm)",
+            "passed": true,
+            "tolerance": 0.01
+          },
+          {
+            "actual": 4440.0,
+            "expected": 4440.0,
+            "name": "room A drawn right = CAD wall left (mm)",
+            "passed": true,
+            "tolerance": 0.01
+          },
+          {
+            "actual": 4560.0,
+            "expected": 4560.0,
+            "name": "room B drawn left = CAD wall right (mm)",
+            "passed": true,
+            "tolerance": 0.01
+          },
+          {
+            "actual": 22.2,
+            "expected": 22.2,
+            "name": "room A housing area (m2)",
+            "passed": true,
+            "tolerance": 1e-8
+          },
+          {
+            "actual": 22.2,
+            "expected": 22.2,
+            "name": "room A CAD clear area (m2)",
+            "passed": true,
+            "tolerance": 0.0001
+          },
+          {
+            "actual": 17.2,
+            "expected": 17.2,
+            "name": "room B housing area (m2)",
+            "passed": true,
+            "tolerance": 1e-8
+          },
+          {
+            "actual": 17.2,
+            "expected": 17.2,
+            "name": "room B CAD clear area (m2)",
+            "passed": true,
+            "tolerance": 0.0001
+          },
+          {
+            "actual": 2250.0,
+            "expected": 2250.0,
+            "name": "window center x (mm)",
+            "passed": true,
+            "tolerance": 0.01
+          },
+          {
+            "actual": 1218600000.0,
+            "expected": 1218600000.0,
+            "name": "partition volume minus door (mm3)",
+            "passed": true,
+            "tolerance": 20.0
+          },
+          {
+            "actual": 3768000000.0,
+            "expected": 3768000000.0,
+            "name": "north wall volume minus window (mm3)",
+            "passed": true,
+            "tolerance": 50.0
+          },
+          {
+            "actual": 5800.0,
+            "expected": 5800.0,
+            "name": "table x (mm)",
+            "passed": true,
+            "tolerance": 0.01
+          },
+          {
+            "actual": 900.0,
+            "expected": 900.0,
+            "name": "table y (mm)",
+            "passed": true,
+            "tolerance": 0.01
+          },
+          {
+            "actual": 1800.0,
+            "expected": 1800.0,
+            "name": "table width (mm)",
+            "passed": true,
+            "tolerance": 0.01
+          },
+          {
+            "actual": 102160000.00000001,
+            "expected": 102160000.0,
+            "name": "furniture total volume (mm3)",
+            "passed": true,
+            "tolerance": 5.0
+          },
+          {
+            "actual": 4440.0,
+            "expected": 4440.0,
+            "name": "colored face x (mm)",
+            "passed": true,
+            "tolerance": 0.01
+          },
+          {
+            "actual": -1.0,
+            "expected": -1.0,
+            "name": "colored face normal x",
+            "passed": true,
+            "tolerance": 1e-8
+          }
+        ],
+        "feature_count": 15,
+        "feature_errors": 0,
+        "measurement": "exact B-rep (SMLib)",
+        "point_classification_checks_passed": 9,
+        "resolved_colored_faces": 1
+      },
+      "verification_ms": 3.45825
+    },
+    {
+      "image_ms": 187.507417,
+      "stage": "04-reopened",
+      "verification": {
+        "bindings_resolve": true,
+        "body_count": 12,
+        "checks": [
+          {
+            "actual": 4440.0,
+            "expected": 4440.0,
+            "name": "partition min x (mm)",
+            "passed": true,
+            "tolerance": 0.01
+          },
+          {
+            "actual": 4560.0,
+            "expected": 4560.0,
+            "name": "partition max x (mm)",
+            "passed": true,
+            "tolerance": 0.01
+          },
+          {
+            "actual": 2400.0,
+            "expected": 2400.0,
+            "name": "partition height (mm)",
+            "passed": true,
+            "tolerance": 0.01
+          },
+          {
+            "actual": 4440.0,
+            "expected": 4440.0,
+            "name": "room A drawn right = CAD wall left (mm)",
+            "passed": true,
+            "tolerance": 0.01
+          },
+          {
+            "actual": 4560.0,
+            "expected": 4560.0,
+            "name": "room B drawn left = CAD wall right (mm)",
+            "passed": true,
+            "tolerance": 0.01
+          },
+          {
+            "actual": 22.2,
+            "expected": 22.2,
+            "name": "room A housing area (m2)",
+            "passed": true,
+            "tolerance": 1e-8
+          },
+          {
+            "actual": 22.2,
+            "expected": 22.2,
+            "name": "room A CAD clear area (m2)",
+            "passed": true,
+            "tolerance": 0.0001
+          },
+          {
+            "actual": 17.2,
+            "expected": 17.2,
+            "name": "room B housing area (m2)",
+            "passed": true,
+            "tolerance": 1e-8
+          },
+          {
+            "actual": 17.2,
+            "expected": 17.2,
+            "name": "room B CAD clear area (m2)",
+            "passed": true,
+            "tolerance": 0.0001
+          },
+          {
+            "actual": 2250.0,
+            "expected": 2250.0,
+            "name": "window center x (mm)",
+            "passed": true,
+            "tolerance": 0.01
+          },
+          {
+            "actual": 1218600000.0,
+            "expected": 1218600000.0,
+            "name": "partition volume minus door (mm3)",
+            "passed": true,
+            "tolerance": 20.0
+          },
+          {
+            "actual": 3768000000.0,
+            "expected": 3768000000.0,
+            "name": "north wall volume minus window (mm3)",
+            "passed": true,
+            "tolerance": 50.0
+          },
+          {
+            "actual": 5800.0,
+            "expected": 5800.0,
+            "name": "table x (mm)",
+            "passed": true,
+            "tolerance": 0.01
+          },
+          {
+            "actual": 900.0,
+            "expected": 900.0,
+            "name": "table y (mm)",
+            "passed": true,
+            "tolerance": 0.01
+          },
+          {
+            "actual": 1800.0,
+            "expected": 1800.0,
+            "name": "table width (mm)",
+            "passed": true,
+            "tolerance": 0.01
+          },
+          {
+            "actual": 102160000.00000001,
+            "expected": 102160000.0,
+            "name": "furniture total volume (mm3)",
+            "passed": true,
+            "tolerance": 5.0
+          },
+          {
+            "actual": 4440.0,
+            "expected": 4440.0,
+            "name": "colored face x (mm)",
+            "passed": true,
+            "tolerance": 0.01
+          },
+          {
+            "actual": -1.0,
+            "expected": -1.0,
+            "name": "colored face normal x",
+            "passed": true,
+            "tolerance": 1e-8
+          }
+        ],
+        "feature_count": 15,
+        "feature_errors": 0,
+        "measurement": "exact B-rep (SMLib)",
+        "point_classification_checks_passed": 9,
+        "resolved_colored_faces": 1
+      },
+      "verification_ms": 3.6157500000000002
+    },
+    {
+      "image_ms": 189.01245799999998,
+      "stage": "05-edited-after-reopen",
+      "verification": {
+        "bindings_resolve": true,
+        "body_count": 12,
+        "checks": [
+          {
+            "actual": 4190.0,
+            "expected": 4190.0,
+            "name": "partition min x (mm)",
+            "passed": true,
+            "tolerance": 0.01
+          },
+          {
+            "actual": 4310.0,
+            "expected": 4310.0,
+            "name": "partition max x (mm)",
+            "passed": true,
+            "tolerance": 0.01
+          },
+          {
+            "actual": 2400.0,
+            "expected": 2400.0,
+            "name": "partition height (mm)",
+            "passed": true,
+            "tolerance": 0.01
+          },
+          {
+            "actual": 4190.0,
+            "expected": 4190.0,
+            "name": "room A drawn right = CAD wall left (mm)",
+            "passed": true,
+            "tolerance": 0.01
+          },
+          {
+            "actual": 4310.0,
+            "expected": 4310.0,
+            "name": "room B drawn left = CAD wall right (mm)",
+            "passed": true,
+            "tolerance": 0.01
+          },
+          {
+            "actual": 20.95,
+            "expected": 20.95,
+            "name": "room A housing area (m2)",
+            "passed": true,
+            "tolerance": 1e-8
+          },
+          {
+            "actual": 20.95,
+            "expected": 20.95,
+            "name": "room A CAD clear area (m2)",
+            "passed": true,
+            "tolerance": 0.0001
+          },
+          {
+            "actual": 18.45,
+            "expected": 18.45,
+            "name": "room B housing area (m2)",
+            "passed": true,
+            "tolerance": 1e-8
+          },
+          {
+            "actual": 18.45,
+            "expected": 18.45,
+            "name": "room B CAD clear area (m2)",
+            "passed": true,
+            "tolerance": 0.0001
+          },
+          {
+            "actual": 2125.0,
+            "expected": 2125.0,
+            "name": "window center x (mm)",
+            "passed": true,
+            "tolerance": 0.01
+          },
+          {
+            "actual": 1218600000.0,
+            "expected": 1218600000.0,
+            "name": "partition volume minus door (mm3)",
+            "passed": true,
+            "tolerance": 20.0
+          },
+          {
+            "actual": 3768000000.0,
+            "expected": 3768000000.0,
+            "name": "north wall volume minus window (mm3)",
+            "passed": true,
+            "tolerance": 50.0
+          },
+          {
+            "actual": 5800.0,
+            "expected": 5800.0,
+            "name": "table x (mm)",
+            "passed": true,
+            "tolerance": 0.01
+          },
+          {
+            "actual": 900.0,
+            "expected": 900.0,
+            "name": "table y (mm)",
+            "passed": true,
+            "tolerance": 0.01
+          },
+          {
+            "actual": 1800.0,
+            "expected": 1800.0,
+            "name": "table width (mm)",
+            "passed": true,
+            "tolerance": 0.01
+          },
+          {
+            "actual": 102160000.00000001,
+            "expected": 102160000.0,
+            "name": "furniture total volume (mm3)",
+            "passed": true,
+            "tolerance": 5.0
+          },
+          {
+            "actual": 4190.0,
+            "expected": 4190.0,
+            "name": "colored face x (mm)",
+            "passed": true,
+            "tolerance": 0.01
+          },
+          {
+            "actual": -1.0,
+            "expected": -1.0,
+            "name": "colored face normal x",
+            "passed": true,
+            "tolerance": 1e-8
+          }
+        ],
+        "feature_count": 15,
+        "feature_errors": 0,
+        "measurement": "exact B-rep (SMLib)",
+        "point_classification_checks_passed": 9,
+        "resolved_colored_faces": 1
+      },
+      "verification_ms": 3.368083
+    }
+  ],
+  "units": "mm; floor areas m2; volumes mm3"
+}

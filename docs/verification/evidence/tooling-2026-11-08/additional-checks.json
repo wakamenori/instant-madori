@@ -1,0 +1,30 @@
+{
+  "expandedBiomeDomains": {
+    "types": "all",
+    "react": "all"
+  },
+  "expandedBiomeDiagnostics": {
+    "effect-dependencies.tsx": [
+      "lint/correctness/useExhaustiveDependencies"
+    ],
+    "valid.tsx": [
+      "lint/style/useComponentExportOnlyModules",
+      "lint/style/useComponentExportOnlyModules",
+      "lint/style/useComponentExportOnlyModules"
+    ],
+    "floating-imported.ts": [
+      "lint/nursery/noFloatingPromises"
+    ],
+    "floating-local.ts": [
+      "lint/nursery/noFloatingPromises"
+    ],
+    "hook-conditional.tsx": [
+      "lint/correctness/useHookAtTopLevel"
+    ],
+    "switch-missing.ts": [
+      "lint/nursery/useExhaustiveSwitchCases"
+    ]
+  },
+  "typescriptWithAllProbesExitCode": 0,
+  "typescriptWithAllProbesOutput": ""
+}

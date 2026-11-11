@@ -1,17 +1,18 @@
-/target*/
-/plan/
-/dist/
-*~
+/target/
+/.tools/
+node_modules/
+dist/
+.wrangler/
+/crates/viewer/pkg/
+/apps/worker/worker-configuration.d.ts
+.env
+.env.*
+!.env.example
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
 .DS_Store
 *.swp
-/.claude/worktrees/
-/target-snapshot
+*~
 __pycache__/
-.vscode/
-
-# cargo-mutants output (docs/mutation-testing.md)
-mutants.out*/
-
-# external corpus downloads (cargo xtask external-corpus, #1397): fetched at test time,
-# hash-pinned in tests/external-corpus.toml; never commit case data
-/corpus/
+/.claude/worktrees/

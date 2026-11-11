@@ -1,0 +1,12 @@
+third_party/solidcraft/
+docs/verification/
+node_modules/
+target/
+.tools/
+.wrangler/
+dist/
+crates/viewer/pkg/
+apps/worker/worker-configuration.d.ts
+Cargo.lock
+pnpm-lock.yaml
+mise.lock

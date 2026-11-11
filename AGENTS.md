@@ -1,52 +1,31 @@
-# SolidCraft: instructions for agents
+# instant-madori：エージェント向けの指示
 
-SolidCraft is a clean-room, pure-Rust parametric 3D CAD app (sketch solver, feature timeline, B-rep kernel, an egui UI that agents drive). This file is a router: the hard rules, then the skill to read for your task. Humans: CONTRIBUTING.md.
+このリポジトリでは、SolidCraftを使って、ブラウザで動く住宅相談サービスを開発する。最初に[README.md](README.md)と[実装計画](docs/plan.md)を読む。振る舞いを変える前に、計画の該当する節を読む。
 
-## Start here
-Work: ROADMAP.md, "Where help is wanted most" in CONTRIBUTING.md, issues labelled `help wanted`, `good first issue`, `needs-triage`; architecture in `docs/architecture.md`. Local `plan/` notes are optional.
+## 協働
 
-## Hard rules (what enforces each)
-- Independent: never copy another product's code, icons, text or templates; never drive or take data from commercial CAD. `skills/solidcraft-ground-rules/SKILL.md`.
-- No GPL/LGPL/AGPL code, not even reading it (OpenCASCADE, FreeCAD, SolveSpace, CadQuery, LibreCAD, QCAD): `cargo xtask licences --check`.
-- Every asset is original or openly licensed with a row in ATTRIBUTION.md; read `assets/AGENTS.md` before icon work: `cargo xtask assets`, `cargo xtask icons`.
-- Never crash: no unwrap/expect/panic/unsafe in non-test code, errors are `Result`, input is hostile: clippy `-D warnings`, `hostile_params_never_panic`.
-- Model decisions (what an operation does, which bodies it touches, which face or edge a point or name means, depths, nearness) use exact geometry; a mesh is for display, export, previews and mesh bodies (`xtask/mesh-decisions.txt` only shrinks): `cargo xtask mesh-decisions`.
-- New kernel cases go to solidcore: `cargo xtask lists`.
-- Everything is a command and programmatic calls never open dialogs: `skills/solidcraft-commands/SKILL.md`.
-- Layering (geom, sketch/kernel/render, doc, io, engine, ui-egui, apps); only `crates/kernel` uses truck: `cargo xtask layers`.
-- One outer UI container, one camera path (`navigation::handle`), colours from theme tokens: `cargo xtask ui-containers`.
-- Application code is Rust only and builds for wasm: `cargo xtask wasm`, `cargo xtask web-offline-test`.
-- The product name is SolidCraft; the old name lives only in `docs/compatibility.md`.
-- Sorted lists (message catalogs, `mod` lines, languages) stay sorted: `cargo xtask lists`. Never edit generated files (`docs/features.md`, `THIRD-PARTY-LICENSES.txt`) in a PR.
-- A design-format change is ONE new file in `crates/doc/src/format/pending/`: `scripts/test-format-pending.sh`.
-- A command has input and output schemas (will become required; `schema/unconverted.txt` only shrinks): `skills/solidcraft-commands/SKILL.md`.
-- New UI strings go in `assets/locales/pending/<slug>.json`, ATTRIBUTION rows in `attribution/pending/<slug>.md`: `cargo xtask lists`.
-- A changed default keeps the old behaviour behind a preference and fills the PR's `Changes a default:` line: `pr-checks.yml`.
-- A regression test goes in the area's existing test file, never a per-bug file (#3226).
-- Look at open PRs first, claim with a draft PR (lowest number wins), one topic per PR: `skills/solidcraft-contributing/SKILL.md`.
-- A PR's title and first sentence make sense to someone who never saw your chat or the issue: `skills/solidcraft-contributing/SKILL.md`.
-- Code, comments, commit messages and docs are in English, always: `skills/solidcraft-contributing/SKILL.md` ("Working as an agent").
-- Independent work runs in parallel, dependent work stays sequential: `skills/solidcraft-contributing/SKILL.md` ("Working as an agent").
-- Show observable changes with real screenshots or a recording, captured yourself.
-- Run `cargo xtask ci` before every commit. `cargo xtask skills` keeps this file and `skills/` honest.
+- 相談、レビュー、設計についての質問は、ファイルを編集する指示ではない。明確な実装の依頼は、合意した範囲の中で実行する。
+- ユーザーの作業を失わない。リポジトリを変更する前にGitの作業状態と履歴を確認し、関係のない変更を巻き戻さない。
+- 合意済みの要件、実装上の選択、観察した事実を区別する。計画しただけの機能や、コンパイルが通っただけの機能を、テスト済みの振る舞いとして書かない。
+- 文書を、決まったことと食い違わない状態に保つ。プロダクトの文書と議論は日本語でよい。コードの識別子とコメントは英語で書く。
+- 説明はユーザーが話している抽象度に合わせ、対等な項目だけを並べる。「正本」という言葉を使わない。
 
-## Working on X: read the skill first
-| Working on | Read |
-|---|---|
-| A PR, a claim, review, CI or evidence | `skills/solidcraft-contributing/SKILL.md` |
-| Licences, assets, clean-room, the name | `skills/solidcraft-ground-rules/SKILL.md` |
-| Non-test Rust, hostile input, a crash report | `skills/solidcraft-crash-safety/SKILL.md` |
-| A command, a crate boundary | `skills/solidcraft-commands/SKILL.md` |
-| A dialog, panel, camera, icon, colour | `skills/solidcraft-ui/SKILL.md` |
-| Labels, messages, translations | `skills/solidcraft-ui-text/SKILL.md` |
-| Saving something new in a design, import, export | `skills/solidcraft-file-formats/SKILL.md` |
-| Preferences, a changed default | `skills/solidcraft-preferences/SKILL.md` |
-| Writing or running tests | `skills/solidcraft-tests/SKILL.md` |
-| Slow work, the window thread, wasm | `skills/solidcraft-performance/SKILL.md` |
-| Releases, installers, packages | `skills/solidcraft-packaging/SKILL.md` |
-| Running the app, control channel, MCP tools | `skills/solidcraft-agent-tools/SKILL.md` |
-| Building a part over MCP | `skills/solidcraft-modeling/SKILL.md` |
-| Changing an existing design | `skills/solidcraft-editing/SKILL.md` |
-| A bug report, a crash, a wrong result | `skills/solidcraft-reporting/SKILL.md` |
-| Checking, porting, designs in git | `skills/solidcraft-checking/SKILL.md` |
-| Assemblies, joints, motion | `skills/solidcraft-mechanisms/SKILL.md` |
+## 構成と境界
+
+- `apps/web` と `apps/worker` はTypeScript、`apps/geometry` と `crates/*` はRustで書く。`packages/contracts` には、WebとAPIが共有するスキーマと、そこから生成するRust向けの型定義を置く。
+- `crates/housing` は、HTTP、ブラウザ、Cloudflare、CADのいずれにも依存しない。`crates/modeling` は住宅データをSolidCraftにつなぐ。`crates/viewer` はSolidCraftの描画の層だけを使う。
+- `third_party/solidcraft` には、upstreamのソース、資産、ライセンス、エージェント向けの指示をそのまま保持する。このコードを修正するときは、upstreamの技術上の制約に従う。一方、upstreamの「すべてRustで書く」「製品名の扱い」「文書は英語」「UI」に関するルールは、その外側にあるこのサービスには適用しない。upstreamへ貢献するための手順（着手の宣言、ドラフトPR、upstreamのCI一式）は、upstreamに貢献するときのものである。このリポジトリ内で組み込みのために行う修正では、その修正に関係する検査と、このファイルに書いたサービスの検査を使う。
+- 使っていないupstreamの構成要素を削除しない。更新は[third_party/solidcraft.md](third_party/solidcraft.md)の手順どおりgit subtreeで行い、upstreamをリポジトリのルートへマージしない。
+- upstreamの更新は原則として取り込む。このサービスと両立するかを確認し、両立しない場合は、サービス側を合わせるか、その更新を保留する理由を具体的に記録する。upstreamの変更とサービスの変更は分けておく。
+- 第三者の著作権表示とライセンスを保持する。GPL、LGPL、AGPLの依存を追加しない。他の製品のコードや資産を写さない。
+- ローカル環境の作業の中で、本番の認証情報を持ち込んだり、インフラをデプロイしたりしない。
+
+## 検査と引き継ぎ
+
+- miseで固定したツールと、READMEに書いたコマンドを使う。`pnpm check --fast` は、TypeScriptとRustを自動修正したうえで検査する。`pnpm check` は、それに加えて両方のテストを実行する。`pnpm check --full` は、ビルド、ローカルでの統合検査、依存関係の監査まで行う。依存関係、upstream、WasmのAPIを変更した後にも `--full` を使う。検査はローカルで実行し、GitHub Actionsに頼らない。コミットの前に、変更に関係する検査を実行する。実行していない検査を、実行したと書かない。
+- TypeScriptのアプリとスクリプトには、型情報を使うESLintと厳格な型検査を適用し続ける。信頼できないJSONは、外から受け取る箇所でパースして検証する。依存関係のカタログとツールのバージョン固定を、互いに食い違わない状態に保つ。ロックファイルの変更は内容を確認する。
+- `pnpm check` は、どのモードでもサービスのファイルを整形し、ESLintとClippyの自動修正を適用する。ステージする前に、その結果の差分を確認する。upstreamのソース、過去の検証記録、生成されたファイルを一括で整形しない。コミット前のフックは、ステージされたファイルを書き換えずに検査するだけで、プロジェクト全体の検査の代わりにはならない。
+- テスト以外の新しいRustコードでは、`unsafe`、`unwrap`、`expect`、およびパニックに頼るエラー処理を使わない。外部からの入力は、受け取る箇所で検証する。
+- 振る舞いと、意味のある連携部分をテストする。処理を呼び出すだけのラッパーはテストしない。生成したWasmとビルドのキャッシュは、Gitの追跡対象にしない。
+- 要件または構成が変わったときは、`docs/plan.md` を更新する。
+- コミット、push、マージ、デプロイは、それぞれ別に許可が要る。ユーザーが明示した操作だけを行う。

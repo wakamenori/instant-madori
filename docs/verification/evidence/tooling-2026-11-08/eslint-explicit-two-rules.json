@@ -1,0 +1,78 @@
+[
+  {
+    "file": "callback-array.ts",
+    "messages": [
+      {
+        "rule": "@typescript-eslint/no-misused-promises",
+        "message": "Promise returned in function argument where a void return was expected."
+      }
+    ]
+  },
+  {
+    "file": "callback-dom.ts",
+    "messages": [
+      {
+        "rule": "@typescript-eslint/no-misused-promises",
+        "message": "Promise returned in function argument where a void return was expected."
+      }
+    ]
+  },
+  {
+    "file": "callback-local.ts",
+    "messages": [
+      {
+        "rule": "@typescript-eslint/no-misused-promises",
+        "message": "Promise returned in function argument where a void return was expected."
+      }
+    ]
+  },
+  {
+    "file": "explicit-any.ts",
+    "messages": [
+      {
+        "rule": "@typescript-eslint/no-unsafe-return",
+        "message": "Unsafe return of a value of type `any`."
+      }
+    ]
+  },
+  {
+    "file": "json-direct.ts",
+    "messages": [
+      {
+        "rule": "@typescript-eslint/no-unsafe-return",
+        "message": "Unsafe return of a value of type `any`."
+      }
+    ]
+  },
+  {
+    "file": "json-property.ts",
+    "messages": [
+      {
+        "rule": "@typescript-eslint/no-unsafe-return",
+        "message": "Unsafe return of a value of type `any`."
+      }
+    ]
+  },
+  {
+    "file": "json-variable.ts",
+    "messages": [
+      {
+        "rule": "@typescript-eslint/no-unsafe-return",
+        "message": "Unsafe return of a value of type `any`."
+      }
+    ]
+  },
+  {
+    "file": "promise-condition.ts",
+    "messages": [
+      {
+        "rule": "@typescript-eslint/no-misused-promises",
+        "message": "Expected non-Promise value in a boolean conditional."
+      }
+    ]
+  },
+  {
+    "file": "valid.ts",
+    "messages": []
+  }
+]

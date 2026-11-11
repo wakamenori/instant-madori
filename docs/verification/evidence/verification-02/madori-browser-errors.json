@@ -1,0 +1,32 @@
+[
+  {
+    "input": {
+      "action": "merge",
+      "revision": 2
+    },
+    "error": {
+      "error": "stale revision"
+    },
+    "state_unchanged": true
+  },
+  {
+    "input": {
+      "action": "split",
+      "revision": 3
+    },
+    "error": {
+      "error": "north wall is already split or absent"
+    },
+    "state_unchanged": true
+  },
+  {
+    "input": {
+      "action": "unknown",
+      "revision": 3
+    },
+    "error": {
+      "error": "unknown verification action"
+    },
+    "state_unchanged": true
+  }
+]

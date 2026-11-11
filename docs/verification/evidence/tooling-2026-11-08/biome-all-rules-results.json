@@ -1,0 +1,276 @@
+{
+  "configuration": {
+    "$schema": "https://biomejs.dev/schemas/2.6.6/schema.json",
+    "vcs": {
+      "enabled": false
+    },
+    "files": {
+      "ignoreUnknown": true
+    },
+    "formatter": {
+      "enabled": false
+    },
+    "assist": {
+      "enabled": false
+    },
+    "javascript": {
+      "resolver": {
+        "experimentalPnpmCatalogs": true
+      }
+    },
+    "linter": {
+      "rules": {
+        "preset": "all",
+        "nursery": "error"
+      }
+    }
+  },
+  "diagnostics": {
+    "floating-imported.ts": [
+      {
+        "rule": "lint/correctness/useImportExtensions",
+        "message": "Add a file extension for relative imports."
+      },
+      {
+        "rule": "lint/nursery/useExplicitReturnType",
+        "message": "Missing return type on function."
+      },
+      {
+        "rule": "lint/nursery/useExplicitType",
+        "message": "Missing return type on function."
+      },
+      {
+        "rule": "lint/nursery/useConsistentFunctionStyle",
+        "message": "Function expressions are required here, but this is a declaration."
+      }
+    ],
+    "hook-conditional.tsx": [
+      {
+        "rule": "lint/style/useBlockStatements",
+        "message": "Block statements are preferred in this position."
+      },
+      {
+        "rule": "lint/nursery/noNull",
+        "message": "Unexpected use of null."
+      },
+      {
+        "rule": "lint/correctness/useHookAtTopLevel",
+        "message": "This hook is being called conditionally, but all hooks must be called in the exact same order in every component render."
+      },
+      {
+        "rule": "lint/nursery/useExplicitReturnType",
+        "message": "Missing return type on function."
+      },
+      {
+        "rule": "lint/nursery/useExplicitType",
+        "message": "Missing return type on function."
+      },
+      {
+        "rule": "lint/nursery/useConsistentFunctionStyle",
+        "message": "Function expressions are required here, but this is a declaration."
+      }
+    ],
+    "switch-missing.ts": [
+      {
+        "rule": "lint/style/useDefaultSwitchClause",
+        "message": "Expected a default switch clause."
+      },
+      {
+        "rule": "lint/nursery/useExplicitReturnType",
+        "message": "Missing return type on function."
+      },
+      {
+        "rule": "lint/nursery/useExplicitType",
+        "message": "Missing return type on function."
+      },
+      {
+        "rule": "lint/nursery/useConsistentFunctionStyle",
+        "message": "Function expressions are required here, but this is a declaration."
+      }
+    ],
+    "valid.tsx": [
+      {
+        "rule": "lint/style/useDefaultSwitchClause",
+        "message": "Expected a default switch clause."
+      },
+      {
+        "rule": "lint/correctness/useImportExtensions",
+        "message": "Add a file extension for relative imports."
+      },
+      {
+        "rule": "lint/style/useComponentExportOnlyModules",
+        "message": "Exporting a non-component with components is not allowed."
+      },
+      {
+        "rule": "lint/style/useComponentExportOnlyModules",
+        "message": "Exporting a non-component with components is not allowed."
+      },
+      {
+        "rule": "lint/style/useComponentExportOnlyModules",
+        "message": "Exporting a non-component with components is not allowed."
+      },
+      {
+        "rule": "lint/nursery/useConsistentFunctionStyle",
+        "message": "Function expressions are required here, but this is a declaration."
+      },
+      {
+        "rule": "lint/nursery/useConsistentFunctionStyle",
+        "message": "Function expressions are required here, but this is a declaration."
+      },
+      {
+        "rule": "lint/nursery/useExplicitType",
+        "message": "Missing return type on function."
+      },
+      {
+        "rule": "lint/nursery/useExplicitReturnType",
+        "message": "Missing return type on function."
+      },
+      {
+        "rule": "lint/nursery/useConsistentFunctionStyle",
+        "message": "Function expressions are required here, but this is a declaration."
+      },
+      {
+        "rule": "lint/correctness/noUndeclaredDependencies",
+        "message": "Dependency zod isn't specified in apps/web/package.json."
+      },
+      {
+        "rule": "lint/nursery/useExplicitType",
+        "message": "Missing return type on function."
+      },
+      {
+        "rule": "lint/nursery/useExplicitReturnType",
+        "message": "Missing return type on function."
+      },
+      {
+        "rule": "lint/nursery/useConsistentFunctionStyle",
+        "message": "Function expressions are required here, but this is a declaration."
+      },
+      {
+        "rule": "lint/nursery/useExplicitReturnType",
+        "message": "Missing return type on function."
+      },
+      {
+        "rule": "lint/nursery/useExplicitType",
+        "message": "Missing return type on function."
+      }
+    ],
+    "async-event.ts": [
+      {
+        "rule": "lint/nursery/useExplicitReturnType",
+        "message": "Missing return type on function."
+      },
+      {
+        "rule": "lint/nursery/useExplicitType",
+        "message": "Missing return type on function."
+      },
+      {
+        "rule": "lint/nursery/useConsistentFunctionStyle",
+        "message": "Function expressions are required here, but this is a declaration."
+      }
+    ],
+    "effect-dependencies.tsx": [
+      {
+        "rule": "lint/nursery/useExplicitReturnType",
+        "message": "Missing return type on function."
+      },
+      {
+        "rule": "lint/nursery/useExplicitType",
+        "message": "Missing return type on function."
+      },
+      {
+        "rule": "lint/nursery/useConsistentFunctionStyle",
+        "message": "Function expressions are required here, but this is a declaration."
+      },
+      {
+        "rule": "lint/nursery/noNull",
+        "message": "Unexpected use of null."
+      },
+      {
+        "rule": "lint/correctness/useExhaustiveDependencies",
+        "message": "This hook does not specify its dependency on name."
+      }
+    ],
+    "floating-local.ts": [
+      {
+        "rule": "lint/nursery/useConsistentFunctionStyle",
+        "message": "Function expressions are required here, but this is a declaration."
+      },
+      {
+        "rule": "lint/nursery/useExplicitReturnType",
+        "message": "Missing return type on function."
+      },
+      {
+        "rule": "lint/nursery/useExplicitType",
+        "message": "Missing return type on function."
+      }
+    ],
+    "ref-in-render.tsx": [
+      {
+        "rule": "lint/nursery/useExplicitReturnType",
+        "message": "Missing return type on function."
+      },
+      {
+        "rule": "lint/nursery/useExplicitType",
+        "message": "Missing return type on function."
+      },
+      {
+        "rule": "lint/nursery/useConsistentFunctionStyle",
+        "message": "Function expressions are required here, but this is a declaration."
+      }
+    ],
+    "set-state-effect.tsx": [
+      {
+        "rule": "lint/nursery/useConsistentFunctionStyle",
+        "message": "Function expressions are required here, but this is a declaration."
+      },
+      {
+        "rule": "lint/nursery/useExplicitReturnType",
+        "message": "Missing return type on function."
+      },
+      {
+        "rule": "lint/nursery/useExplicitType",
+        "message": "Missing return type on function."
+      }
+    ],
+    "support.ts": [
+      {
+        "rule": "lint/nursery/useConsistentFunctionStyle",
+        "message": "Function expressions are required here, but this is a declaration."
+      }
+    ],
+    "unsafe-argument.ts": [
+      {
+        "rule": "lint/nursery/useExplicitType",
+        "message": "Missing return type on function."
+      },
+      {
+        "rule": "lint/nursery/useConsistentFunctionStyle",
+        "message": "Function expressions are required here, but this is a declaration."
+      },
+      {
+        "rule": "lint/nursery/useExplicitReturnType",
+        "message": "Missing return type on function."
+      }
+    ],
+    "unsafe-call.ts": [
+      {
+        "rule": "lint/nursery/useExplicitReturnType",
+        "message": "Missing return type on function."
+      },
+      {
+        "rule": "lint/nursery/useExplicitType",
+        "message": "Missing return type on function."
+      },
+      {
+        "rule": "lint/nursery/useConsistentFunctionStyle",
+        "message": "Function expressions are required here, but this is a declaration."
+      }
+    ],
+    "unsafe-json.ts": [
+      {
+        "rule": "lint/nursery/useConsistentFunctionStyle",
+        "message": "Function expressions are required here, but this is a declaration."
+      }
+    ]
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "i These rules have not yet been implemented:": [
+    "no-invalid-regexp",
+    "@typescript-eslint/await-thenable",
+    "@typescript-eslint/no-array-delete",
+    "@typescript-eslint/no-duplicate-type-constituents",
+    "@typescript-eslint/no-redundant-type-constituents",
+    "@typescript-eslint/no-unsafe-argument",
+    "@typescript-eslint/no-unsafe-assignment",
+    "@typescript-eslint/no-unsafe-call",
+    "@typescript-eslint/no-unsafe-enum-comparison",
+    "@typescript-eslint/no-unsafe-member-access",
+    "@typescript-eslint/no-unused-expressions",
+    "@typescript-eslint/restrict-template-expressions",
+    "@typescript-eslint/triple-slash-reference",
+    "@typescript-eslint/unbound-method",
+    "react-hooks/config",
+    "react-hooks/error-boundaries",
+    "react-hooks/gating",
+    "react-hooks/globals",
+    "react-hooks/immutability",
+    "react-hooks/incompatible-library",
+    "react-hooks/preserve-manual-memoization",
+    "react-hooks/purity",
+    "react-hooks/refs",
+    "react-hooks/set-state-in-effect",
+    "react-hooks/set-state-in-render",
+    "react-hooks/static-components",
+    "react-hooks/unsupported-syntax",
+    "react-hooks/use-memo"
+  ],
+  "i These rules originate from an eslint plugin or other tool that Biome doesn't know about:": []
+}

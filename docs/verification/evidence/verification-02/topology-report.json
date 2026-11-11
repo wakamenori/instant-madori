@@ -1,0 +1,151 @@
+{
+  "failure_isolated": true,
+  "restore_and_split_again": true,
+  "split": {
+    "appearance_after_adapter": [
+      {
+        "body": "wall.north",
+        "body_look": {
+          "color": [
+            190,
+            112,
+            83
+          ],
+          "name": "Custom",
+          "opacity": 1.0
+        },
+        "faces": [
+          {
+            "color": [
+              72,
+              150,
+              110
+            ],
+            "index": 6
+          }
+        ]
+      },
+      {
+        "body": "wall.north (1)",
+        "body_look": {
+          "color": [
+            190,
+            112,
+            83
+          ],
+          "name": "Custom",
+          "opacity": 1.0
+        },
+        "faces": [
+          {
+            "color": [
+              72,
+              150,
+              110
+            ],
+            "index": 2
+          }
+        ]
+      }
+    ],
+    "native_appearance_before_adapter": [
+      {
+        "body": "wall.north",
+        "body_look": {
+          "color": [
+            190,
+            112,
+            83
+          ],
+          "name": "Custom",
+          "opacity": 1.0
+        },
+        "faces": [
+          {
+            "color": [
+              72,
+              150,
+              110
+            ],
+            "index": 6
+          }
+        ]
+      },
+      {
+        "body": "wall.north (1)",
+        "body_look": null,
+        "faces": []
+      }
+    ],
+    "native_reply": {
+      "bodies": [
+        "floor",
+        "wall.south",
+        "wall.north",
+        "wall.west",
+        "wall.east",
+        "wall.divider",
+        "window.glass",
+        "table.top",
+        "table.leg.1",
+        "table.leg.2",
+        "table.leg.3",
+        "table.leg.4",
+        "wall.north (1)"
+      ],
+      "changed_bodies": [
+        "wall.north"
+      ],
+      "created_bodies": [
+        "wall.north (1)"
+      ],
+      "feature": 16,
+      "ms": 11.351459,
+      "name": "north.split",
+      "removed_bodies": [],
+      "warning": null
+    }
+  },
+  "stages": [
+    {
+      "checks": {
+        "areas_m2": [
+          22.2,
+          17.2
+        ],
+        "bodies": 13,
+        "furniture_volume_mm3": 102160000.00000001,
+        "north_volume_mm3": 3768000000.000016,
+        "passed": true
+      },
+      "roundtrip_equal": true,
+      "stage": "01-split"
+    },
+    {
+      "checks": {
+        "areas_m2": [
+          40.0
+        ],
+        "bodies": 12,
+        "furniture_volume_mm3": 102160000.00000001,
+        "north_volume_mm3": 3768000000.000016,
+        "passed": true
+      },
+      "roundtrip_equal": true,
+      "stage": "02-merged-rooms"
+    },
+    {
+      "checks": {
+        "areas_m2": [
+          40.0
+        ],
+        "bodies": 9,
+        "furniture_volume_mm3": 102160000.00000001,
+        "north_volume_mm3": 0.0,
+        "passed": true
+      },
+      "roundtrip_equal": true,
+      "stage": "03-removed-window-wall"
+    }
+  ]
+}

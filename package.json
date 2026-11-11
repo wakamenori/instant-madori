@@ -1,0 +1,31 @@
+{
+  "name": "instant-madori",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.9.0",
+  "engines": {
+    "node": "24.x"
+  },
+  "scripts": {
+    "check": "node scripts/check.ts",
+    "build": "node scripts/build-wasm.ts && pnpm --filter @madori/web build && pnpm --filter @madori/worker build && cargo build --locked -p madori-geometry",
+    "dev": "node scripts/build-wasm.ts && pnpm --filter @madori/web build && node scripts/dev.ts",
+    "upstream:check": "node scripts/upstream.ts check",
+    "upstream:update": "node scripts/upstream.ts update",
+    "setup": "mise install && cargo install wasm-bindgen-cli --version 0.2.129 --locked --root .tools -j 4 && node scripts/build-wasm.ts && pnpm --filter @madori/worker types && pnpm exec lefthook install"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "catalog:",
+    "eslint": "10.14.0",
+    "eslint-config-prettier": "10.1.8",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "globals": "17.14.0",
+    "knip": "6.43.0",
+    "lefthook": "2.2.2",
+    "prettier": "3.9.10",
+    "typescript": "catalog:",
+    "typescript-eslint": "8.72.1",
+    "zod": "catalog:"
+  }
+}

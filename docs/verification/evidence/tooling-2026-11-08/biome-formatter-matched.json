@@ -1,0 +1,85 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.6.6/schema.json",
+  "formatter": {
+    "enabled": true,
+    "formatWithErrors": false,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineEnding": "lf",
+    "lineWidth": 100,
+    "attributePosition": "auto",
+    "bracketSameLine": false,
+    "bracketSpacing": true,
+    "expand": "auto",
+    "useEditorconfig": true
+  },
+  "linter": {
+    "enabled": false
+  },
+  "javascript": {
+    "formatter": {
+      "jsxQuoteStyle": "double",
+      "quoteProperties": "asNeeded",
+      "trailingCommas": "all",
+      "semicolons": "always",
+      "arrowParentheses": "always",
+      "bracketSameLine": false,
+      "quoteStyle": "double",
+      "attributePosition": "auto",
+      "bracketSpacing": true
+    }
+  },
+  "html": {
+    "formatter": {
+      "indentScriptAndStyle": false,
+      "selfCloseVoidElements": "always",
+      "enabled": true
+    }
+  },
+  "vcs": {
+    "enabled": false
+  },
+  "files": {
+    "ignoreUnknown": true,
+    "includes": [
+      "**",
+      "!!third_party/solidcraft",
+      "!!docs/verification",
+      "!!**/node_modules",
+      "!!target",
+      "!!.tools",
+      "!!**/.wrangler",
+      "!!**/dist",
+      "!!crates/viewer/pkg",
+      "!apps/worker/worker-configuration.d.ts",
+      "!**/Cargo.lock",
+      "!pnpm-lock.yaml",
+      "!mise.lock"
+    ]
+  },
+  "markdown": {
+    "formatter": {
+      "proseWrap": "preserve"
+    }
+  },
+  "assist": {
+    "enabled": false
+  },
+  "yaml": {
+    "formatter": {
+      "bracketSpacing": false
+    }
+  },
+  "overrides": [
+    {
+      "includes": [
+        "**/*.jsonc"
+      ],
+      "json": {
+        "formatter": {
+          "trailingCommas": "all"
+        }
+      }
+    }
+  ]
+}

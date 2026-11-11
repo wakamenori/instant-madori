@@ -1,0 +1,142 @@
+{
+  "floating-local.ts": {
+    "eslint": [
+      {
+        "rule": "@typescript-eslint/no-floating-promises",
+        "severity": 2
+      }
+    ],
+    "biome": [
+      {
+        "rule": "lint/nursery/noFloatingPromises",
+        "severity": "error"
+      }
+    ]
+  },
+  "floating-imported.ts": {
+    "eslint": [
+      {
+        "rule": "@typescript-eslint/no-floating-promises",
+        "severity": 2
+      }
+    ],
+    "biome": [
+      {
+        "rule": "lint/nursery/noFloatingPromises",
+        "severity": "error"
+      }
+    ]
+  },
+  "unsafe-json.ts": {
+    "eslint": [
+      {
+        "rule": "@typescript-eslint/no-unsafe-assignment",
+        "severity": 2
+      },
+      {
+        "rule": "@typescript-eslint/no-unsafe-return",
+        "severity": 2
+      },
+      {
+        "rule": "@typescript-eslint/no-unsafe-member-access",
+        "severity": 2
+      }
+    ],
+    "biome": []
+  },
+  "unsafe-call.ts": {
+    "eslint": [
+      {
+        "rule": "@typescript-eslint/no-unsafe-assignment",
+        "severity": 2
+      },
+      {
+        "rule": "@typescript-eslint/no-unsafe-call",
+        "severity": 2
+      }
+    ],
+    "biome": []
+  },
+  "unsafe-argument.ts": {
+    "eslint": [
+      {
+        "rule": "@typescript-eslint/no-unsafe-argument",
+        "severity": 2
+      }
+    ],
+    "biome": []
+  },
+  "async-event.ts": {
+    "eslint": [
+      {
+        "rule": "@typescript-eslint/no-misused-promises",
+        "severity": 2
+      }
+    ],
+    "biome": []
+  },
+  "switch-missing.ts": {
+    "eslint": [
+      {
+        "rule": "@typescript-eslint/switch-exhaustiveness-check",
+        "severity": 2
+      }
+    ],
+    "biome": [
+      {
+        "rule": "lint/nursery/useExhaustiveSwitchCases",
+        "severity": "error"
+      }
+    ]
+  },
+  "hook-conditional.tsx": {
+    "eslint": [
+      {
+        "rule": "react-hooks/rules-of-hooks",
+        "severity": 2
+      }
+    ],
+    "biome": [
+      {
+        "rule": "lint/correctness/useHookAtTopLevel",
+        "severity": "error"
+      }
+    ]
+  },
+  "effect-dependencies.tsx": {
+    "eslint": [
+      {
+        "rule": "react-hooks/exhaustive-deps",
+        "severity": 1
+      }
+    ],
+    "biome": [
+      {
+        "rule": "lint/correctness/useExhaustiveDependencies",
+        "severity": "warning"
+      }
+    ]
+  },
+  "ref-in-render.tsx": {
+    "eslint": [
+      {
+        "rule": "react-hooks/refs",
+        "severity": 2
+      }
+    ],
+    "biome": []
+  },
+  "set-state-effect.tsx": {
+    "eslint": [
+      {
+        "rule": "react-hooks/set-state-in-effect",
+        "severity": 2
+      }
+    ],
+    "biome": []
+  },
+  "valid.tsx": {
+    "eslint": [],
+    "biome": []
+  }
+}
