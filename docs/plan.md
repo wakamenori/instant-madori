@@ -2,7 +2,7 @@
 
 更新日：2026-11-08
 
-初回提供までの仕様、設計、実装順をまとめる。事前の技術検証は完了扱いとし、これから本体を実装する。生成品質・性能・一般の住宅への対応は、各実装段階で確認・改善する。合意した要件に加え、API、モジュール名、保存形式などは実装に向けた初期設計を記す。実装済みの範囲と次の作業は[現在地](status.md)を参照する。
+初回提供までの仕様、設計、実装順をまとめる。事前の技術検証は完了扱いとし、これから本体を実装する。生成品質・性能・一般の住宅への対応は、各実装段階で確認・改善する。合意した要件に加え、API、モジュール名、保存形式などは実装に向けた初期設計を記す。
 
 ## 1. 目的と初回提供の範囲
 
@@ -196,7 +196,7 @@ AIが編集をまとめて案を提示するたびに履歴を一件追加する
 
 リポジトリのルートをinstant-madoriの開発用にし、SolidCraftは `third_party/solidcraft/` に一式を保持してgit subtreeで管理する。使わないアプリや資料も削除せず、内部の配置をできるだけ維持してupstreamの更新を取り込みやすくする。
 
-以下を配置方針とする。環境整備で主要なworkspaceと入口を作成し、各機能の内部ディレクトリは実装時に追加する。作成済みの範囲は[現在地](status.md)に記録する。
+以下を配置方針とする。環境整備で主要なworkspaceと入口を作成し、各機能の内部ディレクトリは実装時に追加する。
 
 ```text
 instant-madori/
@@ -232,11 +232,10 @@ instant-madori/
 │   └── solidcraft/          # upstreamのコード・資産・設定・資料・ライセンス一式
 ├── docs/
 │   ├── plan.md
-│   ├── status.md
 │   └── verification/       # 検証記録と画像・データ
 ├── scripts/
 ├── .github/
-│   └── workflows/
+│   └── dependabot.yml
 ├── Cargo.toml
 ├── Cargo.lock
 ├── package.json
@@ -247,18 +246,19 @@ instant-madori/
 └── AGENTS.md
 ```
 
-| 配置                                | 責務                                                                                                      |
-| ----------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| apps/web/                           | React画面、APIクライアント、Wasmの読み込み、会話・履歴・表示状態                                          |
-| apps/worker/                        | API、AI接続、Workflows、Durable Objects、D1・R2アクセス。マイグレーションとCloudflareの配備設定もまとめる |
-| apps/geometry/                      | Container内のHTTP受付、処理の実行・停止、スナップショットの読込・出力。ContainerのDockerfileも置く        |
-| crates/housing/                     | 住宅データ、共有境界、寸法・面積、住宅の関係の検査                                                        |
-| crates/modeling/                    | 住宅用コマンド、SolidCraftとの対応、変更の引き継ぎ、保存用スナップショット                                |
-| crates/viewer/                      | Web画面へ組み込むWasmライブラリ。選択補助、カメラ操作、素材・日差しの表示                                 |
-| packages/contracts/                 | 通信スキーマと共有型。Rust側の定義から生成した型・スキーマの受け渡し先                                    |
-| third_party/solidcraft/             | 固定した版のSolidCraft一式。SolidCraft自体に必要な修正もこの領域で行う                                    |
-| third_party/solidcraft.md           | 取り込み元、採用コミット、独自変更の理由、更新手順。subtreeの外に置く                                     |
-| docs/・scripts/・.github/workflows/ | サービスの計画・検証記録、開発・ビルド・upstream更新の補助、サービス用CI                                  |
+| 配置                      | 責務                                                                                                      |
+| ------------------------- | --------------------------------------------------------------------------------------------------------- |
+| apps/web/                 | React画面、APIクライアント、Wasmの読み込み、会話・履歴・表示状態                                          |
+| apps/worker/              | API、AI接続、Workflows、Durable Objects、D1・R2アクセス。マイグレーションとCloudflareの配備設定もまとめる |
+| apps/geometry/            | Container内のHTTP受付、処理の実行・停止、スナップショットの読込・出力。ContainerのDockerfileも置く        |
+| crates/housing/           | 住宅データ、共有境界、寸法・面積、住宅の関係の検査                                                        |
+| crates/modeling/          | 住宅用コマンド、SolidCraftとの対応、変更の引き継ぎ、保存用スナップショット                                |
+| crates/viewer/            | Web画面へ組み込むWasmライブラリ。選択補助、カメラ操作、素材・日差しの表示                                 |
+| packages/contracts/       | 通信スキーマと共有型。Rust側の定義から生成した型・スキーマの受け渡し先                                    |
+| third_party/solidcraft/   | 固定した版のSolidCraft一式。SolidCraft自体に必要な修正もこの領域で行う                                    |
+| third_party/solidcraft.md | 取り込み元、採用コミット、独自変更の理由、更新手順。subtreeの外に置く                                     |
+| docs/・scripts/           | サービスの計画・検証記録、開発・ビルド・upstream更新の補助                                                |
+| .github/dependabot.yml    | npm・Cargoの依存関係の更新提案                                                                            |
 
 `apps/` は起動・配備するもの、`crates/` はRustの機能をまとめたモジュール、`packages/` はJS/TS側から共有する定義を置く。`apps/geometry` は `crates/modeling` を呼ぶ入口とし、住宅の計算やCADとの対応をHTTP処理に散らさない。
 
@@ -266,7 +266,7 @@ instant-madori/
 
 住宅データはRust側で定義し、通信に必要な型とスキーマを生成してJS/TS側へ渡す。WebとWorkerの共通の通信定義も `packages/contracts` で管理し、同じ型を両側で独立に手書きしない。
 
-ルートのREADME、AGENTS、CI、開発設定は本サービス向けに整える。SolidCraft由来の資料と開発設定は取り込み領域に保持する。本計画書は `docs/plan.md`、検証記録と証拠は `docs/verification/` へ配置した。関連する参照リンクも移行先に合わせる。
+ルートのREADME、AGENTS、開発設定は本サービス向けに整える。SolidCraft由来の資料と開発設定は取り込み領域に保持する。本計画書は `docs/plan.md`、検証記録と証拠は `docs/verification/` へ配置した。関連する参照リンクも移行先に合わせる。
 
 SolidCraftには、形状操作、フィーチャー評価、編集可能な設計データ、ボディ・面の外観、表示メッシュ、基礎的な描画を担当させる。住宅の意味、案件、指示単位の履歴、WebサービスのAI実行は利用側で作る。
 
@@ -475,13 +475,13 @@ SolidCraftの初回取り込みは `https://github.com/tangency-labs/solidcraft`
 
 - 4.2の配置への移行。SolidCraft一式をsubtreeとして保持し、サービス側の文書・設定・ローカル検査をルートへ分ける。
 - 自作側のCargo・pnpm workspace、共有定義の入口、ビルド・静的解析・整形・依存監査・テスト・ローカル起動のコマンド、upstream更新手順。
-- Web・Worker・Rustサービス・Wasmの最小構成と、設定を読むためのREADME・AGENTS・現在地の記録。
+- Web・Worker・Rustサービス・Wasmの最小構成と、設定を読むためのREADME・AGENTS。
 
 **完了条件**
 
 SolidCraftの採用版と取り込み領域を比較でき、コード・資産・資料・ライセンスに意図しない欠落がない。独自変更を記録し、upstreamの更新手順を再現できる。サービスの計画・検証記録・証拠と参照リンクが移行先へ引き継がれている。
 
-ルートから自作コードのビルド・型確認・テストを実行できる。ネイティブRustとWasmのビルド、移行したengineの形状操作・保存・再読込、Web・Workerのローカル配信とWasm初期化を確認する。SolidCraftの未使用アプリを通常の実行対象に含めない。READMEから作業を開始し、現在地と次の段階を把握できる。
+ルートから自作コードのビルド・型確認・テストを実行できる。ネイティブRustとWasmのビルド、移行したengineの形状操作・保存・再読込、Web・Workerのローカル配信とWasm初期化を確認する。SolidCraftの未使用アプリを通常の実行対象に含めない。READMEから作業を開始できる。
 
 **この段階で確かめること**
 

@@ -2,7 +2,7 @@
 
 営業と施主が、会話を通じて間取り・3D・住まいのイメージを具体化するWebサービスを開発しています。
 
-開発環境の整備を完了し、次はサービス基盤を実装します。住宅の生成・表示、ログイン、保存、Cloudflareへの実配備は次の実装段階です。まず[現在地と次の作業](docs/status.md)、次に[実装計画](docs/plan.md)を読んでください。エージェント向けのルールは[AGENTS.md](AGENTS.md)にあります。
+仕様・設計・実装順は[実装計画](docs/plan.md)、エージェント向けのルールは[AGENTS.md](AGENTS.md)にあります。
 
 ## 開発を始める
 
@@ -53,7 +53,7 @@ mise exec -- pnpm dev
 
 TypeScriptのテストはNode.js標準のtest runnerを使います。`apps/*/{src,tests}/**/*.test.ts`、`packages/*/{src,tests}/**/*.test.ts`、`scripts/**/*.test.ts` が対象です。現在はWorkerのAPIと共有契約を確認するテストがあります。Node.jsの型だけを使うテストには専用のtsconfigを用意し、Worker本体の実行環境の型から分けています。DOM描画のテスト基盤はUI実装時に追加します。
 
-全体モードもローカル実行で、Cloudflareへの配備や本番リソースの作成はしません。Workerのビルドは `--dry-run` です。Dockerイメージのビルド・Linuxでの実行確認は含みません。
+全体モードもローカル実行で、Cloudflareへのデプロイや本番リソースの作成はしません。Workerのビルドは `--dry-run` です。Dockerイメージのビルド・Linuxでの実行確認は含みません。
 
 ## 検査の担当と範囲
 
@@ -99,7 +99,7 @@ Miniflareのsharp依存は、LGPLのlibvipsを含むため除外しています�
 | `crates/viewer`          | SolidCraftのgeom・render・gpuを使うWasm                                      |
 | `packages/contracts`     | WebとWorkerで共有するスキーマ。住宅の通信型はRust実装時に生成を追加          |
 | `third_party/solidcraft` | upstream一式。専用のCargo workspaceとして保持                                |
-| `docs`                   | サービスの計画、現在地、過去の検証記録                                       |
+| `docs`                   | 実装計画、過去の判断・検証記録                                               |
 | `scripts`                | ビルド・起動・検査・upstream更新のTypeScriptスクリプト。Node.js 24で直接実行 |
 
 ルートのCargo.lockとpnpm-lock.yamlがサービスの依存関係を固定します。SolidCraftの未使用アプリは通常のビルド対象に含めません。

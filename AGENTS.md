@@ -1,31 +1,31 @@
-# instant-madori: agent instructions
+# instant-madori：エージェント向けの指示
 
-This repository builds a browser-based housing consultation service using SolidCraft. Start with [README.md](README.md), [current status](docs/status.md), and the [implementation plan](docs/plan.md). Read the relevant plan section before changing behavior.
+このリポジトリでは、SolidCraftを使って、ブラウザで動く住宅相談サービスを開発する。最初に[README.md](README.md)と[実装計画](docs/plan.md)を読む。振る舞いを変える前に、計画の該当する節を読む。
 
-## Collaboration
+## 協働
 
-- Discussion, review, and design questions are not instructions to edit files. Carry out explicit implementation requests within their agreed scope.
-- Preserve the user's work. Check Git status and history before changing the repository; do not reset unrelated changes.
-- Distinguish agreed requirements, implementation choices, and observations. Do not describe a planned or compiled feature as tested behavior.
-- Keep documentation consistent with decisions. Product documentation and discussion may be Japanese; code identifiers and comments use English.
-- Keep explanations at the user's level of abstraction, and group only comparable items. Do not use the term 「正本」.
+- 相談、レビュー、設計についての質問は、ファイルを編集する指示ではない。明確な実装の依頼は、合意した範囲の中で実行する。
+- ユーザーの作業を失わない。リポジトリを変更する前にGitの作業状態と履歴を確認し、関係のない変更を巻き戻さない。
+- 合意済みの要件、実装上の選択、観察した事実を区別する。計画しただけの機能や、コンパイルが通っただけの機能を、テスト済みの振る舞いとして書かない。
+- 文書を、決まったことと食い違わない状態に保つ。プロダクトの文書と議論は日本語でよい。コードの識別子とコメントは英語で書く。
+- 説明はユーザーが話している抽象度に合わせ、対等な項目だけを並べる。「正本」という言葉を使わない。
 
-## Boundaries
+## 構成と境界
 
-- `apps/web` and `apps/worker`: TypeScript. `apps/geometry` and `crates/*`: Rust. `packages/contracts`: shared web/API schemas and generated Rust-facing contracts.
-- `crates/housing` has no HTTP, browser, Cloudflare, or CAD dependency. `crates/modeling` connects housing data to SolidCraft; `crates/viewer` uses only its rendering layers.
-- `third_party/solidcraft` retains upstream source, assets, licenses, and instructions. Honor its technical constraints when patching that code. Its Rust-only, product-name, English-docs, and UI rules do not govern the surrounding service. Upstream contribution procedures (claims, draft PRs, and the entire upstream CI suite) are for contributing upstream; local integration patches use relevant checks and the service checks described here.
-- Do not delete unused upstream components. Update through git subtree as described in [third_party/solidcraft.md](third_party/solidcraft.md), never by merging upstream into the repository root.
-- Incorporate upstream updates by default. Check compatibility with this service; adapt or document a specific deferral when an update conflicts with it. Keep upstream changes separate from service changes.
-- Preserve third-party notices and licenses. Do not introduce GPL/LGPL/AGPL dependencies or copy other products' code or assets.
-- Do not introduce production credentials or deploy infrastructure as part of local environment work.
+- `apps/web` と `apps/worker` はTypeScript、`apps/geometry` と `crates/*` はRustで書く。`packages/contracts` には、WebとAPIが共有するスキーマと、そこから生成するRust向けの型定義を置く。
+- `crates/housing` は、HTTP、ブラウザ、Cloudflare、CADのいずれにも依存しない。`crates/modeling` は住宅データをSolidCraftにつなぐ。`crates/viewer` はSolidCraftの描画の層だけを使う。
+- `third_party/solidcraft` には、upstreamのソース、資産、ライセンス、エージェント向けの指示をそのまま保持する。このコードを修正するときは、upstreamの技術上の制約に従う。一方、upstreamの「すべてRustで書く」「製品名の扱い」「文書は英語」「UI」に関するルールは、その外側にあるこのサービスには適用しない。upstreamへ貢献するための手順（着手の宣言、ドラフトPR、upstreamのCI一式）は、upstreamに貢献するときのものである。このリポジトリ内で組み込みのために行う修正では、その修正に関係する検査と、このファイルに書いたサービスの検査を使う。
+- 使っていないupstreamの構成要素を削除しない。更新は[third_party/solidcraft.md](third_party/solidcraft.md)の手順どおりgit subtreeで行い、upstreamをリポジトリのルートへマージしない。
+- upstreamの更新は原則として取り込む。このサービスと両立するかを確認し、両立しない場合は、サービス側を合わせるか、その更新を保留する理由を具体的に記録する。upstreamの変更とサービスの変更は分けておく。
+- 第三者の著作権表示とライセンスを保持する。GPL、LGPL、AGPLの依存を追加しない。他の製品のコードや資産を写さない。
+- ローカル環境の作業の中で、本番の認証情報を持ち込んだり、インフラをデプロイしたりしない。
 
-## Checks and handoff
+## 検査と引き継ぎ
 
-- Use the pinned tools through mise and the commands in README. `pnpm check --fast` autofixes and checks TypeScript and Rust; `pnpm check` also runs both test suites. Use `pnpm check --full` for builds, local integration and dependency audits, including after dependency, upstream or Wasm API changes. Checks run locally; do not depend on GitHub Actions. Run the checks relevant to a change before committing; never claim checks that were not run.
-- Keep TypeScript apps and scripts under type-aware ESLint and strict type checking. Parse untrusted JSON at its boundary. Keep dependency catalogs and tool pins consistent; review lockfile changes.
-- All `pnpm check` modes format service files and apply automatic ESLint/Clippy fixes; review the resulting diff before staging. Do not bulk-format upstream source, historical verification records, or generated files. Pre-commit hooks check staged files without rewriting them; they do not replace whole-project checks.
-- New non-test Rust must avoid `unsafe`, `unwrap`, `expect`, and panic-based error handling. Validate external input at its boundary.
-- Test behavior and meaningful integration boundaries, not mechanical wrappers. Leave generated Wasm output and build caches untracked.
-- Update `docs/status.md` when a stage finishes: what works, what was actually checked, remaining limitations, and the next step. Update `docs/plan.md` when requirements or architecture change.
-- Commit and deployment are separate actions. Do not push or deploy without authorization.
+- miseで固定したツールと、READMEに書いたコマンドを使う。`pnpm check --fast` は、TypeScriptとRustを自動修正したうえで検査する。`pnpm check` は、それに加えて両方のテストを実行する。`pnpm check --full` は、ビルド、ローカルでの統合検査、依存関係の監査まで行う。依存関係、upstream、WasmのAPIを変更した後にも `--full` を使う。検査はローカルで実行し、GitHub Actionsに頼らない。コミットの前に、変更に関係する検査を実行する。実行していない検査を、実行したと書かない。
+- TypeScriptのアプリとスクリプトには、型情報を使うESLintと厳格な型検査を適用し続ける。信頼できないJSONは、外から受け取る箇所でパースして検証する。依存関係のカタログとツールのバージョン固定を、互いに食い違わない状態に保つ。ロックファイルの変更は内容を確認する。
+- `pnpm check` は、どのモードでもサービスのファイルを整形し、ESLintとClippyの自動修正を適用する。ステージする前に、その結果の差分を確認する。upstreamのソース、過去の検証記録、生成されたファイルを一括で整形しない。コミット前のフックは、ステージされたファイルを書き換えずに検査するだけで、プロジェクト全体の検査の代わりにはならない。
+- テスト以外の新しいRustコードでは、`unsafe`、`unwrap`、`expect`、およびパニックに頼るエラー処理を使わない。外部からの入力は、受け取る箇所で検証する。
+- 振る舞いと、意味のある連携部分をテストする。処理を呼び出すだけのラッパーはテストしない。生成したWasmとビルドのキャッシュは、Gitの追跡対象にしない。
+- 要件または構成が変わったときは、`docs/plan.md` を更新する。
+- コミット、push、マージ、デプロイは、それぞれ別に許可が要る。ユーザーが明示した操作だけを行う。
