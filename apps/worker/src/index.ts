@@ -1,16 +1,12 @@
-import type { WorkerHealth } from "@madori/contracts";
+import { handleApi } from "./api/app.ts";
+import { systemRuntime } from "./services/deps.ts";
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
-    const { pathname } = new URL(request.url);
-    if (pathname === "/api/health") {
-      if (request.method !== "GET") {
-        return new Response(null, { status: 405, headers: { Allow: "GET" } });
-      }
-      return Response.json({ status: "ok", service: "worker" } satisfies WorkerHealth);
-    }
-    if (pathname.startsWith("/api/")) {
-      return Response.json({ error: "not_found" }, { status: 404 });
+  fetch(request: Request, env: Env): Promise<Response> {
+    const url = new URL(request.url);
+    // Matches `run_worker_first: ["/api/*"]` in wrangler.jsonc; other paths are static assets.
+    if (url.pathname.startsWith("/api/")) {
+      return handleApi(request, url, env, systemRuntime);
     }
     return env.ASSETS.fetch(request);
   },

@@ -23,7 +23,7 @@ mise exec -- pnpm dev
 
 初回はRust・Wasmと依存ライブラリをビルドします。`pnpm setup`はツールの準備、Wasmバインディング・Worker型の生成、コミット時の検査フックの登録を行います。wasm-bindgen CLIはライブラリと同じ版を、このリポジトリの`.tools/`へインストールします。依存のインストールだけではGitフックを変更しません。
 
-`pnpm dev`は次のプロセスを起動し、Ctrl-Cでまとめて終了します。
+`pnpm dev`は、ローカルのD1へマイグレーションを適用してから次のプロセスを起動し、Ctrl-Cでまとめて終了します。
 
 | URL                           | 内容                                                            |
 | ----------------------------- | --------------------------------------------------------------- |
@@ -31,7 +31,13 @@ mise exec -- pnpm dev
 | http://127.0.0.1:8787         | ローカルWorkerとビルド済み静的ファイル。`/api/health`で応答確認 |
 | http://127.0.0.1:3001/healthz | ネイティブRustサービス。SolidCraftのSession初期化後に応答       |
 
-現在の画面は開発用の接続確認です。3D描画やWorkerからRustへの形状処理依頼は、まだ実装していません。TypeScriptは開発中に更新されますが、Rust・Wasmを変更したときは再ビルド・再起動してください。
+現在の画面は開発用の接続確認です。案件・パターンのAPIは実装済みですが、画面、3D描画、WorkerからRustへの形状処理依頼は、まだ実装していません。
+
+### ローカルでのログイン
+
+ローカルではCloudflare Accessの代わりに、生成した開発用の鍵を使います。`pnpm dev`は初回に鍵を `.local/access-key.json` に作り、Workerの設定 `apps/worker/.dev.vars` をそこから生成します。どちらもGitの追跡対象外です。`.dev.vars` は毎回生成し直すので、手で編集しないでください。この仕組み以外で作った `.dev.vars` があると、上書きせずに停止します。
+
+Viteのプロキシ（5173番）経由のAPI要求には、開発者として署名したトークンが付きます。別の利用者として試すときは、`MADORI_DEV_EMAIL=other@example.com pnpm dev` のように起動します。8787番のWorkerへ直接送った要求には認証ヘッダーが付かないため、認証が必要なAPIは401になります。`/api/health` は認証なしで応答し、未知のパスは404、許可していないメソッドは405になります。TypeScriptは開発中に更新されますが、Rust・Wasmを変更したときは再ビルド・再起動してください。
 
 ## 日常のコマンド
 
@@ -51,7 +57,7 @@ mise exec -- pnpm dev
 
 `pnpm setup` で生成したWasmの型定義を通常・軽いモードで使います。初期生成がなければ準備手順を示して停止します。Wasmの公開API・依存・ビルド設定・upstreamを変更した場合は `--full` を実行してください。全体モードではWasmを再生成してからTypeScriptを検査し、実際に生成したWasmも接続テストで確認します。
 
-TypeScriptのテストはNode.js標準のtest runnerを使います。`apps/*/{src,tests}/**/*.test.ts`、`packages/*/{src,tests}/**/*.test.ts`、`scripts/**/*.test.ts` が対象です。現在はWorkerのAPIと共有契約を確認するテストがあります。Node.jsの型だけを使うテストには専用のtsconfigを用意し、Worker本体の実行環境の型から分けています。DOM描画のテスト基盤はUI実装時に追加します。
+TypeScriptのテストはNode.js標準のtest runnerを使います。WorkerのAPIのテストは、テストファイルごとに一時的なD1へ実際のマイグレーションを適用し、`wrangler dev` でworkerd上のWorkerを起動して、HTTPで検査します。署名にはテスト用の鍵を使い、Cloudflareのアカウントは不要です。`apps/*/{src,tests}/**/*.test.ts`、`packages/*/{src,tests}/**/*.test.ts`、`scripts/**/*.test.ts` が対象です。現在は、WorkerのAPI（認証、所有権、冪等性、版の競合、ページング）、スキーマの制約、共有契約を確認するテストがあります。Node.jsの型だけを使うテストには専用のtsconfigを用意し、Worker本体の実行環境の型から分けています。DOM描画のテスト基盤はUI実装時に追加します。
 
 全体モードもローカル実行で、Cloudflareへのデプロイや本番リソースの作成はしません。Workerのビルドは `--dry-run` です。Dockerイメージのビルド・Linuxでの実行確認は含みません。
 
