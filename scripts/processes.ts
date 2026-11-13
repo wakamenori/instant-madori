@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
+import { createServer } from "node:net";
 import { setTimeout } from "node:timers/promises";
 
 export type ProcessOutcome =
@@ -36,4 +37,45 @@ export async function stop(processes: ReturnType<typeof start>[]) {
   await Promise.race([done, setTimeout(5000, undefined, { ref: false })]);
   for (const { child } of processes) signal(child, "SIGKILL");
   await done;
+}
+
+/** Throws unless a finished child exited with status 0; `output` is appended if given. */
+export function assertSucceeded(label: string, outcome: ProcessOutcome, output?: string) {
+  if (outcome.kind === "error") throw outcome.error;
+  if (outcome.code !== 0) {
+    const status = outcome.signal ?? outcome.code ?? "unknown exit";
+    throw new Error(`${label} failed (${status})${output === undefined ? "" : `:\n${output}`}`);
+  }
+}
+
+/** Asks the OS for a free loopback port. */
+export async function freePort(): Promise<number> {
+  const server = createServer();
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("No TCP address");
+  await new Promise<void>((resolve, reject) =>
+    server.close((error) => (error ? reject(error) : resolve())),
+  );
+  return address.port;
+}
+
+/** Polls `url` until it answers 2xx, failing early if `child` exits. */
+export async function ready(url: string, child: ChildProcess, timeoutMs = 60_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!child.pid || child.exitCode !== null || child.signalCode !== null)
+      throw new Error(`Server exited before ${url} was ready`);
+    try {
+      const response = await fetch(url, { signal: AbortSignal.timeout(1000) });
+      if (response.ok) return response;
+    } catch {
+      /* The server may still be binding its port. */
+    }
+    await setTimeout(200);
+  }
+  throw new Error(`Server startup timed out: ${url}`);
 }

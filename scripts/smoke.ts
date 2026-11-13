@@ -1,39 +1,6 @@
 import assert from "node:assert/strict";
-import type { ChildProcess } from "node:child_process";
 import { readFile } from "node:fs/promises";
-import { createServer } from "node:net";
-import { setTimeout } from "node:timers/promises";
-import { start, stop } from "./processes.ts";
-
-async function freePort() {
-  const server = createServer();
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", resolve);
-  });
-  const address = server.address();
-  assert(address && typeof address !== "string");
-  await new Promise<void>((resolve, reject) =>
-    server.close((error) => (error ? reject(error) : resolve())),
-  );
-  return address.port;
-}
-
-async function ready(url: string, child: ChildProcess) {
-  const deadline = Date.now() + 60_000;
-  while (Date.now() < deadline) {
-    if (!child.pid || child.exitCode !== null || child.signalCode !== null)
-      throw new Error(`Server exited before ${url} was ready`);
-    try {
-      const response = await fetch(url, { signal: AbortSignal.timeout(1000) });
-      if (response.ok) return response;
-    } catch {
-      /* The server may still be binding its port. */
-    }
-    await setTimeout(200);
-  }
-  throw new Error(`Server startup timed out: ${url}`);
-}
+import { freePort, ready, start, stop } from "./processes.ts";
 
 const workerPort = await freePort();
 const geometryPort = await freePort();

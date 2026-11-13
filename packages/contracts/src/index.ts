@@ -6,3 +6,141 @@ export const workerHealthSchema = z.object({
 });
 
 export type WorkerHealth = z.infer<typeof workerHealthSchema>;
+
+/** The header through which Cloudflare Access (or the local dev proxy) passes its JWT. */
+export const accessAssertionHeader = "cf-access-jwt-assertion";
+
+// API conventions (plan 4.7):
+// - JSON bodies with camelCase fields; IDs are UUIDs; timestamps are ISO 8601 UTC.
+// - Every mutating request carries a client-generated `requestId`. Resending the same
+//   ID with the same body returns the first successful result; failures are not fixed.
+// - Updates to management fields send the `version` the client last saw.
+// - Failures are `{ error }` with a code from `apiErrorCodeSchema`; clients branch on it.
+
+export const apiErrorCodeSchema = z.enum([
+  "unauthenticated",
+  "forbidden",
+  "not_found",
+  "method_not_allowed",
+  "invalid_request",
+  "payload_too_large",
+  "version_conflict",
+  "request_id_reused",
+  "internal_error",
+]);
+
+export type ApiErrorCode = z.infer<typeof apiErrorCodeSchema>;
+
+export const apiErrorSchema = z.object({ error: apiErrorCodeSchema });
+
+export type ApiError = z.infer<typeof apiErrorSchema>;
+
+const idSchema = z.uuid();
+const timestampSchema = z.iso.datetime();
+const versionSchema = z.int().positive();
+// Lowercased so the same UUID in another case is the same request (IDs are stored as text).
+const requestIdSchema = z.uuid().transform((id) => id.toLowerCase());
+// Control characters are rejected: they never belong in a name, and SQLite's length()
+// stops at NUL, which would make the database's own length check fail.
+// Lengths count characters (code points), as the database's length() does, not UTF-16 units.
+// A name must show something: control characters are rejected, and a name made only of
+// invisible format characters (e.g. U+200B) counts as empty. Lone surrogates are rejected
+// because storage would silently replace them.
+const nameSchema = z
+  .string()
+  .trim()
+  // With the `u` flag, \p{Cs} matches only unpaired surrogates (pairs form one code point).
+  .refine((name) => !/\p{Cs}/u.test(name), "must be well-formed Unicode")
+  .refine((name) => {
+    const characters = [...name].length;
+    return characters <= 100 && name.replace(/\p{Cf}/gu, "").trim() !== "";
+  }, "must be 1 to 100 characters, not only invisible ones")
+  .regex(/^[^\p{Cc}]*$/u, "must not contain control characters");
+
+// Access verifies the address; a stricter syntax check here would reject valid ones.
+export const userSchema = z.object({ id: idSchema, email: z.string().min(1) });
+
+export type User = z.infer<typeof userSchema>;
+
+export const meResponseSchema = z.object({ user: userSchema });
+
+export type MeResponse = z.infer<typeof meResponseSchema>;
+
+export const projectSchema = z.object({
+  id: idSchema,
+  name: nameSchema,
+  version: versionSchema,
+  createdAt: timestampSchema,
+  updatedAt: timestampSchema,
+});
+
+export type Project = z.infer<typeof projectSchema>;
+
+export const patternSchema = z.object({
+  id: idSchema,
+  projectId: idSchema,
+  name: nameSchema,
+  version: versionSchema,
+  createdAt: timestampSchema,
+  updatedAt: timestampSchema,
+});
+
+export type Pattern = z.infer<typeof patternSchema>;
+
+/** Query of `GET /api/projects`; `cursor` is the opaque `nextCursor` of the previous page. */
+export const projectListQuerySchema = z.strictObject({
+  cursor: z.string().min(1).max(200).optional(),
+});
+
+export type ProjectListQuery = z.infer<typeof projectListQuerySchema>;
+
+/** Newest projects first. `nextCursor` is null on the last page. */
+export const projectListResponseSchema = z.object({
+  projects: z.array(projectSchema),
+  nextCursor: z.string().nullable(),
+});
+
+export type ProjectListResponse = z.infer<typeof projectListResponseSchema>;
+
+export const createProjectRequestSchema = z.strictObject({
+  requestId: requestIdSchema,
+  name: nameSchema.optional(),
+});
+
+export type CreateProjectRequest = z.infer<typeof createProjectRequestSchema>;
+
+/** Creating a project also starts its first pattern. */
+export const createProjectResponseSchema = z.object({
+  project: projectSchema,
+  pattern: patternSchema,
+});
+
+export type CreateProjectResponse = z.infer<typeof createProjectResponseSchema>;
+
+export const renameRequestSchema = z.strictObject({
+  requestId: requestIdSchema,
+  version: versionSchema,
+  name: nameSchema,
+});
+
+export type RenameRequest = z.infer<typeof renameRequestSchema>;
+
+export const projectResponseSchema = z.object({ project: projectSchema });
+
+export type ProjectResponse = z.infer<typeof projectResponseSchema>;
+
+/** A project has few patterns, so the list is returned whole, in creation (number) order. */
+export const patternListResponseSchema = z.object({ patterns: z.array(patternSchema) });
+
+export type PatternListResponse = z.infer<typeof patternListResponseSchema>;
+
+export const createPatternRequestSchema = z.strictObject({
+  requestId: requestIdSchema,
+  name: nameSchema.optional(),
+});
+
+export type CreatePatternRequest = z.infer<typeof createPatternRequestSchema>;
+
+export const patternResponseSchema = z.object({ pattern: patternSchema });
+
+export type PatternResponse = z.infer<typeof patternResponseSchema>;

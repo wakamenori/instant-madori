@@ -16,3 +16,6 @@ dist/
 *~
 __pycache__/
 /.claude/worktrees/
+
+# Local development keys (scripts/local-access.ts)
+/.local/
