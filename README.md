@@ -110,6 +110,16 @@ runnerを入れ直すときは、[actions/runner](https://github.com/actions/run
 
 VS Code向けの推奨拡張・保存時整形・ESLint自動修正・Rust Analyzer設定を `.vscode/` に用意しています。他のエディタやエージェントによる直接編集でも、同じ `pnpm check` を使えます。
 
+## 作業の管理
+
+作業の単位と状態はGitHubのmilestoneとIssueで管理し、[plan.md](docs/plan.md)には仕様と設計を書きます。milestoneは計画6章の段階に対応し、名前には節の番号を付けません（例：サービス基盤）。Issueは一つのPRで終わる作業で、[テンプレート](.github/ISSUE_TEMPLATE/unit.md)の欄（目的、計画の該当節、範囲、終わった証拠、依存、人の判断）をすべて埋めます。PRは、対応するIssueを本文の `Closes #<番号>` で閉じます。
+
+段階を新しくIssueに分けるときは、次の順に進めます。
+
+1. 下書きを `.issues/<id>.md` に書きます。このフォルダーはGitで追跡しません。本文はテンプレートと同じ見出しにし、先頭のfrontmatterに `id`、`title`、`milestone`、`blockedBy`（先に閉じる必要がある下書きの `id`、カンマ区切り）を書きます。依存の欄では、まだ番号のない下書きを `#<id>` で指します。
+2. 下書きを書いたエージェントとは別のエージェントが、下書きをplan.mdとコードに照らして確かめます。確かめるのは、計画の抜けと重複、下書き同士の食い違い、終わった証拠が実行できる形で書いてあるか、依存の向き、人の判断が要る項目です。plan.mdがコードや決めたことと食い違っていれば、下書きに合わせず、正しい内容を決めてplan.mdを直します。指摘を直してから次へ進みます。
+3. 依存の先から順にIssueを作り、依存の欄の `#<id>` を実際の番号に置き換えます。Issueを作った後は、Issueを正とし、下書きは消します。
+
 ## 依存とツールを更新する
 
 Node.js・pnpm・CLI検査ツールの版は`mise.toml`、共有するTypeScript・Node型・Zodの版は`pnpm-workspace.yaml`のcatalogで変更します。Node.jsは`.node-version`とも揃えます。TypeScriptは型付きlintの対応範囲に合わせて6.0系を採用しています。
