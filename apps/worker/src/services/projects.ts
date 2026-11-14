@@ -1,26 +1,21 @@
+import type { OwnerId } from "../owner.ts";
 import type { Pattern, Project } from "@madori/contracts";
-import {
-  createProjectOnce,
-  getProject,
-  listProjects as listProjectRows,
-  renameProjectOnce,
-} from "../storage/projects.ts";
 import type { ProjectPage, ProjectPosition } from "../storage/projects.ts";
 
 // The api layer depends on services only; the page types are part of this service's surface.
 export type { ProjectPage, ProjectPosition };
 import { requestKey } from "./requests.ts";
-import type { ServiceDeps } from "./deps.ts";
+import type { ServiceDeps, StoreDeps } from "./deps.ts";
 import { defaultPatternNamePrefix } from "./patterns.ts";
 
 const defaultProjectName = "新しい案件";
 const projectPageSize = 50;
 
 export function listProjects(
-  { db }: ServiceDeps,
-  query: { ownerId: string; after: ProjectPosition | null },
+  { store }: StoreDeps<"projects", "list">,
+  query: { ownerId: OwnerId; after: ProjectPosition | null },
 ): Promise<ProjectPage> {
-  return listProjectRows(db, { ...query, limit: projectPageSize });
+  return store.projects.list({ ...query, limit: projectPageSize });
 }
 
 export type CreateProjectOutcome =
@@ -28,15 +23,14 @@ export type CreateProjectOutcome =
 
 /** Creates a project with its first pattern, so a new consultation can start at once. */
 export async function createProject(
-  { db, runtime }: ServiceDeps,
-  input: { ownerId: string; requestId: string; name: string | undefined },
+  { store, runtime }: StoreDeps<"projects", "createOnce"> & Pick<ServiceDeps, "runtime">,
+  input: { ownerId: OwnerId; requestId: string; name: string | undefined },
 ): Promise<CreateProjectOutcome> {
   const key = await requestKey(input.ownerId, input.requestId, "project.create", {
     name: input.name,
   });
-  const once = await createProjectOnce(db, key, {
+  const once = await store.projects.createOnce(key, {
     id: runtime.newId(),
-    ownerId: input.ownerId,
     name: input.name ?? defaultProjectName,
     now: runtime.now(),
     firstPattern: { id: runtime.newId(), name: null, defaultNamePrefix: defaultPatternNamePrefix },
@@ -60,16 +54,15 @@ export type RenameProjectOutcome =
   | { kind: "request_id_reused" };
 
 export async function renameProject(
-  { db, runtime }: ServiceDeps,
-  input: { ownerId: string; requestId: string; projectId: string; version: number; name: string },
+  { store, runtime }: StoreDeps<"projects", "renameOnce" | "get"> & Pick<ServiceDeps, "runtime">,
+  input: { ownerId: OwnerId; requestId: string; projectId: string; version: number; name: string },
 ): Promise<RenameProjectOutcome> {
   const key = await requestKey(input.ownerId, input.requestId, "project.rename", {
     projectId: input.projectId,
     version: input.version,
     name: input.name,
   });
-  const once = await renameProjectOnce(db, key, {
-    ownerId: input.ownerId,
+  const once = await store.projects.renameOnce(key, {
     projectId: input.projectId,
     expectedVersion: input.version,
     name: input.name,
@@ -83,7 +76,10 @@ export async function renameProject(
       return once;
     case "not_applied": {
       // The condition is decided in SQL; this read only explains why it did not hold.
-      const current = await getProject(db, { ownerId: input.ownerId, projectId: input.projectId });
+      const current = await store.projects.get({
+        ownerId: input.ownerId,
+        projectId: input.projectId,
+      });
       return { kind: current ? "version_conflict" : "not_found" };
     }
   }

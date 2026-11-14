@@ -1,4 +1,4 @@
-import type { User } from "@madori/contracts";
+import type { AuthenticatedUser } from "../owner.ts";
 import { z } from "zod";
 import type { LogFields } from "../log.ts";
 import type { ServiceDeps } from "../services/deps.ts";
@@ -9,7 +9,7 @@ export interface RouteContext {
   request: Request;
   url: URL;
   deps: ServiceDeps;
-  user: User;
+  user: AuthenticatedUser;
   /** Path parameters, already validated as UUIDs. */
   params: Record<string, string>;
   /** Adds fields to this request's log line (IDs only, never content). */

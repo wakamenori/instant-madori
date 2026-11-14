@@ -54,6 +54,11 @@ function boundaryConfig(name, files, ignores, rows, allowImportMetaUrl = false) 
           : []),
       ].map((selector) => ({ selector, message: row.message }));
     });
+  syntax.push(
+    ...rows
+      .filter((row) => row.kind === "syntax")
+      .flatMap((row) => row.selectors.map((selector) => ({ selector, message: row.message }))),
+  );
   if (rows.some((row) => row.kind === "imports")) {
     syntax.push(
       {

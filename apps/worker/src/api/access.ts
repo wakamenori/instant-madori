@@ -90,5 +90,9 @@ export async function verifyAccessToken(
   // Service tokens have no email; the app is for invited people only.
   const claims = claimsSchema.safeParse(payload);
   if (!claims.success) throw new ApiFailure("forbidden");
-  return { issuer: access.issuer, subject: claims.data.sub, email: claims.data.email };
+  return {
+    issuer: access.issuer,
+    subject: claims.data.sub,
+    email: claims.data.email,
+  } as VerifiedIdentity;
 }

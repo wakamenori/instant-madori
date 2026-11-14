@@ -1,4 +1,4 @@
-import { geometryClient } from "../geometry/geometry-client.ts";
+import type { Store } from "../storage/store.ts";
 import type { GeometryApi, GeometryInstance } from "../geometry/geometry-client.ts";
 /**
  * What services need from the outside world. Services never read the clock or generate IDs
@@ -17,26 +17,11 @@ export interface Runtime {
 }
 
 export interface ServiceDeps {
-  db: D1Database;
-  bucket: R2Bucket;
+  store: Store;
   geometry: (key: GeometryInstance) => GeometryApi;
   runtime: Runtime;
 }
 
-export const systemRuntime: Runtime = {
-  now: () => new Date().toISOString(),
-  newId: () => crypto.randomUUID(),
-  newTraceId: () => crypto.randomUUID(),
+export type StoreDeps<K extends keyof Store, O extends keyof Store[K]> = {
+  store: { [P in K]: Pick<Store[P], O> };
 };
-
-export function serviceDeps(
-  env: Pick<Env, "DB" | "BLOBS" | "GEOMETRY">,
-  runtime: Runtime,
-): ServiceDeps {
-  return {
-    db: env.DB,
-    bucket: env.BLOBS,
-    runtime,
-    geometry: geometryClient((name) => env.GEOMETRY.getByName(name)),
-  };
-}

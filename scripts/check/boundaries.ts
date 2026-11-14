@@ -1,14 +1,17 @@
 export const typescriptExtensions = "{ts,tsx,mts,cts}";
 
 const workerLayerScopes = {
-  "worker-api": { files: [`apps/worker/src/api/**/*.${typescriptExtensions}`], ignores: [] },
+  "worker-api": {
+    files: [`apps/worker/src/api/**/*.${typescriptExtensions}`],
+    ignores: ["apps/worker/src/api/app.ts", "apps/worker/src/api/access.ts"],
+  },
   "worker-services": {
     files: [`apps/worker/src/services/**/*.${typescriptExtensions}`],
-    ignores: [],
+    ignores: ["apps/worker/src/services/users.ts"],
   },
   "worker-storage": {
     files: [`apps/worker/src/storage/**/*.${typescriptExtensions}`],
-    ignores: [],
+    ignores: ["apps/worker/src/storage/d1.ts", "apps/worker/src/storage/r2.ts"],
   },
   "worker-geometry": {
     files: [`apps/worker/src/geometry/**/*.${typescriptExtensions}`],
@@ -33,9 +36,20 @@ export const typescriptScopes = {
   "web-wasm": { files: ["apps/web/src/viewer/wasm.ts"], ignores: [] },
   "web-config": { files: [`apps/web/vite.config.${typescriptExtensions}`], ignores: [] },
   ...workerLayerScopes,
+  "worker-api-entry": { files: ["apps/worker/src/api/app.ts"], ignores: [] },
+  "worker-access": { files: ["apps/worker/src/api/access.ts"], ignores: [] },
+  "worker-d1": { files: ["apps/worker/src/storage/d1.ts"], ignores: [] },
+  "worker-r2": { files: ["apps/worker/src/storage/r2.ts"], ignores: [] },
+  "worker-composition": { files: ["apps/worker/src/compose.ts"], ignores: [] },
+  "worker-owner": { files: ["apps/worker/src/owner.ts"], ignores: [] },
+  "worker-user-service": { files: ["apps/worker/src/services/users.ts"], ignores: [] },
   "worker-other": {
     files: [`apps/worker/**/*.${typescriptExtensions}`],
-    ignores: Object.values(workerLayerScopes).flatMap((scope) => scope.files),
+    ignores: [
+      ...Object.values(workerLayerScopes).flatMap((scope) => scope.files),
+      "apps/worker/src/compose.ts",
+      "apps/worker/src/owner.ts",
+    ],
   },
   contracts: { files: [`packages/contracts/**/*.${typescriptExtensions}`], ignores: [] },
 } satisfies Record<string, { files: string[]; ignores: string[] }>;
@@ -59,9 +73,10 @@ export const workerLayers: Record<
     reason: "docs/plan.md §4.2 API calls services and maps geometry result types to HTTP",
   },
   services: {
-    allowed: ["storage", "geometry"],
-    typeOnly: [],
-    reason: "docs/plan.md §4.2 services call storage and geometry without HTTP handlers",
+    allowed: ["geometry"],
+    typeOnly: ["storage"],
+    reason:
+      "docs/plan.md §4.2 services receive Store operations and call geometry without HTTP handlers",
   },
   storage: {
     allowed: [],
@@ -99,6 +114,7 @@ type TypeScriptBoundary = {
 } & (
   | { kind: "imports"; regex: string; importNamePattern?: string; allowTypeImports?: boolean }
   | { kind: "globals"; names: string[] }
+  | { kind: "syntax"; selectors: string[] }
 );
 
 const workerLayerNames = Object.keys(workerLayers).filter((layer): layer is WorkerLayer =>
@@ -109,7 +125,14 @@ const workerLayerBoundaries: TypeScriptBoundary[] = workerLayerNames.flatMap((la
   const forbidden = workerLayerNames.filter(
     (target) => target !== layer && !allowed.includes(target) && !typeOnly.includes(target),
   );
-  const from: TypeScriptScope[] = [`worker-${layer}`];
+  const from: TypeScriptScope[] =
+    layer === "storage"
+      ? ["worker-storage", "worker-d1", "worker-r2"]
+      : layer === "api"
+        ? ["worker-api", "worker-api-entry", "worker-access"]
+        : layer === "services"
+          ? ["worker-services", "worker-user-service"]
+          : [`worker-${layer}`];
   const rows: TypeScriptBoundary[] = [];
   if (forbidden.length) {
     rows.push({
@@ -156,8 +179,112 @@ export const typescriptBoundaries: TypeScriptBoundary[] = [
   },
   ...workerLayerBoundaries,
   {
+    id: "storage-binding-types",
+    from: allScopes.filter(
+      (scope) =>
+        scope.startsWith("worker-") &&
+        !["worker-d1", "worker-r2", "worker-composition"].includes(scope),
+    ),
+    kind: "globals",
+    names: ["D1Database", "R2Bucket", "D1PreparedStatement", "R2ObjectBody"],
+    reason: "docs/plan.md §6.1b binding types belong to adapters and composition",
+    message: "Use Store operations instead of raw storage binding types.",
+  },
+  {
+    id: "storage-binding-access",
+    from: allScopes.filter(
+      (scope) => scope.startsWith("worker-") && scope !== "worker-composition",
+    ),
+    kind: "syntax",
+    selectors: [
+      "MemberExpression:matches([property.name=/^(DB|BLOBS)$/u][computed=false], [property.value=/^(DB|BLOBS)$/u])",
+      "Property[parent.type='ObjectPattern']:matches([key.name=/^(DB|BLOBS)$/u][computed=false], [key.value=/^(DB|BLOBS)$/u])",
+      "TSLiteralType > Literal[value=/^(DB|BLOBS)$/u]",
+      "ImportDeclaration[source.value='cloudflare:workers'] ImportSpecifier[imported.name='env']",
+      "ImportDeclaration[source.value='cloudflare:workers'] ImportNamespaceSpecifier",
+      "ImportExpression > Literal.source[value='cloudflare:workers']",
+      "ExportNamedDeclaration[source.value='cloudflare:workers'] ExportSpecifier[local.name='env']",
+      "ExportAllDeclaration[source.value='cloudflare:workers']",
+    ],
+    reason: "docs/plan.md §6.1b only composition extracts DB and BLOBS",
+    message: "Read DB and BLOBS only in apps/worker/src/compose.ts.",
+  },
+  {
+    id: "worker-composition-entry",
+    from: allScopes.filter(
+      (scope) =>
+        scope.startsWith("worker-") && !["worker-api-entry", "worker-composition"].includes(scope),
+    ),
+    kind: "imports",
+    regex: "^\\.\\.?/(?:[^/]+/)*compose(?:\\.[^/]*)?$",
+    allowTypeImports: true,
+    reason: "docs/plan.md §4.2 only api/app.ts constructs service dependencies",
+    message: "Only api/app.ts may import the composition function.",
+  },
+  {
+    id: "worker-store-construction",
+    from: allScopes.filter(
+      (scope) =>
+        scope.startsWith("worker-") &&
+        !["worker-storage", "worker-d1", "worker-r2", "worker-composition"].includes(scope),
+    ),
+    kind: "imports",
+    regex: "^\\.\\.?/(?:[^/]+/)*storage/(?:store|d1|r2)(?:\\.[^/]*)?$",
+    allowTypeImports: true,
+    reason: "docs/plan.md §6.1b only composition builds Store and adapters",
+    message: "Only composition may construct Store and storage adapters.",
+  },
+  {
+    id: "owner-construction",
+    from: allScopes.filter(
+      (scope) =>
+        scope.startsWith("worker-") && !["worker-owner", "worker-user-service"].includes(scope),
+    ),
+    kind: "imports",
+    regex: "^\\.\\.?/(?:[^/]+/)*owner(?:\\.[^/]*)?$",
+    allowTypeImports: true,
+    reason: "docs/plan.md §6.1b only resolveUser constructs OwnerId",
+    message: "Only resolveUser may construct an authenticated owner.",
+  },
+  {
+    id: "owner-assertions",
+    from: allScopes.filter((scope) => scope.startsWith("worker-") && scope !== "worker-owner"),
+    kind: "syntax",
+    selectors: [
+      "TSAsExpression > TSTypeReference.typeAnnotation:matches([typeName.name='OwnerId'], [typeName.right.name='OwnerId'])",
+      "TSTypeAssertion > TSTypeReference.typeAnnotation:matches([typeName.name='OwnerId'], [typeName.right.name='OwnerId'])",
+    ],
+    reason: "docs/plan.md §6.1b direct OwnerId assertions are forbidden",
+    message: "Obtain OwnerId through authentication instead of a direct assertion.",
+    appliesToTests: true,
+  },
+  {
+    id: "identity-assertions",
+    from: allScopes.filter((scope) => scope.startsWith("worker-") && scope !== "worker-access"),
+    kind: "syntax",
+    selectors: [
+      "TSAsExpression > TSTypeReference.typeAnnotation:matches([typeName.name='VerifiedIdentity'], [typeName.right.name='VerifiedIdentity'])",
+      "TSTypeAssertion > TSTypeReference.typeAnnotation:matches([typeName.name='VerifiedIdentity'], [typeName.right.name='VerifiedIdentity'])",
+    ],
+    reason: "docs/plan.md §6.1b only Access verification constructs VerifiedIdentity",
+    message: "Obtain VerifiedIdentity by verifying an Access JWT.",
+    appliesToTests: true,
+  },
+  {
+    id: "never-assertions",
+    from: allScopes.filter((scope) => scope.startsWith("worker-")),
+    kind: "syntax",
+    selectors: [
+      "TSAsExpression > TSNeverKeyword.typeAnnotation",
+      "TSTypeAssertion > TSNeverKeyword.typeAnnotation",
+    ],
+    reason: "docs/plan.md §6.1b casts to never would create OwnerId and VerifiedIdentity",
+    message: "Do not cast to never; it bypasses branded types such as OwnerId.",
+    appliesToTests: true,
+  },
+  {
     id: "storage-response",
-    from: ["worker-storage"],
+    from: ["worker-storage", "worker-d1", "worker-r2"],
     kind: "imports",
     regex: "^(?:@madori/contracts(?:/.*)?|\\.\\.?/(?:[^/]+/)*packages/contracts(?:/.*)?)$",
     importNamePattern: "(?:Response(?:Schema)?|^ApiError(?:Code)?|^apiError(?:Code)?Schema)$",
@@ -165,8 +292,19 @@ export const typescriptBoundaries: TypeScriptBoundary[] = [
     message: "Storage returns domain data, not API response or error types.",
   },
   {
+    id: "storage-unchecked-schemas",
+    from: ["worker-storage", "worker-d1", "worker-r2"],
+    kind: "syntax",
+    selectors: [
+      "MemberExpression[object.name='z'][property.name=/^(?:any|custom)$/u]",
+      "ImportDeclaration[source.value='zod'] ImportSpecifier[imported.name=/^(?:any|custom)$/u]",
+    ],
+    reason: "docs/plan.md §6.1b storage validates every row with a checking schema",
+    message: "Storage schemas must check values; do not use z.any or z.custom.",
+  },
+  {
     id: "services-http",
-    from: ["worker-services"],
+    from: ["worker-services", "worker-user-service"],
     kind: "globals",
     names: ["Request", "Response"],
     reason: "docs/plan.md §4.2 services must not contain Request or Response",
@@ -174,7 +312,7 @@ export const typescriptBoundaries: TypeScriptBoundary[] = [
   },
   {
     id: "storage-http",
-    from: ["worker-storage"],
+    from: ["worker-storage", "worker-d1", "worker-r2"],
     kind: "globals",
     names: ["Request", "Response", "fetch", "Headers"],
     reason: "docs/plan.md §4.2 storage only reads and writes D1 and R2 without HTTP",

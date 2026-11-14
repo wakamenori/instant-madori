@@ -1,7 +1,7 @@
 import type { WorkerHealth } from "@madori/contracts";
 import { describeError, logEvent } from "../log.ts";
 import type { LogFields } from "../log.ts";
-import { serviceDeps } from "../services/deps.ts";
+import { serviceDeps } from "../compose.ts";
 import type { Runtime } from "../services/deps.ts";
 import { resolveUser } from "../services/users.ts";
 import { verifyAccessToken } from "./access.ts";

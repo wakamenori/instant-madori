@@ -1,3 +1,5 @@
+import type { OwnerId } from "../owner.ts";
+import type { R2 } from "./r2.ts";
 import { displayContentType } from "@madori/contracts";
 import { z } from "zod";
 import { parseJsonColumn, StorageCorruption } from "./rows.ts";
@@ -39,25 +41,10 @@ async function sha256(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
   return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-async function putNew(
-  bucket: R2Bucket,
-  key: string,
-  bytes: Uint8Array<ArrayBuffer>,
-  mediaType: string,
-) {
-  // A fresh ID normally guarantees absence; the conditional write also protects
-  // immutable objects if a caller ever reuses one.
-  const stored = await bucket.put(key, bytes, {
-    onlyIf: { etagDoesNotMatch: "*" },
-    httpMetadata: { contentType: mediaType },
-  });
-  if (stored === null) throw new Error("Snapshot object already exists");
-}
-
 export async function writeSnapshot(
-  bucket: R2Bucket,
-  input: { id: string; ownerId: string; now: string; display: Uint8Array<ArrayBuffer> },
-): Promise<Snapshot> {
+  bucket: R2,
+  input: { id: string; ownerId: OwnerId; now: string; display: Uint8Array<ArrayBuffer> },
+): Promise<Snapshot & { ownerId: OwnerId }> {
   const prefix = snapshotPrefix(input.ownerId, input.id);
   const displayKey = `${prefix}display.mdsp`;
   const manifest = manifestSchema.parse({
@@ -69,10 +56,10 @@ export async function writeSnapshot(
       sha256: await sha256(input.display),
     },
   });
-  await putNew(bucket, displayKey, input.display, displayContentType);
+  await bucket.putNew(displayKey, input.display, displayContentType);
   const manifestBytes = new Uint8Array(new TextEncoder().encode(JSON.stringify(manifest)));
   const manifestKey = `${prefix}manifest.json`;
-  await putNew(bucket, manifestKey, manifestBytes, "application/json");
+  await bucket.putNew(manifestKey, manifestBytes, "application/json");
   return {
     id: input.id,
     ownerId: input.ownerId,
@@ -83,13 +70,13 @@ export async function writeSnapshot(
   };
 }
 
-export async function readSnapshotDisplay(bucket: R2Bucket, snapshot: Snapshot) {
+export async function readSnapshotDisplay(bucket: R2, snapshot: Snapshot) {
   const prefix = snapshotPrefix(snapshot.ownerId, snapshot.id);
   if (snapshot.manifestKey !== `${prefix}manifest.json`)
     throw new StorageCorruption("snapshot key");
-  const object = await bucket.get(snapshot.manifestKey);
+  const object = await bucket.read(snapshot.manifestKey);
   if (object === null) throw new StorageCorruption("manifest");
-  const manifestBytes = new Uint8Array(await object.arrayBuffer());
+  const manifestBytes = object.bytes;
   if ((await sha256(manifestBytes)) !== snapshot.manifestSha256)
     throw new StorageCorruption("manifest hash");
   const manifest = parseJsonColumn(
@@ -98,9 +85,9 @@ export async function readSnapshotDisplay(bucket: R2Bucket, snapshot: Snapshot) 
     "manifest",
   );
   if (manifest.display.key !== `${prefix}display.mdsp`) throw new StorageCorruption("display key");
-  const display = await bucket.get(manifest.display.key);
+  const display = await bucket.read(manifest.display.key);
   if (display === null) throw new StorageCorruption("display");
-  const bytes = new Uint8Array(await display.arrayBuffer());
+  const bytes = display.bytes;
   if (
     bytes.byteLength !== manifest.display.bytes ||
     (await sha256(bytes)) !== manifest.display.sha256

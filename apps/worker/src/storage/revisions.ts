@@ -1,7 +1,9 @@
+import type { OwnerId } from "../owner.ts";
+import { foundSchema, jsonRows, rows, write } from "./d1.ts";
+import type { D1 } from "./d1.ts";
 import { patternSchema, revisionSchema } from "@madori/contracts";
 import type { Pattern, Revision } from "@madori/contracts";
 import { patternJson } from "./patterns.ts";
-import { parseJsonColumn, parseJsonRows } from "./rows.ts";
 import { snapshotJson, snapshotSchema } from "./snapshots.ts";
 import type { Snapshot } from "./snapshots.ts";
 
@@ -14,32 +16,26 @@ function revisionJson(t: string) {
 export type CommitResult = { kind: "committed"; revision: Revision } | { kind: "not_committed" };
 
 export async function commitRevision(
-  db: D1Database,
+  db: D1,
   input: {
     id: string;
-    ownerId: string;
     patternId: string;
     name: string;
     baseRevisionId: string | null;
-    snapshot: Snapshot;
+    snapshot: Snapshot & { ownerId: OwnerId };
   },
 ): Promise<CommitResult> {
   const s = input.snapshot;
-  // The snapshot row is inserted under its own owner, so a mismatch would store an
-  // unchecked row even though the revision insert refuses it.
-  if (s.ownerId !== input.ownerId) throw new Error("Snapshot belongs to another owner");
   // Both inserts carry the base condition, so a reused snapshot ID cannot bypass it.
   const latestIsBase = `? IS (SELECT r.id FROM revisions r
     WHERE r.pattern_id = ? AND r.owner_id = ? ORDER BY r.number DESC LIMIT 1)`;
-  const results = await db.batch([
-    db
-      .prepare(
-        `INSERT INTO snapshots
+  const [, , committed] = await db.batch([
+    write({
+      sql: `INSERT INTO snapshots
       (id, owner_id, format_version, manifest_key, manifest_sha256, created_at)
       SELECT ?, ?, ?, ?, ?, ? FROM patterns p
       WHERE p.id = ? AND p.owner_id = ? AND ${latestIsBase}`,
-      )
-      .bind(
+      bindings: [
         s.id,
         s.ownerId,
         s.formatVersion,
@@ -47,44 +43,45 @@ export async function commitRevision(
         s.manifestSha256,
         s.createdAt,
         input.patternId,
-        input.ownerId,
+        s.ownerId,
         input.baseRevisionId,
         input.patternId,
-        input.ownerId,
-      ),
+        s.ownerId,
+      ],
+    }),
     // A fresh snapshot ID's row ties this insert to the ownership condition above
     // without depending on connection-local changes().
-    db
-      .prepare(
-        `INSERT INTO revisions
+    write({
+      sql: `INSERT INTO revisions
       (id, pattern_id, owner_id, number, name, snapshot_id, base_revision_id, created_at)
       SELECT ?, ?, s.owner_id,
         (SELECT coalesce(max(number), 0) + 1 FROM revisions
          WHERE pattern_id = ? AND owner_id = s.owner_id),
         ?, s.id, ?, s.created_at FROM snapshots s
       WHERE s.id = ? AND s.owner_id = ? AND ${latestIsBase}`,
-      )
-      .bind(
+      bindings: [
         input.id,
         input.patternId,
         input.patternId,
         input.name,
         input.baseRevisionId,
         s.id,
-        input.ownerId,
+        s.ownerId,
         input.baseRevisionId,
         input.patternId,
-        input.ownerId,
-      ),
-    db
-      .prepare(
-        `SELECT ${revisionJson("r")} AS json FROM revisions r WHERE r.id = ? AND r.owner_id = ?`,
-      )
-      .bind(input.id, input.ownerId),
+        s.ownerId,
+      ],
+    }),
+    jsonRows(
+      {
+        sql: `SELECT ${revisionJson("r")} AS json FROM revisions r WHERE r.id = ? AND r.owner_id = ?`,
+        bindings: [input.id, s.ownerId],
+      },
+      revisionSchema,
+      "revision",
+    ),
   ]);
-  const result = results[2];
-  if (!result) throw new Error("D1 batch returned fewer results than statements");
-  const revision = parseJsonRows(result.results, revisionSchema, "revision")[0];
+  const revision = committed[0];
   return revision ? { kind: "committed", revision } : { kind: "not_committed" };
 }
 
@@ -95,28 +92,33 @@ export interface PatternState {
 }
 
 export async function getPatternState(
-  db: D1Database,
-  scope: { ownerId: string; patternId: string },
+  db: D1,
+  scope: { ownerId: OwnerId; patternId: string },
 ): Promise<PatternState | null> {
   const [patterns, revisions] = await db.batch([
-    db
-      .prepare(
-        `SELECT ${patternJson("p")} AS json FROM patterns p WHERE p.id = ? AND p.owner_id = ?`,
-      )
-      .bind(scope.patternId, scope.ownerId),
-    db
-      .prepare(
-        `SELECT ${revisionJson("r")} AS json FROM revisions r
+    jsonRows(
+      {
+        sql: `SELECT ${patternJson("p")} AS json FROM patterns p WHERE p.id = ? AND p.owner_id = ?`,
+        bindings: [scope.patternId, scope.ownerId],
+      },
+      patternSchema,
+      "pattern",
+    ),
+    jsonRows(
+      {
+        sql: `SELECT ${revisionJson("r")} AS json FROM revisions r
       WHERE r.pattern_id = ? AND r.owner_id = ? ORDER BY r.number DESC LIMIT 1`,
-      )
-      .bind(scope.patternId, scope.ownerId),
+        bindings: [scope.patternId, scope.ownerId],
+      },
+      revisionSchema,
+      "revision",
+    ),
   ]);
-  if (!patterns || !revisions) throw new Error("D1 batch returned fewer results than statements");
-  const pattern = parseJsonRows(patterns.results, patternSchema, "pattern")[0];
+  const pattern = patterns[0];
   if (!pattern) return null;
   return {
     pattern,
-    currentRevision: parseJsonRows(revisions.results, revisionSchema, "revision")[0] ?? null,
+    currentRevision: revisions[0] ?? null,
   };
 }
 
@@ -126,39 +128,49 @@ export interface RevisionPage {
 }
 
 export async function listRevisions(
-  db: D1Database,
-  query: { ownerId: string; patternId: string; after: number | null; limit: number },
+  db: D1,
+  query: { ownerId: OwnerId; patternId: string; after: number | null; limit: number },
 ): Promise<RevisionPage | null> {
-  const [patterns, rows] = await db.batch([
-    db
-      .prepare("SELECT 1 AS found FROM patterns WHERE id = ? AND owner_id = ?")
-      .bind(query.patternId, query.ownerId),
-    db
-      .prepare(
-        `SELECT ${revisionJson("r")} AS json FROM revisions r
+  const [patterns, revisionRows] = await db.batch([
+    rows(
+      {
+        sql: "SELECT 1 AS found FROM patterns WHERE id = ? AND owner_id = ?",
+        bindings: [query.patternId, query.ownerId],
+      },
+      foundSchema,
+      "existence",
+    ),
+    jsonRows(
+      {
+        sql: `SELECT ${revisionJson("r")} AS json FROM revisions r
       WHERE r.pattern_id = ? AND r.owner_id = ? AND (? IS NULL OR r.number < ?)
       ORDER BY r.number DESC LIMIT ?`,
-      )
-      .bind(query.patternId, query.ownerId, query.after, query.after, query.limit + 1),
+        bindings: [query.patternId, query.ownerId, query.after, query.after, query.limit + 1],
+      },
+      revisionSchema,
+      "revision",
+    ),
   ]);
-  if (!patterns || !rows) throw new Error("D1 batch returned fewer results than statements");
-  if (patterns.results.length === 0) return null;
-  const all = parseJsonRows(rows.results, revisionSchema, "revision");
+  if (patterns.length === 0) return null;
+  const all = revisionRows;
   const revisions = all.slice(0, query.limit);
   return { revisions, next: all.length > query.limit ? (revisions.at(-1)?.number ?? null) : null };
 }
 
 export async function getRevisionSnapshot(
-  db: D1Database,
-  scope: { ownerId: string; revisionId: string },
+  db: D1,
+  scope: { ownerId: OwnerId; revisionId: string },
 ): Promise<Snapshot | null> {
-  const json = await db
-    .prepare(
-      `SELECT ${snapshotJson("s")} AS json
+  return db.first(
+    jsonRows(
+      {
+        sql: `SELECT ${snapshotJson("s")} AS json
     FROM snapshots s JOIN revisions r ON r.snapshot_id = s.id AND r.owner_id = s.owner_id
     WHERE r.id = ? AND r.owner_id = ? AND s.owner_id = ?`,
-    )
-    .bind(scope.revisionId, scope.ownerId, scope.ownerId)
-    .first("json");
-  return json === null ? null : parseJsonColumn(json, snapshotSchema, "snapshot");
+        bindings: [scope.revisionId, scope.ownerId, scope.ownerId],
+      },
+      snapshotSchema,
+      "snapshot",
+    ),
+  );
 }

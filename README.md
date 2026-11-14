@@ -81,6 +81,17 @@ TypeScriptのテストはNode.js標準のtest runnerを使います。HTTP経由
 | upstreamとの境界                  | 採用版とのファイル照合、独自変更の記録、Cargo workspaceと依存先の検査                                                                                                                                                                                                                                                                                                                                                                                                    |
 | 依存の境界                        | `scripts/check/boundaries.ts` の表から、TypeScriptはESLintのimport・構文・global制限を、Rustは `cargo metadata` とContainer対象のpackage別 `cargo tree` による検査を組み立てる。表の各行に違反と許可の例をテストする。Workerの層は許可先から禁止先を生成し、`src/` 直下の未宣言ディレクトリも拒否する。層に属さないファイルを経由した再exportは検査しない。`require()`、servicesの `fetch`・`Headers` は検査しない。`../worker/` の判定はWeb内の同名フォルダーも拒否する |
 
+Workerの保存境界では、型名・バインディングの取り出し・組み立て関数の入口を別の行で検査する。`storage/` では `z.any` と `z.custom` を禁止し、行の型は渡したスキーマから導出する。テストは破損注入のためにこれらの制限を除外し、ブランド型への直接キャストと `as never` の禁止だけは適用する。この構文検査では、次の形を防げない。
+
+- `OwnerId`・`VerifiedIdentity` の名前を書かないキャストで作る形。ブランドを含む型へのキャスト（例：`as AuthenticatedUser`、`as AuthenticatedUser["id"]`、`as RequestKey`）、型の別名を通したキャストがこれに当たる。
+- 使う箇所にキャストを書かず、宣言で型を作る形。型述語、ジェネリックの補助関数、オーバーロードのシグネチャ、戻り値の型の宣言がこれに当たる。
+- 計算したキーやrest分割代入でバインディングを取り出す形。
+- `zod` の別名やnamespaceのimport、計算したプロパティ、分割代入、`zod/v4` などの別のパスから `any`・`custom` を名前でimportする形と、`z.ZodType<T>` へのキャストや `transform` の中のキャストで検証しないスキーマを作る形。
+- 例外として許可したファイル（`compose.ts`、`api/app.ts`、`services/users.ts`、`storage/` のファイル）が、組み立て関数、`authenticatedUser`、Storeやアダプターの構築関数を再exportする形。再exportしたものは、そのファイルを値としてimportできる層と `src/` 直下のファイルから使える。
+- 組み立て関数・`authenticatedUser`・Storeとアダプターの構築関数のimport制限は、ファイル名（`compose`・`owner`・`storage/store`・`storage/d1`・`storage/r2`）で判定する。そのため、別の場所に同じ名前、またはその名前と `.` で始まる名前（例：`compose.helpers.ts`）のファイルを作ると、無関係なimportも拒否する。
+
+`OwnerId` は他のIDとの取り違えを型で防ぐもので、IDの由来やSQLの所有者条件を保証しない。所有者条件は実際のD1に対する所有権のテストとレビューで確かめる。
+
 自作コードのlint・一括整形・未使用検査は、`third_party/solidcraft`を対象にしません。生成物も除外し、過去の検証記録・証拠は一括整形しません。依存の脆弱性やライセンスの検査対象はソースの配置で除外せず、サービスのlockfileから決めます。
 
 Lefthookのコミット前検査は、ステージした自作ファイルの整形・lint、自作Rustの整形、秘密情報です。自動修正は先に `pnpm check` で行い、整形・lintはステージ対象ファイルの作業ツリーを、秘密情報はステージ済みの差分を検査します。フックはファイルやGitのステージ内容を書き換えません。部分ステージした変更をまとめてステージすることはありません。フックだけでは全体の型確認・テストを代替できません。

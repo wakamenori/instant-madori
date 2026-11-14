@@ -1,5 +1,5 @@
 import { handleApi } from "./api/app.ts";
-import { systemRuntime } from "./services/deps.ts";
+import { systemRuntime } from "./runtime.ts";
 
 export default {
   fetch(request: Request, env: Env): Promise<Response> {
