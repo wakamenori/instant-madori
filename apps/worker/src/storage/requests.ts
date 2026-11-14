@@ -178,7 +178,7 @@ class OnceBatch {
   ): OnceBatch {
     const key = copyKey(inputKey);
     const { statements, table, id, result } = create;
-    const before = Object.freeze(statements.map(copyStatement));
+    const before = Object.freeze(Array.from(statements, copyStatement));
     const resultPart = copyStatement(result);
     const record = copyStatement(
       recordStatement(key, createdAt, {

@@ -11,7 +11,7 @@ import { authenticatedUser } from "../../src/owner.ts";
 import type { OwnerId } from "../../src/owner.ts";
 import { upsertAccessUser } from "../../src/storage/users.ts";
 import { d1 } from "../../src/storage/d1.ts";
-import type { D1 } from "../../src/storage/d1.ts";
+import type { D1, SqlPart } from "../../src/storage/d1.ts";
 import { createOnceStatements, updateOnceStatements, runOnce } from "../../src/storage/requests.ts";
 import type { OnceBatch, RequestKey } from "../../src/storage/requests.ts";
 
@@ -115,6 +115,87 @@ void test("once-only batches preserve their private protocol on real D1", async 
           kind: "replayed",
           result: { name: "original" },
         });
+      },
+    );
+
+    await t.test(
+      "caller array methods and species cannot change the captured writes",
+      async (t) => {
+        for (const mode of ["subclass", "own constructor"] as const) {
+          for (const attack of ["replace", "append"] as const) {
+            await t.test(mode + " " + attack, async () => {
+              const made = creation();
+              const foreign = creation(key(ownerB));
+              await runOnce(db, schema, foreign.batch);
+              const swapped: SqlPart = {
+                sql: made.statement.sql,
+                bindings: [made.input.id, ownerA, "swapped", now, now],
+              };
+              const foreignUpdate: SqlPart = {
+                sql: "UPDATE projects SET name = 'injected' WHERE id = ? AND owner_id = ?",
+                bindings: [foreign.input.id, ownerB],
+              };
+              let execution: "original" | "replace" | "append" = "original";
+              class Shifting extends Array<SqlPart> {
+                override map<U>(
+                  callback: (value: SqlPart, index: number, array: SqlPart[]) => U,
+                  thisArg?: unknown,
+                ): U[] {
+                  if (execution === "replace") return [callback(swapped, 0, this)];
+                  const mapped = super.map(callback, thisArg);
+                  if (execution === "append")
+                    mapped.push(callback(foreignUpdate, this.length, this));
+                  return mapped;
+                }
+              }
+              const statements =
+                mode === "subclass" ? new Shifting(made.statement) : [made.statement];
+              if (mode === "own constructor") {
+                Object.defineProperty(statements, "constructor", { value: Shifting });
+              }
+              const batch = createOnceStatements(made.request, now, { ...made.input, statements });
+              execution = attack;
+              const before = z.tuple([z.number(), z.number(), z.number()]).parse(await counts());
+              const sent: string[] = [];
+              const observed: D1 = {
+                ...db,
+                batch(statements) {
+                  sent.push(...statements.map((statement) => statement.sql));
+                  return db.batch(statements);
+                },
+              };
+              assert.deepEqual(await runOnce(observed, schema, batch), {
+                kind: "applied",
+                result: { name: "original" },
+              });
+              assert.equal(sent.length, 2);
+              assert.equal(sent[0], made.statement.sql);
+              assert.match(sent[1] ?? "", /^INSERT INTO requests/u);
+              assert.equal(await record(made.request), '{"name":"original"}');
+              assert.equal(
+                await raw
+                  .prepare("SELECT name FROM projects WHERE id = ?")
+                  .bind(made.input.id)
+                  .first("name"),
+                "original",
+              );
+              assert.equal(
+                await raw
+                  .prepare("SELECT name FROM projects WHERE id = ?")
+                  .bind(foreign.input.id)
+                  .first("name"),
+                "original",
+              );
+              const after = [before[0] + 1, before[1], before[2] + 1];
+              assert.deepEqual(await counts(), after);
+              assert.deepEqual(await runOnce(observed, schema, batch), {
+                kind: "replayed",
+                result: { name: "original" },
+              });
+              assert.deepEqual(await counts(), after);
+            });
+          }
+        }
       },
     );
 
