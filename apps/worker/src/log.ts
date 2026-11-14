@@ -13,6 +13,11 @@ export interface LogFields {
   ms?: number;
   error?: ReturnType<typeof describeError>;
   requestId?: string;
+  patternId?: string;
+  jobId?: string;
+  messageId?: string;
+  messageNumber?: number;
+  acceptance?: "applied" | "replayed";
   bytes?: number;
   geometryStart?: "cold" | "warm";
   geometryMs?: number;
@@ -35,6 +40,11 @@ const logKeys = {
   ms: true,
   error: true,
   requestId: true,
+  patternId: true,
+  jobId: true,
+  messageId: true,
+  messageNumber: true,
+  acceptance: true,
   bytes: true,
   geometryStart: true,
   geometryMs: true,

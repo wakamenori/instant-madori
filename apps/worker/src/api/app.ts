@@ -8,6 +8,7 @@ import { verifyAccessToken } from "./access.ts";
 import { loadConfig } from "./config.ts";
 import { ApiFailure, errorResponse } from "./http.ts";
 import { meRoutes } from "./me.ts";
+import { messageRoutes } from "./messages.ts";
 import { patternRoutes } from "./patterns.ts";
 import { projectRoutes } from "./projects.ts";
 import { matchRoute } from "./router.ts";
@@ -16,6 +17,7 @@ import { sampleRoutes } from "./sample.ts";
 
 const routes = [
   ...meRoutes,
+  ...messageRoutes,
   ...projectRoutes,
   ...patternRoutes,
   ...sampleRoutes,

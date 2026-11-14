@@ -14,8 +14,7 @@ const statusByCode = {
   service_unavailable: 503,
 } as const satisfies Record<ApiErrorCode, number>;
 
-/** Management requests carry IDs and names only; larger bodies are rejected while reading. */
-const maxJsonBodyBytes = 16 * 1024;
+const defaultMaxJsonBodyBytes = 16 * 1024;
 
 /** An expected failure that ends the request with an API error code. */
 export class ApiFailure extends Error {
@@ -34,9 +33,9 @@ export function errorResponse(code: ApiErrorCode, headers: Record<string, string
   return Response.json({ error: code } satisfies ApiError, { status: statusByCode[code], headers });
 }
 
-async function readBodyText(request: Request): Promise<string> {
+async function readBodyText(request: Request, maxBytes: number): Promise<string> {
   const declared = request.headers.get("content-length");
-  if (declared !== null && Number(declared) > maxJsonBodyBytes) {
+  if (declared !== null && Number(declared) > maxBytes) {
     throw new ApiFailure("payload_too_large");
   }
   if (!request.body) return "";
@@ -49,7 +48,7 @@ async function readBodyText(request: Request): Promise<string> {
     if (done) break;
     if (!(value instanceof Uint8Array)) throw new Error("Request body chunk is not bytes");
     size += value.byteLength;
-    if (size > maxJsonBodyBytes) {
+    if (size > maxBytes) {
       await reader.cancel();
       throw new ApiFailure("payload_too_large");
     }
@@ -69,11 +68,15 @@ async function readBodyText(request: Request): Promise<string> {
 }
 
 /** Reads a JSON request body and validates it against the contract schema. */
-export async function readJsonBody<T>(request: Request, schema: z.ZodType<T>): Promise<T> {
+export async function readJsonBody<T>(
+  request: Request,
+  schema: z.ZodType<T>,
+  { maxBytes = defaultMaxJsonBodyBytes }: { maxBytes?: number } = {},
+): Promise<T> {
   if (!/^application\/json\s*(;|$)/i.test(request.headers.get("content-type") ?? "")) {
     throw new ApiFailure("invalid_request");
   }
-  const text = await readBodyText(request);
+  const text = await readBodyText(request, maxBytes);
   let payload: unknown;
   try {
     payload = JSON.parse(text);

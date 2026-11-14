@@ -1,0 +1,45 @@
+import { acceptInstructionRequestSchema } from "@madori/contracts";
+import type { AcceptInstructionResponse } from "@madori/contracts";
+import { acceptInstruction } from "../services/jobs.ts";
+import { ApiFailure, readJsonBody } from "./http.ts";
+import { param } from "./router.ts";
+import type { Route } from "./router.ts";
+
+export const messageRoutes: Route[] = [
+  {
+    method: "POST",
+    path: "/api/patterns/:patternId/messages",
+    async handle(context) {
+      const { request, deps, user, log } = context;
+      const input = await readJsonBody(request, acceptInstructionRequestSchema, {
+        maxBytes: 128 * 1024,
+      });
+      const patternId = param(context, "patternId");
+      log["requestId"] = input.requestId;
+      log["patternId"] = patternId;
+      const outcome = await acceptInstruction(deps, { ownerId: user.id, patternId, ...input });
+      switch (outcome.kind) {
+        case "accepted":
+          log["jobId"] = outcome.job.id;
+          log["messageId"] = outcome.message.id;
+          log["messageNumber"] = outcome.message.number;
+          log["acceptance"] = outcome.acceptance;
+          return Response.json(
+            {
+              job: {
+                jobId: outcome.job.id,
+                messageId: outcome.message.id,
+                number: outcome.message.number,
+              },
+            } satisfies AcceptInstructionResponse,
+            { status: 202 },
+          );
+        case "invalid_message":
+          throw new ApiFailure("invalid_request");
+        case "not_found":
+        case "request_id_reused":
+          throw new ApiFailure(outcome.kind);
+      }
+    },
+  },
+];

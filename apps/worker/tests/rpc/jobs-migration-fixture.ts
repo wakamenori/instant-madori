@@ -44,7 +44,10 @@ try {
   const r1 = await commit(null);
   const r2 = await commit(r1.id);
   const r3 = await commit(r2.id);
-  assert.deepEqual((await db.store.revisions.state({ ownerId, patternId }))?.currentRevision, r3);
+  assert.deepEqual(
+    (await db.store.revisions.list({ ownerId, patternId, after: null, limit: 10 }))?.revisions[0],
+    r3,
+  );
   const self = crypto.randomUUID();
   await db.raw
     .prepare(

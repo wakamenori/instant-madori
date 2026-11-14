@@ -1,12 +1,11 @@
-/// <reference lib="es2024.string" />
-
+import { instructionBodySchema } from "@madori/contracts";
 import type { OwnerId } from "../owner.ts";
 import type { Acceptance } from "../storage/jobs.ts";
 import type { ServiceDeps, StoreDeps } from "./deps.ts";
 import { requestKey } from "./requests.ts";
 
 export type AcceptInstructionOutcome =
-  | ({ kind: "accepted" } & Acceptance)
+  | ({ kind: "accepted"; acceptance: "applied" | "replayed" } & Acceptance)
   | { kind: "invalid_message" }
   | { kind: "not_found" }
   | { kind: "request_id_reused" };
@@ -16,7 +15,7 @@ export async function acceptInstruction(
   input: { ownerId: OwnerId; requestId: string; patternId: string; body: string },
 ): Promise<AcceptInstructionOutcome> {
   const { ownerId, requestId, patternId, body } = input;
-  if (!body.isWellFormed() || body.trim() === "" || new TextEncoder().encode(body).length > 16384) {
+  if (!instructionBodySchema.safeParse(body).success) {
     return { kind: "invalid_message" };
   }
   const key = await requestKey(ownerId, requestId, "instruction.accept", { patternId, body });
@@ -30,7 +29,7 @@ export async function acceptInstruction(
   switch (once.kind) {
     case "applied":
     case "replayed":
-      return { kind: "accepted", ...once.result };
+      return { kind: "accepted", acceptance: once.kind, ...once.result };
     case "not_applied":
       return { kind: "not_found" };
     case "request_id_reused":

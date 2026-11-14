@@ -1,8 +1,8 @@
 import type { OwnerId } from "../owner.ts";
 import { foundSchema, jsonRows, rows, write } from "./d1.ts";
 import type { D1 } from "./d1.ts";
-import { patternSchema, revisionSchema } from "@madori/contracts";
-import type { Pattern, Revision } from "@madori/contracts";
+import { acceptedJobSchema, patternSchema, revisionSchema } from "@madori/contracts";
+import type { AcceptedJob, Pattern, Revision } from "@madori/contracts";
 import { patternJson } from "./patterns.ts";
 import { snapshotJson, snapshotSchema } from "./snapshots.ts";
 import type { Snapshot } from "./snapshots.ts";
@@ -89,13 +89,21 @@ export interface PatternState {
   pattern: Pattern;
   /** The revision with the greatest number, or null before the first commit. */
   currentRevision: Revision | null;
+  queuedJobs: AcceptedJob[];
 }
+
+// Keep jobs outermost so completed message history does not drive the queue scan.
+export const queuedJobsSql = `SELECT json_object('jobId', j.id, 'messageId', m.id,
+  'number', m.number) AS json
+  FROM jobs j CROSS JOIN messages m ON m.id = j.message_id AND m.pattern_id = j.pattern_id
+  WHERE j.pattern_id = ? AND j.owner_id = ? AND j.state = 'queued'
+  ORDER BY m.number`;
 
 export async function getPatternState(
   db: D1,
   scope: { ownerId: OwnerId; patternId: string },
 ): Promise<PatternState | null> {
-  const [patterns, revisions] = await db.batch([
+  const [patterns, revisions, queuedJobs] = await db.batch([
     jsonRows(
       {
         sql: `SELECT ${patternJson("p")} AS json FROM patterns p WHERE p.id = ? AND p.owner_id = ?`,
@@ -113,12 +121,18 @@ export async function getPatternState(
       revisionSchema,
       "revision",
     ),
+    jsonRows(
+      { sql: queuedJobsSql, bindings: [scope.patternId, scope.ownerId] },
+      acceptedJobSchema,
+      "queued job",
+    ),
   ]);
   const pattern = patterns[0];
   if (!pattern) return null;
   return {
     pattern,
     currentRevision: revisions[0] ?? null,
+    queuedJobs,
   };
 }
 
