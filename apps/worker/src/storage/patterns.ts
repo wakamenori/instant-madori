@@ -4,7 +4,7 @@ import type { D1, SqlPart } from "./d1.ts";
 import { patternSchema } from "@madori/contracts";
 import type { Pattern } from "@madori/contracts";
 import { z } from "zod";
-import { mapOnce, recordStatement, runOnce, updateOnceStatements } from "./requests.ts";
+import { createOnceStatements, mapOnce, runOnce, updateOnceStatements } from "./requests.ts";
 import type { Once, RequestKey } from "./requests.ts";
 
 /**
@@ -119,19 +119,16 @@ export async function createPatternOnce(
   key: RequestKey,
   pattern: NewPattern,
 ): Promise<Once<Pattern>> {
-  const record = recordStatement(key, pattern.now, {
+  const batch = createOnceStatements(key, pattern.now, {
+    statements: insertPatternStatements(key.ownerId, pattern),
+    table: "patterns",
+    id: pattern.id,
     result: {
       sql: `SELECT json_object('pattern', ${patternJson("t")}) FROM patterns t WHERE t.id = ?`,
       bindings: [pattern.id],
     },
-    // The pattern ID is new to this request, so its row exists only if the inserts applied.
-    when: { sql: "SELECT 1 FROM patterns WHERE id = ?", bindings: [pattern.id] },
   });
-  const once = await runOnce(db, key, patternResultSchema, {
-    before: insertPatternStatements(key.ownerId, pattern),
-    record,
-    after: [],
-  });
+  const once = await runOnce(db, patternResultSchema, batch);
   return mapOnce(once, ({ pattern }) => pattern);
 }
 
@@ -165,6 +162,6 @@ export async function renamePatternOnce(
       bindings: [rename.name, rename.now, rename.patternId],
     },
   });
-  const once = await runOnce(db, key, patternResultSchema, batch);
+  const once = await runOnce(db, patternResultSchema, batch);
   return mapOnce(once, ({ pattern }) => pattern);
 }

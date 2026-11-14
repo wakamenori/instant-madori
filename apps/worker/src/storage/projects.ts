@@ -6,7 +6,7 @@ import type { Pattern, Project } from "@madori/contracts";
 import { z } from "zod";
 import { insertPatternStatements, patternJson } from "./patterns.ts";
 import type { NewPattern } from "./patterns.ts";
-import { mapOnce, recordStatement, runOnce, updateOnceStatements } from "./requests.ts";
+import { createOnceStatements, mapOnce, runOnce, updateOnceStatements } from "./requests.ts";
 import type { Once, RequestKey } from "./requests.ts";
 
 /**
@@ -102,27 +102,24 @@ export async function createProjectOnce(
     projectId: project.id,
     now: project.now,
   };
-  const record = recordStatement(key, project.now, {
-    result: {
-      sql: `SELECT json_object('project', ${projectJson("p")}, 'pattern', ${patternJson("t")})
-            FROM projects p JOIN patterns t ON t.project_id = p.id
-            WHERE t.id = ?`,
-      bindings: [pattern.id],
-    },
-    // Both IDs are new to this request, so the pattern row exists only if every insert applied.
-    when: { sql: "SELECT 1 FROM patterns WHERE id = ?", bindings: [pattern.id] },
-  });
   const insertProject = {
     sql: `INSERT INTO projects
          (id, owner_id, name, version, next_pattern_number, created_at, updated_at)
        VALUES (?, ?, ?, 1, 1, ?, ?)`,
     bindings: [project.id, key.ownerId, project.name, project.now, project.now],
   };
-  return runOnce(db, key, createdProjectSchema, {
-    before: [insertProject, ...insertPatternStatements(key.ownerId, pattern)],
-    record,
-    after: [],
+  const batch = createOnceStatements(key, project.now, {
+    statements: [insertProject, ...insertPatternStatements(key.ownerId, pattern)],
+    table: "patterns",
+    id: pattern.id,
+    result: {
+      sql: `SELECT json_object('project', ${projectJson("p")}, 'pattern', ${patternJson("t")})
+            FROM projects p JOIN patterns t ON t.project_id = p.id
+            WHERE t.id = ?`,
+      bindings: [pattern.id],
+    },
   });
+  return runOnce(db, createdProjectSchema, batch);
 }
 
 export interface ProjectRename {
@@ -157,6 +154,6 @@ export async function renameProjectOnce(
       bindings: [rename.name, rename.now, rename.projectId],
     },
   });
-  const once = await runOnce(db, key, projectResultSchema, batch);
+  const once = await runOnce(db, projectResultSchema, batch);
   return mapOnce(once, ({ project }) => project);
 }

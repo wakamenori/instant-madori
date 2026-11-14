@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
 
-void test("Store and owner types reject unverified identities and duplicate owner arguments", () => {
+void test("Storage types reject unverified identities, duplicate owners and forged batches", () => {
   const configFile = fileURLToPath(new URL("./rpc/tsconfig.json", import.meta.url));
   const fixtureFile = fileURLToPath(new URL("./rpc/storage-type-fixture.ts", import.meta.url));
   const config = ts.readConfigFile(configFile, (path) => ts.sys.readFile(path));
@@ -120,6 +120,41 @@ void test("Store and owner types reject unverified identities and duplicate owne
     assert.deepEqual(
       diagnostics(imports + invalid, path).map((diagnostic) => diagnostic.code),
       [2554, 2554, 2345, 2345, 2345, 2353, 2345, 2540],
+    );
+  }
+  const batchImports = `
+    import { createOnceStatements, updateOnceStatements, runOnce } from "../../src/storage/requests.ts";
+    import type { OnceBatch } from "../../src/storage/requests.ts";
+    import type { SqlPart } from "../../src/storage/d1.ts";
+    declare const part: SqlPart;
+  `;
+  assert.deepEqual(
+    diagnostics(
+      batchImports +
+        `
+      const created: OnceBatch = createOnceStatements(key, "now", {
+        statements: [part], table: "patterns", id: patternId, result: part,
+      });
+      const updated: OnceBatch = updateOnceStatements(key, "now", {
+        table: "projects", set: part, where: part, result: part,
+      });
+      void runOnce(database, z.object({ name: z.string() }), created);
+      void runOnce(database, z.object({ name: z.string() }), updated);
+    `,
+    ),
+    [],
+  );
+  for (const [source, codes] of [
+    ["const batch: OnceBatch = {};", [2739]],
+    ["const batch: OnceBatch = { before: [], record: part, after: [] };", [2353]],
+    ["new OnceBatch();", [2673, 1361]],
+    ['import { recordStatement } from "../../src/storage/requests.ts";', [2459]],
+    ["void runOnce(database, key, z.unknown(), {});", [2554]],
+  ] as const) {
+    assert.deepEqual(
+      diagnostics(batchImports + source).map((diagnostic) => diagnostic.code),
+      codes,
+      source,
     );
   }
 });
