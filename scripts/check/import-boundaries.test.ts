@@ -203,10 +203,6 @@ const cases: Record<string, BoundaryCases> = {
     ],
     allowed: [importValue("../runtime.ts")],
   },
-  "owner-construction": {
-    rejected: [importValue("../owner.ts")],
-    allowed: [importType("../owner.ts", "OwnerId")],
-  },
   "owner-assertions": {
     rejected: [
       "const id = value as OwnerId;",
@@ -892,13 +888,6 @@ void test("storage composition exceptions permit only their intended entry point
   for (const specifier of ["./storage/store.ts", "./storage/d1.ts", "./storage/r2.ts"]) {
     assert.deepEqual(await diagnostics(importValue(specifier), scopes["worker-composition"]), []);
   }
-  assert.deepEqual(
-    await diagnostics(
-      'import { authenticatedUser } from "../owner.ts";',
-      scopes["worker-user-service"],
-    ),
-    [],
-  );
   assert.deepEqual(
     await diagnostics("const verified = value as VerifiedIdentity;", scopes["worker-access"]),
     [],

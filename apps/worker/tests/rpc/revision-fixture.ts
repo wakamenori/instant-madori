@@ -11,31 +11,12 @@ import type { Runtime } from "../../src/services/deps.ts";
 import { createStore } from "../../src/storage/store.ts";
 import { d1 } from "../../src/storage/d1.ts";
 import { r2 } from "../../src/storage/r2.ts";
-import { authenticatedUser } from "../../src/owner.ts";
+import { accessAssertionHeader } from "@madori/contracts";
+import { exportJWK, generateKeyPair, SignJWT } from "jose";
+import { verifyAccessToken } from "../../src/api/access.ts";
+import { resolveUser } from "../../src/services/users.ts";
 import { StorageCorruption } from "../../src/storage/rows.ts";
 
-const signedInOwner = z
-  .uuid()
-  .transform((id) => authenticatedUser({ id, email: "fixture@example.test" }).id);
-
-const input = z
-  .discriminatedUnion("kind", [
-    z.object({
-      kind: z.literal("commit"),
-      ownerId: signedInOwner,
-      otherId: signedInOwner,
-      patternId: z.uuid(),
-    }),
-    z.object({
-      kind: z.literal("damage"),
-      ownerId: signedInOwner,
-      revisionId: z.uuid(),
-      target: z.enum(["display", "manifest"]),
-      missing: z.boolean(),
-    }),
-    z.object({ kind: z.literal("once"), ownerId: signedInOwner }),
-  ])
-  .parse(JSON.parse(process.argv[3] ?? ""));
 const state = z.string().min(1).parse(process.argv[2]);
 // getMiniflarePersistRoot takes a literal path; dev appends v3 to --persist-to.
 // The HTTP harness has stopped its Worker before launching this process.
@@ -47,6 +28,67 @@ const proxy = await getPlatformProxy<Pick<Env, "DB" | "BLOBS">>({
 try {
   const { DB: db, BLOBS: bucket } = proxy.env;
   const store = createStore(d1(db), r2(bucket));
+  const { privateKey, publicKey } = await generateKeyPair("RS256", { extractable: true });
+  const jwks = {
+    keys: [{ ...(await exportJWK(publicKey)), kty: "RSA", kid: "revision-fixture", alg: "RS256" }],
+  };
+  const source = JSON.stringify(jwks);
+  const signedInOwner = z.uuid().transform(async (id) => {
+    const user = z
+      .object({ issuer: z.string(), subject: z.string(), email: z.string() })
+      .parse(
+        await db
+          .prepare(
+            "SELECT access_issuer AS issuer, access_subject AS subject, email FROM users WHERE id = ?",
+          )
+          .bind(id)
+          .first(),
+      );
+    const token = await new SignJWT({ email: user.email })
+      .setProtectedHeader({ alg: "RS256", kid: "revision-fixture" })
+      .setIssuer(user.issuer)
+      .setSubject(user.subject)
+      .setAudience("revision-fixture")
+      .setExpirationTime("5m")
+      .sign(privateKey);
+    const identity = await verifyAccessToken(
+      new Request("https://app.test/api/me", {
+        headers: { [accessAssertionHeader]: token },
+      }),
+      { issuer: user.issuer, audience: "revision-fixture", keys: { kind: "local", jwks, source } },
+    );
+    const authenticated = await resolveUser(
+      {
+        store,
+        runtime: {
+          now: () => new Date().toISOString(),
+          newId: () => crypto.randomUUID(),
+          newTraceId: () => crypto.randomUUID(),
+        },
+      },
+      identity,
+    );
+    assert.equal(authenticated.id, id);
+    return authenticated.id;
+  });
+  const input = await z
+    .discriminatedUnion("kind", [
+      z.object({
+        kind: z.literal("commit"),
+        ownerId: signedInOwner,
+        otherId: signedInOwner,
+        patternId: z.uuid(),
+      }),
+      z.object({
+        kind: z.literal("damage"),
+        ownerId: signedInOwner,
+        revisionId: z.uuid(),
+        target: z.enum(["display", "manifest"]),
+        missing: z.boolean(),
+      }),
+      z.object({ kind: z.literal("once"), ownerId: signedInOwner }),
+    ])
+    .parseAsync(JSON.parse(process.argv[3] ?? ""));
   if (input.kind === "damage") {
     const snapshot = await store.revisions.snapshot(input);
     assert(snapshot);

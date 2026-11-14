@@ -5,7 +5,7 @@ import ts from "typescript";
 
 void test("Store and owner types reject unverified identities and duplicate owner arguments", () => {
   const configFile = fileURLToPath(new URL("./rpc/tsconfig.json", import.meta.url));
-  const file = fileURLToPath(new URL("./rpc/storage-type-fixture.ts", import.meta.url));
+  const fixtureFile = fileURLToPath(new URL("./rpc/storage-type-fixture.ts", import.meta.url));
   const config = ts.readConfigFile(configFile, (path) => ts.sys.readFile(path));
   assert.equal(config.error, undefined);
   const parsed = ts.parseJsonConfigFileContent(
@@ -27,7 +27,7 @@ void test("Store and owner types reject unverified identities and duplicate owne
     declare const patternId: string;
     declare const key: RequestKey;
   `;
-  function diagnostics(source: string) {
+  function diagnostics(source: string, file = fixtureFile) {
     const options = { ...parsed.options, noUnusedLocals: false, noUnusedParameters: false };
     const host = ts.createCompilerHost(options);
     const getSourceFile = host.getSourceFile.bind(host);
@@ -35,7 +35,10 @@ void test("Store and owner types reject unverified identities and duplicate owne
       path === file
         ? ts.createSourceFile(
             file,
-            prelude + source,
+            (prelude + source).replaceAll(
+              "../../src/",
+              file === fixtureFile ? "../../src/" : "../",
+            ),
             options.target ?? ts.ScriptTarget.ESNext,
             true,
           )
@@ -84,4 +87,39 @@ void test("Store and owner types reject unverified identities and duplicate owne
       [2379, 20],
     ],
   );
+  const imports = `
+    import { authenticatedUser } from "../../src/owner.ts";
+    import { freezeIdentity } from "../../src/identity.ts";
+    import type { User } from "@madori/contracts";
+    declare const user: User;
+    declare const identity: VerifiedIdentity;
+    declare const resolved: Awaited<ReturnType<Store["users"]["upsertAccess"]>>;
+  `;
+  const valid = `
+    async function resolve() {
+      const result = await store.users.upsertAccess({ identity, newId: patternId, now: "now" });
+      const owner: OwnerId = authenticatedUser(identity, result).id;
+      return owner;
+    }
+  `;
+  const invalid = `
+    authenticatedUser();
+    authenticatedUser(user);
+    authenticatedUser(user, resolved);
+    authenticatedUser(identity, user);
+    authenticatedUser(identity, { ...resolved });
+    store.users.upsertAccess({ issuer: "issuer", subject: "subject", email: "email", newId: patternId, now: "now" });
+    freezeIdentity({ issuer: "issuer", subject: "subject", email: "email" });
+    identity.subject = "other";
+  `;
+  for (const path of [
+    fixtureFile,
+    fileURLToPath(new URL("../src/services/owner-type-fixture.ts", import.meta.url)),
+  ]) {
+    assert.deepEqual(diagnostics(imports + valid, path), []);
+    assert.deepEqual(
+      diagnostics(imports + invalid, path).map((diagnostic) => diagnostic.code),
+      [2554, 2554, 2345, 2345, 2345, 2353, 2345, 2540],
+    );
+  }
 });

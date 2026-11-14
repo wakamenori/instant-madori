@@ -235,18 +235,6 @@ export const typescriptBoundaries: TypeScriptBoundary[] = [
     message: "Only composition may construct Store and storage adapters.",
   },
   {
-    id: "owner-construction",
-    from: allScopes.filter(
-      (scope) =>
-        scope.startsWith("worker-") && !["worker-owner", "worker-user-service"].includes(scope),
-    ),
-    kind: "imports",
-    regex: "^\\.\\.?/(?:[^/]+/)*owner(?:\\.[^/]*)?$",
-    allowTypeImports: true,
-    reason: "docs/plan.md §6.1b only resolveUser constructs OwnerId",
-    message: "Only resolveUser may construct an authenticated owner.",
-  },
-  {
     id: "owner-assertions",
     from: allScopes.filter((scope) => scope.startsWith("worker-") && scope !== "worker-owner"),
     kind: "syntax",

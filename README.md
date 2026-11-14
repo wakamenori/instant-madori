@@ -85,13 +85,15 @@ TypeScriptのテストはNode.js標準のtest runnerを使います。HTTP経由
 Workerの保存境界では、型名・バインディングの取り出し・組み立て関数の入口を別の行で検査する。`storage/` では `z.any` と `z.custom` を禁止し、行の型は渡したスキーマから導出する。テストは破損注入のためにこれらの制限を除外し、ブランド型への直接キャストと `as never` の禁止だけは適用する。この構文検査では、次の形を防げない。
 
 - `OwnerId`・`VerifiedIdentity` の名前を書かないキャストで作る形。ブランドを含む型へのキャスト（例：`as AuthenticatedUser`、`as AuthenticatedUser["id"]`、`as RequestKey`）、型の別名を通したキャストがこれに当たる。
+- 保存結果の `resolved.constructor` を構築可能な型へキャストし、任意の利用者行を渡す形。非公開コンストラクタも、明示的なキャストによる偽造までは防がない。
+- `VerifiedIdentity` の欄の直接代入や `Object.assign` による書き換えは、生成時の凍結で拒否する。既存の証拠をspreadし、別の値へ置き換えたオブジェクトや、型の偽造はこの保証に含まれない。
 - 使う箇所にキャストを書かず、宣言で型を作る形。型述語、ジェネリックの補助関数、オーバーロードのシグネチャ、戻り値の型の宣言がこれに当たる。
 - 計算したキーやrest分割代入でバインディングを取り出す形。
 - `zod` の別名やnamespaceのimport、計算したプロパティ、分割代入、`zod/v4` などの別のパスから `any`・`custom` を名前でimportする形と、`z.ZodType<T>` へのキャストや `transform` の中のキャストで検証しないスキーマを作る形。
-- 例外として許可したファイル（`compose.ts`、`api/app.ts`、`services/users.ts`、`storage/` のファイル）が、組み立て関数、`authenticatedUser`、Storeやアダプターの構築関数を再exportする形。再exportしたものは、そのファイルを値としてimportできる層と `src/` 直下のファイルから使える。
-- 組み立て関数・`authenticatedUser`・Storeとアダプターの構築関数のimport制限は、ファイル名（`compose`・`owner`・`storage/store`・`storage/d1`・`storage/r2`）で判定する。そのため、別の場所に同じ名前、またはその名前と `.` で始まる名前（例：`compose.helpers.ts`）のファイルを作ると、無関係なimportも拒否する。
+- 例外として許可したファイル（`compose.ts`、`api/app.ts`、`storage/` のファイル）が、組み立て関数、Storeやアダプターの構築関数を再exportする形。再exportしたものは、そのファイルを値としてimportできる層と `src/` 直下のファイルから使える。
+- 組み立て関数・Storeとアダプターの構築関数のimport制限は、ファイル名（`compose`・`storage/store`・`storage/d1`・`storage/r2`）で判定する。そのため、別の場所に同じ名前、またはその名前と `.` で始まる名前（例：`compose.helpers.ts`）のファイルを作ると、無関係なimportも拒否する。
 
-`OwnerId` は他のIDとの取り違えを型で防ぐもので、IDの由来やSQLの所有者条件を保証しない。所有者条件は実際のD1に対する所有権のテストとレビューで確かめる。
+`OwnerId` は他のIDとの取り違えを型で防ぎ、生成には `VerifiedIdentity` と保存処理を通った結果を要求する。異なる認証主体の結果との組み合わせは実行時に拒否する。上記の明示的な偽造やSQLの所有者条件は保証しない。所有者条件は実際のD1に対する所有権のテストとレビューで確かめる。
 
 自作コードのlint・一括整形・未使用検査は、`third_party/solidcraft`を対象にしません。生成物も除外し、過去の検証記録・証拠は一括整形しません。依存の脆弱性やライセンスの検査対象はソースの配置で除外せず、サービスのlockfileから決めます。
 
