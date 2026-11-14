@@ -50,7 +50,10 @@ const logKeys = {
 /** Writes one structured log line; Workers Logs indexes the JSON fields. */
 export function logEvent(level: "info" | "error", event: string, fields: LogFields) {
   const allowed = Object.fromEntries(
-    Object.entries(fields).filter(([key]) => Object.hasOwn(logKeys, key)),
+    Object.entries(fields).filter(
+      ([key, value]) =>
+        Object.hasOwn(logKeys, key) && (typeof value === "string" || typeof value === "number"),
+    ),
   );
   const line = JSON.stringify({ level, event, ...allowed });
   if (level === "error") console.error(line);
