@@ -69,12 +69,19 @@ export function checkSqlSource(path: string, source: string) {
           scanner.reScanTemplateToken(false);
         }
         checkText(scanner.getTokenText(), start);
-        if (restrictRequestWrites && writesRequests(node.text)) {
-          const { line, character } = sourceFile.getLineAndCharacterOfPosition(start);
-          violations.push(
-            `${path}:${line + 1}:${character + 1}: writes to requests are only allowed in apps/worker/src/storage/requests.ts.`,
-          );
-        }
+      }
+      const sql = ts.isTemplateExpression(node)
+        ? node.head.text + node.templateSpans.map((span) => "_" + span.literal.text).join("")
+        : ts.isStringLiteralLike(node)
+          ? node.text
+          : undefined;
+      if (restrictRequestWrites && sql !== undefined && writesRequests(sql)) {
+        const { line, character } = sourceFile.getLineAndCharacterOfPosition(
+          node.getStart(sourceFile),
+        );
+        violations.push(
+          `${path}:${line + 1}:${character + 1}: writes to requests are only allowed in apps/worker/src/storage/requests.ts.`,
+        );
       }
       ts.forEachChild(node, visit);
     }
