@@ -31,3 +31,5 @@
 ## stagingで残る確認
 
 このPRのマージ後、検証用ユーザーとしてContainerを一度起動し、以降は要求を送らず、Workers Logsで最後の操作から約10分後の `container.idle_stopped` と、それ以降に同じContainerのログが無いことを確認する。ownerはデプロイせず、この項目は未実施として指揮役へ引き継ぐ。ローカルのamd64エミュレーションの結果からCloudflare上の停止時間を断定しない。
+
+マージ後に指揮役が確かめた結果は、[検証5](verification-05.md)に書いた。

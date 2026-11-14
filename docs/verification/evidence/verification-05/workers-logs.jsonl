@@ -1,0 +1,6 @@
+{"at":"2026-11-14T23:26:19.635Z","event":"api.request","route":"GET /api/sample/display","status":200,"ms":64,"geometryStart":"warm","note":"deploy smoke test"}
+{"at":"2026-11-14T23:27:13.444Z","event":"api.request","route":"POST /api/patterns/:patternId/messages","status":202,"ms":54,"note":"#36 staging check (does not reach the Container)"}
+{"at":"2026-11-14T23:27:13.519Z","event":"api.request","route":"GET /api/patterns/:patternId/state","status":200,"ms":17,"note":"#36 staging check (does not reach the Container)"}
+{"at":"2026-11-14T23:27:40.757Z","event":"api.request","route":"GET /api/sample/display","status":200,"ms":86,"geometryStart":"warm","note":"last request: the idle-stop measurement starts here"}
+{"at":"2026-11-14T23:37:40.919Z","event":"container.idle_stopped","ms":600164}
+{"window":"2026-11-14T23:37:41.000Z/2026-11-14T23:45:15.025Z","service":"instant-madori-staging","events":0}
