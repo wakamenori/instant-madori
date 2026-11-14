@@ -573,7 +573,7 @@ Linux Container上のSolidCraftの動作、必要メモリと起動時間、WebG
 | 1   | Accessによるログイン、内部ユーザー、案件とパターンのAPI（D1）                      | 完了（PR #4） |
 | 2   | 形状の表示経路（Container → DO → Worker → Wasmビューア）                           | 完了（PR #6） |
 | 3   | stagingへのデプロイと計測                                                          | 完了（検証3） |
-| 4   | R2への保存と案（revision）、案と履歴のD1の構造                                     | 完了          |
+| 4   | R2への保存と案（revision）、案と履歴のD1の構造                                     | 完了（PR #9） |
 | 5   | 一パターン一編集、ジョブの開始・停止・復帰、条件付き確定、完了条件にある障害の試験 | 未着手        |
 
 単位5では、単位3から持ち越した次の二つも扱う。一つは、Containerを休止時間どおりに止めることである。接続用DOが最後の操作の時刻を記録し、DOのアラームで休止時間の経過を確かめて、自分でContainerを止める（[`@cloudflare/containers`](https://github.com/cloudflare/containers) の `sleepAfter` と同じ考え方。2026-11-14にソースの `src/lib/container.ts` を読み、最後の操作の時刻を更新し、アラームで期限切れを確かめて止める実装であることを確かめた）。Cloudflare側の休止の仕組みは、停止の時刻を決められず、仕組みも確かめられていないため使わない。もう一つは、同時に動かすContainerの上限を決めることである。
