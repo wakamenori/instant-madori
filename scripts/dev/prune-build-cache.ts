@@ -6,18 +6,19 @@ import { z } from "zod";
 
 const exec = promisify(execFile);
 const defaultMountLimitBytes = 8 * 1024 ** 3;
+const defaultLayerLimitBytes = 4 * 1024 ** 3;
+const layerKinds = new Set(["regular", "frontend"]);
+const discardedKinds = new Set(["internal", "source.local", "source.git.checkout"]);
+const byteLimit = z
+  .string()
+  .regex(/^\d+$/u)
+  .transform(Number)
+  .pipe(z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER));
 const timestamp = z.iso.datetime({ offset: true });
 const recordSchema = z
   .object({
     ID: z.string().regex(/^[a-z0-9]{1,128}$/u),
-    Type: z.enum([
-      "regular",
-      "internal",
-      "frontend",
-      "source.local",
-      "source.git.checkout",
-      "exec.cachemount",
-    ]),
+    Type: z.string().min(1),
     Size: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
     InUse: z.boolean(),
     CreatedAt: timestamp,
@@ -45,17 +46,23 @@ export function parseBuildCache(output: string): CacheRecord[] {
 export function selectBuildCache(input: {
   records: readonly CacheRecord[];
   mountLimitBytes: number;
+  layerLimitBytes: number;
 }): CacheRecord[] {
-  const mounts = input.records.filter(({ kind }) => kind === "exec.cachemount");
-  let mountBytes = mounts.reduce((sum, record) => sum + record.sizeBytes, 0);
-  const remove = input.records.filter(({ kind, inUse }) => kind !== "exec.cachemount" && !inUse);
-  const unusedMounts = mounts
-    .filter(({ inUse }) => !inUse)
-    .sort((a, b) => a.usedAt - b.usedAt || a.id.localeCompare(b.id));
-  for (const mount of unusedMounts) {
-    if (mountBytes <= input.mountLimitBytes) break;
-    remove.push(mount);
-    mountBytes -= mount.sizeBytes;
+  const remove = input.records.filter(({ kind, inUse }) => discardedKinds.has(kind) && !inUse);
+  for (const budget of [
+    { kinds: new Set(["exec.cachemount"]), bytes: input.mountLimitBytes },
+    { kinds: layerKinds, bytes: input.layerLimitBytes },
+  ]) {
+    const records = input.records.filter(({ kind }) => budget.kinds.has(kind));
+    let bytes = records.reduce((sum, record) => sum + record.sizeBytes, 0);
+    const unused = records
+      .filter(({ inUse }) => !inUse)
+      .sort((a, b) => a.usedAt - b.usedAt || a.id.localeCompare(b.id));
+    for (const record of unused) {
+      if (bytes <= budget.bytes) break;
+      remove.push(record);
+      bytes -= record.sizeBytes;
+    }
   }
   return remove;
 }
@@ -87,6 +94,9 @@ function summary(records: CacheRecord[]) {
     cacheMountBytes: records
       .filter(({ kind }) => kind === "exec.cachemount")
       .reduce((sum, record) => sum + record.sizeBytes, 0),
+    layerBytes: records
+      .filter(({ kind }) => layerKinds.has(kind))
+      .reduce((sum, record) => sum + record.sizeBytes, 0),
   };
 }
 
@@ -95,22 +105,19 @@ async function main() {
     options: {
       "dry-run": { type: "boolean", default: false },
       "mount-limit-bytes": { type: "string", default: String(defaultMountLimitBytes) },
+      "layer-limit-bytes": { type: "string", default: String(defaultLayerLimitBytes) },
       help: { type: "boolean", short: "h" },
     },
   });
   if (values.help) {
     console.info(
-      "Usage: pnpm docker:prune-build-cache [--dry-run] [--mount-limit-bytes N]\n" +
-        "Remove unused build cache; retain up to 8 GiB of cache mounts by default.",
+      "Usage: pnpm docker:prune-build-cache [--dry-run] [--mount-limit-bytes N] [--layer-limit-bytes N]\n" +
+        "Retain up to 8 GiB of cache mounts and 4 GiB of recent regular/frontend layers by default.",
     );
     return;
   }
-  const mountLimitBytes = z
-    .string()
-    .regex(/^\d+$/u)
-    .transform(Number)
-    .pipe(z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER))
-    .parse(values["mount-limit-bytes"]);
+  const mountLimitBytes = byteLimit.parse(values["mount-limit-bytes"]);
+  const layerLimitBytes = byteLimit.parse(values["layer-limit-bytes"]);
   const configuredHost = process.env["DOCKER_CONTEXT"] ? undefined : process.env["DOCKER_HOST"];
   const host = z
     .string()
@@ -129,14 +136,27 @@ async function main() {
     );
   const socketPath = host.slice("unix://".length);
   const records = await inventory(socketPath);
-  const remove = selectBuildCache({ records, mountLimitBytes });
+  const unknownKinds = [...new Set(records.map(({ kind }) => kind))]
+    .filter(
+      (kind) => kind !== "exec.cachemount" && !layerKinds.has(kind) && !discardedKinds.has(kind),
+    )
+    .sort();
+  if (unknownKinds.length > 0) {
+    console.info(
+      JSON.stringify({ event: "docker.cache.prune.unknown", retainedKinds: unknownKinds }),
+    );
+  }
+  const remove = selectBuildCache({ records, mountLimitBytes, layerLimitBytes });
+  const removedIds = new Set(remove.map(({ id }) => id));
   console.info(
     JSON.stringify({
       event: "docker.cache.prune.plan",
       dryRun: values["dry-run"],
       mountLimitBytes,
+      layerLimitBytes,
       before: summary(records),
       remove,
+      keep: records.filter(({ id }) => !removedIds.has(id)),
     }),
   );
   if (values["dry-run"]) return;
@@ -168,6 +188,7 @@ async function main() {
     JSON.stringify({
       event: "docker.cache.prune.result",
       mountLimitBytes,
+      layerLimitBytes,
       after: summary(await inventory(socketPath)),
     }),
   );
@@ -179,7 +200,7 @@ if (import.meta.main) {
   } catch (error) {
     console.error(
       error instanceof z.ZodError
-        ? "Invalid Docker cache inventory, local Unix socket or mount limit; no further cache pruned"
+        ? "Invalid Docker cache inventory, local Unix socket or cache limit; no further cache pruned"
         : error instanceof Error
           ? error.message
           : "Docker cache pruning failed",
