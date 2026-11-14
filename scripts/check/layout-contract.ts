@@ -34,7 +34,17 @@ export function assertStagingBindings(config: unknown): void {
     assets: z.unknown().optional(),
     env: z.unknown().optional(),
   });
-  const top = bindingSchema.extend(inherited.shape).strict().parse(config);
+  // Local-only secrets (the dev JWKS) are declared for type generation; staging declares none.
+  const top = bindingSchema
+    .extend(inherited.shape)
+    .extend({
+      secrets: z
+        .object({ required: z.array(z.string()) })
+        .strict()
+        .optional(),
+    })
+    .strict()
+    .parse(config);
   const staging = z
     .object({
       env: z.object({
