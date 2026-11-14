@@ -477,7 +477,7 @@ SolidCraft一式を保持することと、通常のビルド・テスト対象�
 
 本番はWorkerと静的ファイル、D1マイグレーション、R2、DO・Workflow、Containerイメージを一組の版としてデプロイする。RustはContainerの対象であるLinux向けにビルドし、Wasmは別の成果物として作る。形状処理のメモリと起動時間を測り、Containerのサイズ・同時実行数・休止条件を選ぶ。
 
-stagingはworkers.devのホスト名で公開し、Worker宛先のAccessアプリで守る（preview URLは無効）。手順の順序はREADMEに従う。Accessアプリとstaging用のD1を作成し、`apps/worker/wrangler.jsonc` の `env.staging` にDB ID、Accessの発行元とaudience、画面のOriginを設定する。初期値の `.invalid` 発行元はローカル以外で拒否する。インスタンスの種類と休止時間は環境別の変数で指定し、stagingでの計測（[検証3](verification/verification-03.md)）に基づいて決める。Workers Logsを有効にし、Container内の標準出力もそこへ集める。stagingのCloudflareリソースの作成、デプロイ、D1のマイグレーションは、AGENTS.mdのとおり、ユーザーが明示して許可した場合に限りエージェントが行う。接続用DOが出す `container.ready` ログの `mode: cold` で起動時間、Rustの要求ログの `vmHwmKib` でLinux上のメモリ最大値を読む。
+stagingはworkers.devのホスト名で公開し、Worker宛先のAccessアプリで守る（preview URLは無効）。手順の順序はREADMEに従う。Accessアプリとstaging用のD1を作成し、`apps/worker/wrangler.jsonc` の `env.staging` にDB ID、Accessの発行元とaudience、画面のOriginを設定する。初期値の `.invalid` 発行元はローカル以外で拒否する。インスタンスの種類と休止時間は環境別の変数で指定し、stagingでの計測（[検証3](verification/verification-03.md)）に基づいて決める。Workers Logsを有効にし、Container内の標準出力もそこへ集める。接続用DOが出す `container.ready` ログの `mode: cold` で起動時間、Rustの要求ログの `vmHwmKib` でLinux上のメモリ最大値を読む。
 
 起動確認が終わってから処理を渡す。長い処理ではコンテナの生存時間を明示的に管理する。ブラウザ、Workflow、ContainerのHTTP接続が切れたことだけを、ジョブの完了や取消の証拠にしない。
 
@@ -586,7 +586,7 @@ Linux Container上のSolidCraftの動作、必要メモリと起動時間、WebG
 - 案を確定する操作（R2への保存とD1の条件付き追加）は、単位4ではテストからだけ呼ぶ。実際の利用者の操作で案を作る経路は、単位5のジョブで初めてつなぐ。そのため `GET /api/sample/display` は残す。
 - 案を読む公開API（パターンの状態、案の一覧、案の表示データ）を追加し、テストで作った案で検査する。
 - 会話の区切りの列はmessagesのテーブルと一緒に単位5で、復帰元の列は復帰の操作と一緒に6.6で加える。同じjob IDからの二重追加を防ぐ一意制約も単位5で加える。
-- R2への書込みはWorkerが行う。stagingのR2バケットの作成は、AGENTS.mdのとおりユーザーの許可を得て行う。
+- R2への書込みはWorkerが行う。
 
 単位4の実装では、`snapshots` が所有者、manifestのキー・SHA-256、形式の版を保持し、`revisions` がパターン内の番号、名前、編集元、snapshotへの参照を保持する。形式の版は、読み書きできる版1だけをDBのCHECK制約で許可する。6.2で版を増やす際に読込処理と制約を一緒に更新する。所有者と親の一致、および編集元が同じパターンに属することを複合外部キーで保証する。
 
@@ -635,7 +635,7 @@ Linux Container上のSolidCraftの動作、必要メモリと起動時間、WebG
    - 冪等な操作の文の組（`OnceBatch`）を、`updateOnceStatements` と、作成用の組み立て関数からしか作れない形にする。今は各操作が記録の文を自分で書き、変更と記録が結び付いていることは操作ごとの設計とテストに頼っている。
    - `authenticatedUser` が、認証を通ったことの証拠（`VerifiedIdentity` など）を受け取らないと `OwnerId` を作れない形にする。
 
-単位4から単位5へ持ち越すもの：同じjob IDからの二重の確定を防ぐ一意制約と、確定をやり直したときに二重に書かないこと、会話の区切りの列。stagingのR2バケットの作成（AGENTS.mdのとおりユーザーの許可を得る）と、本番のR2で上書きを拒む書込みが効くことの確認（ローカルのminiflareでは確かめたが、実際のR2はバケットがないため確かめられない）。
+単位4から単位5へ持ち越すもの：同じjob IDからの二重の確定を防ぐ一意制約と、確定をやり直したときに二重に書かないこと、会話の区切りの列。stagingのR2バケットの作成と、本番のR2で上書きを拒む書込みが効くことの確認（ローカルのminiflareでは確かめたが、実際のR2はバケットがないため確かめられない）。
 
 単位5では、公開要求の所有者を表す `OwnerId` と、保存済みジョブの実行権を別の型にする。実行権にはパターン・job ID・実行世代を含める。DOの最初の受付ではジョブの行がまだないため、4.6の受付順を決め直す。Workerが認証済みの要求を先に保存し、DOには識別子を渡す案を第一候補にする。DO・Workflowからservicesを呼ぶため、組み立て関数の入口（今は `api/app.ts` だけに許可している）にDO・Workflowの入口のファイルを加える。そのファイルのscopeは、元の層の依存の制限も受けるようにする。
 
