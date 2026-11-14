@@ -53,6 +53,9 @@
       "storage": "sqlite",
     },
   },
+  // Type generation reads secret names from here, not from the generated .dev.vars.
+  // Staging must not set ACCESS_JWKS, so it declares no secrets.
+  "secrets": { "required": ["ACCESS_JWKS"] },
   "vars": {
     "ENVIRONMENT": "local",
     "APP_ORIGINS": "http://127.0.0.1:5173",

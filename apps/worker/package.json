@@ -4,8 +4,8 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev --local --ip 127.0.0.1 --port 8787",
-    "types": "wrangler types",
-    "typecheck": "wrangler types && tsc -p tsconfig.json",
+    "types": "wrangler types --strict-vars=false",
+    "typecheck": "wrangler types --strict-vars=false && tsc -p tsconfig.json",
     "build": "wrangler deploy --dry-run --containers-rollout=none --outdir dist"
   },
   "dependencies": {

@@ -73,3 +73,14 @@ for (const name of ["a#b.txt", "a?b.txt", "a%20b.txt", "a#b?c%20.txt"]) {
     );
   });
 }
+
+void test("only the top level declares secrets", () => {
+  const secrets = { required: ["ACCESS_JWKS"] };
+  assert.doesNotThrow(() =>
+    assertStagingBindings({ ...bindings, secrets, env: { staging: bindings } }),
+  );
+  assert.throws(
+    () => assertStagingBindings({ ...bindings, env: { staging: { ...bindings, secrets } } }),
+    /Unrecognized|unrecognized/,
+  );
+});
