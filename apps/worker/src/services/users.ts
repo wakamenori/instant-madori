@@ -12,6 +12,7 @@ export async function resolveUser(
   identity: VerifiedIdentity,
 ): Promise<AuthenticatedUser> {
   return authenticatedUser(
-    await store.users.upsertAccess({ ...identity, newId: runtime.newId(), now: runtime.now() }),
+    identity,
+    await store.users.upsertAccess({ identity, newId: runtime.newId(), now: runtime.now() }),
   );
 }

@@ -8,6 +8,7 @@ import {
 } from "jose";
 import type { JWTVerifyGetKey } from "jose";
 import { z } from "zod";
+import { freezeIdentity } from "../identity.ts";
 import type { VerifiedIdentity } from "../services/identity.ts";
 import type { AccessConfig } from "./config.ts";
 import { ApiFailure } from "./http.ts";
@@ -98,15 +99,15 @@ export async function verifyAccessToken(
   if (!claims.success) throw new ApiFailure("forbidden");
   if (claims.data.common_name !== undefined) {
     if (claims.data.common_name !== access.verifierClientId) throw new ApiFailure("forbidden");
-    return {
+    return freezeIdentity({
       issuer: access.issuer,
       subject: "staging:verifier",
       email: "verifier@staging.invalid",
-    } as VerifiedIdentity;
+    } as VerifiedIdentity);
   }
-  return {
+  return freezeIdentity({
     issuer: access.issuer,
     subject: claims.data.sub,
     email: claims.data.email,
-  } as VerifiedIdentity;
+  } as VerifiedIdentity);
 }
