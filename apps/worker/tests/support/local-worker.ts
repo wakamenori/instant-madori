@@ -213,7 +213,12 @@ export async function migratedDatabase() {
 export async function startLocalWorker({
   containers = false,
   readyTimeoutMs = 30_000,
-}: { containers?: boolean; readyTimeoutMs?: number } = {}): Promise<LocalWorker> {
+  vars = {},
+}: {
+  containers?: boolean;
+  readyTimeoutMs?: number;
+  vars?: Record<string, string>;
+} = {}): Promise<LocalWorker> {
   const directory = await mkdtemp(join(tmpdir(), "madori-worker-test-"));
   // Output is captured rather than printed, and shown when the Worker fails to start. Every
   // structured line is parsed once, as it arrives.
@@ -245,7 +250,7 @@ export async function startLocalWorker({
     const envFile = join(directory, "worker.env");
     await writeFile(
       envFile,
-      formatEnvFile(localWorkerVars(key, [testAppOrigin, testAlternateOrigin])),
+      formatEnvFile({ ...localWorkerVars(key, [testAppOrigin, testAlternateOrigin]), ...vars }),
     );
     await mkdir(assets);
     // A real SPA entry. Only browser navigations get the SPA fallback, so if `/api/*` ever

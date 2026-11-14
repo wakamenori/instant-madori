@@ -1,0 +1,33 @@
+ℹ tests 22
+ℹ suites 0
+ℹ pass 21
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 157.312625
+
+✖ failing tests:
+
+test at apps/worker/tests/container-gateway.test.ts:499:6
+✖ resume preserves the stored deadline and the waking alarm; fallback has 60 seconds margin (0.793792ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    [
+  +   60000,
+  +   60000
+  -   120000,
+  -   120000
+    ]
+  
+      at TestContext.<anonymous> (file:///Users/matsukokuumahikari/.t3/worktrees/instant-madori/feat-container-idle-ala-93bb909a48d54741/apps/worker/tests/container-gateway.test.ts:509:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ 60000, 60000 ],
+    expected: [ 120000, 120000 ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }

@@ -3,12 +3,16 @@ import { DurableObject } from "cloudflare:workers";
 import { z } from "zod";
 import { geometryInternal as protocol } from "@madori/contracts/geometry-internal";
 import { logEvent } from "../log.ts";
-import { ContainerGateway } from "./container-gateway.ts";
+import { ContainerGateway, containerInactivityMarginMs } from "./container-gateway.ts";
 import { acceptReadinessResponse, readSampleDisplay, routeTimeouts } from "./geometry-protocol.ts";
 import type { GeometryCall } from "./geometry-protocol.ts";
 const configSchema = z.object({
   GEOMETRY_INSTANCE_TYPE: z.enum(["lite", "standard-1", "standard-2", "standard-3", "standard-4"]),
-  GEOMETRY_IDLE_TIMEOUT_MS: z.coerce.number().int().min(60_000).max(21_600_000),
+  GEOMETRY_IDLE_TIMEOUT_MS: z.coerce
+    .number()
+    .int()
+    .min(60_000)
+    .max(21_600_000 - containerInactivityMarginMs),
 });
 export class GeometryContainer extends DurableObject<Env> implements GeometryApi {
   readonly #gateway: ContainerGateway;
@@ -31,6 +35,17 @@ export class GeometryContainer extends DurableObject<Env> implements GeometryApi
         fetchPort: (request) => container.getTcpPort(protocol.port).fetch(request),
       },
       {
+        readActivity: () => ctx.storage.kv.get("lastActivityAt"),
+        writeActivity: (at) => ctx.storage.kv.put("lastActivityAt", at),
+        clearActivity: () => {
+          ctx.storage.kv.delete("lastActivityAt");
+        },
+        setAlarm: async (at) => {
+          await ctx.storage.setAlarm(at);
+        },
+        deleteAlarm: async () => {
+          await ctx.storage.deleteAlarm();
+        },
         read: () => ctx.storage.kv.get("start"),
         write: (record) => ctx.storage.kv.put("start", record),
         clear: () => {
@@ -67,7 +82,10 @@ export class GeometryContainer extends DurableObject<Env> implements GeometryApi
     );
     void ctx.blockConcurrencyWhile(() => this.#gateway.resume());
   }
+  override alarm() {
+    return this.#gateway.alarm();
+  }
   sampleDisplay(call: GeometryCall) {
-    return readSampleDisplay((request) => this.#gateway.send(request), call);
+    return this.#gateway.run((send) => readSampleDisplay(send, call));
   }
 }

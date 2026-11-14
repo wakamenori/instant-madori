@@ -1,0 +1,26 @@
+ℹ tests 2
+ℹ suites 0
+ℹ pass 0
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 101041.714625
+
+✖ failing tests:
+
+test at apps/worker/tests/container.e2e.ts:93:15
+✖ idle alarm stops this session's Container and the next request starts cold (90056.311416ms)
+  AssertionError [ERR_ASSERTION]: the DO must log container.idle_stopped, not just lose the Container
+      at TestContext.<anonymous> (file:///Users/matsukokuumahikari/.t3/worktrees/instant-madori/feat-container-idle-ala-93bb909a48d54741/apps/worker/tests/container.e2e.ts:120:11)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async TestContext.<anonymous> (file:///Users/matsukokuumahikari/.t3/worktrees/instant-madori/feat-container-idle-ala-93bb909a48d54741/apps/worker/tests/container.e2e.ts:93:7)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }

@@ -11,6 +11,10 @@ import type {
 function fixture() {
   let record: StartRecord | undefined;
   let clock = 0;
+  let lastActivityAt: unknown;
+  let alarm: number | null = null;
+  let alarmDeletes = 0;
+  const inactivityTimeouts: number[] = [];
   let starts = 0;
   let destroys = 0;
   let timeouts = 0;
@@ -47,7 +51,8 @@ function fixture() {
       container.running = false;
       if (!delayExit) stop();
     },
-    async setInactivityTimeout() {
+    async setInactivityTimeout(ms) {
+      inactivityTimeouts.push(ms);
       await Promise.resolve();
       timeouts++;
     },
@@ -61,6 +66,22 @@ function fixture() {
     },
   };
   const store = {
+    readActivity: () => lastActivityAt,
+    writeActivity: (at: number) => {
+      lastActivityAt = at;
+    },
+    clearActivity: () => {
+      lastActivityAt = undefined;
+    },
+    setAlarm: (at: number) => {
+      alarm = at;
+      return Promise.resolve();
+    },
+    deleteAlarm: () => {
+      alarm = null;
+      alarmDeletes++;
+      return Promise.resolve();
+    },
     read: () => record,
     write: (value: StartRecord) => {
       record = value;
@@ -120,6 +141,12 @@ function fixture() {
     requests,
     events,
     monitors,
+    inactivityTimeouts,
+    alarm: () => alarm,
+    alarmDeletes: () => alarmDeletes,
+    at: (at: number) => {
+      clock = at;
+    },
     delayExit: () => {
       delayExit = true;
     },
@@ -127,6 +154,7 @@ function fixture() {
       healthy = true;
       status = 200;
       failFetch = false;
+      failDestroy = false;
     },
     failMonitor: () => {
       failMonitor = true;
@@ -159,24 +187,27 @@ function fixture() {
 void test("concurrent cold requests share startup; warm sends carry only the owned token", async () => {
   const f = fixture();
   const gateway = f.make();
-  const results = await Promise.all([gateway.send(f.call), gateway.send(f.call)]);
+  const results = await Promise.all([
+    gateway.run((send) => send(f.call)),
+    gateway.run((send) => send(f.call)),
+  ]);
   assert(results.every((r) => r.kind === "response" && r.start === "cold"));
   assert.equal(f.counts().starts, 1);
-  const warm = await gateway.send(f.call);
+  const warm = await gateway.run((send) => send(f.call));
   assert.equal(warm.kind === "response" && warm.start, "warm");
   assert.equal(f.requests.at(-1)?.headers.get("authorization"), "Bearer token-0");
   assert.equal(f.requests.at(-1)?.headers.get("x-trace"), "trace-1");
 });
 void test("DO restart adopts the stored token and rearms idle timeout; image skew replaces", async () => {
   const f = fixture();
-  await f.make().send(f.call);
+  await f.make().run((send) => send(f.call));
   const adopted = f.make();
   await adopted.resume();
-  await adopted.send(f.call);
+  await adopted.run((send) => send(f.call));
   assert.equal(f.counts().starts, 1);
   assert.equal(f.counts().timeouts, 3);
   f.store.write({ token: "old", image: "old-image", startedAt: 0 });
-  await f.make().send(f.call);
+  await f.make().run((send) => send(f.call));
   assert.equal(f.counts().starts, 2);
   assert.equal(f.counts().destroys, 1);
   assert.equal(f.store.read()?.token, "token-1");
@@ -190,7 +221,7 @@ void test("unavailability clears failed starts and destroys unready or unauthori
   ] as const) {
     const f = fixture();
     f[cause]();
-    const result = await f.make().send(f.call);
+    const result = await f.make().run((send) => send(f.call));
     assert.deepEqual(result, { kind: "unavailable", reason });
     assert.equal(f.store.read(), undefined);
     assert.equal(f.container.running, false);
@@ -200,16 +231,21 @@ void test("missing record replaces an orphan; exit restarts; connection failure 
   const f = fixture();
   f.container.running = true;
   const gateway = f.make();
-  await gateway.send(f.call);
+  await gateway.run((send) => send(f.call));
   assert.equal(f.counts().destroys, 1);
   f.exit();
   await Promise.resolve();
-  await gateway.send(f.call);
+  await gateway.run((send) => send(f.call));
   assert.equal(f.counts().starts, 2);
   f.failFetch();
-  assert.deepEqual(await gateway.send(f.call), { kind: "unavailable", reason: "unreachable" });
+  assert.deepEqual(await gateway.run((send) => send(f.call)), {
+    kind: "unavailable",
+    reason: "unreachable",
+  });
   assert.deepEqual(
-    await new ContainerGateway(undefined, f.store, f.settings, f.environment).send(f.call),
+    await new ContainerGateway(undefined, f.store, f.settings, f.environment).run((send) =>
+      send(f.call),
+    ),
     { kind: "unavailable", reason: "containers_disabled" },
   );
 });
@@ -217,7 +253,10 @@ void test("missing record replaces an orphan; exit restarts; connection failure 
 void test("a rejected monitor during startup aborts readiness and clears its record", async () => {
   const f = fixture();
   f.failMonitor();
-  assert.deepEqual(await f.make().send(f.call), { kind: "unavailable", reason: "exited" });
+  assert.deepEqual(await f.make().run((send) => send(f.call)), {
+    kind: "unavailable",
+    reason: "exited",
+  });
   assert.equal(f.store.read(), undefined);
   assert.equal(f.counts().destroys, 1);
 });
@@ -227,19 +266,19 @@ void test("failed readiness and token rejection restart; failed transport reprob
     const f = fixture();
     const gateway = f.make();
     f[cause]();
-    assert.equal((await gateway.send(f.call)).kind, "unavailable");
+    assert.equal((await gateway.run((send) => send(f.call))).kind, "unavailable");
     f.recover();
-    assert.equal((await gateway.send(f.call)).kind, "response");
+    assert.equal((await gateway.run((send) => send(f.call))).kind, "response");
     assert.equal(f.counts().starts, 2);
   }
   const f = fixture();
   const gateway = f.make();
-  await gateway.send(f.call);
+  await gateway.run((send) => send(f.call));
   f.failFetch();
-  assert.equal((await gateway.send(f.call)).kind, "unavailable");
+  assert.equal((await gateway.run((send) => send(f.call))).kind, "unavailable");
   const probes = f.requests.filter((r) => new URL(r.url).pathname === "/healthz").length;
   f.recover();
-  assert.equal((await gateway.send(f.call)).kind, "response");
+  assert.equal((await gateway.run((send) => send(f.call))).kind, "response");
   assert.equal(f.counts().starts, 1);
   assert.equal(f.requests.filter((r) => new URL(r.url).pathname === "/healthz").length, probes + 1);
 });
@@ -247,19 +286,19 @@ void test("a delayed old monitor cannot erase a newer ready lifetime", async () 
   const f = fixture();
   const gateway = f.make();
   f.delayExit();
-  await gateway.send(f.call);
+  await gateway.run((send) => send(f.call));
   const old = f.monitors[0];
   assert(old);
   f.reject();
-  await gateway.send(f.call);
+  await gateway.run((send) => send(f.call));
   f.recover();
-  await gateway.send(f.call);
+  await gateway.run((send) => send(f.call));
   old();
   await Promise.resolve();
   await Promise.resolve();
   await Promise.resolve();
   assert.equal(f.store.read()?.token, "token-1");
-  const warm = await gateway.send(f.call);
+  const warm = await gateway.run((send) => send(f.call));
   assert.equal(warm.kind === "response" && warm.start, "warm");
   assert.equal(f.counts().starts, 2);
 });
@@ -268,7 +307,10 @@ void test("concurrent callers share a failed start and its cleanup", async () =>
   const f = fixture();
   f.failStart();
   const gateway = f.make();
-  const results = await Promise.all([gateway.send(f.call), gateway.send(f.call)]);
+  const results = await Promise.all([
+    gateway.run((send) => send(f.call)),
+    gateway.run((send) => send(f.call)),
+  ]);
   assert.deepEqual(results, [
     { kind: "unavailable", reason: "start_failed" },
     { kind: "unavailable", reason: "start_failed" },
@@ -281,7 +323,7 @@ void test("concurrent callers share a failed start and its cleanup", async () =>
 void test("a request waiting for reset is measured as a cold replacement", async () => {
   const f = fixture();
   const gateway = f.make();
-  await gateway.send(f.call);
+  await gateway.run((send) => send(f.call));
   let release: () => void = () => undefined;
   let entered: () => void = () => undefined;
   const gate = new Promise<void>((resolve) => {
@@ -297,10 +339,10 @@ void test("a request waiting for reset is measured as a cold replacement", async
     await original(reason);
   };
   f.reject();
-  const rejected = gateway.send(f.call);
+  const rejected = gateway.run((send) => send(f.call));
   await destroying;
   f.recover();
-  const replacement = gateway.send(f.call);
+  const replacement = gateway.run((send) => send(f.call));
   release();
   await rejected;
   const response = await replacement;
@@ -317,7 +359,7 @@ void test("readiness timing includes the start call and setup", async () => {
     startupMs += 3;
     start(options);
   };
-  await f.make().send(f.call);
+  await f.make().run((send) => send(f.call));
   assert.equal(f.events.find((entry) => entry.event === "container.ready")?.fields["ms"], 3);
 });
 
@@ -329,6 +371,7 @@ void test("malformed persisted records are cleared and running containers replac
   const gateway = new ContainerGateway(
     f.container,
     {
+      ...f.store,
       read: () => stored,
       write: (value) => {
         stored = value;
@@ -341,7 +384,7 @@ void test("malformed persisted records are cleared and running containers replac
     f.settings,
     f.environment,
   );
-  assert.equal((await gateway.send(f.call)).kind, "response");
+  assert.equal((await gateway.run((send) => send(f.call))).kind, "response");
   assert.equal(clears, 1);
   assert.equal(f.counts().destroys, 1);
   assert(
@@ -352,33 +395,33 @@ void test("malformed persisted records are cleared and running containers replac
         e.fields["traceId"] === "trace-1",
     ),
   );
-  assert.equal((await gateway.send(f.call)).kind, "response");
+  assert.equal((await gateway.run((send) => send(f.call))).kind, "response");
 });
 
 void test("destroy failures are errors and ready logs distinguish lifecycle modes", async () => {
   const f = fixture();
   const gateway = f.make();
-  await gateway.send(f.call);
+  await gateway.run((send) => send(f.call));
   assert.equal(
     f.events.filter((e) => e.event === "container.ready").at(-1)?.fields["mode"],
     "cold",
   );
-  await f.make().send(f.call);
+  await f.make().run((send) => send(f.call));
   assert.equal(
     f.events.filter((e) => e.event === "container.ready").at(-1)?.fields["mode"],
     "adopted",
   );
   f.failFetch();
-  await gateway.send(f.call);
+  await gateway.run((send) => send(f.call));
   f.recover();
-  await gateway.send(f.call);
+  await gateway.run((send) => send(f.call));
   assert.equal(
     f.events.filter((e) => e.event === "container.ready").at(-1)?.fields["mode"],
     "reprobe",
   );
   f.failDestroy();
   f.reject();
-  await gateway.send(f.call);
+  await gateway.run((send) => send(f.call));
   const failure = f.events.find((e) => e.event === "container.destroy_failed");
   assert.equal(failure?.level, "error");
   assert.equal(failure?.fields["traceId"], f.call.traceId);
@@ -393,7 +436,9 @@ void test("binary operation bodies reach the container unchanged", async () => {
     const f = fixture();
     await f
       .make()
-      .send({ ...f.call, method: "POST", body, contentType: "application/octet-stream" });
+      .run((send) =>
+        send({ ...f.call, method: "POST", body, contentType: "application/octet-stream" }),
+      );
     const request = f.requests.at(-1);
     assert(request);
     assert.equal(request.headers.get("content-type"), "application/octet-stream");
@@ -415,7 +460,227 @@ void test("contract readiness distinguishes protocol rejection from the retry de
     const f = fixture();
     f.settings.readiness.acceptHealth = acceptReadinessResponse;
     f.container.fetchPort = () => Promise.resolve(makeResponse());
-    assert.deepEqual(await f.make().send(f.call), { kind: "unavailable", reason });
+    assert.deepEqual(await f.make().run((send) => send(f.call)), { kind: "unavailable", reason });
     assert.equal(f.counts().destroys, 1);
   }
+});
+
+void test("operations move the idle deadline; early alarms rearm and expiry stops once", async () => {
+  const f = fixture();
+  const gateway = f.make();
+  await gateway.run((send) => send(f.call));
+  assert.equal(f.alarm(), 60_000);
+  f.at(40_000);
+  await gateway.run((send) => send(f.call));
+  assert.equal(f.store.readActivity(), 40_000);
+  assert.equal(f.alarm(), 100_000);
+  f.at(60_000);
+  await f.store.deleteAlarm();
+  await gateway.alarm();
+  assert.equal(f.container.running, true);
+  assert.equal(f.alarm(), 100_000);
+  f.at(100_000);
+  await gateway.alarm();
+  assert.equal(f.container.running, false);
+  assert.equal(f.store.read(), undefined);
+  assert.equal(f.store.readActivity(), undefined);
+  assert.equal(f.alarm(), null);
+  assert.deepEqual(
+    f.events.filter((e) => e.event === "container.idle_stopped"),
+    [{ event: "container.idle_stopped", fields: { ms: 60_000 }, level: undefined }],
+  );
+  await gateway.alarm();
+  assert.equal(f.counts().destroys, 1);
+  assert.equal(f.events.filter((e) => e.event === "container.idle_stopped").length, 1);
+  const next = await gateway.run((send) => send(f.call));
+  assert.equal(next.kind === "response" && next.start, "cold");
+  assert.equal(f.counts().starts, 2);
+});
+
+void test("resume preserves the stored deadline and the waking alarm; fallback has 60 seconds margin", async () => {
+  const f = fixture();
+  await f.make().run((send) => send(f.call));
+  f.at(60_000);
+  const deletes = f.alarmDeletes();
+  const resumed = f.make();
+  await resumed.resume();
+  assert.equal(f.alarmDeletes(), deletes);
+  assert.equal(f.alarm(), 60_000);
+  assert.equal(f.store.readActivity(), 0);
+  assert.deepEqual(f.inactivityTimeouts, [120_000, 120_000]);
+  await resumed.alarm();
+  assert.equal(f.counts().destroys, 1);
+});
+
+void test("resume bounds missing, malformed and future activity by the current time", async () => {
+  for (const value of [undefined, "wrong", NaN, Infinity, -1, 1_000_000]) {
+    const f = fixture();
+    await f.make().run((send) => send(f.call));
+    const readActivity = f.store.readActivity;
+    f.store.readActivity = () => value;
+    f.at(5_000);
+    await f.make().resume();
+    assert.equal(f.alarm(), 65_000);
+    f.store.readActivity = readActivity;
+    assert.equal(f.store.readActivity(), 5_000);
+  }
+  const f = fixture();
+  await f.make().run((send) => send(f.call));
+  f.at(1_000);
+  f.store.writeActivity(5_000_000);
+  await f.make().resume();
+  assert.equal(f.store.readActivity(), 1_000);
+  assert.equal(f.alarm(), 61_000);
+});
+
+void test("resume cleans stopped containers without starting them", async () => {
+  const f = fixture();
+  await f.make().run((send) => send(f.call));
+  f.exit();
+  const resumed = f.make();
+  await resumed.resume();
+  await resumed.alarm();
+  assert.equal(f.store.read(), undefined);
+  assert.equal(f.store.readActivity(), undefined);
+  assert.equal(f.alarm(), null);
+  assert.equal(f.counts().starts, 1);
+  assert.equal(f.counts().destroys, 0);
+});
+
+void test("a pending response body is protected; the idle window starts after consumption", async () => {
+  const f = fixture();
+  const gateway = f.make();
+  const fetchPort = f.container.fetchPort.bind(f.container);
+  let finishBody: () => void = () => undefined;
+  let reading: () => void = () => undefined;
+  const entered = new Promise<void>((resolve) => {
+    reading = resolve;
+  });
+  f.container.fetchPort = (request) => {
+    if (new URL(request.url).pathname === "/healthz") return fetchPort(request);
+    return Promise.resolve(
+      new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            finishBody = () => {
+              controller.enqueue(new TextEncoder().encode("body"));
+              controller.close();
+            };
+          },
+        }),
+      ),
+    );
+  };
+  const operation = gateway.run(async (send) => {
+    const result = await send(f.call);
+    assert.equal(result.kind, "response");
+    assert(result.kind === "response");
+    reading();
+    assert.equal(await result.response.text(), "body");
+  });
+  await entered;
+  f.at(90_000);
+  await gateway.alarm();
+  assert.equal(f.counts().destroys, 0);
+  assert.equal(f.alarm(), 150_000);
+  f.at(100_000);
+  finishBody();
+  await operation;
+  assert.equal(f.store.readActivity(), 100_000);
+  assert.equal(f.alarm(), 160_000);
+  f.at(160_000);
+  await gateway.alarm();
+  assert.equal(f.counts().destroys, 1);
+});
+
+void test("overlapping operations record their actual completion order, including errors", async () => {
+  const f = fixture();
+  const gateway = f.make();
+  let release: () => void = () => undefined;
+  let entered: () => void = () => undefined;
+  const blocked = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const started = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const first = gateway.run(async (send) => {
+    await send(f.call);
+    entered();
+    await blocked;
+    throw new Error("body failed");
+  });
+  await started;
+  f.at(30_000);
+  await gateway.run((send) => send(f.call));
+  f.at(90_000);
+  await gateway.alarm();
+  assert.equal(f.counts().destroys, 0);
+  f.at(100_000);
+  release();
+  await assert.rejects(first, /body failed/);
+  assert.equal(f.store.readActivity(), 100_000);
+  assert.equal(f.alarm(), 160_000);
+});
+
+void test("repeated destroy failures preserve both records and keep bounded retry alarms", async () => {
+  const f = fixture();
+  const gateway = f.make();
+  await gateway.run((send) => send(f.call));
+  const record = f.store.read();
+  f.failDestroy();
+  let now = 60_000;
+  for (const delay of [1_000, 2_000, 4_000, 8_000, 16_000, 32_000, 60_000, 60_000, 60_000]) {
+    f.at(now);
+    await gateway.alarm();
+    assert.deepEqual(f.store.read(), record);
+    assert.equal(f.store.readActivity(), 0);
+    assert.equal(f.container.running, true);
+    assert.equal(f.alarm(), now + delay);
+    now += delay;
+  }
+  assert.equal(f.events.filter((e) => e.event === "container.destroy_failed").length, 9);
+  assert.equal(f.events.filter((e) => e.event === "container.idle_stopped").length, 0);
+  f.recover();
+  f.at(now);
+  await gateway.alarm();
+  assert.equal(f.container.running, false);
+  assert.equal(f.store.read(), undefined);
+  assert.equal(f.alarm(), null);
+});
+
+void test("a request arriving during idle destruction starts after all old cleanup", async () => {
+  const f = fixture();
+  const gateway = f.make();
+  await gateway.run((send) => send(f.call));
+  let release: () => void = () => undefined;
+  let entered: () => void = () => undefined;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const destroying = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const destroy = f.container.destroy.bind(f.container);
+  f.container.destroy = async (reason) => {
+    entered();
+    await gate;
+    await destroy(reason);
+  };
+  f.at(60_000);
+  const stopping = gateway.alarm();
+  await destroying;
+  const next = gateway.run((send) => send(f.call));
+  assert.equal(f.counts().starts, 1);
+  release();
+  await stopping;
+  const result = await next;
+  assert.equal(result.kind === "response" && result.start, "cold");
+  assert.equal(f.counts().starts, 2);
+  assert.equal(f.store.read()?.token, "token-1");
+  assert.equal(f.store.readActivity(), 60_000);
+  assert.equal(f.alarm(), 120_000);
+  await f.make().resume();
+  await f.make().run((send) => send(f.call));
+  assert.equal(f.counts().starts, 2);
 });

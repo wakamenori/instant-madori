@@ -1,5 +1,7 @@
 import { z } from "zod";
 import type { LogFields } from "../log.ts";
+// A fresh DO needs this margin so its idle alarm runs before the runtime stops its Container.
+export const containerInactivityMarginMs = 60_000;
 type InstanceType = "lite" | "standard-1" | "standard-2" | "standard-3" | "standard-4";
 export interface ContainerHandle {
   readonly running: boolean;
@@ -20,10 +22,15 @@ export interface StartRecord {
   image: string;
   startedAt: number;
 }
-export interface StartRecordStore {
+export interface GatewayStore {
   read(): unknown;
   write(record: StartRecord): void;
   clear(): void;
+  readActivity(): unknown;
+  writeActivity(at: number): void;
+  clearActivity(): void;
+  setAlarm(at: number): Promise<void>;
+  deleteAlarm(): Promise<void>;
 }
 export interface GatewaySettings {
   imageName: string;
@@ -78,13 +85,15 @@ export class ContainerGateway {
   #starting: Promise<Ready | Unavailable> | null = null;
   #generation = 0;
   #resetting: Promise<void> | null = null;
+  #active = 0;
+  #stopRetryMs = 1_000;
   private readonly container: ContainerHandle | undefined;
-  private readonly store: StartRecordStore;
+  private readonly store: GatewayStore;
   private readonly settings: GatewaySettings;
   private readonly environment: GatewayEnvironment;
   constructor(
     container: ContainerHandle | undefined,
-    store: StartRecordStore,
+    store: GatewayStore,
     settings: GatewaySettings,
     environment: GatewayEnvironment,
   ) {
@@ -94,10 +103,93 @@ export class ContainerGateway {
     this.environment = environment;
   }
   async resume(): Promise<void> {
-    if (this.container?.running)
-      await this.container.setInactivityTimeout(this.settings.idleTimeoutMs);
+    if (!this.container?.running) {
+      await this.#forget();
+      return;
+    }
+    await this.container.setInactivityTimeout(
+      this.settings.idleTimeoutMs + containerInactivityMarginMs,
+    );
+    await this.store.setAlarm(this.#activity() + this.settings.idleTimeoutMs);
   }
-  async send(request: GatewayRequest): Promise<GatewayResult> {
+  async run<T>(
+    operation: (send: (request: GatewayRequest) => Promise<GatewayResult>) => Promise<T>,
+  ): Promise<T> {
+    ++this.#active;
+    try {
+      while (this.#resetting) await this.#resetting;
+      if (this.container) await this.#touch();
+      return await operation((request) => this.#send(request));
+    } finally {
+      while (this.#resetting) await this.#resetting;
+      --this.#active;
+      if (this.container?.running) await this.#touch();
+      else if (this.#active === 0) await this.#forget();
+    }
+  }
+  async alarm(): Promise<void> {
+    if (this.#resetting) {
+      await this.#resetting;
+      return;
+    }
+    const container = this.container;
+    if (!container?.running) {
+      await this.#forget();
+      return;
+    }
+    const now = this.environment.now();
+    const lastActivityAt = this.#activity();
+    if (this.#active > 0) {
+      await this.store.setAlarm(now + this.settings.idleTimeoutMs);
+      return;
+    }
+    const deadline = lastActivityAt + this.settings.idleTimeoutMs;
+    if (now < deadline) {
+      await this.store.setAlarm(deadline);
+      return;
+    }
+    ++this.#generation;
+    this.#ready = null;
+    const resetting = (async () => {
+      try {
+        await container.destroy("idle timeout");
+      } catch {
+        this.environment.log("container.destroy_failed", { reason: "idle_timeout" }, "error");
+        await this.store.setAlarm(this.environment.now() + this.#stopRetryMs);
+        this.#stopRetryMs = Math.min(this.#stopRetryMs * 2, this.settings.idleTimeoutMs);
+        return;
+      }
+      await this.#forget();
+      this.#stopRetryMs = 1_000;
+      this.environment.log("container.idle_stopped", {
+        ms: this.environment.now() - lastActivityAt,
+      });
+    })().finally(() => {
+      if (this.#resetting === resetting) this.#resetting = null;
+    });
+    this.#resetting = resetting;
+    await resetting;
+  }
+  #activity(): number {
+    const now = this.environment.now();
+    const stored = z.number().finite().nonnegative().safeParse(this.store.readActivity());
+    if (stored.success && stored.data <= now) return stored.data;
+    this.store.writeActivity(now);
+    return now;
+  }
+  async #touch(): Promise<void> {
+    const now = this.environment.now();
+    this.store.writeActivity(now);
+    this.#stopRetryMs = 1_000;
+    await this.store.setAlarm(now + this.settings.idleTimeoutMs);
+  }
+  async #forget(): Promise<void> {
+    this.#ready = null;
+    this.store.clear();
+    this.store.clearActivity();
+    await this.store.deleteAlarm();
+  }
+  async #send(request: GatewayRequest): Promise<GatewayResult> {
     const container = this.container;
     if (!container) return { kind: "unavailable", reason: "containers_disabled" };
     const started = this.environment.now();
@@ -208,7 +300,9 @@ export class ContainerGateway {
         this.environment.log("container.adopted", { traceId });
       }
       if (!record) throw new Error("Missing start record");
-      await container.setInactivityTimeout(this.settings.idleTimeoutMs);
+      await container.setInactivityTimeout(
+        this.settings.idleTimeoutMs + containerInactivityMarginMs,
+      );
     } catch {
       await this.#reset(container, generation, "start_failed", traceId);
       return { kind: "unavailable", reason: "start_failed" };

@@ -224,7 +224,7 @@ mise exec -- node --env-file=/path/to/.env scripts/deploy/registry-retention.ts 
 6. Worker宛先（`destinations: [{"type": "worker", "worker_id": "<WorkerのID>"}]`）のAccessアプリと招待ポリシーを作成します。WorkerのIDは `GET /accounts/{account_id}/workers/scripts` の `tag` です。APIで作る場合は、Accessのアプリとポリシーを編集できるトークンを使います。
 7. Accessアプリのaudienceを `ACCESS_AUD` に設定し、`workers_dev` を有効にします。service tokenをAccessで許可して `.env` に設定し、そのrefを上記のworkflowでデプロイします。ログインせずに `/` へアクセスすると、Accessのログイン画面へリダイレクトされることを確かめます。
 
-`GEOMETRY_INSTANCE_TYPE` と `GEOMETRY_IDLE_TIMEOUT_MS` は環境別の設定です。値の根拠は[検証3](docs/verification/verification-03.md)にあります。Workers Logsを有効にしているので、接続用DOの `container.ready`（`mode: cold` の `ms` が起動時間）とContainer内の `geometry.request`（`vmHwmKib` がメモリの最大値）を、Workers Logsの検索APIで読めます。検索には `Workers Observability Write` の権限を持つトークンが要ります。検証3で使った取得と集計のスクリプトは[記録フォルダ](docs/verification/evidence/verification-03/)にあります。
+`GEOMETRY_INSTANCE_TYPE` と `GEOMETRY_IDLE_TIMEOUT_MS` は環境別の設定です。値の根拠は[検証3](docs/verification/verification-03.md)にあります。休止時間は10分のままです。接続用DOが操作の開始・終了時刻を保存し、最後の操作の完了から休止時間が過ぎたらアラームでContainerを止めます。操作には応答本文の読取りを含み、操作中は止めません。停止ログ `container.idle_stopped` の `ms` は最後の操作からの経過時間です。DOが再起動しても保存した期限を戻します。実行環境の停止猶予は休止時間に60秒を足した値にするため、休止時間の設定範囲は60,000〜21,540,000 msです。停止に失敗した場合は記録を残し、1秒から倍増し休止時間を上限とする間隔で再試行します。ローカルの確認は[検証4](docs/verification/verification-04.md)に記録します。Workers Logsを有効にしているので、接続用DOの `container.ready`（`mode: cold` の `ms` が起動時間）とContainer内の `geometry.request`（`vmHwmKib` がメモリの最大値）を、Workers Logsの検索APIで読めます。検索には `Workers Observability Write` の権限を持つトークンが要ります。検証3で使った取得と集計のスクリプトは[記録フォルダ](docs/verification/evidence/verification-03/)にあります。
 
 Container接続用DOと内部プロトコルは `apps/worker/src/geometry/` に置き、`services/` から呼びます。将来のパターンごとの調整DOは `objects/` から `services/` を呼ぶ構成です。
 

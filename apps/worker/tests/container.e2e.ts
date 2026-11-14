@@ -1,15 +1,40 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { setTimeout } from "node:timers/promises";
 import { test } from "node:test";
 import { geometryInternal } from "@madori/contracts/geometry-internal";
 import { startLocalWorker, newUser } from "./support/local-worker.ts";
-// Keep container cases here as subtests sharing one Docker boot.
+const docker = promisify(execFile);
+async function runningContainers() {
+  const { stdout } = await docker("docker", [
+    "ps",
+    "--no-trunc",
+    "--format",
+    "{{.ID}}\t{{.Image}}",
+  ]);
+  return stdout
+    .trim()
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => {
+      const [id, image] = line.split("\t");
+      assert(id && image, `Invalid docker ps row: ${line}`);
+      return { id, image };
+    });
+}
 void test(
   "real Linux container returns an artifact over Worker and DO RPC",
   { timeout: 900_000 },
-  async () => {
+  async (t) => {
     const started = performance.now();
-    const worker = await startLocalWorker({ containers: true, readyTimeoutMs: 800_000 });
+    const idleTimeoutMs = 60_000;
+    const worker = await startLocalWorker({
+      containers: true,
+      readyTimeoutMs: 800_000,
+      vars: { GEOMETRY_IDLE_TIMEOUT_MS: String(idleTimeoutMs) },
+    });
     const bootMs = performance.now() - started;
     try {
       const viewer = await import("../../../crates/viewer/pkg/madori_viewer.js");
@@ -64,6 +89,60 @@ void test(
       assert.equal(
         worker.logEntries().filter((entry) => entry["event"] === "container.started").length,
         1,
+      );
+      await t.test(
+        "idle alarm stops this session's Container and the next request starts cold",
+        async () => {
+          const started = worker
+            .logEntries()
+            .find((entry) => entry["event"] === "container.started");
+          assert(started);
+          const owned = (await runningContainers()).filter(
+            (entry) => entry.image === started["image"],
+          );
+          assert.equal(
+            owned.length,
+            1,
+            "container.started image identifies exactly this Worker session",
+          );
+          const id = owned[0]?.id;
+          assert(id);
+          const waited = performance.now();
+          const deadline = waited + idleTimeoutMs + 30_000;
+          let stopped;
+          while (performance.now() < deadline) {
+            stopped = worker
+              .logEntries()
+              .find((entry) => entry["event"] === "container.idle_stopped");
+            if (stopped) break;
+            await setTimeout(200);
+          }
+          assert(stopped, "the DO must log container.idle_stopped, not just lose the Container");
+          assert.equal(stopped["level"], "info");
+          assert(typeof stopped["ms"] === "number" && stopped["ms"] >= idleTimeoutMs);
+          assert(
+            !(await runningContainers()).some((entry) => entry.id === id),
+            "the owned Container stopped",
+          );
+          const response = await worker.call("/api/sample/display", { as: user });
+          assert.equal(response.status, 200);
+          await response.arrayBuffer();
+          const log = await worker.logLine(response.headers.get("x-trace-id") ?? "");
+          assert.equal(log["geometryStart"], "cold");
+          assert.equal(
+            worker.logEntries().filter((entry) => entry["event"] === "container.started").length,
+            2,
+          );
+          console.info(
+            JSON.stringify({
+              event: "container.idle_verified",
+              idleMs: stopped["ms"],
+              observedMs: performance.now() - waited,
+              containerId: id,
+              nextStart: log["geometryStart"],
+            }),
+          );
+        },
       );
     } finally {
       await worker.stop();
