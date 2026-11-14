@@ -32,7 +32,7 @@ Containerを使うローカルセッション（実Containerテスト、別workt
 | http://127.0.0.1:5173 | Reactの開発画面。サンプルをWebGPUで描画する                     |
 | http://127.0.0.1:8787 | ローカルWorkerとビルド済み静的ファイル。`/api/health`で応答確認 |
 
-サンプルは床と3枚の壁、奥壁の開口で構成します。画面はドラッグでの回転と、スクロールでの拡大・縮小に対応します。ブラウザで確かめた範囲は、[実装計画](docs/plan.md)の6.1bにあります。Worker → Durable Object → Containerを通してSolidCraftで生成し、Wasmビューアへ表示データを渡します。WebGPUを利用できるブラウザが必要です。初回のamd64イメージのビルドには数分かかります。
+サンプルは床と3枚の壁、奥壁の開口で構成します。画面はドラッグでの回転と、スクロールでの拡大・縮小に対応します。ブラウザでは、WebGPUのアダプタがあるChromiumで描画を確かめ、合成したポインタイベントでの回転と、ホイールイベントでの拡大を確かめました。縮小、実際のマウス・トラックパッドでの操作感、Chromium以外のブラウザは確かめていません。Worker → Durable Object → Containerを通してSolidCraftで生成し、Wasmビューアへ表示データを渡します。WebGPUを利用できるブラウザが必要です。初回のamd64イメージのビルドには数分かかります。
 
 Rustサービスだけを反復する場合は `MADORI_INTERNAL_TOKEN=local cargo run -p madori-geometry` で起動します。`http://127.0.0.1:3001/healthz` は認証不要、`/v1/sample/display` は `authorization: Bearer local` が必要です。このプロセスをWorkerが呼ぶことはありません。
 
@@ -62,7 +62,7 @@ Viteのプロキシ（5173番）経由のAPI要求には、開発者として署
 
 `pnpm setup` で生成したWasmの型定義を通常・軽いモードで使います。初期生成がなければ準備手順を示して停止します。Wasmの公開API・依存・ビルド設定・upstreamを変更した場合は `--full` を実行してください。全体モードではWasmを再生成してからTypeScriptを検査し、実際に生成したWasmも接続テストで確認します。
 
-TypeScriptのテストはNode.js標準のtest runnerを使います。HTTP経由のWorker APIテストは、テストファイルごとに一時的なD1へ実際のマイグレーションを適用し、`wrangler dev` でworkerd上のWorkerを起動して、HTTPで検査します。署名にはテスト用の鍵を使い、Cloudflareのアカウントは不要です。`apps/*/{src,tests}/**/*.test.ts`、`packages/*/{src,tests}/**/*.test.ts`、`scripts/**/*.test.ts` が対象です。現在は、WorkerのAPI（認証、所有権、冪等性、版の競合、ページング、サンプル取得、案の確定・読取とR2の内容の照合）、Containerの起動・引継ぎ・障害復帰、内部プロトコル、WebのAPIエラーとビューアの初期化・解放、操作量、アクセシビリティの静的マークアップ、スキーマ・生成契約・環境別バインディングを確認するテストがあります。Rustでは表示形式の固定フィクスチャ・破損入力・大量入力、配置済み形状の書出し、内部API認証、シーン変換とカメラを検査します。Node.jsの型だけを使うテストには専用のtsconfigを用意し、Worker本体の実行環境の型から分けています。RPCとサービスの単体テストはWorkerの型も必要なため、Node用のテストからtsconfigを分けています。これらの単体テスト自体はNodeで動き、workerdやContainerを起動しません。例外として、`tests/rpc/revision-fixture.ts` は単体テストではなく、案の保存のHTTPテストから子プロセスとして起動され、`getPlatformProxy` 経由のworkerdでローカルのD1・R2に対してサービスを実行します。静的マークアップとDOM/GPUの代替オブジェクトによる検査は、ブラウザでの実描画を確かめるものではありません。
+TypeScriptのテストはNode.js標準のtest runnerを使います。HTTP経由のWorker APIテストは、テストファイルごとに一時的なD1へ実際のマイグレーションを適用し、`wrangler dev` でworkerd上のWorkerを起動して、HTTPで検査します。署名にはテスト用の鍵を使い、Cloudflareのアカウントは不要です。`apps/*/{src,tests}/**/*.test.ts`、`packages/*/{src,tests}/**/*.test.ts`、`scripts/**/*.test.ts` が対象です。現在は、WorkerのAPI（認証、所有権、冪等性、版の競合、ページング、サンプル取得、案の確定・読取とR2の内容の照合）、Containerの起動・引継ぎ・障害復帰、内部プロトコル、WebのAPIエラーとビューアの初期化・解放、操作量、アクセシビリティの静的マークアップ、スキーマ・生成契約・環境別バインディングを確認するテストがあります。Rustでは表示形式の固定フィクスチャ・破損入力・大量入力、配置済み形状の書出し、内部API認証、シーン変換とカメラを検査します。Node.jsの型だけを使うテストには専用のtsconfigを用意し、Worker本体の実行環境の型から分けています。RPCとサービスの単体テストはWorkerの型も必要なため、Node用のテストからtsconfigを分けています。これらの単体テスト自体はNodeで動き、workerdやContainerを起動しません。例外として、`tests/rpc/revision-fixture.ts` は単体テストではなく、案の保存のHTTPテストから子プロセスとして起動され、`getPlatformProxy` 経由のworkerdでローカルのD1・R2に対してサービスを実行します。HTTPテストはその間Workerを一時停止し、fixtureは同じ永続化先を指定します。fixtureがproxyを終了してからWorkerを再開し、保存した内容を公開APIから読みます。同じSQLiteファイルを二つのworkerdが同時に開かないためです。静的マークアップとDOM/GPUの代替オブジェクトによる検査は、ブラウザでの実描画を確かめるものではありません。
 
 全体モードもローカル実行で、Cloudflareへのデプロイや本番リソースの作成はしません。Workerのビルドは `--dry-run` です。DockerイメージをビルドしてLinuxで起動し、WorkerとDOを通した表示データの取得を検査します。通常のWorker APIテストとdry-runビルドではContainerを無効にします。
 
@@ -112,7 +112,11 @@ VS Code向けの推奨拡張・保存時整形・ESLint自動修正・Rust Analy
 
 ## 作業の管理
 
-作業の単位と状態はGitHubのmilestoneとIssueで管理し、[plan.md](docs/plan.md)には仕様と設計を書きます。milestoneは計画6章の段階に対応し、名前には節の番号を付けません（例：サービス基盤）。Issueは一つのPRで終わる作業で、[テンプレート](.github/ISSUE_TEMPLATE/unit.md)の欄（目的、計画の該当節、範囲、終わった証拠、依存、人の判断）をすべて埋めます。PRは、対応するIssueを本文の `Closes #<番号>` で閉じます。
+作業の単位と状態はGitHubのmilestoneとIssueで管理し、[plan.md](docs/plan.md)には仕様と設計を書きます。milestoneは計画6章の段階に対応し、名前には節の番号を付けません（例：サービス基盤）。Issueは一つのPRで終わる作業で、[テンプレート](.github/ISSUE_TEMPLATE/unit.md)の欄（目的、計画の該当節、範囲、終わった証拠、依存、人の判断）をすべて埋めます。範囲の「PRで決めること」は任意で、PRでpstackのarchitectとinterrogateを使って決める設計の問いを書きます。PRは、対応するIssueを本文の `Closes #<番号>` で閉じます。
+
+一つのIssueには、変更を一つだけ入れます。その変更は自分の証拠を持ち、ほかの変更と関係なく失敗しうるものです。別々に確かめられる二つの変更を一つの下書きが含むときは、二つのIssueに分けます。
+
+作業中に見つかった問題や改善案は、milestoneの無いIssueに「振り分け待ち」のラベルを付けて入れます。計画を進める指揮役が、その中身を確かめてmilestoneへ振り分けます。
 
 段階を新しくIssueに分けるときは、次の順に進めます。
 
@@ -173,6 +177,6 @@ mainへのpushで、`.github/workflows/deploy-staging.yml` がself-hosted runner
 
 `GEOMETRY_INSTANCE_TYPE` と `GEOMETRY_IDLE_TIMEOUT_MS` は環境別の設定です。値の根拠は[検証3](docs/verification/verification-03.md)にあります。Workers Logsを有効にしているので、接続用DOの `container.ready`（`mode: cold` の `ms` が起動時間）とContainer内の `geometry.request`（`vmHwmKib` がメモリの最大値）を、Workers Logsの検索APIで読めます。検索には `Workers Observability Write` の権限を持つトークンが要ります。検証3で使った取得と集計のスクリプトは[記録フォルダ](docs/verification/evidence/verification-03/)にあります。
 
-Container接続用DOと内部プロトコルは `apps/worker/src/geometry/` に置き、`services/` から呼びます。将来の案ごとの調整DOは `objects/` から `services/` を呼ぶ構成です。
+Container接続用DOと内部プロトコルは `apps/worker/src/geometry/` に置き、`services/` から呼びます。将来のパターンごとの調整DOは `objects/` から `services/` を呼ぶ構成です。
 
 内部APIの本文は `crates/geometry-api` で定義し、`pnpm generate:geometry` でJSON Schema・Zod・TypeScript型を再生成します。`pnpm check` も全モードで再生成し、RustとNodeのテストが生成結果の一致を検査します。

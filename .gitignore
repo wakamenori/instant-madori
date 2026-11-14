@@ -21,3 +21,6 @@ __pycache__/
 
 # Local development keys (scripts/dev/local-access.ts)
 /.local/
+
+# Decision trails of autonomous runs (pstack show-me-your-work)
+/.audit/
