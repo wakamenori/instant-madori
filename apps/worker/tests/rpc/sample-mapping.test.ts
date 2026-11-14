@@ -5,6 +5,7 @@ import { sampleRoutes } from "../../src/api/sample.ts";
 import { ApiFailure, errorResponse } from "../../src/api/http.ts";
 import { getSampleDisplay } from "../../src/services/geometry.ts";
 import type { RouteContext } from "../../src/api/router.ts";
+import type { LogFields } from "../../src/log.ts";
 import type { GeometryResult, DisplayArtifact } from "../../src/geometry/geometry-protocol.ts";
 // Only the RPC boundary is substituted; HTTP error mapping is real.
 function context(call: () => Promise<GeometryResult<DisplayArtifact>>): RouteContext {
@@ -95,7 +96,7 @@ void test("failed geometry maps to 500; binary successes preserve the artifact",
 
 void test("failed geometry logs reason, status and violation in separate fields", async () => {
   const { geometryValue } = await import("../../src/api/geometry.ts");
-  const log: Record<string, string | number | boolean | undefined> = {};
+  const log: LogFields = {};
   assert.throws(
     () =>
       geometryValue(

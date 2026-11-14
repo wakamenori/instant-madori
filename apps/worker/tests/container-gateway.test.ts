@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import type { LogFields } from "../src/log.ts";
 import { ContainerGateway } from "../src/geometry/container-gateway.ts";
 import type {
   ContainerHandle,
@@ -88,7 +89,7 @@ function fixture() {
   };
   const events: {
     event: string;
-    fields: Record<string, string | number>;
+    fields: LogFields;
     level: "info" | "error" | undefined;
   }[] = [];
   const environment: GatewayEnvironment = {
