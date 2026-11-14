@@ -507,6 +507,8 @@ SolidCraft一式を保持することと、通常のビルド・テスト対象�
 
 開発では `pnpm dev` がWeb画面、Worker・D1、Wasmと、`wrangler dev` 経由のDocker Containerを接続する。画面だけを扱うときは `MADORI_DEV_CONTAINERS=0` でContainerを無効にする。`pnpm check --full` はDockerイメージをビルドし、実Containerとの接続も検査する。Dockerはビルドプラットフォーム上のRustからLinux amd64向けにコンパイルし、Cargoのキャッシュを再利用する。テスト用と本番用の認証設定・DB・R2・秘密情報は分離する。
 
+`pnpm check --full` の最後で、ローカルDocker Engineの未使用ビルドキャッシュを回収する。Cargoのregistry・git・targetを含む `exec.cachemount` は合計8 GiBまで保持し、超えた場合だけ最終使用時刻が古い未使用記録から削除する。使用中の記録は削除せず、上限の計算には含めるため、使用中の分だけで上限を超える間は収まらないことがある。記録は丸ごと削除し、他の種類の未使用記録はすべて回収する。選別はDocker Engineのバイト数・時刻を検証した純粋関数で行い、選んだIDだけをBuildKitへ渡す。手動のdry-runも同じ選別を使う。手元とrunnerで同じ入口を使い、UnixソケットのローカルEngineだけを対象にする。イメージ・Container・ボリューム、runnerのCargoのtargetとツールは対象にしない。並行したビルドや回収で計測後の状態が変わるため、回収後の容量も出力する。
+
 招待した利用者が使い始めるまでは、stagingだけを環境とし、本番の環境は作らない。本番の環境（設定、Accessアプリ、D1、R2、デプロイ手順）は、招待の前に6.6で用意する。本番はWorkerと静的ファイル、D1マイグレーション、R2、DO・Workflow、Containerイメージを一組の版としてデプロイする。RustはContainerの対象であるLinux向けにビルドし、Wasmは別の成果物として作る。形状処理のメモリと起動時間を測り、Containerのサイズ・同時実行数・休止条件を選ぶ。
 
 stagingはworkers.devのホスト名で公開し、Worker宛先のAccessアプリで守る（preview URLは無効）。mainへのpushまたは `gh workflow run deploy-staging.yml --ref <ブランチまたはmain>` で、self-hosted runnerが `pnpm check --full`、D1のマイグレーション、デプロイ、Accessのservice tokenを使った疎通の確認を順に行う。マイグレーションはデプロイの前に適用するため、動いている前の版のWorkerと両立する形で書く。初回のWorker作成を除き、再デプロイはこのworkflowだけを使う。試験用ブランチも同じ順に実行し、そのマイグレーションはmainに入る前にstagingのD1へ適用される。手順の順序はREADMEに従う。Accessアプリとstaging用のD1を作成し、`apps/worker/wrangler.jsonc` の `env.staging` にDB ID、Accessの発行元とaudience、画面のOriginを設定する。初期値の `.invalid` 発行元はローカル以外で拒否する。インスタンスの種類と休止時間は環境別の変数で指定する。Workers Logsを有効にし、Container内の標準出力もそこへ集める。接続用DOが出す `container.ready` ログの `mode: cold` で起動時間、Rustの要求ログの `vmHwmKib` でLinux上のメモリ最大値を読む。

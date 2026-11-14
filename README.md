@@ -27,6 +27,10 @@ mise exec -- pnpm dev
 
 Containerを使うローカルセッション（実Containerテスト、別worktreeやself-hosted runnerでの `pnpm check --full`）は同時に起動できます。Miniflareがセッションごとに異なるIDをContainerの名前（`workerd-<ID>-instant-madori-GeometryContainer-...`）に付けるためです。`pnpm dev` だけは8787番と5173番のポートを固定しているので、同時に一つしか起動できません。クラッシュしたセッションのContainerは残ることがあります。`docker ps -a --format '{{.ID}} {{.Names}}'` で `workerd-` で始まる名前を確かめ、動いているセッションがないときに `docker rm --force <ID>...` で削除します。
 
+`pnpm check --full` は最後に、接続先のローカルDocker Engineの未使用ビルドキャッシュを回収します。Cargoのregistry・git・targetを含む `exec.cachemount` は合計8 GiBまで残し、超えた場合だけ最終使用時刻が古い記録から丸ごと消します。それ以外の未使用記録はすべて対象です。使用中の記録は消しません。使用中のmountだけで上限を超える場合や、計測後に別のビルドがキャッシュを増やす場合は、一度の回収で上限に収まらないことがあります。イメージ・Container・ボリュームは回収しません。Unixソケットで接続するローカルDockerを対象とし、独立したbuildx builderは対象にしません。
+
+手で確かめる場合は `pnpm docker:prune-build-cache --dry-run` で削除候補と容量を表示し、`pnpm docker:prune-build-cache` で回収します。上限を変える場合は `--mount-limit-bytes 8589934592` のようにバイト数を指定します。このオプションはその実行だけに適用します。
+
 | URL                   | 内容                                                            |
 | --------------------- | --------------------------------------------------------------- |
 | http://127.0.0.1:5173 | Reactの開発画面。サンプルをWebGPUで描画する                     |
@@ -112,6 +116,8 @@ Dependabotはnpm・Cargoの更新提案用に残し、upstream本体はsubtree�
 PRごとに `.github/workflows/check.yml` が、開発用Macのself-hosted runner（ラベル `madori`）で `pnpm setup` と `pnpm check` を実行します。変更したファイルから `scripts/check/ci-mode.ts` が `--full` を付けるかを決めます。最後に、自動修正で差分が出ていないことを確かめます。GitHubのrunnerは使いません。無料プランのprivateリポジトリでは2コア・ディスクの空き13 GBで、`--full` がディスク不足で失敗し、無料枠も足りないためです。
 
 checkoutは毎回clone直後と同じ状態から始めます。Rustの `target/` と `.tools/` だけは、`$RUNNER_TOOL_CACHE/madori` へのシンボリックリンクで実行の間に再利用します。runnerの `--full` は、手元の `pnpm dev` や `pnpm check --full` と同時に動いても衝突しません。
+
+runnerでも `--full` の最後に、手元と同じ規則でDockerのビルドキャッシュを回収します。cache mountは合計8 GiBまで残します。使用中の記録はBuildKitが保持するため、並行するビルドの記録は消しません。runnerの `target/` と `.tools/` はこの回収の対象にしません。
 
 このリポジトリではブランチ保護を使えないため、検査の成功はマージの条件として強制されません。マージの前に、PRの最新のheadで `check` が成功していることを確かめます。
 

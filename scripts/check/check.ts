@@ -195,6 +195,7 @@ async function main() {
         "--locked",
         "check",
       ]);
+      await script("Prune Docker build cache", "scripts/dev/prune-build-cache.ts");
     }
     console.log(
       `\n[check] Passed (${mode}, ${((performance.now() - started) / 1000).toFixed(1)}s).`,
