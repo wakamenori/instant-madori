@@ -9,3 +9,8 @@ paths = [
   '''(^|/)crates/viewer/pkg(/|$)''',
   '''(^|/)apps/worker/worker-configuration\.d\.ts$''',
 ]
+
+[[allowlists]]
+description = "An Access audience tag is public: Access puts it in the aud claim of every token it hands to the browser."
+regexTarget = "match"
+regexes = ['''^ACCESS_AUD": "[0-9a-f]{64}"$''']

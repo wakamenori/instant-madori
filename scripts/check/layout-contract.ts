@@ -28,6 +28,7 @@ export function assertStagingBindings(config: unknown): void {
     compatibility_flags: z.unknown().optional(),
     workers_dev: z.unknown().optional(),
     preview_urls: z.unknown().optional(),
+    observability: z.unknown().optional(),
     assets: z.unknown().optional(),
     env: z.unknown().optional(),
   });

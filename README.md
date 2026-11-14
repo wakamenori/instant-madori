@@ -125,15 +125,17 @@ SolidCraftの元のREADME・資料・ライセンスは取り込み領域に保�
 
 ## stagingへデプロイする
 
-この手順はCloudflareリソースの作成とデプロイを伴います。ローカルの検査では実行しません。
+この手順はCloudflareリソースの作成とデプロイを伴います。ローカルの検査では実行しません。現在のstagingは `https://instant-madori-staging.firpmnfiywl.workers.dev` です。
 
-1. stagingのホスト名を決め、Cloudflareで管理するドメインのCustom Domain（`env.staging.routes` に `pattern` と `custom_domain: true`）またはWorker routeを設定します。`workers_dev` と `preview_urls` は無効なので、ホスト名への経路が必要です。そのホスト名を保護するAccessアプリとstaging用D1を作成し、招待ポリシーを設定します。
-2. `apps/worker/wrangler.jsonc` の `env.staging` に実際のDB ID、Origin、Access発行元、audienceを設定します。初期値の `.invalid` 発行元は認証設定の検査で拒否します。
+1. Workers Paidのアカウントで、staging用D1を `wrangler d1 create instant-madori-staging` で作成します。Containersを使うにはWorkers Paidが必要です。
+2. `apps/worker/wrangler.jsonc` の `env.staging` に、D1のID、画面のOrigin（workers.devのホスト名）、Accessのチームドメインを設定します。この時点では `workers_dev` を無効にしておきます。Accessで守る前に公開すると、静的ファイルはWorkerの認証を通らずに配信されるためです。`preview_urls` は常に無効にします。初期値の `.invalid` 発行元は認証設定の検査で拒否します。
 3. `pnpm check --full` を実行します。
 4. `pnpm --filter @madori/worker exec wrangler d1 migrations apply DB --remote --env staging` でマイグレーションを適用します。
-5. `pnpm --filter @madori/worker exec wrangler deploy --env staging` でイメージとWorkerをデプロイします。
+5. `workers_dev` を無効にしたまま `pnpm --filter @madori/worker exec wrangler deploy --env staging` でデプロイし、公開前にWorkerを作ります。
+6. Worker宛先（`destinations: [{"type": "worker", "worker_id": "<WorkerのID>"}]`）のAccessアプリと招待ポリシーを作成します。WorkerのIDは `GET /accounts/{account_id}/workers/scripts` の `tag` です。APIで作る場合は、Accessのアプリとポリシーを編集できるトークンを使います。
+7. Accessアプリのaudienceを `ACCESS_AUD` に設定し、`workers_dev` を有効にして再度デプロイします。ログインせずに `/` へアクセスすると、Accessのログイン画面へリダイレクトされることを確かめます。
 
-`GEOMETRY_INSTANCE_TYPE` と `GEOMETRY_IDLE_TIMEOUT_MS` は環境別の設定です。初期値は計測用で、本番の推奨値ではありません。`apps/worker/src/geometry/` のDOが出す `container.ready` の `mode: cold` の `ms` とRustの `geometry.request` の `vmHwmKib` を読み、起動時間とLinuxのメモリ最大値を計測して調整します。
+`GEOMETRY_INSTANCE_TYPE` と `GEOMETRY_IDLE_TIMEOUT_MS` は環境別の設定です。値の根拠は[検証3](docs/verification/verification-03.md)にあります。Workers Logsを有効にしているので、接続用DOの `container.ready`（`mode: cold` の `ms` が起動時間）とContainer内の `geometry.request`（`vmHwmKib` がメモリの最大値）を、Workers Logsの検索APIで読めます。検索には `Workers Observability Write` の権限を持つトークンが要ります。検証3で使った取得と集計のスクリプトは[記録フォルダ](docs/verification/evidence/verification-03/)にあります。
 
 Container接続用DOと内部プロトコルは `apps/worker/src/geometry/` に置き、`services/` から呼びます。将来の案ごとの調整DOは `objects/` から `services/` を呼ぶ構成です。
 
