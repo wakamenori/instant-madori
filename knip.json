@@ -8,6 +8,7 @@
         "scripts/check/ci-mode.ts",
         "scripts/check/check-licenses.ts",
         "scripts/check/check-secrets.ts",
+        "scripts/check/check-sql.ts",
         "scripts/check/smoke.ts",
         "scripts/check/staging-smoke.ts"
       ],
