@@ -14,7 +14,6 @@ import { r2 } from "../../src/storage/r2.ts";
 import { authenticatedUser } from "../../src/owner.ts";
 import { StorageCorruption } from "../../src/storage/rows.ts";
 
-// The HTTP test has already signed these users in; their IDs arrive as plain strings.
 const signedInOwner = z
   .uuid()
   .transform((id) => authenticatedUser({ id, email: "fixture@example.test" }).id);
@@ -77,7 +76,6 @@ try {
     await assert.rejects(store.snapshots.display(snapshot), StorageCorruption);
     console.log(JSON.stringify({ ok: true }));
   } else if (input.kind === "once") {
-    // Services treat applied and replayed alike, so only this shows where runOnce reads the record.
     const now = "2026-11-14T00:00:00.000Z";
     const key = (operation: string) =>
       requestKey(input.ownerId, crypto.randomUUID(), operation, {});

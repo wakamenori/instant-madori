@@ -66,7 +66,6 @@ export function d1(database: D1Database) {
       const results = await database.batch(statements.map(prepare));
       if (results.length !== statements.length)
         throw new Error("D1 batch returned fewer results than statements");
-      // Each result is parsed by the descriptor at the same tuple position.
       return statements.map((statement, index) =>
         statement[decodeRows](results[index]?.results ?? []),
       ) as {

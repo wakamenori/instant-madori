@@ -165,26 +165,12 @@ export function updateOnceStatements(
   return { before: [], record, after: [statement] };
 }
 
-/** The writes of a once-only batch around its request record, in execution order. */
 export interface OnceBatch {
   before: SqlPart[];
   record: SqlPart;
   after: SqlPart[];
 }
 
-/**
- * Runs a once-only operation: `batch` as one D1 batch (a transaction). This function only
- * orders the checks around the batch; it cannot see whether the statements are coupled
- * correctly. Each operation designs its own SQL so that the record exists exactly when the
- * whole change happened, either through `updateOnceStatements` or, for inserts, a record
- * conditioned on the new rows.
- *
- * A request ID that already has a record can never apply twice: either its operation's
- * condition no longer holds and nothing is written, or the record insert hits the primary
- * key and the whole transaction rolls back. So the batch runs first, and the stored result is
- * read only when the batch failed or did not apply, which covers resends, concurrent resends
- * and reused IDs alike.
- */
 export async function runOnce<T>(
   db: D1,
   key: RequestKey,

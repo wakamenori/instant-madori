@@ -73,7 +73,6 @@ void test("Store and owner types reject unverified identities and duplicate owne
         ? -1
         : diagnostic.file?.getLineAndCharacterOfPosition(diagnostic.start).line,
     ]),
-    // One diagnostic per statement of the failing source, on that statement's line.
     [
       [2322, 13],
       [2741, 14],
