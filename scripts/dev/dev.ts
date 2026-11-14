@@ -1,5 +1,4 @@
 import { finishDevelopment } from "./dev-session.ts";
-import { cleanupWorkerContainers, snapshotWorkerContainers } from "./wrangler-containers.ts";
 import { ensureDevAccess } from "./local-access.ts";
 import { assertSucceeded, start, stop } from "../shared/processes.ts";
 import type { ProcessOutcome } from "../shared/processes.ts";
@@ -46,8 +45,6 @@ if (migrated) {
   console.info(
     "Geometry runs in Docker; the first amd64 image build takes several minutes. MADORI_DEV_CONTAINERS=0 disables containers.",
   );
-  const before =
-    process.env["MADORI_DEV_CONTAINERS"] === "0" ? undefined : snapshotWorkerContainers();
   const processes = [
     start(
       process.execPath,
@@ -75,10 +72,5 @@ if (migrated) {
   const result = await Promise.race([...processes.map(({ finished }) => finished), interruption]);
   // Decide the exit status before stopping: a Ctrl-C during shutdown must not hide a crash.
   const stoppedByUser = interrupted;
-  await finishDevelopment(result, stoppedByUser, {
-    stop: () => stop(processes),
-    cleanup: () => {
-      if (before) cleanupWorkerContainers(before);
-    },
-  });
+  await finishDevelopment(result, stoppedByUser, () => stop(processes));
 }

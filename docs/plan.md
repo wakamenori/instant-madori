@@ -634,7 +634,7 @@ Linux Container上のSolidCraftの動作、必要メモリと起動時間、WebG
    - 冪等な操作の文の組（`OnceBatch`）を、`updateOnceStatements` と、作成用の組み立て関数からしか作れない形にする。今は各操作が記録の文を自分で書き、変更と記録が結び付いていることは操作ごとの設計とテストに頼っている。
    - `authenticatedUser` が、認証を通ったことの証拠（`VerifiedIdentity` など）を受け取らないと `OwnerId` を作れない形にする。
 
-5. Containerを使うローカルセッションを同時に動かせるようにする。self-hosted runnerの `pnpm check --full` は、エージェントの手元の `pnpm dev`・`pnpm check --full` と同じMacで動く。MiniflareはDurable Objectの名前空間のキーを `<Worker名>-<クラス名>` で作り、Containerの名前はそのキーとDOのIDから決まるため、今は同時に起動すると衝突し、終了処理が他のセッションのContainerを削除することもある。セッションごとにランダムな接尾辞を付けたWorker名を `wrangler dev --name` で渡し、終了処理はそのセッションの名前に一致するContainerだけを削除する。Containerを二つ同時に起動し、両方が動き、片方の終了処理がもう片方を消さないことを確かめる。起動ごとに増えるローカルのイメージのタグとDockerのビルドキャッシュの回収も、ここで扱う。
+5. ローカルのDockerのイメージとビルドキャッシュの回収。Containerを起動するたびに `cloudflare-dev/geometrycontainer-geometry-*` のタグが一つ増え、self-hosted runnerの `--full` でも増える。ビルドキャッシュにはRustの依存のキャッシュ（Dockerfileのcache mount）も含まれ、消すと形状サービスのビルドが遅くなるため、残す量を決めて回収する。
 
 単位4から単位5へ持ち越すもの：同じjob IDからの二重の確定を防ぐ一意制約と、確定をやり直したときに二重に書かないこと、会話の区切りの列。stagingのR2で上書きを拒む書込みが効くことの確認（ローカルのminiflareでは確かめた。stagingのバケットは作成済みで、Workerはまだ単位4の版をデプロイしていない）。
 

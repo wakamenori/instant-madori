@@ -11,10 +11,6 @@ import { stripVTControlCharacters } from "node:util";
 import { fileURLToPath } from "node:url";
 import { accessAssertionHeader } from "@madori/contracts";
 import {
-  cleanupWorkerContainers,
-  snapshotWorkerContainers,
-} from "../../../../scripts/dev/wrangler-containers.ts";
-import {
   createAccessKey,
   formatEnvFile,
   localWorkerVars,
@@ -225,7 +221,6 @@ export async function startLocalWorker({
   let worker: CapturedProcess | undefined;
   let resumeWorker: (() => Promise<void>) | undefined;
   const state = join(directory, "state");
-  let before: ReturnType<typeof snapshotWorkerContainers> | undefined;
 
   /** The one teardown, for a failed start and for `stop()` alike. Safe to call again. */
   let disposing: Promise<void> | undefined;
@@ -233,9 +228,6 @@ export async function startLocalWorker({
     disposing ??= (async () => {
       const problems = await cleanupSteps([
         () => worker?.dispose(),
-        () => {
-          if (before) cleanupWorkerContainers(before);
-        },
         () => rm(directory, { recursive: true, force: true }),
       ]);
       if (problems.length > 0) throw new AggregateError(problems, "Local Worker cleanup failed");
@@ -262,7 +254,6 @@ export async function startLocalWorker({
     await writeFile(join(assets, "index.html"), testSpaHtml);
     await migrate(state);
 
-    before = containers ? snapshotWorkerContainers() : undefined;
     resumeWorker = async () => {
       const started = startWrangler(
         [
