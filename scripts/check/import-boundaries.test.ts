@@ -1,17 +1,29 @@
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync } from "node:fs";
-import { test } from "node:test";
+import { after, test } from "node:test";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, relative } from "node:path";
 import { ESLint } from "eslint";
 import { z } from "zod";
+import { createImportBoundaryChecker } from "./check-imports.ts";
+import type { typescriptScopes } from "./boundaries.ts";
 import {
+  boundaryTestIgnores,
   checkWorkerLayers,
   typescriptBoundaries,
-  typescriptScopes,
   workerLayers,
 } from "./boundaries.ts";
 
 const boundaryRules = new Set([
-  "no-restricted-imports",
   "no-restricted-syntax",
   "no-restricted-properties",
   "@typescript-eslint/no-import-type-side-effects",
@@ -20,9 +32,7 @@ const boundaryRules = new Set([
 ]);
 const eslint = new ESLint({
   ruleFilter: ({ ruleId }) => boundaryRules.has(ruleId),
-  overrideConfig: {
-    languageOptions: { parserOptions: { projectService: false, project: false } },
-  },
+  overrideConfig: { languageOptions: { parserOptions: { projectService: false, project: false } } },
 });
 const scopes = {
   web: "apps/web/src/api.ts",
@@ -43,78 +53,121 @@ const scopes = {
   "worker-user-service": "apps/worker/src/services/users.ts",
   "worker-other": "apps/worker/src/index.ts",
   contracts: "packages/contracts/src/index.ts",
-};
+} satisfies Record<keyof typeof typescriptScopes, string>;
 const importType = (specifier: string, name = "Domain") =>
   `import type { ${name} } from ${JSON.stringify(specifier)};`;
 const importValue = (specifier: string) => `import { value } from ${JSON.stringify(specifier)};`;
-
-const workerLayerPermissions: Record<
-  keyof typeof workerLayers,
-  { allowed: string[]; typeOnly: string[] }
-> = {
-  api: { allowed: ["services"], typeOnly: ["geometry"] },
-  services: { allowed: ["geometry"], typeOnly: ["storage"] },
-  storage: { allowed: [], typeOnly: [] },
-  geometry: { allowed: [], typeOnly: [] },
-  objects: { allowed: ["services"], typeOnly: [] },
+const root = mkdtempSync(join(tmpdir(), "madori-import-boundaries-"));
+after(() => rmSync(root, { recursive: true, force: true }));
+function write(path: string, text = "export const value = 1; export type Domain = string;") {
+  const destination = join(root, path);
+  mkdirSync(dirname(destination), { recursive: true });
+  writeFileSync(destination, text);
+}
+const options = {
+  target: "ES2022",
+  module: "ESNext",
+  moduleResolution: "Bundler",
+  allowImportingTsExtensions: true,
+  resolveJsonModule: true,
+  types: [],
+  paths: { "@storage/*": ["./src/storage/*"], "@api/*": ["./src/api/*"] },
 };
-type BoundaryCases = { rejected: string[]; allowed: string[] };
-const workerLayerCases = Object.fromEntries<BoundaryCases>(
-  Object.entries(workerLayerPermissions).flatMap(([layer, { allowed, typeOnly }]) => {
-    const forbidden = Object.keys(workerLayerPermissions).filter(
-      (target) => target !== layer && !allowed.includes(target) && !typeOnly.includes(target),
-    );
-    const specifiers = (target: string) => [
-      `../${target}/x.ts`,
-      `../../src/${target}/x.ts`,
-      `../${target}/nested/x.ts`,
-    ];
-    const runtimeImports = (specifier: string) => [
-      importValue(specifier),
-      `void import(${JSON.stringify(specifier)});`,
-      `export { value } from ${JSON.stringify(specifier)};`,
-    ];
-    const typeImports = (specifier: string) => [
-      importType(specifier),
-      `type X = import(${JSON.stringify(specifier)}).Domain;`,
-      `export type { Domain } from ${JSON.stringify(specifier)};`,
-    ];
-    const rows: [string, BoundaryCases][] = [
-      [
-        `worker-${layer}-layers`,
-        {
-          rejected: forbidden.flatMap((target) =>
-            specifiers(target).flatMap((specifier) => [
-              ...runtimeImports(specifier),
-              ...typeImports(specifier),
-            ]),
-          ),
-          allowed: [
-            ...[layer, ...allowed].flatMap((target) =>
-              specifiers(target).flatMap((specifier) => [
-                ...runtimeImports(specifier),
-                ...typeImports(specifier),
-              ]),
-            ),
-            ...typeOnly.flatMap((target) => specifiers(target).flatMap(typeImports)),
-            importValue("../log.ts"),
-            importType("@madori/contracts", "Project"),
-          ],
-        },
-      ],
-    ];
-    if (typeOnly.length) {
-      rows.push([
-        `worker-${layer}-type-only`,
-        {
-          rejected: typeOnly.flatMap((target) => specifiers(target).flatMap(runtimeImports)),
-          allowed: typeOnly.flatMap((target) => specifiers(target).flatMap(typeImports)),
-        },
-      ]);
-    }
-    return rows;
+write(
+  "package.json",
+  JSON.stringify({ name: "fixture", type: "module", devDependencies: { typescript: "*" } }),
+);
+for (const [path, name] of [
+  ["apps/web", "web"],
+  ["apps/worker", "worker"],
+  ["packages/contracts", "contracts"],
+]) {
+  write(
+    `${path}/tsconfig.json`,
+    JSON.stringify({
+      compilerOptions: options,
+      include: ["**/*.ts", "**/*.tsx", "**/*.mts", "**/*.cts"],
+    }),
+  );
+  write(
+    `${path}/package.json`,
+    JSON.stringify({
+      name: `@madori/${name}`,
+      type: "module",
+      imports: { "#api": "./src/api/x.ts", "#storage": "./src/storage/x.ts" },
+      exports: {
+        ".": "./src/index.ts",
+        "./*": "./src/*.ts",
+        ...(name === "worker"
+          ? { "./conditional": { import: "./src/api/x.ts", require: "./src/storage/x.ts" } }
+          : {}),
+        ...(name === "contracts"
+          ? { "./geometry-internal": "./src/generated/geometry-internal.ts" }
+          : {}),
+      },
+      dependencies: { "@madori/contracts": "workspace:*", zod: "*", "declared-external": "*" },
+    }),
+  );
+}
+write(
+  "scripts/tsconfig.json",
+  JSON.stringify({
+    compilerOptions: { ...options, module: "NodeNext", moduleResolution: "NodeNext" },
+    include: ["**/*.ts"],
   }),
 );
+mkdirSync(join(root, "node_modules/@madori"), { recursive: true });
+for (const [name, path] of [
+  ["contracts", "packages/contracts"],
+  ["web", "apps/web"],
+  ["worker", "apps/worker"],
+]) {
+  assert(path);
+  symlinkSync(join(root, path), join(root, `node_modules/@madori/${name}`), "dir");
+}
+for (const path of Object.values(scopes)) write(path);
+for (const layer of Object.keys(workerLayers)) {
+  for (const path of [`apps/worker/src/${layer}/x.ts`, `apps/worker/src/${layer}/nested/x.ts`])
+    write(path);
+}
+for (const path of [
+  "apps/web/src/index.ts",
+  "apps/web/src/worker/pool.ts",
+  "apps/web/src/style.css",
+  "apps/worker/src/geometry/types.d.ts",
+  "apps/worker/src/log.ts",
+  "apps/worker/src/geometry/geometry-protocol.ts",
+  "apps/worker/src/storage/store.ts",
+  "packages/contracts/src/generated/geometry-internal.ts",
+  "packages/contracts/src/generated/geometry-bodies.ts",
+  "packages/contracts/src/generated/display.ts",
+  "scripts/shared/repository.ts",
+  "scripts/dev/local-access.ts",
+  "scripts/check/check.ts",
+  "crates/viewer/pkg/madori_viewer.d.ts",
+])
+  write(path);
+write(
+  "apps/worker/worker-configuration.d.ts",
+  'declare module "cloudflare:workers" { export class WorkerEntrypoint {} }',
+);
+write("packages/contracts/src/generated/geometry-internal.schema.json", "{}");
+const checkFile = createImportBoundaryChecker(root);
+function resolved(source: string, path = scopes["worker-api"]) {
+  write(path, source);
+  return checkFile(path);
+}
+function specifier(from: string, target: string) {
+  const path = relative(dirname(join(root, from)), join(root, target)).replaceAll("\\", "/");
+  return path.startsWith(".") ? path : `./${path}`;
+}
+async function diagnostics(source: string, filePath: string) {
+  const results = await eslint.lintText(source, { filePath });
+  const messages = results.flatMap((result) => result.messages);
+  assert(!messages.some((message) => message.fatal), JSON.stringify(messages));
+  return messages.filter((message) => message.ruleId && boundaryRules.has(message.ruleId));
+}
+type BoundaryCases = { rejected: string[]; allowed: string[] };
 const storageNetworkGlobals = [
   'void fetch("https://example.test");',
   "new Headers();",
@@ -132,37 +185,7 @@ const storageNetworkGlobals = [
   ]),
 ];
 
-const cases: Record<string, BoundaryCases> = {
-  "normalized-specifiers": {
-    rejected: [
-      "./../../worker/src/api/app.ts",
-      "../../web/../worker/src/api/app.ts",
-      "../../scripts/dev/../shared/repository.ts",
-      "../../../packages//contracts/src/generated/geometry-internal.ts",
-      "../../scripts/dev//../shared/repository.ts",
-      "../../../../crates/viewer//pkg/madori_viewer.js",
-      "../..//worker/src/api/app.ts",
-      "../..//web/src/api.ts",
-      "..\\storage\\projects.ts",
-      "/repo/apps/worker/src/storage/revisions.ts",
-      "/repo/apps/web/src/api.ts",
-    ].map(importValue),
-    allowed: [importValue("./x.ts"), importValue("../x.ts")],
-  },
-  "production-test-imports": {
-    rejected: [
-      "./tests/helper.ts",
-      "./projects.test.ts",
-      "./projects.test.js",
-      "./projects.test",
-    ].map(importValue),
-    allowed: [
-      importValue("./projects.ts"),
-      importValue("./testing.ts"),
-      importValue("./test-utils.ts"),
-    ],
-  },
-  ...workerLayerCases,
+const syntaxCases: Record<string, BoundaryCases> = {
   "storage-binding-types": {
     rejected: [
       "type X = D1Database;",
@@ -191,18 +214,6 @@ const cases: Record<string, BoundaryCases> = {
     ],
     allowed: ["env.ASSETS;", 'type X = Env["GEOMETRY"];'],
   },
-  "worker-composition-entry": {
-    rejected: [importValue("../compose.ts"), 'export { serviceDeps } from "../compose.ts";'],
-    allowed: [importType("../compose.ts", "Dependencies"), importValue("../runtime.ts")],
-  },
-  "worker-store-construction": {
-    rejected: [
-      importValue("../storage/store.ts"),
-      importValue("../storage/d1.ts"),
-      importValue("../storage/r2.ts"),
-    ],
-    allowed: [importValue("../runtime.ts")],
-  },
   "owner-assertions": {
     rejected: [
       "const id = value as OwnerId;",
@@ -221,21 +232,6 @@ const cases: Record<string, BoundaryCases> = {
   "never-assertions": {
     rejected: ["const id: OwnerId = value as never;", "const id: OwnerId = <never>value;"],
     allowed: ["const unreachable: never = value;", "const checked = value satisfies never;"],
-  },
-  "storage-response": {
-    rejected: [
-      importType("@madori/contracts", "ProjectResponse"),
-      'import type { RevisionListResponse as Page } from "@madori/contracts";',
-      importType("../../../../packages/contracts/src/index.ts", "PatternStateResponse"),
-      'import * as contracts from "@madori/contracts";',
-      'export type { ProjectResponse } from "@madori/contracts";',
-      'type X = import("@madori/contracts").ProjectResponse.foo;',
-      importType("@madori/contracts", "ApiError"),
-      importType("@madori/contracts", "ApiErrorCode"),
-      'import { apiErrorSchema } from "@madori/contracts";',
-      'import { apiErrorCodeSchema } from "@madori/contracts";',
-    ],
-    allowed: [importType("@madori/contracts", "Project"), importValue("./rows.ts")],
   },
   "storage-unchecked-schemas": {
     rejected: [
@@ -273,411 +269,428 @@ const cases: Record<string, BoundaryCases> = {
       "const Request = { value: 1 }; void Request.value;",
     ],
   },
-  "web-worker": {
-    rejected: [
-      "../../worker/src/api/app.ts",
-      "../../../worker/src/api/app.ts",
-      "../../../apps/worker/src/api/app.ts",
-      "@madori/worker",
-      "@madori/worker/api",
-    ].map(importValue),
-    allowed: [
-      importType("@madori/contracts", "Project"),
-      importValue("./viewer/wasm.ts"),
-      importValue("./worker/pool.ts"),
-      importValue("./worker"),
-    ],
-  },
-  "web-scripts": {
-    rejected: ["../../../scripts/shared/repository.ts", "../../scripts/dev/local-access.ts"].map(
-      importValue,
-    ),
-    allowed: [importType("@madori/contracts", "Project"), importValue("./viewer/wasm.ts")],
-  },
-  "web-config-scripts": {
-    rejected: ["../../scripts/shared/repository.ts", "../../scripts/check/check.ts"].map(
-      importValue,
-    ),
-    allowed: [importValue("../../scripts/dev/local-access.ts"), importValue("vite")],
-  },
-  "worker-web": {
-    rejected: [
-      "../../web/src/api.ts",
-      "../../../apps/web/src/api.ts",
-      "@madori/web",
-      "@madori/web/viewer",
-    ].map(importValue),
-    allowed: [
-      importType("@madori/contracts", "Project"),
-      importValue("zod"),
-      importValue("./web/x.ts"),
-      importValue("./web"),
-    ],
-  },
-  "contracts-apps": {
-    rejected: [
-      "../../../apps/web/src/api.ts",
-      "../../../apps/worker/src/api/app.ts",
-      "@madori/worker",
-      "@madori/web/api",
-    ].map(importValue),
-    allowed: [importValue("zod"), importValue("./generated/display.ts")],
-  },
-  "web-internal-geometry": {
-    rejected: [
-      "@madori/contracts/geometry-internal",
-      "../../../packages/contracts/src/generated/geometry-internal.ts",
-      "../../../packages/contracts/src/generated/geometry-bodies.ts",
-      "../../../packages/contracts/src/generated/geometry-internal.schema.json",
-      "../../../packages/contracts/src/generated/geometry-internal.js",
-    ].map(importValue),
-    allowed: [importValue("@madori/contracts")],
-  },
-  "web-viewer-bindings": {
-    rejected: [importValue("../../../../crates/viewer/pkg/madori_viewer.js")],
-    allowed: [importValue("./viewer/wasm.ts")],
-  },
 };
 
-async function diagnostics(source: string, filePath: string) {
-  const results = await eslint.lintText(source, { filePath });
-  assert.equal(results.length, 1);
-  const messages = results.flatMap((result) => result.messages);
-  assert(!messages.some((message) => message.fatal), JSON.stringify(messages));
-  return messages.filter((message) => message.ruleId && boundaryRules.has(message.ruleId));
+const workerLayerPermissions: Record<
+  keyof typeof workerLayers,
+  { allowed: string[]; typeOnly: string[] }
+> = {
+  api: { allowed: ["services"], typeOnly: ["geometry"] },
+  services: { allowed: ["geometry"], typeOnly: ["storage"] },
+  storage: { allowed: [], typeOnly: [] },
+  geometry: { allowed: [], typeOnly: [] },
+  objects: { allowed: ["services"], typeOnly: [] },
+};
+const importCases: Record<string, string[]> = {
+  "production-test-imports": ["apps/worker/tests/helper.ts", "apps/worker/src/example.test.ts"],
+  "worker-composition-entry": ["apps/worker/src/compose.ts"],
+  "worker-store-construction": [
+    "apps/worker/src/storage/store.ts",
+    "apps/worker/src/storage/d1.ts",
+    "apps/worker/src/storage/r2.ts",
+  ],
+  "storage-response": ["packages/contracts/src/index.ts"],
+  "web-worker": ["apps/worker/src/api/app.ts"],
+  "web-scripts": ["scripts/dev/local-access.ts", "scripts/shared/repository.ts"],
+  "web-config-scripts": ["scripts/check/check.ts", "scripts/shared/repository.ts"],
+  "worker-web": ["apps/web/src/api.ts"],
+  "contracts-apps": ["apps/web/src/api.ts", "apps/worker/src/api/app.ts"],
+  "web-internal-geometry": [
+    "packages/contracts/src/index.ts",
+    "packages/contracts/src/generated/geometry-internal.ts",
+    "packages/contracts/src/generated/geometry-bodies.ts",
+    "packages/contracts/src/generated/geometry-internal.schema.json",
+  ],
+  "web-viewer-bindings": ["crates/viewer/pkg/madori_viewer.d.ts"],
+};
+for (const [layer, { allowed, typeOnly }] of Object.entries(workerLayerPermissions)) {
+  importCases[`worker-${layer}-layers`] = Object.keys(workerLayerPermissions)
+    .filter((target) => target !== layer && !allowed.includes(target) && !typeOnly.includes(target))
+    .flatMap((target) => [
+      `apps/worker/src/${target}/x.ts`,
+      `apps/worker/src/${target}/nested/x.ts`,
+    ]);
+  if (typeOnly.length)
+    importCases[`worker-${layer}-type-only`] = typeOnly.map(
+      (target) => `apps/worker/src/${target}/x.ts`,
+    );
 }
 
-assert.deepEqual(
-  Object.keys(cases),
-  typescriptBoundaries.map((row) => row.id),
-);
+void test("every boundary row has explicit rejected and allowed cases", () => {
+  assert.deepEqual(
+    [...Object.keys(importCases), ...Object.keys(syntaxCases)].sort(),
+    typescriptBoundaries.map((row) => row.id).sort(),
+  );
+});
 for (const row of typescriptBoundaries) {
-  void test(`TypeScript boundary ${row.id} rejects violations and allows its dependencies`, async () => {
-    const fixture = cases[row.id];
-    assert(fixture);
+  void test(`boundary ${row.id} rejects violations and allows dependencies`, async () => {
     for (const scope of row.from) {
-      const filePath = scopes[scope];
-      for (const source of fixture.rejected) {
-        const messages = await diagnostics(source, filePath);
-        assert(
-          messages.some((message) => message.message.includes(row.message)),
-          `${filePath}: ${source}\n${JSON.stringify(messages)}`,
-        );
-      }
-      for (const source of fixture.allowed) {
-        assert.deepEqual(await diagnostics(source, filePath), [], `${filePath}: ${source}`);
+      const from = scopes[scope];
+      if (row.kind === "imports") {
+        const targets = importCases[row.id];
+        assert(targets?.length, row.id);
+        for (const target of targets) {
+          if (row.id === "production-test-imports") write(target);
+          const name = specifier(from, target);
+          const sources: string[] = [
+            row.id === "storage-response" ? importType(name, "ProjectResponse") : importValue(name),
+            `void import(${JSON.stringify(name)});`,
+            `export * from ${JSON.stringify(name)};`,
+            ...(!row.allowTypeImports
+              ? [
+                  `type X = import(${JSON.stringify(name)}).ProjectResponse;`,
+                  `export type { ProjectResponse } from ${JSON.stringify(name)};`,
+                ]
+              : []),
+          ];
+          for (const source of sources) {
+            assert(
+              resolved(source, from).some((diagnostic) => diagnostic.boundaryId === row.id),
+              `${row.id} ${from}: ${source}`,
+            );
+          }
+          const testFile = from.replace(/\.ts$/u, ".test.ts");
+          const testSource: string =
+            row.id === "storage-response"
+              ? importType(specifier(testFile, target), "ProjectResponse")
+              : importValue(specifier(testFile, target));
+          assert.equal(
+            resolved(testSource, testFile).some((diagnostic) => diagnostic.boundaryId === row.id),
+            row.appliesToTests === true,
+            `${row.id} tests`,
+          );
+        }
+        const safe = `${dirname(from)}/safe.ts`;
+        write(safe);
+        const allowed =
+          row.id === "web-internal-geometry"
+            ? importValue("@madori/contracts")
+            : importValue(specifier(from, safe));
+        assert.deepEqual(resolved(allowed, from), [], `${row.id} ${from}`);
+      } else {
+        const cases = syntaxCases[row.id];
+        assert(cases?.rejected.length && cases.allowed.length, row.id);
+        for (const source of cases.rejected)
+          assert(
+            (await diagnostics(source, from)).some((diagnostic) =>
+              diagnostic.message.includes(row.message),
+            ),
+            `${row.id} ${from}: ${source}`,
+          );
+        for (const source of cases.allowed)
+          assert.deepEqual(await diagnostics(source, from), [], `${row.id} ${from}: ${source}`);
       }
     }
   });
 }
 
-void test("production exceptions preserve all other web boundaries", async () => {
-  assert.deepEqual(
-    await diagnostics(
-      importValue("../../../../crates/viewer/pkg/madori_viewer.js"),
-      scopes["web-wasm"],
-    ),
-    [],
-  );
-  for (const source of cases["web-internal-geometry"]?.rejected ?? []) {
-    assert(
-      (await diagnostics(source, scopes["web-wasm"])).some((message) =>
-        message.message.includes("Use public"),
-      ),
-    );
-  }
-});
-
-void test("test files may cross layers except rows marked for tests", async () => {
-  for (const row of typescriptBoundaries) {
-    if (row.appliesToTests) continue;
-    const fixture = cases[row.id];
-    assert(fixture);
-    for (const scope of row.from) {
-      const path = scopes[scope].replace(/\.tsx?$/u, ".test.ts");
-      for (const source of fixture.rejected) {
-        const messages = await diagnostics(source, path);
-        if (row.id === "web-config-scripts") {
-          assert.equal(messages.length, 1, `${path}: ${source}`);
-          assert.equal(messages[0]?.ruleId, "no-restricted-imports");
-          assert(messages[0]?.message.includes("Web must not import development scripts."));
-        } else assert.deepEqual(messages, [], `${path}: ${source}`);
-      }
-    }
-  }
-  assert.deepEqual(
-    await diagnostics(importValue("../src/api/http.ts"), "apps/worker/tests/rpc/example.ts"),
-    [],
-  );
-  const marked = typescriptBoundaries.filter((row) => row.appliesToTests);
-  assert(marked.length > 0);
-  for (const row of marked) {
-    for (const source of cases[row.id]?.rejected ?? []) {
-      for (const path of ["owner-assertions", "identity-assertions", "never-assertions"].includes(
-        row.id,
-      )
-        ? ["apps/worker/src/services/example.test.ts", "apps/worker/tests/rpc/example.ts"]
-        : row.id === "web-viewer-bindings"
-          ? ["apps/web/src/api.test.ts", "apps/web/tests/x.ts"]
-          : ["apps/web/src/viewer/viewport-session.test.ts", "apps/web/tests/x.ts"]) {
-        assert(
-          (await diagnostics(source, path)).some((m) => m.message.includes(row.message)),
-          `${path}: ${source}`,
-        );
-      }
-    }
-  }
-});
-
-void test("nested source directories still inherit both app and layer boundaries", async () => {
-  for (const [filePath, source, message] of [
-    [
-      "apps/worker/src/api/nested/handler.ts",
-      importType("../../storage/projects.ts"),
-      "Worker api must not import",
-    ],
-    [
-      "apps/worker/src/storage/nested/query.ts",
-      importType("../../../src/services/projects.ts"),
-      "Worker storage must not import",
-    ],
-    [
-      "apps/worker/src/services/nested/action.ts",
-      importValue("../../../../web/src/api.ts"),
-      "Worker must not import",
-    ],
-    [
-      "apps/web/src/viewer/nested/view.ts",
-      importValue("../../../../../scripts/check/check.ts"),
-      "Web must not import",
-    ],
-  ]) {
-    assert(filePath && source && message);
-    assert(
-      (await diagnostics(source, filePath)).some((diagnostic) =>
-        diagnostic.message.includes(message),
-      ),
-    );
-  }
-});
-
-void test("A alternate module syntax obeys import boundaries", async () => {
-  for (const row of typescriptBoundaries.filter((row) => row.kind === "imports")) {
-    const source = cases[row.id]?.rejected[0];
-    assert(source);
-    const specifier = /"([^"]+)"/u.exec(source)?.[1];
-    assert(specifier);
-    for (const scope of row.from) {
-      const variants: string[] = [
-        `void import(${JSON.stringify(specifier)});`,
-        ...(!row.allowTypeImports
-          ? [`type X = import(${JSON.stringify(specifier)}).ProjectResponse;`]
-          : []),
-      ];
-      for (const variant of variants) {
-        assert(
-          (await diagnostics(variant, scopes[scope])).some((m) => m.message.includes(row.message)),
-          variant,
-        );
-      }
-    }
-  }
-  for (const path of Object.values(scopes)) {
-    assert((await diagnostics("void import(path);", path)).length > 0, path);
-    assert.deepEqual(await diagnostics('void import("zod");', path), [], path);
-  }
-  assert.deepEqual(
-    await diagnostics(
-      'type X = import("../geometry/geometry-protocol.ts").GeometryResult;',
-      scopes["worker-api"],
-    ),
-    [],
-  );
-});
-
-void test("B unnormalized specifiers are rejected in every scope", async () => {
-  for (const path of Object.values(scopes)) {
-    for (const specifier of [
-      "./../../worker/src/api/app.ts",
-      "../../web/../worker/src/api/app.ts",
-      "../../scripts/dev/../shared/repository.ts",
-      "./x/./module.ts",
-    ]) {
-      assert((await diagnostics(importValue(specifier), path)).length > 0, `${path}: ${specifier}`);
-    }
-    for (const specifier of [
-      "../../worker-like/x.ts",
-      "./x.ts",
-      "../x.ts",
-      "../../x.ts",
-      "@scope/lib",
-      "./dot.name/x.ts",
-    ]) {
-      assert.deepEqual(
-        await diagnostics(importValue(specifier), path),
-        [],
-        `${path}: ${specifier}`,
+void test("Worker layers permit precisely their runtime and type dependencies", () => {
+  for (const [layer, { allowed, typeOnly }] of Object.entries(workerLayerPermissions)) {
+    const from = `apps/worker/src/${layer}/nested/source.ts`;
+    for (const target of Object.keys(workerLayers)) {
+      const name = specifier(from, `apps/worker/src/${target}/x.ts`);
+      assert.equal(
+        resolved(importValue(name), from).length === 0,
+        target === layer || allowed.includes(target),
+        `${layer} -> ${target}`,
+      );
+      assert.equal(
+        resolved(importType(name), from).length === 0,
+        target === layer || allowed.includes(target) || typeOnly.includes(target),
+        `${layer} -> type ${target}`,
       );
     }
   }
 });
 
-void test("C and J web and Vite use only public contracts and wrapped viewer bindings", async () => {
-  for (const path of [scopes.web, scopes["web-config"]]) {
-    for (const specifier of [
-      "../../../packages/contracts/src/generated/geometry-bodies.ts",
-      "../../../packages/contracts/src/generated/geometry-internal.schema.json",
-      "../../../packages/contracts/src/generated/geometry-internal.js",
-      "../../../packages/contracts/src/index.ts",
-      "@madori/contracts/geometry-internal",
-      "../../../crates/viewer/pkg/madori_viewer.js",
-    ]) {
-      assert((await diagnostics(importValue(specifier), path)).length > 0, `${path}: ${specifier}`);
+void test("separators, redundant segments, case and package exports identify the same file", () => {
+  const from = scopes["worker-storage"];
+  const canonical = resolved(importValue("../api/projects.ts"), from).map(
+    (diagnostic) => diagnostic.boundaryId,
+  );
+  assert(canonical.includes("worker-storage-layers"));
+  for (const name of [
+    "..//api/projects.ts",
+    "..\\api\\projects.ts",
+    "./../api/./projects.ts",
+    "../services/../api/projects.ts",
+    "@madori/worker/api/projects",
+    "@api/projects.ts",
+  ]) {
+    assert.deepEqual(
+      resolved(importValue(name), from).map((diagnostic) => diagnostic.boundaryId),
+      canonical,
+      name,
+    );
+  }
+  const alternate = "apps/worker/src/API/projects.ts";
+  try {
+    const same =
+      realpathSync.native(join(root, alternate)) ===
+      realpathSync.native(join(root, "apps/worker/src/api/projects.ts"));
+    assert(same);
+    assert.deepEqual(
+      resolved(importValue("../API/projects.ts"), from).map((diagnostic) => diagnostic.boundaryId),
+      canonical,
+    );
+  } catch (error) {
+    if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
+    assert(
+      resolved(importValue("../API/projects.ts"), from).some(
+        (diagnostic) => diagnostic.boundaryId === "unresolved-import",
+      ),
+    );
+  }
+});
+
+void test("unrelated worker, compose, owner and store files are allowed", () => {
+  for (const [from, targets] of [
+    [scopes.web, ["apps/web/src/worker/pool.ts", "apps/web/src/worker/index.ts"]],
+    [
+      scopes["worker-api"],
+      [
+        "apps/worker/src/api/helpers/compose.ts",
+        "apps/worker/src/api/helpers/owner.ts",
+        "apps/worker/src/api/helpers/storage/store.ts",
+        "apps/worker/src/compose.helpers.ts",
+      ],
+    ],
+  ] satisfies [string, string[]][]) {
+    for (const target of targets) {
+      write(target);
+      assert.deepEqual(resolved(importValue(specifier(from, target)), from), [], target);
     }
   }
 });
 
-void test("D storage rejects response schemas but permits domain schemas and display content type", async () => {
+void test("parenthesized dynamic imports and Vite queries cannot hide forbidden targets", () => {
   assert(
-    (
-      await diagnostics(
-        'import { projectResponseSchema } from "@madori/contracts";',
-        scopes["worker-storage"],
-      )
-    ).length > 0,
+    resolved('void import((("../storage/x.ts"))));').some(
+      (diagnostic) => diagnostic.boundaryId === "worker-api-layers",
+    ),
   );
+  assert.deepEqual(resolved('void import((("../services/x.ts"))));'), []);
+  for (const suffix of ["?raw", "?url", "#fragment", "?raw#fragment"]) {
+    assert(
+      resolved(`void import("../storage/x.ts${suffix}");`).some(
+        (diagnostic) => diagnostic.boundaryId === "worker-api-layers",
+      ),
+    );
+    assert.deepEqual(resolved(`void import("./worker/pool.ts${suffix}");`, scopes.web), []);
+  }
+  assert.deepEqual(resolved('void import("./worker/pool.ts?worker");', scopes.web), []);
+  assert(
+    resolved('void import("../worker/src/api/app.ts?raw");', scopes["web-config"]).some(
+      (diagnostic) => diagnostic.boundaryId === "web-worker",
+    ),
+  );
+});
+
+void test("type references, module augmentations and ambient re-exports obey boundaries", () => {
+  for (const [source, from, id] of [
+    [
+      '/// <reference types="../../../apps/worker/worker-configuration.d.ts" />',
+      scopes.contracts,
+      "contracts-apps",
+    ],
+    [
+      '/// <reference path="../../../apps/worker/worker-configuration.d.ts" />',
+      scopes.contracts,
+      "contracts-apps",
+    ],
+    ['export {}; declare module "../storage/x.ts" {}', scopes["worker-api"], "worker-api-layers"],
+    ['export {}; declare module "@storage/x.ts" {}', scopes["worker-api"], "worker-api-layers"],
+    [
+      'declare module "ambient-library" { export { value } from "../storage/x.ts"; }',
+      scopes["worker-api"],
+      "worker-api-layers",
+    ],
+    ['import x = require("../storage/x.ts");', scopes["worker-api"], "worker-api-layers"],
+    ['import type x = require("../storage/x.ts");', scopes["worker-api"], "worker-api-layers"],
+  ]) {
+    assert(source && from && id);
+    assert(
+      resolved(source, from).some((diagnostic) => diagnostic.boundaryId === id),
+      source,
+    );
+  }
+  for (const source of [
+    '/// <reference types="../geometry/types.d.ts" />',
+    'export {}; declare module "../geometry/x.ts" {}',
+    'export {}; declare module "@api/x.ts" {}',
+    'declare module "ambient-library" { export { value } from "../services/x.ts"; }',
+    'import x = require("../services/x.ts");',
+    'import type x = require("../geometry/x.ts");',
+  ])
+    assert.deepEqual(resolved(source), [], source);
+});
+
+void test("contracts public entry keeps its declared package spelling", () => {
+  for (const from of [
+    scopes.web,
+    scopes["web-config"],
+    scopes["web-wasm"],
+    scopes["web-viewer-tests"],
+  ]) {
+    assert.deepEqual(resolved(importValue("@madori/contracts"), from), []);
+    for (const name of [
+      specifier(from, "packages/contracts/src/index.ts"),
+      "@madori/contracts/geometry-internal",
+    ])
+      assert(
+        resolved(importValue(name), from).some(
+          (diagnostic) => diagnostic.boundaryId === "web-internal-geometry",
+        ),
+        name,
+      );
+  }
+});
+
+void test("namespace, aliases and import qualifiers enforce response name restrictions", () => {
+  for (const source of [
+    'import type { ProjectResponse as Alias } from "@madori/contracts";',
+    'export type { ApiError as Alias } from "@madori/contracts";',
+    'import * as contracts from "@madori/contracts";',
+    'type X = import("@madori/contracts").ProjectResponse.foo;',
+    'type X = typeof import("@madori/contracts");',
+    'import x = require("@madori/contracts");',
+  ])
+    assert(
+      resolved(source, scopes["worker-storage"]).some(
+        (diagnostic) => diagnostic.boundaryId === "storage-response",
+      ),
+      source,
+    );
   assert.deepEqual(
-    await diagnostics(
-      'import { patternSchema, projectSchema, revisionSchema, userSchema, displayContentType } from "@madori/contracts";',
+    resolved(
+      'import type { Project, Pattern } from "@madori/contracts";',
       scopes["worker-storage"],
     ),
     [],
   );
 });
 
-void test("F every TypeScript extension inherits base lint and boundary rules", async () => {
-  for (const extension of ["ts", "tsx", "mts", "cts"]) {
-    for (const [scope, path] of Object.entries(scopes)) {
-      const filePath = path.replace(/\.ts$/u, `.${extension}`);
+void test("type-only declarations and import types do not emit a runtime dependency", async () => {
+  for (const source of [
+    'import type { Domain } from "../geometry/x.ts";',
+    'export type { Domain } from "../geometry/x.ts";',
+    'type X = import("../geometry/x.ts").Domain;',
+    'type X = typeof import("../geometry/x.ts");',
+    'import type x = require("../geometry/x.ts");',
+  ])
+    assert.deepEqual(resolved(source), [], source);
+  for (const source of [
+    'import { type Domain } from "../geometry/x.ts";',
+    'import { type Domain, value } from "../geometry/x.ts";',
+    'export { type Domain } from "../geometry/x.ts";',
+    'import "../geometry/x.ts";',
+  ])
+    assert(
+      resolved(source).some((diagnostic) => diagnostic.boundaryId === "worker-api-type-only"),
+      source,
+    );
+  assert(
+    (await diagnostics('import { type Domain } from "../geometry/x.ts";', scopes["worker-api"]))
+      .length > 0,
+  );
+});
 
+void test("unresolvable imports fail, including tests, but builtins and declared packages are exempt", () => {
+  for (const from of [scopes.web, scopes["worker-api"], "apps/worker/tests/example.ts"]) {
+    for (const name of [
+      "./missing.ts",
+      "undeclared-package",
+      "@madori/contracts/missing",
+      "./missing.css",
+      "node:fake-builtin",
+    ])
       assert(
-        (
-          await diagnostics(
-            importValue(
-              scope.startsWith("web") && filePath.includes(".test.")
-                ? "@madori/contracts/geometry-internal"
-                : scope === "contracts"
-                  ? "../../../apps/web/src/api.ts"
-                  : scope.startsWith("web")
-                    ? "../../../worker/src/index.ts"
-                    : "../../../web/src/api.ts",
-            ),
-            filePath,
-          )
-        ).length > 0,
-        filePath,
+        resolved(importValue(name), from).some(
+          (diagnostic) => diagnostic.boundaryId === "unresolved-import",
+        ),
+        `${from}: ${name}`,
       );
-      const config = z
-        .object({ rules: z.record(z.string(), z.unknown()) })
-        .parse(await eslint.calculateConfigForFile(filePath));
-      assert(config.rules["@typescript-eslint/no-explicit-any"], filePath);
-    }
+    for (const name of ["node:fs", "fs/promises", "declared-external/subpath"])
+      assert.deepEqual(resolved(importValue(name), from), [], name);
   }
+  assert.deepEqual(resolved('import "./style.css";', scopes.web), []);
+  assert.deepEqual(resolved('import { WorkerEntrypoint } from "cloudflare:workers";'), []);
+  assert(
+    resolved('import "cloudflare:workers";', scopes.web).some(
+      (diagnostic) => diagnostic.boundaryId === "unresolved-import",
+    ),
+  );
+  assert(
+    resolved('import "typescript";', scopes.web).some(
+      (diagnostic) => diagnostic.boundaryId === "unresolved-import",
+    ),
+  );
 });
 
-void test("G HTTP globals cannot be accessed through self, destructuring, or typeof", async () => {
-  for (const path of [scopes["worker-services"], scopes["worker-storage"]]) {
-    for (const source of [
-      "self.Response.json({});",
-      "const { Response } = globalThis;",
-      "const { Request: Input } = self;",
-      "type X = InstanceType<typeof Response>;",
-      "type X = typeof Request;",
-      "type X = typeof globalThis.Response;",
-      "type X = typeof self.Request;",
-      "type X = self.Response;",
-    ]) {
-      assert((await diagnostics(source, path)).length > 0, `${path}: ${source}`);
-    }
-  }
-});
-
-void test("H only immediate viewer tests may load viewer bindings directly", async () => {
-  const source = importValue("../../../../crates/viewer/pkg/madori_viewer.js");
-  for (const path of [
+void test("tests preserve viewer and cross-layer exceptions", () => {
+  const target = "crates/viewer/pkg/madori_viewer.d.ts";
+  for (const from of [scopes["web-wasm"], scopes["web-viewer-tests"]])
+    assert.deepEqual(resolved(importValue(specifier(from, target)), from), []);
+  for (const from of [
     "apps/web/src/api.test.ts",
     "apps/web/tests/example.ts",
     "apps/web/src/viewer/nested/example.test.ts",
     "apps/web/src/viewer/example.test.tsx",
-    "apps/web/src/viewer/example.test.mts",
-    "apps/web/src/viewer/example.test.cts",
-  ]) {
-    assert((await diagnostics(source, path)).length > 0, path);
-  }
-  assert.deepEqual(await diagnostics(source, "apps/web/src/viewer/viewport-session.test.ts"), []);
-});
-
-void test("I inline-only type imports cannot emit a runtime geometry import", async () => {
-  assert(
-    (
-      await diagnostics(
-        'import { type GeometryResult } from "../geometry/geometry-protocol.ts";',
-        scopes["worker-api"],
-      )
-    ).length > 0,
+  ])
+    assert(
+      resolved(importValue(specifier(from, target)), from).some(
+        (diagnostic) => diagnostic.boundaryId === "web-viewer-bindings",
+      ),
+    );
+  assert.deepEqual(
+    resolved('import { value } from "../src/api/x.ts";', "apps/worker/tests/example.ts"),
+    [],
   );
 });
 
-void test("J objects call only services and reject geometry types and Container connections", async () => {
-  const path = "apps/worker/src/objects/pattern.ts";
-  assert((await diagnostics(importValue("../geometry/geometry-client.ts"), path)).length > 0);
-  assert((await diagnostics(importType("../geometry/geometry-protocol.ts"), path)).length > 0);
-  assert.deepEqual(await diagnostics(importValue("../services/projects.ts"), path), []);
-});
-
-void test("K documented rules include UI, viewer loading, scripts, and cache safety", () => {
-  const section = readFileSync(new URL("../../docs/plan.md", import.meta.url), "utf8")
-    .split("### 4.2")[1]
-    ?.split("### 4.3")[0];
-  assert(section);
-  for (const text of ["apps/geometry` には", "viewer/wasm.ts", "scripts/dev", "solidcraft-io"])
-    assert(section.includes(text), text);
-});
-
-void test("L docs describe coordinated rule changes and remaining checker limits", () => {
-  const agents = readFileSync(new URL("../../AGENTS.md", import.meta.url), "utf8");
-  const readme = readFileSync(new URL("../../README.md", import.meta.url), "utf8");
-  assert(agents.includes("検査を通すことだけを目的"));
-  for (const text of ["require()", "再export", "fetch", "Headers", "Web内の同名フォルダー"])
-    assert(readme.includes(text), text);
-});
-
-void test("Worker layer permissions apply to nested source files", async () => {
-  for (const [layer, { allowed, typeOnly }] of Object.entries(workerLayerPermissions)) {
-    for (const target of Object.keys(workerLayerPermissions)) {
-      const path = `apps/worker/src/${layer}/nested/example.ts`;
-      const specifier = `../../${target}/x.ts`;
-      for (const source of [importValue(specifier), `void import(${JSON.stringify(specifier)});`]) {
-        const messages = await diagnostics(source, path);
-        if (target === layer || allowed.includes(target)) assert.deepEqual(messages, [], source);
-        else assert(messages.length > 0, `${path}: ${source}`);
-      }
-      const source = importType(specifier);
-      const messages = await diagnostics(source, path);
-      if (target === layer || allowed.includes(target) || typeOnly.includes(target))
-        assert.deepEqual(messages, [], source);
-      else assert(messages.length > 0, `${path}: ${source}`);
-    }
+void test("every TypeScript extension retains boundaries and strict lint", async () => {
+  for (const extension of ["ts", "tsx", "mts", "cts"]) {
+    const from = scopes["worker-storage"].replace(/\.ts$/u, `.${extension}`);
+    assert(
+      resolved(importType("../api/x.ts"), from).some(
+        (diagnostic) => diagnostic.boundaryId === "worker-storage-layers",
+      ),
+    );
+    const config = z
+      .object({ rules: z.record(z.string(), z.unknown()) })
+      .parse(await eslint.calculateConfigForFile(from));
+    assert(config.rules["@typescript-eslint/no-explicit-any"]);
   }
 });
 
-void test("undeclared Worker directories fail while declared layers and the real tree pass", () => {
+void test("source files retain computed-import, glob and URL restrictions", async () => {
+  for (const from of [
+    ...Object.values(scopes),
+    "apps/worker/src/api/example.test.ts",
+    "packages/contracts/src/example.test.ts",
+  ]) {
+    for (const source of [
+      "void import(path);",
+      'import.meta.glob("./**/*.ts");',
+      'const glob = import.meta["glob"];',
+    ])
+      assert((await diagnostics(source, from)).length > 0, `${from}: ${source}`);
+    const source = 'new URL("./fixture", import.meta.url);';
+    const isTest = /\.test\.|\/tests\//u.test(from);
+    assert.equal((await diagnostics(source, from)).length > 0, !isTest, from);
+  }
+  assert.deepEqual(await diagnostics('void import((("./x.ts")));', scopes.web), []);
+  assert.deepEqual(
+    await diagnostics('new URL("./fixture", import.meta.url);', "apps/worker/tests/example.ts"),
+    [],
+  );
+  assert(boundaryTestIgnores.length > 0);
+});
+
+void test("undeclared Worker directories fail and the real tree passes", () => {
   assert.deepEqual(checkWorkerLayers(Object.keys(workerLayers)), []);
-  for (const directory of ["new-layer", "constructor", "toString", "__proto__"]) {
-    const violations = checkWorkerLayers([...Object.keys(workerLayers), directory]);
-    assert.equal(violations.length, 1);
-    assert(violations[0]?.includes(`apps/worker/src/${directory}`));
-  }
+  for (const directory of ["new-layer", "constructor", "toString", "__proto__"])
+    assert.equal(checkWorkerLayers([...Object.keys(workerLayers), directory]).length, 1);
   const directories = readdirSync(new URL("../../apps/worker/src/", import.meta.url), {
     withFileTypes: true,
   })
@@ -687,217 +700,104 @@ void test("undeclared Worker directories fail while declared layers and the real
   assert.deepEqual(checkWorkerLayers(directories), []);
 });
 
-void test("review 1 duplicate separators and backslashes cannot bypass normalization", async (t) => {
-  for (const [scope, specifier] of [
-    ["web", "../../../packages//contracts/src/generated/geometry-internal.ts"],
-    ["web-config", "../../scripts/dev//../shared/repository.ts"],
-    ["web", "../../../../crates/viewer//pkg/madori_viewer.js"],
-    ["web", "../..//worker/src/api/app.ts"],
-    ["worker-api", "../..//web/src/api.ts"],
-    ["worker-api", "..\\storage\\projects.ts"],
-  ] satisfies [keyof typeof scopes, string][]) {
-    await t.test(`${scope} ${specifier}`, async () => {
-      const messages = await diagnostics(importType(specifier), scopes[scope]);
-      assert(
-        messages.some((message) =>
-          message.message.includes("normalized relative module specifiers"),
-        ),
-      );
-    });
-  }
-});
-
-void test("review 2 glob and module-relative URLs cannot load code outside import checks", async (t) => {
-  for (const source of [
-    "import.meta.glob(`../../worker/src/**/*.ts`);",
-    'import.meta.glob("./**/*.ts", { base: "../../worker/src" });',
-    "import.meta.glob([`../../worker/src/**/*.ts`]);",
-    'import.meta["glob"]("./**/*.ts", { base: "../../worker/src" });',
-    "new URL(`../../worker/src/api/app.ts`, import.meta.url);",
-    'new URL("./safe.ts", import.meta.url);',
-  ]) {
-    await t.test(source, async () => {
-      assert((await diagnostics(source, scopes.web)).length > 0, source);
-    });
-  }
-});
-
-void test("review 3 inline type re-exports must use a type-only declaration", async () => {
-  const source = 'export { type GeometryResult } from "../geometry/geometry-protocol.ts";';
-  const messages = await diagnostics(source, scopes["worker-api"]);
-  assert(messages.some((message) => message.ruleId === "no-restricted-syntax"));
-  assert.deepEqual(
-    await diagnostics(
-      'export type { GeometryResult } from "../geometry/geometry-protocol.ts";',
-      scopes["worker-api"],
-    ),
-    [],
-  );
-});
-
-void test("review 4 every Worker scope rejects Web and viewer tests reject Worker and scripts", async (t) => {
-  const row = typescriptBoundaries.find((row) => row.id === "worker-web");
-  assert(row);
-  assert.deepEqual(
-    row.from,
-    Object.keys(typescriptScopes).filter((scope) => scope.startsWith("worker-")),
-  );
-  for (const specifier of [
-    "../../../worker/src/api/app.ts",
-    "../../../../scripts/check/check.ts",
-  ]) {
-    await t.test(specifier, async () => {
-      assert((await diagnostics(importValue(specifier), scopes["web-viewer-tests"])).length > 0);
-    });
-  }
-});
-
-void test("brand cast rows cover their intended Worker scopes and test files", () => {
-  const workerScopes = Object.keys(typescriptScopes).filter((scope) => scope.startsWith("worker-"));
-  const expected = {
-    "owner-assertions": workerScopes.filter((scope) => scope !== "worker-owner"),
-    "identity-assertions": workerScopes.filter((scope) => scope !== "worker-access"),
-    "never-assertions": workerScopes,
-  };
-  for (const [id, from] of Object.entries(expected)) {
-    const row = typescriptBoundaries.find((row) => row.id === id);
-    assert(row, id);
-    assert.deepEqual(row.from, from, id);
-    assert.equal(row.appliesToTests, true, id);
-  }
-});
-
-void test("review 5 package subpaths are not mistaken for relative layers or apps", async (t) => {
-  for (const path of Object.values(scopes)) {
-    for (const specifier of [
-      "@opentelemetry/api",
-      "firebase/storage",
-      "library/services",
-      "library/geometry",
-      "library/objects",
-      "library/apps/worker",
-      "library/apps/web",
-      "library/scripts/shared",
-      "library/packages/contracts",
-      "library/crates/viewer/pkg",
-    ]) {
-      await t.test(`${path} ${specifier}`, async () => {
-        assert.deepEqual(await diagnostics(importValue(specifier), path), []);
-      });
-    }
-  }
-});
-
-void test("review 6 dynamic imports and import types match paths case-insensitively", async (t) => {
-  for (const source of [
-    'void import("../../../Packages/Contracts/src/generated/geometry-internal.ts");',
-    'type X = import("../../../Packages/Contracts/src/generated/geometry-internal.ts").Domain;',
-  ]) {
-    await t.test(source, async () => {
-      assert((await diagnostics(source, scopes.web)).length > 0, source);
-    });
-  }
-});
-
-void test("review 7 plan explicitly forbids API response types and schemas in storage", () => {
-  const section = readFileSync(new URL("../../docs/plan.md", import.meta.url), "utf8")
+void test("docs retain architecture rules and the remaining limits", () => {
+  const plan = readFileSync(new URL("../../docs/plan.md", import.meta.url), "utf8")
     .split("### 4.2")[1]
     ?.split("### 4.3")[0];
-  assert(section?.includes("API応答の型・スキーマも使わない"));
+  assert(plan);
+  for (const text of [
+    "API応答の型・スキーマも使わない",
+    "viewer/wasm.ts",
+    "scripts/dev",
+    "solidcraft-io",
+    "宣言した依存",
+  ])
+    assert(plan.includes(text), text);
+  const readme = readFileSync(new URL("../../README.md", import.meta.url), "utf8");
+  for (const text of ["require()", "再export", "fetch", "Headers", "エディタ"])
+    assert(readme.includes(text), text);
+  assert(!readme.includes("Web内の同名フォルダーも拒否"));
 });
 
-void test("review 8 production code cannot depend on test files", async (t) => {
-  for (const [scope, path] of Object.entries(scopes)) {
-    if (scope === "web-viewer-tests") continue;
-    for (const specifier of [
-      "./tests/helper.ts",
-      "./projects.test.ts",
-      "./projects.test.js",
-      "./projects.test",
-    ]) {
-      await t.test(`${path} ${specifier}`, async () => {
-        assert((await diagnostics(importValue(specifier), path)).length > 0);
-      });
-    }
-  }
-});
-
-void test("source files ban glob and file URLs; test files may read fixtures by URL", async () => {
-  const sourcePaths = Object.values(scopes).filter((path) => !/\.test\.|\/tests\//u.test(path));
-  assert(sourcePaths.length > 0);
-  for (const path of sourcePaths) {
-    for (const source of [
-      'import.meta.glob("./**/*.ts");',
-      "import.meta.glob(`./**/*.ts`);",
-      'import.meta.glob(["./**/*.ts"]);',
-      'import.meta.glob("./**/*.ts", { base: "../../worker/src" });',
-      'const load = import.meta["glob"];',
-    ])
-      assert(
-        (await diagnostics(source, path)).some((m) => m.message.includes("import.meta.glob")),
-        `${path}: ${source}`,
-      );
-    for (const source of [
-      "new URL(`./fixture.txt`, import.meta.url);",
-      'new URL("./x.ts", import.meta.url);',
-    ])
-      assert(
-        (await diagnostics(source, path)).some((m) => m.message.includes("new URL")),
-        `${path}: ${source}`,
-      );
-    assert.deepEqual(await diagnostics('new URL("/api", "https://example.test");', path), [], path);
-  }
-  for (const path of [
-    "apps/web/src/viewer/viewport-session.test.ts",
-    "apps/web/src/other.test.ts",
-    "apps/worker/tests/support/local-worker.ts",
-    "apps/worker/tests/other.ts",
-  ]) {
-    assert.deepEqual(
-      await diagnostics('new URL("../fixtures/x.mdsp", import.meta.url);', path),
-      [],
-      path,
-    );
+void test("NodeNext import and require conditions resolve to their actual targets", () => {
+  const directory = "apps/worker/src/api/node";
+  write(`${directory}/source.mts`);
+  write(`${directory}/source.cts`);
+  write(
+    `${directory}/tsconfig.json`,
+    JSON.stringify({
+      extends: "../../../tsconfig.json",
+      compilerOptions: { module: "NodeNext", moduleResolution: "NodeNext" },
+      include: ["*.mts", "*.cts"],
+    }),
+  );
+  for (const source of [
+    'import { value } from "@madori/worker/conditional";',
+    'export { value } from "@madori/worker/conditional";',
+  ])
+    assert.deepEqual(resolved(source, `${directory}/source.mts`), []);
+  for (const source of [
+    'import x = require("@madori/worker/conditional");',
+    'import type x = require("@madori/worker/conditional");',
+  ])
     assert(
-      (await diagnostics('import.meta.glob("./**/*.ts");', path)).some((m) =>
-        m.message.includes("import.meta.glob"),
+      resolved(source, `${directory}/source.mts`).some(
+        (diagnostic) => diagnostic.boundaryId === "worker-api-layers",
       ),
-      path,
+      source,
     );
+  assert(
+    resolved('import { value } from "@madori/worker/conditional";', `${directory}/source.cts`).some(
+      (diagnostic) => diagnostic.boundaryId === "worker-api-layers",
+    ),
+  );
+  assert.deepEqual(
+    resolved('void import((("@madori/worker/conditional")));', `${directory}/source.cts`),
+    [],
+  );
+});
+
+void test("symlinks cannot disguise the target layer", () => {
+  const link = "apps/worker/src/api/linked.ts";
+  symlinkSync(join(root, "apps/worker/src/storage/x.ts"), join(root, link));
+  assert(
+    resolved(importValue("./linked.ts")).some(
+      (diagnostic) => diagnostic.boundaryId === "worker-api-layers",
+    ),
+  );
+});
+
+void test("composition exceptions and type-only Store imports remain permitted", async () => {
+  assert.deepEqual(resolved(importValue("../compose.ts"), scopes["worker-api-entry"]), []);
+  assert.deepEqual(
+    resolved(importType("../storage/store.ts", "Store"), scopes["worker-services"]),
+    [],
+  );
+  for (const name of ["store", "d1", "r2"])
+    assert.deepEqual(
+      resolved(importValue(`./storage/${name}.ts`), scopes["worker-composition"]),
+      [],
+    );
+  for (const from of [scopes["worker-d1"], scopes["worker-r2"], scopes["worker-composition"]])
+    assert.deepEqual(
+      await diagnostics("type Database = D1Database; type Bucket = R2Bucket;", from),
+      [],
+    );
+  for (const [from, source] of [
+    [scopes["worker-owner"], "const id = value as OwnerId;"],
+    [scopes["worker-access"], "const identity = value as VerifiedIdentity;"],
+  ]) {
+    assert(from && source);
+    assert.deepEqual(await diagnostics(source, from), []);
   }
 });
 
-void test("storage composition exceptions permit only their intended entry points", async () => {
-  for (const path of [scopes["worker-d1"], scopes["worker-r2"], scopes["worker-composition"]]) {
-    assert.deepEqual(
-      await diagnostics("type Database = D1Database; type Bucket = R2Bucket;", path),
-      [],
+void test("package imports maps keep the leading hash while asset suffixes are removed", () => {
+  assert.deepEqual(resolved(importType("#api")), []);
+  for (const name of ["#storage", "#storage?raw"])
+    assert(
+      resolved(importType(name)).some(
+        (diagnostic) => diagnostic.boundaryId === "worker-api-layers",
+      ),
     );
-  }
-  for (const source of cases["storage-binding-access"]?.rejected ?? []) {
-    assert.deepEqual(await diagnostics(source, scopes["worker-composition"]), []);
-  }
-  assert.deepEqual(
-    await diagnostics('import { serviceDeps } from "../compose.ts";', scopes["worker-api-entry"]),
-    [],
-  );
-  assert.deepEqual(
-    await diagnostics('import * as deps from "./deps.ts";', scopes["worker-services"]),
-    [],
-  );
-  for (const specifier of ["./storage/store.ts", "./storage/d1.ts", "./storage/r2.ts"]) {
-    assert.deepEqual(await diagnostics(importValue(specifier), scopes["worker-composition"]), []);
-  }
-  assert.deepEqual(
-    await diagnostics("const verified = value as VerifiedIdentity;", scopes["worker-access"]),
-    [],
-  );
-  assert.deepEqual(await diagnostics("const id = value as OwnerId;", scopes["worker-owner"]), []);
-  assert.deepEqual(
-    await diagnostics(
-      'import type { Store } from "../storage/store.ts";',
-      scopes["worker-services"],
-    ),
-    [],
-  );
 });

@@ -21,68 +21,35 @@ const baseRestrictedSyntax = [
   },
 ];
 
-function selectorRegex(regex) {
-  return `/${regex.replace(/\\\//gu, "/").replace(/\//gu, "\\/")}/iu`;
-}
-
 function boundaryConfig(name, files, ignores, rows, allowImportMetaUrl = false) {
-  const patterns = rows
-    .filter((row) => row.kind === "imports")
-    .map((row) => ({
-      regex: row.regex,
-      message: row.message,
-      ...(row.importNamePattern ? { importNamePattern: row.importNamePattern } : {}),
-      ...(row.allowTypeImports ? { allowTypeImports: true } : {}),
-    }));
   const globals = rows
     .filter((row) => row.kind === "globals")
     .flatMap((row) => row.names.map((name) => ({ name, message: row.message })));
   const syntax = rows
-    .filter((row) => row.kind === "imports")
-    .flatMap((row) => {
-      const regex = selectorRegex(row.regex);
-      const importType = row.importNamePattern
-        ? `TSImportType:matches([qualifier=null], [qualifier.name=${selectorRegex(row.importNamePattern)}])`
-        : "TSImportType";
-      return [
-        `ImportExpression > Literal.source[value=${regex}]`,
-        ...(!row.allowTypeImports ? [`${importType} > Literal.source[value=${regex}]`] : []),
-        ...(row.importNamePattern && !row.allowTypeImports
-          ? [
-              `TSImportType[source.value=${regex}] > TSQualifiedName.qualifier Identifier.left[name=${selectorRegex(row.importNamePattern)}]`,
-            ]
-          : []),
-      ].map((selector) => ({ selector, message: row.message }));
-    });
+    .filter((row) => row.kind === "syntax")
+    .flatMap((row) => row.selectors.map((selector) => ({ selector, message: row.message })));
   syntax.push(
-    ...rows
-      .filter((row) => row.kind === "syntax")
-      .flatMap((row) => row.selectors.map((selector) => ({ selector, message: row.message }))),
+    {
+      selector: "ImportExpression[source.type!='Literal']",
+      message: "Use literal dynamic imports so dependency boundaries can be checked.",
+    },
+    {
+      selector:
+        "MemberExpression[object.type='MetaProperty'][object.meta.name='import']:matches([property.name='glob'], [property.value='glob'])",
+      message:
+        "Use literal imports instead of import.meta.glob so dependency boundaries can be checked.",
+    },
+    ...(!allowImportMetaUrl
+      ? [
+          {
+            selector:
+              "NewExpression[callee.name='URL'][arguments.1.object.type='MetaProperty'][arguments.1.object.meta.name='import']:matches([arguments.1.property.name='url'], [arguments.1.property.value='url'])",
+            message:
+              "Use literal imports instead of new URL with import.meta.url so dependency boundaries can be checked.",
+          },
+        ]
+      : []),
   );
-  if (rows.some((row) => row.kind === "imports")) {
-    syntax.push(
-      {
-        selector: "ImportExpression[source.type!='Literal']",
-        message: "Use literal dynamic imports so dependency boundaries can be checked.",
-      },
-      {
-        selector:
-          "MemberExpression[object.type='MetaProperty'][object.meta.name='import']:matches([property.name='glob'], [property.value='glob'])",
-        message:
-          "Use literal imports instead of import.meta.glob so dependency boundaries can be checked.",
-      },
-      ...(!allowImportMetaUrl
-        ? [
-            {
-              selector:
-                "NewExpression[callee.name='URL'][arguments.1.object.type='MetaProperty'][arguments.1.object.meta.name='import']:matches([arguments.1.property.name='url'], [arguments.1.property.value='url'])",
-              message:
-                "Use literal imports instead of new URL with import.meta.url so dependency boundaries can be checked.",
-            },
-          ]
-        : []),
-    );
-  }
   syntax.push(
     ...globals.flatMap(({ name, message }) =>
       [
@@ -96,7 +63,6 @@ function boundaryConfig(name, files, ignores, rows, allowImportMetaUrl = false) 
     files,
     ignores,
     rules: {
-      "no-restricted-imports": ["error", { patterns }],
       "no-restricted-syntax": ["error", ...baseRestrictedSyntax, ...syntax],
       ...(globals.length
         ? {
@@ -133,17 +99,13 @@ const boundaryConfigs = Object.entries(typescriptScopes).flatMap(([scope, { file
   // Tests read fixtures through import.meta.url and may cross boundaries anyway.
   return [
     boundaryConfig(`boundaries/${scope}`, files, [...ignores, ...boundaryTestIgnores], rows),
-    ...(testRows.length
-      ? [
-          boundaryConfig(
-            `boundaries/${scope}/tests`,
-            files.flatMap((file) => boundaryTestIgnores.map((test) => [file, test])),
-            ignores,
-            testRows,
-            true,
-          ),
-        ]
-      : []),
+    boundaryConfig(
+      `boundaries/${scope}/tests`,
+      files.flatMap((file) => boundaryTestIgnores.map((test) => [file, test])),
+      ignores,
+      testRows,
+      true,
+    ),
   ];
 });
 
