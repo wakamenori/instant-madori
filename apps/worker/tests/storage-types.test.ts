@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
 
@@ -147,7 +148,10 @@ void test("Storage types reject unverified identities, duplicate owners and forg
   for (const [source, codes] of [
     ["const batch: OnceBatch = {};", [2739]],
     ["const batch: OnceBatch = { before: [], record: part, after: [] };", [2353]],
-    ["new OnceBatch();", [2673, 1361]],
+    [
+      'import { OnceBatch as Batch } from "../../src/storage/requests.ts"; new Batch();',
+      [1485, 2673, 1362],
+    ],
     ['import { recordStatement } from "../../src/storage/requests.ts";', [2459]],
     ["void runOnce(database, key, z.unknown(), {});", [2554]],
   ] as const) {
@@ -157,4 +161,41 @@ void test("Storage types reject unverified identities, duplicate owners and forg
       source,
     );
   }
+  const runtimeSource =
+    batchImports +
+    `
+    import assert from "node:assert/strict";
+    const batch = createOnceStatements(key, "now", {
+      statements: [], table: "projects", id: patternId,
+      result: { sql: "SELECT '{}'", bindings: [] },
+    });
+    const read = () => ({ key, parts: { before: [], record: { sql: "SELECT '{}'", bindings: [] }, after: [] } });
+    assert.throws(() => Object.assign(batch.constructor, { read }), TypeError);
+    assert.throws(() => Object.defineProperty(batch.constructor, "read", { value: read }), TypeError);
+    assert.equal(Reflect.set(batch.constructor, "read", read), false);
+    assert.equal(Object.isFrozen(Object.getPrototypeOf(batch)), true);
+    let calls = 0;
+    const observed: typeof database = {
+      async first() { calls++; throw new Error("Unexpected D1 read"); },
+      async all() { calls++; throw new Error("Unexpected D1 read"); },
+      async batch() { calls++; throw new Error("Unexpected D1 batch"); },
+    };
+    const forged = {} as unknown as OnceBatch;
+    await assert.rejects(runOnce(observed, z.unknown(), forged), TypeError);
+    assert.equal(calls, 0);
+  `;
+  assert.deepEqual(diagnostics(runtimeSource), []);
+  const runtime = ts.transpileModule(prelude + runtimeSource, {
+    compilerOptions: { ...parsed.options, noEmit: false },
+  });
+  execFileSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "--eval",
+      'const key = { ownerId: "owner", requestId: "request", operation: "create", fingerprint: "input" }; const patternId = "id";\n' +
+        runtime.outputText,
+    ],
+    { cwd: new URL("./rpc/", import.meta.url), stdio: "pipe" },
+  );
 });

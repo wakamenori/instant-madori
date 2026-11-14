@@ -139,17 +139,25 @@ function copyStatement(part: SqlPart): SqlPart {
   return Object.freeze({ sql: part.sql, bindings });
 }
 
+const batchToken = Symbol("OnceBatch");
+
+function copyKey(key: RequestKey): Readonly<RequestKey> {
+  return Object.freeze({
+    ownerId: key.ownerId,
+    requestId: key.requestId,
+    operation: key.operation,
+    fingerprint: key.fingerprint,
+  });
+}
+
 class OnceBatch {
   readonly #key: Readonly<RequestKey>;
   readonly #parts: Readonly<BatchParts>;
 
-  private constructor(key: RequestKey, parts: BatchParts) {
-    this.#key = Object.freeze({ ...key });
-    this.#parts = Object.freeze({
-      before: Object.freeze(parts.before.map(copyStatement)),
-      record: copyStatement(parts.record),
-      after: Object.freeze(parts.after.map(copyStatement)),
-    });
+  private constructor(token: typeof batchToken, key: RequestKey, parts: BatchParts) {
+    if (token !== batchToken) throw new TypeError("Once-only batches require the private token");
+    this.#key = key;
+    this.#parts = Object.freeze(parts);
     Object.freeze(this);
   }
 
@@ -164,18 +172,24 @@ class OnceBatch {
    */
   static create(
     this: void,
-    key: RequestKey,
+    inputKey: RequestKey,
     createdAt: string,
     create: { statements: readonly SqlPart[]; table: OnceTable; id: string; result: SqlPart },
   ): OnceBatch {
-    const record = recordStatement(key, createdAt, {
-      result: create.result,
-      when: {
-        sql: `SELECT 1 FROM ${create.table} WHERE id = ? AND owner_id = ?`,
-        bindings: [create.id, key.ownerId],
-      },
-    });
-    return new OnceBatch(key, { before: create.statements, record, after: [] });
+    const key = copyKey(inputKey);
+    const { statements, table, id, result } = create;
+    const before = Object.freeze(statements.map(copyStatement));
+    const resultPart = copyStatement(result);
+    const record = copyStatement(
+      recordStatement(key, createdAt, {
+        result: resultPart,
+        when: {
+          sql: `SELECT 1 FROM ${table} WHERE id = ? AND owner_id = ?`,
+          bindings: [id, key.ownerId],
+        },
+      }),
+    );
+    return new OnceBatch(batchToken, key, { before, record, after: Object.freeze([]) });
   }
 
   /**
@@ -197,26 +211,40 @@ class OnceBatch {
    */
   static update(
     this: void,
-    key: RequestKey,
+    inputKey: RequestKey,
     createdAt: string,
     update: { table: OnceTable; set: SqlPart; where: SqlPart; result: SqlPart },
   ): OnceBatch {
-    const record = recordStatement(key, createdAt, {
-      result: update.result,
-      when: {
-        sql: `SELECT 1 FROM ${update.table} WHERE (${update.where.sql})`,
-        bindings: update.where.bindings,
-      },
-    });
+    const key = copyKey(inputKey);
+    const { table, set, where, result } = update;
+    const setPart = copyStatement(set);
+    const wherePart = copyStatement(where);
+    const resultPart = copyStatement(result);
+    const record = copyStatement(
+      recordStatement(key, createdAt, {
+        result: resultPart,
+        when: {
+          sql: `SELECT 1 FROM ${table} WHERE (${wherePart.sql})`,
+          bindings: wherePart.bindings,
+        },
+      }),
+    );
     const recorded = recordedBy(key);
-    const statement = {
-      sql: `UPDATE ${update.table} SET ${update.set.sql}
-       WHERE (${update.where.sql}) AND ${recorded.sql}`,
-      bindings: [...update.set.bindings, ...update.where.bindings, ...recorded.bindings],
-    };
-    return new OnceBatch(key, { before: [], record, after: [statement] });
+    const statement = copyStatement({
+      sql: `UPDATE ${table} SET ${setPart.sql}
+       WHERE (${wherePart.sql}) AND ${recorded.sql}`,
+      bindings: [...setPart.bindings, ...wherePart.bindings, ...recorded.bindings],
+    });
+    return new OnceBatch(batchToken, key, {
+      before: Object.freeze([]),
+      record,
+      after: Object.freeze([statement]),
+    });
   }
 }
+
+Object.freeze(OnceBatch);
+Object.freeze(OnceBatch.prototype);
 
 export type { OnceBatch };
 export const updateOnceStatements = OnceBatch.update;
