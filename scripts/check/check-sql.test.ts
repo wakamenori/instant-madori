@@ -111,6 +111,11 @@ for (const source of [
   "const sql = `UPDATE ${conflict} requests SET result = '{}' WHERE request_id = ?`;",
   "const sql = `${prefix}INSERT INTO requests (request_id, result) VALUES (?, '{}')`;",
   "const sql = `UPDATE ${schema}.requests SET result = '{}' WHERE request_id = ?`;",
+  "const sql = `INSERT${x} INTO requests (request_id, result) VALUES (?, '{}')`;",
+  'const sql = `INSERT${ignore ? " OR IGNORE" : ""} INTO requests (request_id, result) VALUES (?, \'{}\')`;',
+  "const sql = `UPDATE${x} requests SET result = '{}' WHERE request_id = ?`;",
+  "const sql = `DELETE${x} FROM requests WHERE request_id = ?`;",
+  "const sql = `REPLACE${x} INTO requests (request_id, result) VALUES (?, '{}')`;",
 ]) {
   void test(`rejects request writes in templates and nested literals: ${source}`, () => {
     assert.equal(checkSqlSource(storagePath, source).length, 1);
