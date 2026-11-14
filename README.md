@@ -6,7 +6,7 @@
 
 ## 開発を始める
 
-macOSまたはLinux、Git（`git subtree`を含む）、[mise](https://mise.jdx.dev/getting-started.html)、rustupを使用します。Node.js・pnpm・検査ツールは`mise.toml`、Rust・Clippy・rustfmt・Wasmターゲットは`rust-toolchain.toml`で固定しています。Dockerはコンテナをビルドするときに必要です。
+macOSまたはLinux、Git（`git subtree`を含む）、[mise](https://mise.jdx.dev/getting-started.html)、rustupを使用します。Node.js・pnpm・検査ツールは`mise.toml`、Rust・Clippy・rustfmt・Wasmターゲットは`rust-toolchain.toml`で固定しています。Dockerは `pnpm dev` と `pnpm check --full` に必要です。画面だけの作業では `MADORI_DEV_CONTAINERS=0 pnpm dev` で起動できます。
 
 リポジトリのルートで実行します。ローカル起動にCloudflareアカウントやAIキーは不要です。
 
@@ -23,15 +23,18 @@ mise exec -- pnpm dev
 
 初回はRust・Wasmと依存ライブラリをビルドします。`pnpm setup`はツールの準備、Wasmバインディング・Worker型の生成、コミット時の検査フックの登録を行います。wasm-bindgen CLIはライブラリと同じ版を、このリポジトリの`.tools/`へインストールします。依存のインストールだけではGitフックを変更しません。
 
-`pnpm dev`は、ローカルのD1へマイグレーションを適用してから次のプロセスを起動し、Ctrl-Cでまとめて終了します。
+`pnpm dev`は、ローカルのD1へマイグレーションを適用してから次のプロセスを起動し、Ctrl-Cでまとめて終了します。Wrangler 4.158の終了処理は形状イメージに属するContainerを削除しますが、別イメージの通信プロキシが残るため、Wrangler起動前に全ContainerのIDと、このWorker名・宣言したContainerクラスの名前のパターンを保存します。終了後は保存したパターンに一致し、開始時に存在しなかったIDのContainerとプロキシを削除します。途中で設定を変更しても対象パターンを広げず、開始時に存在したIDは削除しません。終了処理の失敗は報告し、起動・実行結果と終了コードを維持します。実Containerテストも同じ終了処理を使います。
 
-| URL                           | 内容                                                            |
-| ----------------------------- | --------------------------------------------------------------- |
-| http://127.0.0.1:5173         | Reactの開発画面。Workerへの接続とWasmの初期化を表示             |
-| http://127.0.0.1:8787         | ローカルWorkerとビルド済み静的ファイル。`/api/health`で応答確認 |
-| http://127.0.0.1:3001/healthz | ネイティブRustサービス。SolidCraftのSession初期化後に応答       |
+このWorkerのローカルセッション（`pnpm dev`、`pnpm check --full`、別worktreeでの実行を含む）の同時起動はサポートしません。MiniflareはWorker名とContainerクラス名から同じ名前を作るため、終了処理に関係なく衝突し、重複して起動すると他セッションの新しいContainerを終了処理で削除することもあります。クラッシュ後に残ったContainerは次回起動時のIDとして保存されるため、自動削除しません。残りを削除する場合は、このWorkerの全ローカルセッションを停止してから `docker ps -a --no-trunc --format '{{.ID}} {{.Names}}'` で一覧を確認し、このWorker・Containerクラスに属する残りのIDを選んで `docker rm --force <ID>...` を実行します。
 
-現在の画面は開発用の接続確認です。案件・パターンのAPIは実装済みですが、画面、3D描画、WorkerからRustへの形状処理依頼は、まだ実装していません。
+| URL                   | 内容                                                            |
+| --------------------- | --------------------------------------------------------------- |
+| http://127.0.0.1:5173 | Reactの開発画面。サンプルをWebGPUで描画する                     |
+| http://127.0.0.1:8787 | ローカルWorkerとビルド済み静的ファイル。`/api/health`で応答確認 |
+
+サンプルは床と3枚の壁、奥壁の開口で構成します。画面はドラッグでの回転と、スクロールでの拡大・縮小に対応します。ブラウザで確かめた範囲は、[実装計画](docs/plan.md)の6.1bにあります。Worker → Durable Object → Containerを通してSolidCraftで生成し、Wasmビューアへ表示データを渡します。WebGPUを利用できるブラウザが必要です。初回のamd64イメージのビルドには数分かかります。
+
+Rustサービスだけを反復する場合は `MADORI_INTERNAL_TOKEN=local cargo run -p madori-geometry` で起動します。`http://127.0.0.1:3001/healthz` は認証不要、`/v1/sample/display` は `authorization: Bearer local` が必要です。このプロセスをWorkerが呼ぶことはありません。
 
 ### ローカルでのログイン
 
@@ -47,9 +50,11 @@ Viteのプロキシ（5173番）経由のAPI要求には、開発者として署
 | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
 | `pnpm check --fast` | 作業中。自動修正、TypeScriptの型付きlint・型確認、Rustのnative/Wasm Clippy、未使用コード・依存、Dockerfile、upstream境界、秘密情報を検査      |
 | `pnpm check`        | 通常の作業確認。軽い検査にTypeScriptとRustのテストを追加                                                                                      |
-| `pnpm check --full` | 全体確認。Wasmの再生成、Web・Worker・Rustのビルド、ローカル接続テスト、依存のライセンス・取得元・脆弱性監査も実行。監査にはネットワークが必要 |
-| `pnpm dev`          | Web・Worker・Rustをまとめて起動                                                                                                               |
+| `pnpm check --full` | 全体確認。Wasmの再生成、Web・Worker・Rustのビルド、ローカル接続テスト、依存のライセンス・取得元・脆弱性監査も実行。Dockerとネットワークが必要 |
+| `pnpm dev`          | Web・WorkerとDockerの形状処理Containerを起動                                                                                                  |
 | `pnpm build`        | Wasm・Web・Worker・ネイティブRustの成果物だけをビルド                                                                                         |
+
+補助スクリプトは `scripts/check/`・`scripts/dev/`・`scripts/generate/`・`scripts/build/`・`scripts/upstream/` に目的別に置き、複数の目的で使う部品は `scripts/shared/` に置きます。テストは対象ファイルと同じフォルダーに置きます。
 
 初期設定は `pnpm setup`、引数の確認は `pnpm check --help`。upstreamの取得・取り込みには後述の `pnpm upstream:check` / `pnpm upstream:update` を使います。個別ツールを順に手動実行する必要はありません。
 
@@ -57,9 +62,9 @@ Viteのプロキシ（5173番）経由のAPI要求には、開発者として署
 
 `pnpm setup` で生成したWasmの型定義を通常・軽いモードで使います。初期生成がなければ準備手順を示して停止します。Wasmの公開API・依存・ビルド設定・upstreamを変更した場合は `--full` を実行してください。全体モードではWasmを再生成してからTypeScriptを検査し、実際に生成したWasmも接続テストで確認します。
 
-TypeScriptのテストはNode.js標準のtest runnerを使います。WorkerのAPIのテストは、テストファイルごとに一時的なD1へ実際のマイグレーションを適用し、`wrangler dev` でworkerd上のWorkerを起動して、HTTPで検査します。署名にはテスト用の鍵を使い、Cloudflareのアカウントは不要です。`apps/*/{src,tests}/**/*.test.ts`、`packages/*/{src,tests}/**/*.test.ts`、`scripts/**/*.test.ts` が対象です。現在は、WorkerのAPI（認証、所有権、冪等性、版の競合、ページング）、スキーマの制約、共有契約を確認するテストがあります。Node.jsの型だけを使うテストには専用のtsconfigを用意し、Worker本体の実行環境の型から分けています。DOM描画のテスト基盤はUI実装時に追加します。
+TypeScriptのテストはNode.js標準のtest runnerを使います。HTTP経由のWorker APIテストは、テストファイルごとに一時的なD1へ実際のマイグレーションを適用し、`wrangler dev` でworkerd上のWorkerを起動して、HTTPで検査します。署名にはテスト用の鍵を使い、Cloudflareのアカウントは不要です。`apps/*/{src,tests}/**/*.test.ts`、`packages/*/{src,tests}/**/*.test.ts`、`scripts/**/*.test.ts` が対象です。現在は、WorkerのAPI（認証、所有権、冪等性、版の競合、ページング、サンプル取得）、Containerの起動・引継ぎ・障害復帰、内部プロトコル、WebのAPIエラーとビューアの初期化・解放、操作量、アクセシビリティの静的マークアップ、スキーマ・生成契約・環境別バインディングを確認するテストがあります。Rustでは表示形式の固定フィクスチャ・破損入力・大量入力、配置済み形状の書出し、内部API認証、シーン変換とカメラを検査します。Node.jsの型だけを使うテストには専用のtsconfigを用意し、Worker本体の実行環境の型から分けています。RPCとサービスの単体テストはWorkerの型も必要なため、Node用のテストからtsconfigを分けています。これらの単体テスト自体はNodeで動き、workerdやContainerを起動しません。静的マークアップとDOM/GPUの代替オブジェクトによる検査は、ブラウザでの実描画を確かめるものではありません。
 
-全体モードもローカル実行で、Cloudflareへのデプロイや本番リソースの作成はしません。Workerのビルドは `--dry-run` です。Dockerイメージのビルド・Linuxでの実行確認は含みません。
+全体モードもローカル実行で、Cloudflareへのデプロイや本番リソースの作成はしません。Workerのビルドは `--dry-run` です。DockerイメージをビルドしてLinuxで起動し、WorkerとDOを通した表示データの取得を検査します。通常のWorker APIテストとdry-runビルドではContainerを無効にします。
 
 ## 検査の担当と範囲
 
@@ -100,6 +105,8 @@ Miniflareのsharp依存は、LGPLのlibvipsを含むため除外しています�
 | `apps/web`               | React・TypeScriptの画面                                                      |
 | `apps/worker`            | Cloudflare WorkersのAPI・静的配信                                            |
 | `apps/geometry`          | ネイティブRustのHTTP入口、Container用Dockerfile                              |
+| `crates/display`         | 依存を持たない表示データの型と版付きバイナリ形式                             |
+| `crates/geometry-api`    | 内部API契約とTypeScript定義の生成                                            |
 | `crates/housing`         | 住宅データと整合性。環境整備時点ではモジュールの入口のみ                     |
 | `crates/modeling`        | 住宅操作とSolidCraftの接続                                                   |
 | `crates/viewer`          | SolidCraftのgeom・render・gpuを使うWasm                                      |
@@ -115,3 +122,19 @@ Miniflareのsharp依存は、LGPLのlibvipsを含むため除外しています�
 **upstreamの更新は原則取り込みます。** 住宅サービスへの影響を確認し、問題があれば調整するか、理由を記録して保留します。採用版は[solidcraft.json](third_party/solidcraft.json)、独自変更・更新手順・初回移行の記録は[solidcraft.md](third_party/solidcraft.md)を参照してください。
 
 SolidCraftの元のREADME・資料・ライセンスは取り込み領域に保持しています。[MITライセンス](third_party/solidcraft/LICENSE-MIT)、[Apacheライセンス](third_party/solidcraft/LICENSE-APACHE)、[NOTICE](third_party/solidcraft/NOTICE)、[資産と依存の帰属](third_party/solidcraft/ATTRIBUTION.md)を参照してください。
+
+## stagingへデプロイする
+
+この手順はCloudflareリソースの作成とデプロイを伴います。ローカルの検査では実行しません。
+
+1. stagingのホスト名を決め、Cloudflareで管理するドメインのCustom Domain（`env.staging.routes` に `pattern` と `custom_domain: true`）またはWorker routeを設定します。`workers_dev` と `preview_urls` は無効なので、ホスト名への経路が必要です。そのホスト名を保護するAccessアプリとstaging用D1を作成し、招待ポリシーを設定します。
+2. `apps/worker/wrangler.jsonc` の `env.staging` に実際のDB ID、Origin、Access発行元、audienceを設定します。初期値の `.invalid` 発行元は認証設定の検査で拒否します。
+3. `pnpm check --full` を実行します。
+4. `pnpm --filter @madori/worker exec wrangler d1 migrations apply DB --remote --env staging` でマイグレーションを適用します。
+5. `pnpm --filter @madori/worker exec wrangler deploy --env staging` でイメージとWorkerをデプロイします。
+
+`GEOMETRY_INSTANCE_TYPE` と `GEOMETRY_IDLE_TIMEOUT_MS` は環境別の設定です。初期値は計測用で、本番の推奨値ではありません。`apps/worker/src/geometry/` のDOが出す `container.ready` の `mode: cold` の `ms` とRustの `geometry.request` の `vmHwmKib` を読み、起動時間とLinuxのメモリ最大値を計測して調整します。
+
+Container接続用DOと内部プロトコルは `apps/worker/src/geometry/` に置き、`services/` から呼びます。将来の案ごとの調整DOは `objects/` から `services/` を呼ぶ構成です。
+
+内部APIの本文は `crates/geometry-api` で定義し、`pnpm generate:geometry` でJSON Schema・Zod・TypeScript型を再生成します。`pnpm check` も全モードで再生成し、RustとNodeのテストが生成結果の一致を検査します。

@@ -8,7 +8,12 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+madori-geometry-api.workspace = true
 axum.workspace = true
 madori-modeling.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
+
+[dev-dependencies]
+madori-display.workspace = true
+tower.workspace = true

@@ -7,17 +7,29 @@ import { createInterface } from "node:readline";
 import { setTimeout } from "node:timers/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { stripVTControlCharacters } from "node:util";
 import { fileURLToPath } from "node:url";
 import { accessAssertionHeader } from "@madori/contracts";
+import {
+  cleanupWorkerContainers,
+  snapshotWorkerContainers,
+} from "../../../../scripts/dev/wrangler-containers.ts";
 import {
   createAccessKey,
   formatEnvFile,
   localWorkerVars,
   signAccessToken,
-} from "../../../../scripts/local-access.ts";
-import type { AccessKey, AccessUser } from "../../../../scripts/local-access.ts";
-import { assertSucceeded, freePort, ready, start, stop } from "../../../../scripts/processes.ts";
-import type { ProcessOutcome } from "../../../../scripts/processes.ts";
+} from "../../../../scripts/dev/local-access.ts";
+import type { AccessKey, AccessUser } from "../../../../scripts/dev/local-access.ts";
+import {
+  assertSucceeded,
+  cleanupSteps,
+  freePort,
+  ready,
+  start,
+  stop,
+} from "../../../../scripts/shared/processes.ts";
+import type { ProcessOutcome } from "../../../../scripts/shared/processes.ts";
 
 const workerDirectory = fileURLToPath(new URL("../../", import.meta.url));
 const wrangler = join(workerDirectory, "node_modules/wrangler/bin/wrangler.js");
@@ -201,28 +213,28 @@ export async function migratedDatabase() {
   };
 }
 
-export async function startLocalWorker(): Promise<LocalWorker> {
+export async function startLocalWorker({
+  containers = false,
+  readyTimeoutMs = 30_000,
+}: { containers?: boolean; readyTimeoutMs?: number } = {}): Promise<LocalWorker> {
   const directory = await mkdtemp(join(tmpdir(), "madori-worker-test-"));
   // Output is captured rather than printed, and shown when the Worker fails to start. Every
   // structured line is parsed once, as it arrives.
   const entries: Record<string, unknown>[] = [];
   let worker: CapturedProcess | undefined;
+  let before: ReturnType<typeof snapshotWorkerContainers> | undefined;
 
   /** The one teardown, for a failed start and for `stop()` alike. Safe to call again. */
   let disposing: Promise<void> | undefined;
   function dispose() {
     disposing ??= (async () => {
-      const problems: unknown[] = [];
-      try {
-        await worker?.dispose();
-      } catch (error) {
-        problems.push(error);
-      }
-      try {
-        await rm(directory, { recursive: true, force: true });
-      } catch (error) {
-        problems.push(error);
-      }
+      const problems = await cleanupSteps([
+        () => worker?.dispose(),
+        () => {
+          if (before) cleanupWorkerContainers(before);
+        },
+        () => rm(directory, { recursive: true, force: true }),
+      ]);
       if (problems.length > 0) throw new AggregateError(problems, "Local Worker cleanup failed");
     })();
     return disposing;
@@ -248,10 +260,12 @@ export async function startLocalWorker(): Promise<LocalWorker> {
     await writeFile(join(assets, "index.html"), testSpaHtml);
     await migrate(state);
 
+    before = containers ? snapshotWorkerContainers() : undefined;
     const started = startWrangler(
       [
         "dev",
         "--local",
+        `--enable-containers=${containers}`,
         "--ip",
         "127.0.0.1",
         "--port",
@@ -271,12 +285,13 @@ export async function startLocalWorker(): Promise<LocalWorker> {
         "log",
       ],
       (line) => {
+        if (containers) console.info(line);
         const entry = parseLogEntry(line);
         if (entry) entries.push(entry);
       },
     );
     worker = started;
-    await ready(`${origin}/api/health`, started.process);
+    await ready(`${origin}/api/health`, started.process, readyTimeoutMs);
   } catch (error) {
     // The Worker's output goes into the error, built after cleanup has read its last lines.
     // The reason leads, so a hang and a crash are told apart without reading the output.
@@ -363,11 +378,12 @@ export async function startLocalWorker(): Promise<LocalWorker> {
  * the JSON (and prints its own non-JSON lines), so parsing starts at the first `{`.
  */
 function parseLogEntry(line: string): Record<string, unknown> | null {
-  const jsonStart = line.indexOf("{");
+  const plain = stripVTControlCharacters(line);
+  const jsonStart = plain.indexOf("{");
   if (jsonStart === -1) return null;
   let entry: unknown;
   try {
-    entry = JSON.parse(line.slice(jsonStart));
+    entry = JSON.parse(plain.slice(jsonStart));
   } catch {
     return null;
   }

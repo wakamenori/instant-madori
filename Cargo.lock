@@ -1004,13 +1004,30 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d15f86d12da44cd8d4ec3c73984537eb7f4cadcb9776a575a0a8a05ca11005c"
 
 [[package]]
+name = "madori-display"
+version = "0.1.0"
+
+[[package]]
 name = "madori-geometry"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "madori-display",
+ "madori-geometry-api",
  "madori-modeling",
  "serde_json",
  "tokio",
+ "tower",
+]
+
+[[package]]
+name = "madori-geometry-api"
+version = "0.1.0"
+dependencies = [
+ "madori-display",
+ "schemars",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -1021,6 +1038,7 @@ version = "0.1.0"
 name = "madori-modeling"
 version = "0.1.0"
 dependencies = [
+ "madori-display",
  "serde_json",
  "solidcraft-doc",
  "solidcraft-engine",
@@ -1031,10 +1049,14 @@ dependencies = [
 name = "madori-viewer"
 version = "0.1.0"
 dependencies = [
+ "js-sys",
+ "madori-display",
  "solidcraft-geom",
  "solidcraft-gpu",
  "solidcraft-render",
  "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
  "wgpu",
 ]
 

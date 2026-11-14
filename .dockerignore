@@ -9,5 +9,5 @@ target
 **/.dev.vars*
 crates/viewer/pkg
 docs
-# Local development keys (scripts/local-access.ts)
+# Local development keys (scripts/dev/local-access.ts)
 .local

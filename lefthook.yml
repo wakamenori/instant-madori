@@ -3,7 +3,7 @@ pre-commit:
   commands:
     format:
       glob: "*.{ts,tsx,js,mjs,json,jsonc,yml,yaml,md,css,html}"
-      exclude: "^(third_party/solidcraft/|docs/verification/|pnpm-lock.yaml)"
+      exclude: "^(third_party/solidcraft/|docs/verification/|packages/contracts/src/generated/|pnpm-lock.yaml)"
       run: pnpm exec prettier --check {staged_files}
     lint:
       glob: "*.{ts,tsx,mjs}"
@@ -12,6 +12,6 @@ pre-commit:
     rust-format:
       glob: "*.rs"
       exclude: "^third_party/solidcraft/"
-      run: cargo fmt -p madori-geometry -p madori-housing -p madori-modeling -p madori-viewer -- --check
+      run: node scripts/check/rust-format.ts --check
     secrets:
       run: mise exec -- gitleaks git --pre-commit --staged --redact --verbose --no-banner

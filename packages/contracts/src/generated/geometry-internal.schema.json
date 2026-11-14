@@ -1,0 +1,60 @@
+{
+  "errorBodySchema": {
+    "direction": "response",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "error": {
+          "description": "Transport and protocol failures only. Expected route outcomes are 200 bodies with a\n`kind` union. BuildFailed means a deterministic build failed unexpectedly.",
+          "enum": [
+            "unauthorized",
+            "invalid_request",
+            "not_found",
+            "method_not_allowed",
+            "build_failed",
+            "internal"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "error"
+      ],
+      "title": "ErrorBody",
+      "type": "object"
+    }
+  },
+  "healthSchema": {
+    "direction": "response",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "protocol": {
+          "format": "uint32",
+          "maximum": 4294967295,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "service": {
+          "enum": [
+            "geometry"
+          ],
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "ok"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "service",
+        "protocol"
+      ],
+      "title": "Health",
+      "type": "object"
+    }
+  }
+}

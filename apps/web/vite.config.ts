@@ -2,7 +2,7 @@ import { defineConfig } from "vite";
 import type { ProxyOptions } from "vite";
 import react from "@vitejs/plugin-react";
 import { accessAssertionHeader } from "@madori/contracts";
-import { devAccess, readAccessKey, signAccessToken } from "../../scripts/local-access.ts";
+import { devAccess, readAccessKey, signAccessToken } from "../../scripts/dev/local-access.ts";
 
 /** Signed once at startup; long enough that a running dev server never sees it expire. */
 const tokenLifetimeSeconds = 365 * 24 * 60 * 60;

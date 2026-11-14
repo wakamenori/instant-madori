@@ -10,3 +10,4 @@ apps/worker/worker-configuration.d.ts
 Cargo.lock
 pnpm-lock.yaml
 mise.lock
+packages/contracts/src/generated/

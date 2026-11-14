@@ -1,6 +1,7 @@
 import type { WorkerHealth } from "@madori/contracts";
 import { describeError, logEvent } from "../log.ts";
 import type { LogFields } from "../log.ts";
+import { serviceDeps } from "../services/deps.ts";
 import type { Runtime } from "../services/deps.ts";
 import { resolveUser } from "../services/users.ts";
 import { verifyAccessToken } from "./access.ts";
@@ -10,8 +11,9 @@ import { meRoutes } from "./me.ts";
 import { patternRoutes } from "./patterns.ts";
 import { projectRoutes } from "./projects.ts";
 import { matchRoute } from "./router.ts";
+import { sampleRoutes } from "./sample.ts";
 
-const routes = [...meRoutes, ...projectRoutes, ...patternRoutes];
+const routes = [...meRoutes, ...projectRoutes, ...patternRoutes, ...sampleRoutes];
 
 /** A Cloudflare Ray ID: 16 hex digits and a data-center code, e.g. `230b030023ae2822-SJC`. */
 const rayIdPattern = /^[0-9a-f]{16}-[A-Z]{3}$/;
@@ -40,7 +42,7 @@ export async function handleApi(
   };
   let response: Response;
   try {
-    response = await dispatch(request, url, env, runtime, log);
+    response = await dispatch(request, url, env, runtime, log, traceId);
   } catch (error) {
     if (error instanceof ApiFailure) {
       response = errorResponse(error.code, error.headers);
@@ -51,7 +53,11 @@ export async function handleApi(
   }
   response.headers.set("cache-control", "no-store");
   response.headers.set("x-trace-id", traceId);
-  logEvent("info", "api.request", { ...log, status: response.status, ms: Date.now() - started });
+  logEvent(response.status >= 500 ? "error" : "info", "api.request", {
+    ...log,
+    status: response.status,
+    ms: Date.now() - started,
+  });
   return response;
 }
 
@@ -61,6 +67,7 @@ async function dispatch(
   env: Env,
   runtime: Runtime,
   log: LogFields,
+  traceId: string,
 ): Promise<Response> {
   if (url.pathname === "/api/health") {
     log["route"] = url.pathname;
@@ -80,8 +87,8 @@ async function dispatch(
   if (request.method !== "GET" && !config.appOrigins.has(request.headers.get("origin") ?? "")) {
     throw new ApiFailure("forbidden");
   }
-  const deps = { db: env.DB, runtime };
+  const deps = serviceDeps(env, runtime);
   const user = await resolveUser(deps, identity);
   log["userId"] = user.id;
-  return match.route.handle({ request, url, deps, user, params: match.params, log });
+  return match.route.handle({ request, url, deps, user, params: match.params, log, traceId });
 }

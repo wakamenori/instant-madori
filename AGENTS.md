@@ -13,7 +13,8 @@
 
 ## 構成と境界
 
-- `apps/web` と `apps/worker` はTypeScript、`apps/geometry` と `crates/*` はRustで書く。`packages/contracts` には、WebとAPIが共有するスキーマと、そこから生成するRust向けの型定義を置く。
+- `apps/web` と `apps/worker` はTypeScript、`apps/geometry` と `crates/*` はRustで書く。`packages/contracts` には、WebとAPIが共有するスキーマと、Rustの内部API契約から生成したTypeScript定義を置く。
+- `crates/display` は依存を持たず、表示データの不変条件と版付きバイナリ形式を受け持つ。内部APIは `crates/geometry-api` を編集し、`packages/contracts/src/generated/` の内部API定数・JSON Schema・Zodと型はそこから `pnpm generate:geometry` で生成し、生成ファイルを手で編集しない。内部APIの各ボディはルートの要求・応答スロットから方向を導出する。要求はDeserialize契約で生成し、未知フィールド拒否を生成時に検査する。応答はSerialize契約で生成し、未知フィールド拒否をスキーマから再帰的に除いて追加フィールドを許容する。エラー本文のスキーマ・メディア型・上限は、全ルートが使うプロトコル共通の定数として定義する。
 - `crates/housing` は、HTTP、ブラウザ、Cloudflare、CADのいずれにも依存しない。`crates/modeling` は住宅データをSolidCraftにつなぐ。`crates/viewer` はSolidCraftの描画の層だけを使う。
 - `third_party/solidcraft` には、upstreamのソース、資産、ライセンス、エージェント向けの指示をそのまま保持する。このコードを修正するときは、upstreamの技術上の制約に従う。一方、upstreamの「すべてRustで書く」「製品名の扱い」「文書は英語」「UI」に関するルールは、その外側にあるこのサービスには適用しない。upstreamへ貢献するための手順（着手の宣言、ドラフトPR、upstreamのCI一式）は、upstreamに貢献するときのものである。このリポジトリ内で組み込みのために行う修正では、その修正に関係する検査と、このファイルに書いたサービスの検査を使う。
 - 使っていないupstreamの構成要素を削除しない。更新は[third_party/solidcraft.md](third_party/solidcraft.md)の手順どおりgit subtreeで行い、upstreamをリポジトリのルートへマージしない。
@@ -21,9 +22,12 @@
 - 第三者の著作権表示とライセンスを保持する。GPL、LGPL、AGPLの依存を追加しない。他の製品のコードや資産を写さない。
 - ローカル環境の作業の中で、本番の認証情報を持ち込んだり、インフラをデプロイしたりしない。
 
+- 補助スクリプトは、目的に合う `scripts/check/`・`scripts/dev/`・`scripts/generate/`・`scripts/build/`・`scripts/upstream/` に置く。複数の目的から使う部品だけを `scripts/shared/` に置き、テストは対象のファイルと同じフォルダーに置く。当てはまる目的がなければ、フォルダーの追加を相談する。一度限りの検証スクリプトは `scripts/` に置かない。
+
 ## 検査と引き継ぎ
 
 - miseで固定したツールと、READMEに書いたコマンドを使う。`pnpm check --fast` は、TypeScriptとRustを自動修正したうえで検査する。`pnpm check` は、それに加えて両方のテストを実行する。`pnpm check --full` は、ビルド、ローカルでの統合検査、依存関係の監査まで行う。依存関係、upstream、WasmのAPIを変更した後にも `--full` を使う。検査はローカルで実行し、GitHub Actionsに頼らない。コミットの前に、変更に関係する検査を実行する。実行していない検査を、実行したと書かない。
+- `apps/geometry`、Dockerfile、`crates/display`・`crates/geometry-api`・`crates/modeling`、Workerの `geometry/`・サンプルAPIと形状サービス、Containerの設定など、Containerまたは表示データの経路を変更した後は、Dockerを起動して `pnpm check --full` で実Containerとの接続を検査する。
 - TypeScriptのアプリとスクリプトには、型情報を使うESLintと厳格な型検査を適用し続ける。信頼できないJSONは、外から受け取る箇所でパースして検証する。依存関係のカタログとツールのバージョン固定を、互いに食い違わない状態に保つ。ロックファイルの変更は内容を確認する。
 - `pnpm check` は、どのモードでもサービスのファイルを整形し、ESLintとClippyの自動修正を適用する。ステージする前に、その結果の差分を確認する。upstreamのソース、過去の検証記録、生成されたファイルを一括で整形しない。コミット前のフックは、ステージされたファイルを書き換えずに検査するだけで、プロジェクト全体の検査の代わりにはならない。
 - テスト以外の新しいRustコードでは、`unsafe`、`unwrap`、`expect`、およびパニックに頼るエラー処理を使わない。外部からの入力は、受け取る箇所で検証する。

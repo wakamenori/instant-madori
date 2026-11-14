@@ -11,6 +11,7 @@ const statusByCode = {
   version_conflict: 409,
   request_id_reused: 422,
   internal_error: 500,
+  service_unavailable: 503,
 } as const satisfies Record<ApiErrorCode, number>;
 
 /** Management requests carry IDs and names only; larger bodies are rejected while reading. */
