@@ -107,6 +107,7 @@ async function main() {
     for await (const file of glob("apps/*/tests/**/*.e2e.ts")) e2eFiles.push(file);
     assertContainerE2eFiles(e2eFiles);
     await script("Upstream boundary", "scripts/check/check-layout.ts");
+    await script("Migration immutability", "scripts/check/check-migrations.ts");
     await script("SQL connection state", "scripts/check/check-sql.ts");
     await script("Secret scan", "scripts/check/check-secrets.ts");
 
