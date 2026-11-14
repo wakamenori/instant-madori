@@ -29,7 +29,14 @@ export async function stop(processes: ReturnType<typeof start>[]) {
         if (child.exitCode === null && child.signalCode === null) child.kill(name);
       } else process.kill(-child.pid, name);
     } catch (error) {
-      if (!(error instanceof Error && "code" in error && error.code === "ESRCH")) throw error;
+      if (
+        error instanceof Error &&
+        "code" in error &&
+        (error.code === "ESRCH" ||
+          (error.code === "EPERM" && (child.exitCode !== null || child.signalCode !== null)))
+      )
+        return;
+      throw error;
     }
   }
   for (const { child } of processes) signal(child, "SIGTERM");
