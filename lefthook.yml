@@ -9,6 +9,10 @@ pre-commit:
       glob: "*.{ts,tsx,mjs}"
       exclude: "^third_party/solidcraft/"
       run: pnpm exec eslint --max-warnings 0 {staged_files}
+    import-boundaries:
+      glob: "*.{ts,tsx,mts,cts}"
+      exclude: "^(third_party/solidcraft/|apps/worker/worker-configuration.d.ts)"
+      run: node scripts/check/check-imports.ts {staged_files}
     rust-format:
       glob: "*.rs"
       exclude: "^third_party/solidcraft/"

@@ -112,7 +112,14 @@ type TypeScriptBoundary = {
   /** Also enforced in test files, which otherwise may cross boundaries. */
   appliesToTests?: true;
 } & (
-  | { kind: "imports"; regex: string; importNamePattern?: string; allowTypeImports?: boolean }
+  | {
+      kind: "imports";
+      targets: string[];
+      exceptTargets?: string[];
+      publicEntry?: { file: string; specifier: string };
+      importNamePattern?: string;
+      allowTypeImports?: boolean;
+    }
   | { kind: "globals"; names: string[] }
   | { kind: "syntax"; selectors: string[] }
 );
@@ -139,7 +146,7 @@ const workerLayerBoundaries: TypeScriptBoundary[] = workerLayerNames.flatMap((la
       id: `worker-${layer}-layers`,
       from,
       kind: "imports",
-      regex: `^\\.\\.?/(?:[^/]+/)*(?:${forbidden.join("|")})(?:/|$)`,
+      targets: forbidden.map((target) => `apps/worker/src/${target}/**`),
       reason,
       message: `Worker ${layer} must not import ${forbidden.join(", ")}; use its allowed layers.`,
     });
@@ -149,7 +156,7 @@ const workerLayerBoundaries: TypeScriptBoundary[] = workerLayerNames.flatMap((la
       id: `worker-${layer}-type-only`,
       from,
       kind: "imports",
-      regex: `^\\.\\.?/(?:[^/]+/)*(?:${typeOnly.join("|")})(?:/|$)`,
+      targets: typeOnly.map((target) => `apps/worker/src/${target}/**`),
       allowTypeImports: true,
       reason,
       message: `Worker ${layer} may import only types from ${typeOnly.join(", ")}.`,
@@ -160,20 +167,10 @@ const workerLayerBoundaries: TypeScriptBoundary[] = workerLayerNames.flatMap((la
 
 export const typescriptBoundaries: TypeScriptBoundary[] = [
   {
-    id: "normalized-specifiers",
-    from: allScopes,
-    kind: "imports",
-    regex: "^/|//|\\\\|^\\./\\.\\.(?:/|$)|/\\.(?:/|$)|(?:^|/)(?!\\.\\.?(?:/|$))[^/]+/\\.\\.(?:/|$)",
-    reason: "docs/plan.md §4.2 dependency paths must be normalized",
-    message:
-      "Use normalized relative module specifiers: no absolute paths or redundant path segments.",
-    appliesToTests: true,
-  },
-  {
     id: "production-test-imports",
     from: allScopes.filter((scope) => scope !== "web-viewer-tests"),
     kind: "imports",
-    regex: "(?:^|/)tests(?:/|$)|\\.test(?:\\.[^/]*)?(?:$|[?#])",
+    targets: ["**/tests/**", "**/*.test", "**/*.test.*"],
     reason: "docs/plan.md §4.2 production files must not depend on test files",
     message: "Production files must not import test files.",
   },
@@ -216,7 +213,7 @@ export const typescriptBoundaries: TypeScriptBoundary[] = [
         scope.startsWith("worker-") && !["worker-api-entry", "worker-composition"].includes(scope),
     ),
     kind: "imports",
-    regex: "^\\.\\.?/(?:[^/]+/)*compose(?:\\.[^/]*)?$",
+    targets: ["apps/worker/src/compose.ts"],
     allowTypeImports: true,
     reason: "docs/plan.md §4.2 only api/app.ts constructs service dependencies",
     message: "Only api/app.ts may import the composition function.",
@@ -229,7 +226,7 @@ export const typescriptBoundaries: TypeScriptBoundary[] = [
         !["worker-storage", "worker-d1", "worker-r2", "worker-composition"].includes(scope),
     ),
     kind: "imports",
-    regex: "^\\.\\.?/(?:[^/]+/)*storage/(?:store|d1|r2)(?:\\.[^/]*)?$",
+    targets: ["apps/worker/src/storage/{store,d1,r2}.ts"],
     allowTypeImports: true,
     reason: "docs/plan.md §6.1b only composition builds Store and adapters",
     message: "Only composition may construct Store and storage adapters.",
@@ -274,7 +271,7 @@ export const typescriptBoundaries: TypeScriptBoundary[] = [
     id: "storage-response",
     from: ["worker-storage", "worker-d1", "worker-r2"],
     kind: "imports",
-    regex: "^(?:@madori/contracts(?:/.*)?|\\.\\.?/(?:[^/]+/)*packages/contracts(?:/.*)?)$",
+    targets: ["packages/contracts/**"],
     importNamePattern: "(?:Response(?:Schema)?|^ApiError(?:Code)?|^apiError(?:Code)?Schema)$",
     reason: "docs/plan.md §4.2 API maps business results to HTTP responses",
     message: "Storage returns domain data, not API response or error types.",
@@ -310,7 +307,7 @@ export const typescriptBoundaries: TypeScriptBoundary[] = [
     id: "web-worker",
     from: ["web", "web-viewer-tests", "web-wasm", "web-config"],
     kind: "imports",
-    regex: "(?:^@madori/worker|^\\.\\.?/(?:[^/]+/)*apps/worker|^(?:\\.\\./)+worker)(?:/|$)",
+    targets: ["apps/worker/**"],
     reason: "docs/plan.md §4.2 web owns the browser; worker owns the server",
     message: "Web must not import Worker.",
     appliesToTests: true,
@@ -319,7 +316,7 @@ export const typescriptBoundaries: TypeScriptBoundary[] = [
     id: "web-scripts",
     from: ["web", "web-viewer-tests", "web-wasm"],
     kind: "imports",
-    regex: "^\\.\\.?/(?:[^/]+/)*scripts(?:/|$)",
+    targets: ["scripts/**"],
     reason: "docs/plan.md §4.2 web owns the browser; scripts are development tooling",
     message: "Web must not import development scripts.",
     appliesToTests: true,
@@ -328,7 +325,8 @@ export const typescriptBoundaries: TypeScriptBoundary[] = [
     id: "web-config-scripts",
     from: ["web-config"],
     kind: "imports",
-    regex: "^\\.\\.?/(?:[^/]+/)*scripts/(?!dev/)",
+    targets: ["scripts/**"],
+    exceptTargets: ["scripts/dev/**"],
     reason: "docs/plan.md §4.2 Vite config may import scripts/dev only",
     message: "Vite config may import only development scripts under scripts/dev.",
   },
@@ -336,7 +334,7 @@ export const typescriptBoundaries: TypeScriptBoundary[] = [
     id: "worker-web",
     from: allScopes.filter((scope) => scope.startsWith("worker-")),
     kind: "imports",
-    regex: "(?:^@madori/web|^\\.\\.?/(?:[^/]+/)*apps/web|^(?:\\.\\./)+web)(?:/|$)",
+    targets: ["apps/web/**"],
     reason: "docs/plan.md §4.2 worker owns the server; web owns the browser",
     message: "Worker must not import Web.",
   },
@@ -344,7 +342,7 @@ export const typescriptBoundaries: TypeScriptBoundary[] = [
     id: "contracts-apps",
     from: ["contracts"],
     kind: "imports",
-    regex: "(?:^@madori/(?:web|worker)|^\\.\\.?/(?:[^/]+/)*apps)(?:/|$)",
+    targets: ["apps/**"],
     reason: "docs/plan.md §4.2 contracts contains shared communication schemas and types",
     message: "Shared contracts must not import applications.",
   },
@@ -352,8 +350,8 @@ export const typescriptBoundaries: TypeScriptBoundary[] = [
     id: "web-internal-geometry",
     from: ["web", "web-viewer-tests", "web-wasm", "web-config"],
     kind: "imports",
-    regex:
-      "(?:^@madori/contracts/geometry-internal(?:$|[/.])|^\\.\\.?/(?:[^/]+/)*packages/contracts(?:/|$))",
+    targets: ["packages/contracts/**"],
+    publicEntry: { file: "packages/contracts/src/index.ts", specifier: "@madori/contracts" },
     reason: "docs/plan.md §4.2 Web must not import internal API definitions",
     message: "Use public @madori/contracts exports in web.",
     appliesToTests: true,
@@ -362,7 +360,7 @@ export const typescriptBoundaries: TypeScriptBoundary[] = [
     id: "web-viewer-bindings",
     from: ["web", "web-config"],
     kind: "imports",
-    regex: "^\\.\\.?/(?:[^/]+/)*crates/viewer/pkg(?:/|$)",
+    targets: ["crates/viewer/pkg/**"],
     reason: "docs/plan.md §4.2 web owns Wasm loading through viewer/wasm.ts",
     message: "Import viewer bindings through viewer/wasm.ts.",
     appliesToTests: true,

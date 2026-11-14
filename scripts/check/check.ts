@@ -84,6 +84,7 @@ async function main() {
     } finally {
       await format();
     }
+    await script("Resolved TypeScript import boundaries", "scripts/check/check-imports.ts");
     for (const project of [
       "packages/contracts",
       "apps/web",
