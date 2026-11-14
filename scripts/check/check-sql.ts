@@ -7,10 +7,10 @@ export function checkSqlSource(path: string, source: string) {
   const violations: string[] = [];
   const sourceFile = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true);
   function checkText(text: string, offset: number) {
-    for (const match of text.matchAll(/\bchanges\s*\(/gi)) {
+    for (const match of text.matchAll(/\b(?:changes|total_changes|last_insert_rowid)(?=\s*\()/gi)) {
       const { line, character } = sourceFile.getLineAndCharacterOfPosition(offset + match.index);
       violations.push(
-        `${path}:${line + 1}:${character + 1}: changes() depends on connection state; use row data instead.`,
+        `${path}:${line + 1}:${character + 1}: ${match[0].toLowerCase()}() depends on connection state; use row data instead.`,
       );
     }
   }
