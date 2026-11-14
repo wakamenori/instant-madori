@@ -1,6 +1,7 @@
 import { z } from "zod";
 
-const errorDescriptionSchema = z.string().brand<"ErrorDescription">();
+const errorDescription: unique symbol = Symbol("ErrorDescription");
+const errorDescriptionSchema = z.string().brand(errorDescription);
 
 export interface LogFields {
   traceId?: string;
@@ -24,9 +25,34 @@ export interface LogFields {
   mode?: "cold" | "adopted" | "reprobe";
 }
 
+const logKeys = {
+  traceId: true,
+  rayId: true,
+  method: true,
+  route: true,
+  userId: true,
+  status: true,
+  ms: true,
+  error: true,
+  requestId: true,
+  bytes: true,
+  geometryStart: true,
+  geometryMs: true,
+  geometryFailure: true,
+  geometryStatus: true,
+  geometryViolation: true,
+  reason: true,
+  why: true,
+  image: true,
+  mode: true,
+} satisfies Record<keyof LogFields, true>;
+
 /** Writes one structured log line; Workers Logs indexes the JSON fields. */
 export function logEvent(level: "info" | "error", event: string, fields: LogFields) {
-  const line = JSON.stringify({ level, event, ...fields });
+  const allowed = Object.fromEntries(
+    Object.entries(fields).filter(([key]) => Object.hasOwn(logKeys, key)),
+  );
+  const line = JSON.stringify({ level, event, ...allowed });
   if (level === "error") console.error(line);
   else console.log(line);
 }
