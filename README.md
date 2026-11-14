@@ -147,7 +147,11 @@ SolidCraftの元のREADME・資料・ライセンスは取り込み領域に保�
 
 ## stagingへデプロイする
 
-この手順はCloudflareリソースの作成とデプロイを伴います。ローカルの検査では実行しません。現在のstagingは `https://instant-madori-staging.firpmnfiywl.workers.dev` です。
+mainへのpushで、`.github/workflows/deploy-staging.yml` がself-hosted runnerでstagingへデプロイします。`pnpm check --full`、D1のマイグレーションの適用、`wrangler deploy --env staging` の順に進め、最後に `scripts/check/staging-smoke.ts` で、Accessを通した疎通を確かめます。デプロイは途中で止めず、後から来たpushは前のデプロイが終わってから最新のmainをデプロイします。マイグレーションはデプロイの前に適用するため、動いている前の版のWorkerと両立する形で書きます。
+
+疎通の確認では、Accessのservice tokenを使います。token無しでAccessのログインへ302でリダイレクトされること、`/api/health` が200を返すこと、`/api/me` が403 `forbidden` を返すことを確かめます。Workerはservice tokenの利用者を受け付けないため、403は、WorkerがAccessのJWTを設定した発行元・audienceで検証したことを示します。認証の要るAPIはこの確認では呼びません。runnerは、`MADORI_ENV_FILE` が指す `.env` から、`CLOUDFLARE_API_TOKEN`、`STAGING_ACCESS_CLIENT_ID`、`STAGING_ACCESS_CLIENT_SECRET` だけを読みます。service tokenはAccessアプリの `non_identity` のポリシーで許可し、期限は1年です。
+
+以下は、stagingの環境を最初に作るときの手順です。Cloudflareリソースの作成とデプロイを伴い、ローカルの検査では実行しません。現在のstagingは `https://instant-madori-staging.firpmnfiywl.workers.dev` です。
 
 1. Workers Paidのアカウントで、staging用D1を `wrangler d1 create instant-madori-staging` で、R2バケットを `wrangler r2 bucket create instant-madori-staging` で作成します。Containersを使うにはWorkers Paidが必要です。
 2. `apps/worker/wrangler.jsonc` の `env.staging` に、D1のID、画面のOrigin（workers.devのホスト名）、Accessのチームドメインを設定します。この時点では `workers_dev` を無効にしておきます。Accessで守る前に公開すると、静的ファイルはWorkerの認証を通らずに配信されるためです。`preview_urls` は常に無効にします。初期値の `.invalid` 発行元は認証設定の検査で拒否します。

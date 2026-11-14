@@ -477,7 +477,7 @@ SolidCraft一式を保持することと、通常のビルド・テスト対象�
 
 本番はWorkerと静的ファイル、D1マイグレーション、R2、DO・Workflow、Containerイメージを一組の版としてデプロイする。RustはContainerの対象であるLinux向けにビルドし、Wasmは別の成果物として作る。形状処理のメモリと起動時間を測り、Containerのサイズ・同時実行数・休止条件を選ぶ。
 
-stagingはworkers.devのホスト名で公開し、Worker宛先のAccessアプリで守る（preview URLは無効）。手順の順序はREADMEに従う。Accessアプリとstaging用のD1を作成し、`apps/worker/wrangler.jsonc` の `env.staging` にDB ID、Accessの発行元とaudience、画面のOriginを設定する。初期値の `.invalid` 発行元はローカル以外で拒否する。インスタンスの種類と休止時間は環境別の変数で指定し、stagingでの計測（[検証3](verification/verification-03.md)）に基づいて決める。Workers Logsを有効にし、Container内の標準出力もそこへ集める。接続用DOが出す `container.ready` ログの `mode: cold` で起動時間、Rustの要求ログの `vmHwmKib` でLinux上のメモリ最大値を読む。
+stagingはworkers.devのホスト名で公開し、Worker宛先のAccessアプリで守る（preview URLは無効）。mainへのpushで、self-hosted runnerが `pnpm check --full`、D1のマイグレーション、デプロイ、Accessのservice tokenを使った疎通の確認を順に行う。マイグレーションはデプロイの前に適用するため、動いている前の版のWorkerと両立する形で書く。手順の順序はREADMEに従う。Accessアプリとstaging用のD1を作成し、`apps/worker/wrangler.jsonc` の `env.staging` にDB ID、Accessの発行元とaudience、画面のOriginを設定する。初期値の `.invalid` 発行元はローカル以外で拒否する。インスタンスの種類と休止時間は環境別の変数で指定し、stagingでの計測（[検証3](verification/verification-03.md)）に基づいて決める。Workers Logsを有効にし、Container内の標準出力もそこへ集める。接続用DOが出す `container.ready` ログの `mode: cold` で起動時間、Rustの要求ログの `vmHwmKib` でLinux上のメモリ最大値を読む。
 
 起動確認が終わってから処理を渡す。長い処理ではコンテナの生存時間を明示的に管理する。ブラウザ、Workflow、ContainerのHTTP接続が切れたことだけを、ジョブの完了や取消の証拠にしない。
 
@@ -636,7 +636,7 @@ Linux Container上のSolidCraftの動作、必要メモリと起動時間、WebG
 
 5. ローカルのDockerのイメージとビルドキャッシュの回収。Containerを起動するたびに `cloudflare-dev/geometrycontainer-geometry-*` のタグが一つ増え、self-hosted runnerの `--full` でも増える。ビルドキャッシュにはRustの依存のキャッシュ（Dockerfileのcache mount）も含まれ、消すと形状サービスのビルドが遅くなるため、残す量を決めて回収する。
 
-単位4から単位5へ持ち越すもの：同じjob IDからの二重の確定を防ぐ一意制約と、確定をやり直したときに二重に書かないこと、会話の区切りの列。stagingのR2で上書きを拒む書込みが効くことの確認（ローカルのminiflareでは確かめた。stagingのバケットは作成済みで、Workerはまだ単位4の版をデプロイしていない）。
+単位4から単位5へ持ち越すもの：同じjob IDからの二重の確定を防ぐ一意制約と、確定をやり直したときに二重に書かないこと、会話の区切りの列。stagingのR2で上書きを拒む書込みが効くことの確認（ローカルのminiflareでは確かめた。stagingの自動デプロイの疎通の確認は認証の要るAPIを呼ばないため、案の保存はまだ確かめられない）。
 
 単位5では、公開要求の所有者を表す `OwnerId` と、保存済みジョブの実行権を別の型にする。実行権にはパターン・job ID・実行世代を含める。DOの最初の受付ではジョブの行がまだないため、4.6の受付順を決め直す。Workerが認証済みの要求を先に保存し、DOには識別子を渡す案を第一候補にする。DO・Workflowからservicesを呼ぶため、組み立て関数の入口（今は `api/app.ts` だけに許可している）にDO・Workflowの入口のファイルを加える。そのファイルのscopeは、元の層の依存の制限も受けるようにする。
 
