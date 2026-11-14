@@ -1,6 +1,21 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { migratedDatabase } from "./support/local-worker.ts";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
+
+await test("Populated migration preserves bases and the previous Worker's storage operations", async () => {
+  await promisify(execFile)(process.execPath, [
+    fileURLToPath(new URL("./rpc/jobs-migration-fixture.ts", import.meta.url)),
+  ]);
+});
+
+await test("Jobs and messages enforce their D1 constraints", async () => {
+  await promisify(execFile)(process.execPath, [
+    fileURLToPath(new URL("./rpc/jobs-constraints-fixture.ts", import.meta.url)),
+  ]);
+});
 
 await test("Schema constraints", async (t) => {
   const db = await migratedDatabase();
@@ -77,42 +92,42 @@ await test("Revision and snapshot constraints", async (t) => {
     INSERT INTO snapshots VALUES
       ('s1', 'u1', 1, 'one/manifest.json', '${hash}', '${now}'),
       ('s2', 'u2', 1, 'two/manifest.json', '${hash}', '${now}');
-    INSERT INTO revisions VALUES ('r1', 't1', 'u1', 1, 'R', 's1', NULL, '${now}');
+    INSERT INTO revisions (id, pattern_id, owner_id, number, name, snapshot_id, base_revision_id, created_at) VALUES ('r1', 't1', 'u1', 1, 'R', 's1', NULL, '${now}');
   `);
   for (const [label, sql, expected] of [
     [
       "revision owner must equal pattern owner",
-      `INSERT INTO revisions VALUES ('bad', 't1', 'u2', 2, 'R', 's2', NULL, '${now}')`,
+      `INSERT INTO revisions (id, pattern_id, owner_id, number, name, snapshot_id, base_revision_id, created_at) VALUES ('bad', 't1', 'u2', 2, 'R', 's2', NULL, '${now}')`,
       /FOREIGN KEY constraint failed/,
     ],
     [
       "revision owner must equal snapshot owner",
-      `INSERT INTO revisions VALUES ('bad', 't1', 'u1', 2, 'R', 's2', NULL, '${now}')`,
+      `INSERT INTO revisions (id, pattern_id, owner_id, number, name, snapshot_id, base_revision_id, created_at) VALUES ('bad', 't1', 'u1', 2, 'R', 's2', NULL, '${now}')`,
       /FOREIGN KEY constraint failed/,
     ],
     [
       "base must belong to the same pattern",
-      `INSERT INTO revisions VALUES ('bad', 't2', 'u1', 1, 'R', 's1', 'r1', '${now}')`,
+      `INSERT INTO revisions (id, pattern_id, owner_id, number, name, snapshot_id, base_revision_id, created_at) VALUES ('bad', 't2', 'u1', 1, 'R', 's1', 'r1', '${now}')`,
       /FOREIGN KEY constraint failed/,
     ],
     [
       "history numbers cannot repeat",
-      `INSERT INTO revisions VALUES ('bad', 't1', 'u1', 1, 'R', 's1', NULL, '${now}')`,
+      `INSERT INTO revisions (id, pattern_id, owner_id, number, name, snapshot_id, base_revision_id, created_at) VALUES ('bad', 't1', 'u1', 1, 'R', 's1', NULL, '${now}')`,
       /UNIQUE constraint failed: revisions.pattern_id, revisions.number/,
     ],
     [
       "number starts at one",
-      `INSERT INTO revisions VALUES ('bad', 't1', 'u1', 0, 'R', 's1', NULL, '${now}')`,
+      `INSERT INTO revisions (id, pattern_id, owner_id, number, name, snapshot_id, base_revision_id, created_at) VALUES ('bad', 't1', 'u1', 0, 'R', 's1', NULL, '${now}')`,
       /CHECK constraint failed: number >= 1/,
     ],
     [
       "revision name cannot be empty",
-      `INSERT INTO revisions VALUES ('bad', 't1', 'u1', 2, '', 's1', NULL, '${now}')`,
+      `INSERT INTO revisions (id, pattern_id, owner_id, number, name, snapshot_id, base_revision_id, created_at) VALUES ('bad', 't1', 'u1', 2, '', 's1', NULL, '${now}')`,
       /CHECK constraint failed: length\(name\)/,
     ],
     [
       "revision name cannot exceed 100 characters",
-      `INSERT INTO revisions VALUES ('bad', 't1', 'u1', 2, '${"あ".repeat(101)}', 's1', NULL, '${now}')`,
+      `INSERT INTO revisions (id, pattern_id, owner_id, number, name, snapshot_id, base_revision_id, created_at) VALUES ('bad', 't1', 'u1', 2, '${"あ".repeat(101)}', 's1', NULL, '${now}')`,
       /CHECK constraint failed: length\(name\)/,
     ],
     [
@@ -139,6 +154,6 @@ await test("Revision and snapshot constraints", async (t) => {
     await t.test(label, () => assert.rejects(db.execute(sql), expected));
   }
   await db.execute(
-    `INSERT INTO revisions VALUES ('r2', 't1', 'u1', 2, 'R2', 's1', 'r1', '${now}')`,
+    `INSERT INTO revisions (id, pattern_id, owner_id, number, name, snapshot_id, base_revision_id, created_at) VALUES ('r2', 't1', 'u1', 2, 'R2', 's1', 'r1', '${now}')`,
   );
 });

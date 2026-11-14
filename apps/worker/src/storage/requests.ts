@@ -125,7 +125,7 @@ function recordedBy(key: RequestKey): SqlPart {
 }
 
 /** Tables that once-only operations may change. Names are code constants, never input. */
-type OnceTable = "projects" | "patterns";
+type OnceTable = "projects" | "patterns" | "jobs";
 
 interface BatchParts {
   before: readonly SqlPart[];
