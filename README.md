@@ -113,7 +113,7 @@ Miniflareのsharp依存は、LGPLのlibvipsを含むため除外しています�
 | `packages/contracts`     | WebとWorkerで共有するスキーマ。住宅の通信型はRust実装時に生成を追加          |
 | `third_party/solidcraft` | upstream一式。専用のCargo workspaceとして保持                                |
 | `docs`                   | 実装計画、過去の判断・検証記録                                               |
-| `scripts`                | ビルド・起動・検査・upstream更新のTypeScriptスクリプト。Node.js 24で直接実行 |
+| `scripts`                | ビルド・起動・検査・upstream更新のTypeScriptスクリプト。Node.js 26で直接実行 |
 
 ルートのCargo.lockとpnpm-lock.yamlがサービスの依存関係を固定します。SolidCraftの未使用アプリは通常のビルド対象に含めません。
 
