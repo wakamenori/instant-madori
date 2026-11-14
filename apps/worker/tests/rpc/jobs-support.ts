@@ -1,0 +1,57 @@
+import { readFile } from "node:fs/promises";
+import { URL, fileURLToPath } from "node:url";
+import { getPlatformProxy, unstable_splitSqlQuery } from "wrangler";
+import { exportJWK, generateKeyPair, SignJWT } from "jose";
+import { accessAssertionHeader } from "@madori/contracts";
+import { verifyAccessToken } from "../../src/api/access.ts";
+import { resolveUser } from "../../src/services/users.ts";
+import { createStore } from "../../src/storage/store.ts";
+import { d1 } from "../../src/storage/d1.ts";
+import { r2 } from "../../src/storage/r2.ts";
+
+export const jobMigration = new URL("../../migrations/0003_jobs_messages.sql", import.meta.url);
+export const now = "2026-11-15T00:00:00.000Z";
+
+export async function openJobDatabase() {
+  const proxy = await getPlatformProxy<Pick<Env, "DB" | "BLOBS">>({
+    configPath: fileURLToPath(new URL("../../wrangler.jsonc", import.meta.url)),
+    persist: false,
+    remoteBindings: false,
+  });
+  const raw = proxy.env.DB;
+  const apply = (sql: string) => raw.batch(unstable_splitSqlQuery(sql).map((s) => raw.prepare(s)));
+  try {
+    for (const name of ["0001_users_projects_patterns.sql", "0002_revisions.sql"]) {
+      await apply(await readFile(new URL(`../../migrations/${name}`, import.meta.url), "utf8"));
+    }
+    const store = createStore(d1(raw), r2(proxy.env.BLOBS));
+    const runtime = {
+      now: () => now,
+      newId: () => crypto.randomUUID(),
+      newTraceId: () => crypto.randomUUID(),
+    };
+    const { privateKey, publicKey } = await generateKeyPair("RS256", { extractable: true });
+    const jwks = {
+      keys: [{ ...(await exportJWK(publicKey)), kty: "RSA", kid: "jobs", alg: "RS256" }],
+    };
+    const issuer = "https://jobs.invalid";
+    async function owner(subject: string) {
+      const token = await new SignJWT({ email: `${subject}@example.test` })
+        .setProtectedHeader({ alg: "RS256", kid: "jobs" })
+        .setIssuer(issuer)
+        .setAudience("jobs")
+        .setSubject(subject)
+        .setExpirationTime("5m")
+        .sign(privateKey);
+      const identity = await verifyAccessToken(
+        new Request("https://app.test/api/me", { headers: { [accessAssertionHeader]: token } }),
+        { issuer, audience: "jobs", keys: { kind: "local", jwks, source: JSON.stringify(jwks) } },
+      );
+      return (await resolveUser({ store, runtime }, identity)).id;
+    }
+    return { raw, store, runtime, apply, owner, dispose: () => proxy.dispose() };
+  } catch (error) {
+    await proxy.dispose();
+    throw error;
+  }
+}

@@ -4,12 +4,19 @@ import * as projects from "./projects.ts";
 import * as patterns from "./patterns.ts";
 import * as revisions from "./revisions.ts";
 import * as snapshots from "./snapshots.ts";
+import * as jobs from "./jobs.ts";
 import { upsertAccessUser } from "./users.ts";
 
 export function createStore(db: D1, bucket: R2) {
   return {
     users: {
       upsertAccess: (input: Parameters<typeof upsertAccessUser>[1]) => upsertAccessUser(db, input),
+    },
+    jobs: {
+      acceptOnce: (
+        key: Parameters<typeof jobs.acceptInstructionOnce>[1],
+        input: Parameters<typeof jobs.acceptInstructionOnce>[2],
+      ) => jobs.acceptInstructionOnce(db, key, input),
     },
     projects: {
       list: (query: Parameters<typeof projects.listProjects>[1]) =>
