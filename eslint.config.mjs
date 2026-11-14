@@ -5,10 +5,142 @@ import reactHooks from "eslint-plugin-react-hooks";
 import prettier from "eslint-config-prettier";
 import globals from "globals";
 
-const internalGeometryImport = {
-  name: "@madori/contracts/geometry-internal",
-  message: "Use public @madori/contracts exports in web.",
-};
+import {
+  boundaryTestIgnores,
+  typescriptBoundaries,
+  typescriptScopes,
+  typescriptExtensions,
+} from "./scripts/check/boundaries.ts";
+
+const baseRestrictedSyntax = [
+  {
+    selector:
+      "ExportNamedDeclaration[exportKind='value'][source] > ExportSpecifier[exportKind='type']",
+    message:
+      "Use export type declarations for type re-exports to avoid a runtime module dependency.",
+  },
+];
+
+function selectorRegex(regex) {
+  return `/${regex.replace(/\\\//gu, "/").replace(/\//gu, "\\/")}/iu`;
+}
+
+function boundaryConfig(name, files, ignores, rows, allowImportMetaUrl = false) {
+  const patterns = rows
+    .filter((row) => row.kind === "imports")
+    .map((row) => ({
+      regex: row.regex,
+      message: row.message,
+      ...(row.importNamePattern ? { importNamePattern: row.importNamePattern } : {}),
+      ...(row.allowTypeImports ? { allowTypeImports: true } : {}),
+    }));
+  const globals = rows
+    .filter((row) => row.kind === "globals")
+    .flatMap((row) => row.names.map((name) => ({ name, message: row.message })));
+  const syntax = rows
+    .filter((row) => row.kind === "imports")
+    .flatMap((row) => {
+      const regex = selectorRegex(row.regex);
+      const importType = row.importNamePattern
+        ? `TSImportType:matches([qualifier=null], [qualifier.name=${selectorRegex(row.importNamePattern)}])`
+        : "TSImportType";
+      return [
+        `ImportExpression > Literal.source[value=${regex}]`,
+        ...(!row.allowTypeImports ? [`${importType} > Literal.source[value=${regex}]`] : []),
+        ...(row.importNamePattern && !row.allowTypeImports
+          ? [
+              `TSImportType[source.value=${regex}] > TSQualifiedName.qualifier Identifier.left[name=${selectorRegex(row.importNamePattern)}]`,
+            ]
+          : []),
+      ].map((selector) => ({ selector, message: row.message }));
+    });
+  if (rows.some((row) => row.kind === "imports")) {
+    syntax.push(
+      {
+        selector: "ImportExpression[source.type!='Literal']",
+        message: "Use literal dynamic imports so dependency boundaries can be checked.",
+      },
+      {
+        selector:
+          "MemberExpression[object.type='MetaProperty'][object.meta.name='import']:matches([property.name='glob'], [property.value='glob'])",
+        message:
+          "Use literal imports instead of import.meta.glob so dependency boundaries can be checked.",
+      },
+      ...(!allowImportMetaUrl
+        ? [
+            {
+              selector:
+                "NewExpression[callee.name='URL'][arguments.1.object.type='MetaProperty'][arguments.1.object.meta.name='import']:matches([arguments.1.property.name='url'], [arguments.1.property.value='url'])",
+              message:
+                "Use literal imports instead of new URL with import.meta.url so dependency boundaries can be checked.",
+            },
+          ]
+        : []),
+    );
+  }
+  syntax.push(
+    ...globals.flatMap(({ name, message }) =>
+      [
+        `TSTypeQuery > Identifier[name='${name}']`,
+        `TSTypeQuery TSQualifiedName[left.name=/^(?:globalThis|self)$/u][right.name='${name}']`,
+      ].map((selector) => ({ selector, message })),
+    ),
+  );
+  return {
+    name,
+    files,
+    ignores,
+    rules: {
+      "no-restricted-imports": ["error", { patterns }],
+      "no-restricted-syntax": ["error", ...baseRestrictedSyntax, ...syntax],
+      ...(globals.length
+        ? {
+            "no-restricted-globals": ["error", { globals, checkGlobalObject: true }],
+            "no-restricted-properties": [
+              "error",
+              ...globals.flatMap(({ name, message }) =>
+                ["globalThis", "self"].map((object) => ({ object, property: name, message })),
+              ),
+            ],
+            // ESLint's global rule skips TypeScript type references.
+            "@typescript-eslint/no-restricted-types": [
+              "error",
+              {
+                types: Object.fromEntries(
+                  globals.flatMap(({ name, message }) =>
+                    [name, `globalThis.${name}`, `self.${name}`].map((type) => [type, { message }]),
+                  ),
+                ),
+              },
+            ],
+          }
+        : {}),
+    },
+  };
+}
+
+// Several config objects matching one file replace each other's rule options, so each
+// file gets exactly one boundary config: source files every row of their scope, test
+// files (an AND of the scope glob and a test glob) only the rows marked for tests.
+const boundaryConfigs = Object.entries(typescriptScopes).flatMap(([scope, { files, ignores }]) => {
+  const rows = typescriptBoundaries.filter((row) => row.from.includes(scope));
+  const testRows = rows.filter((row) => row.appliesToTests);
+  // Tests read fixtures through import.meta.url and may cross boundaries anyway.
+  return [
+    boundaryConfig(`boundaries/${scope}`, files, [...ignores, ...boundaryTestIgnores], rows),
+    ...(testRows.length
+      ? [
+          boundaryConfig(
+            `boundaries/${scope}/tests`,
+            files.flatMap((file) => boundaryTestIgnores.map((test) => [file, test])),
+            ignores,
+            testRows,
+            true,
+          ),
+        ]
+      : []),
+  ];
+});
 
 export default defineConfig(
   globalIgnores([
@@ -28,12 +160,18 @@ export default defineConfig(
     languageOptions: { globals: globals.node },
   },
   {
-    files: ["apps/**/*.{ts,tsx}", "packages/**/*.ts", "scripts/**/*.ts"],
+    files: [
+      `apps/**/*.${typescriptExtensions}`,
+      `packages/**/*.${typescriptExtensions}`,
+      `scripts/**/*.${typescriptExtensions}`,
+    ],
     extends: [js.configs.recommended, tseslint.configs.recommendedTypeChecked],
     languageOptions: {
       parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname },
     },
     rules: {
+      "no-restricted-syntax": ["error", ...baseRestrictedSyntax],
+      "@typescript-eslint/no-import-type-side-effects": "error",
       "@typescript-eslint/consistent-type-imports": "error",
       "@typescript-eslint/no-non-null-assertion": "error",
       "@typescript-eslint/no-explicit-any": "error",
@@ -41,27 +179,16 @@ export default defineConfig(
     },
   },
   {
-    files: ["apps/web/src/**/*.{ts,tsx}"],
+    files: [`apps/web/src/**/*.${typescriptExtensions}`],
     extends: [reactHooks.configs.flat.recommended],
     rules: {
       "no-console": ["error", { allow: ["warn", "error"] }],
-      "no-restricted-imports": [
-        "error",
-        {
-          paths: [internalGeometryImport],
-          patterns: [
-            {
-              group: ["**/crates/viewer/pkg/*"],
-              message: "Import viewer bindings through viewer/wasm.ts.",
-            },
-          ],
-        },
-      ],
     },
   },
   {
-    files: ["apps/web/src/viewer/wasm.ts", "apps/web/src/viewer/*.test.ts"],
-    rules: { "no-restricted-imports": ["error", { paths: [internalGeometryImport] }] },
+    files: [`apps/worker/**/*.${typescriptExtensions}`],
+    languageOptions: { globals: { self: "readonly" } },
   },
+  ...boundaryConfigs,
   prettier,
 );

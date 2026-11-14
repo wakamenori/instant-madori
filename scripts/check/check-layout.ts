@@ -1,11 +1,24 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { lstatSync, readFileSync, readlinkSync } from "node:fs";
+import { lstatSync, readFileSync, readdirSync, readlinkSync } from "node:fs";
 import ts from "typescript";
 import { z } from "zod";
 import { geometryInternal } from "../../packages/contracts/src/generated/geometry-internal.ts";
 import { readUpstreamPin, repositoryRoot } from "../shared/repository.ts";
+import { checkWorkerLayers } from "./boundaries.ts";
 import { assertStagingBindings, upstreamFilePath } from "./layout-contract.ts";
+import {
+  cargoMetadataSchema,
+  checkRustBoundaries,
+  readRustBoundaryFeatures,
+} from "./rust-boundaries.ts";
+
+const workerLayerViolations = checkWorkerLayers(
+  readdirSync(new URL("apps/worker/src/", repositoryRoot), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name),
+);
+if (workerLayerViolations.length) throw new Error(workerLayerViolations.join("\n"));
 
 const pin = readUpstreamPin();
 const tree = execFileSync("git", ["ls-tree", "-rz", pin.commit], {
@@ -43,19 +56,16 @@ for (const file of localFiles.split("\0").filter(Boolean)) {
   if (!upstreamPaths.has(relative) && !patches.has(relative))
     throw new Error(`Unrecorded upstream addition: ${relative}`);
 }
-const metadata = z
-  .object({
-    packages: z.array(z.object({ id: z.string(), name: z.string() })),
-    workspace_members: z.array(z.string()),
-  })
-  .parse(
-    JSON.parse(
-      execFileSync("cargo", ["metadata", "--locked", "--no-deps", "--format-version", "1"], {
-        encoding: "utf8",
-        maxBuffer: 16 * 1024 * 1024,
-      }),
-    ),
-  );
+const metadata = cargoMetadataSchema.parse(
+  JSON.parse(
+    execFileSync("cargo", ["metadata", "--locked", "--format-version", "1"], {
+      encoding: "utf8",
+      maxBuffer: 16 * 1024 * 1024,
+    }),
+  ),
+);
+const boundaryViolations = checkRustBoundaries(metadata, readRustBoundaryFeatures());
+if (boundaryViolations.length) throw new Error(boundaryViolations.join("\n"));
 const actualMembers = metadata.packages
   .filter((pkg) => metadata.workspace_members.includes(pkg.id))
   .map((pkg) => pkg.name)
@@ -70,52 +80,6 @@ const expectedMembers = [
 ];
 if (JSON.stringify(actualMembers) !== JSON.stringify(expectedMembers))
   throw new Error(`Unexpected workspace members: ${actualMembers.join(", ")}`);
-const viewerDependencies = execFileSync(
-  "cargo",
-  [
-    "tree",
-    "--locked",
-    "-p",
-    "madori-viewer",
-    "--target",
-    "wasm32-unknown-unknown",
-    "--edges",
-    "normal",
-    "--prefix",
-    "none",
-  ],
-  { encoding: "utf8" },
-);
-if (/^solidcraft-(engine|doc|kernel|ui-egui) /m.test(viewerDependencies))
-  throw new Error("The browser viewer must not include editing or egui crates");
-const nativeDependencies = execFileSync(
-  "cargo",
-  ["tree", "--locked", "-p", "madori-geometry", "--edges", "normal", "--prefix", "none"],
-  { encoding: "utf8" },
-);
-if (/^(egui|eframe|winit|solidcraft-ui-egui) /m.test(nativeDependencies))
-  throw new Error("The native geometry service must not include the upstream UI");
-const nativeFeatures = execFileSync(
-  "cargo",
-  ["tree", "--locked", "-p", "madori-geometry", "--edges", "features", "--prefix", "none"],
-  { encoding: "utf8" },
-);
-if (
-  !nativeFeatures.includes('solidcraft-io feature "external-workspace"') ||
-  nativeFeatures.includes('solidcraft-io feature "trust-unknown-source"')
-)
-  throw new Error("The service must not trust a cache fingerprint from the upstream workspace");
-
-const displayTree = execFileSync(
-  "cargo",
-  ["tree", "--locked", "-p", "madori-display", "--edges", "normal", "--prefix", "none"],
-  { encoding: "utf8" },
-);
-if (displayTree.trim().split("\n").length !== 1)
-  throw new Error("Display format must have no dependencies");
-
-if (/^madori-modeling /m.test(viewerDependencies))
-  throw new Error("Viewer must not include modeling");
 const dockerfile = readFileSync(new URL("apps/geometry/Dockerfile", repositoryRoot), "utf8");
 if (
   !dockerfile.includes(`EXPOSE ${geometryInternal.port}`) ||
