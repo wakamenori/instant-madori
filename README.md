@@ -85,6 +85,10 @@ TypeScriptのテストはNode.js標準のtest runnerを使います。HTTP経由
 
 Workerの保存境界では、型名・バインディングの取り出し・組み立て関数の入口を別の行で検査する。`storage/` では `z.any` と `z.custom` を禁止し、行の型は渡したスキーマから導出する。テストは破損注入のためにこれらの制限を除外し、ブランド型への直接キャストと `as never` の禁止だけは適用する。この構文検査では、次の形を防げない。
 
+- 作成の証拠の行が、その要求の文で新しく作られたか。既存のIDを証拠にすると、変更のない記録が残る。
+- 作成の文が何かを作るとき、必ず証拠の行も作るか。そうでなければ記録のない変更が残り、再送で繰り返される。
+- 冪等な操作の結果のSQLが、正しい結果を作るか。
+- `requests` 表への手書きの書込み。この禁止は[#65](https://github.com/wakamenori/instant-madori/issues/65)で追加する。
 - `OwnerId`・`VerifiedIdentity` の名前を書かないキャストで作る形。ブランドを含む型へのキャスト（例：`as AuthenticatedUser`、`as AuthenticatedUser["id"]`、`as RequestKey`）、型の別名を通したキャストがこれに当たる。
 - 保存結果の `resolved.constructor` を構築可能な型へキャストし、任意の利用者行を渡す形。非公開コンストラクタも、明示的なキャストによる偽造までは防がない。
 - `VerifiedIdentity` の欄の直接代入や `Object.assign` による書き換えは、生成時の凍結で拒否する。既存の証拠をspreadし、別の値へ置き換えたオブジェクトや、型の偽造はこの保証に含まれない。

@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
 
-void test("Store and owner types reject unverified identities and duplicate owner arguments", () => {
+void test("Storage types reject unverified identities, duplicate owners and forged batches", () => {
   const configFile = fileURLToPath(new URL("./rpc/tsconfig.json", import.meta.url));
   const fixtureFile = fileURLToPath(new URL("./rpc/storage-type-fixture.ts", import.meta.url));
   const config = ts.readConfigFile(configFile, (path) => ts.sys.readFile(path));
@@ -122,4 +123,79 @@ void test("Store and owner types reject unverified identities and duplicate owne
       [2554, 2554, 2345, 2345, 2345, 2353, 2345, 2540],
     );
   }
+  const batchImports = `
+    import { createOnceStatements, updateOnceStatements, runOnce } from "../../src/storage/requests.ts";
+    import type { OnceBatch } from "../../src/storage/requests.ts";
+    import type { SqlPart } from "../../src/storage/d1.ts";
+    declare const part: SqlPart;
+  `;
+  assert.deepEqual(
+    diagnostics(
+      batchImports +
+        `
+      const created: OnceBatch = createOnceStatements(key, "now", {
+        statements: [part], table: "patterns", id: patternId, result: part,
+      });
+      const updated: OnceBatch = updateOnceStatements(key, "now", {
+        table: "projects", set: part, where: part, result: part,
+      });
+      void runOnce(database, z.object({ name: z.string() }), created);
+      void runOnce(database, z.object({ name: z.string() }), updated);
+    `,
+    ),
+    [],
+  );
+  for (const [source, codes] of [
+    ["const batch: OnceBatch = {};", [2739]],
+    ["const batch: OnceBatch = { before: [], record: part, after: [] };", [2353]],
+    [
+      'import { OnceBatch as Batch } from "../../src/storage/requests.ts"; new Batch();',
+      [1485, 2673, 1362],
+    ],
+    ['import { recordStatement } from "../../src/storage/requests.ts";', [2459]],
+    ["void runOnce(database, key, z.unknown(), {});", [2554]],
+  ] as const) {
+    assert.deepEqual(
+      diagnostics(batchImports + source).map((diagnostic) => diagnostic.code),
+      codes,
+      source,
+    );
+  }
+  const runtimeSource =
+    batchImports +
+    `
+    import assert from "node:assert/strict";
+    const batch = createOnceStatements(key, "now", {
+      statements: [], table: "projects", id: patternId,
+      result: { sql: "SELECT '{}'", bindings: [] },
+    });
+    const read = () => ({ key, parts: { before: [], record: { sql: "SELECT '{}'", bindings: [] }, after: [] } });
+    assert.throws(() => Object.assign(batch.constructor, { read }), TypeError);
+    assert.throws(() => Object.defineProperty(batch.constructor, "read", { value: read }), TypeError);
+    assert.equal(Reflect.set(batch.constructor, "read", read), false);
+    assert.equal(Object.isFrozen(Object.getPrototypeOf(batch)), true);
+    let calls = 0;
+    const observed: typeof database = {
+      async first() { calls++; throw new Error("Unexpected D1 read"); },
+      async all() { calls++; throw new Error("Unexpected D1 read"); },
+      async batch() { calls++; throw new Error("Unexpected D1 batch"); },
+    };
+    const forged = {} as unknown as OnceBatch;
+    await assert.rejects(runOnce(observed, z.unknown(), forged), TypeError);
+    assert.equal(calls, 0);
+  `;
+  assert.deepEqual(diagnostics(runtimeSource), []);
+  const runtime = ts.transpileModule(prelude + runtimeSource, {
+    compilerOptions: { ...parsed.options, noEmit: false },
+  });
+  execFileSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "--eval",
+      'const key = { ownerId: "owner", requestId: "request", operation: "create", fingerprint: "input" }; const patternId = "id";\n' +
+        runtime.outputText,
+    ],
+    { cwd: new URL("./rpc/", import.meta.url), stdio: "pipe" },
+  );
 });
