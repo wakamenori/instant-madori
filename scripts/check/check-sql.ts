@@ -13,7 +13,7 @@ function writesRequests(sql: string): boolean {
   ).filter((token) => !token.startsWith("--") && !token.startsWith("/*"));
 
   for (const [index, raw] of tokens.entries()) {
-    const token = raw.replace(/^\0+/, "");
+    const token = raw.replace(/^\0+|\0+$/g, "");
     let target = index + 1;
     while (/^\0+$/.test(tokens[target] ?? "") && tokens[target + 1] !== ".") target++;
     if ((token === "insert" || token === "update") && tokens[target] === "or") target += 2;
