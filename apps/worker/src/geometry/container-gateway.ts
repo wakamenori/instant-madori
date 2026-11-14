@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { LogFields } from "../log.ts";
 type InstanceType = "lite" | "standard-1" | "standard-2" | "standard-3" | "standard-4";
 export interface ContainerHandle {
   readonly running: boolean;
@@ -43,7 +44,7 @@ export interface GatewayEnvironment {
   now(): number;
   sleep(ms: number): Promise<void>;
   newToken(): string;
-  log(event: string, fields: Record<string, string | number>, level?: "info" | "error"): void;
+  log(event: string, fields: LogFields, level?: "info" | "error"): void;
 }
 export interface GatewayRequest {
   method: "GET" | "POST";
@@ -173,7 +174,7 @@ export class ContainerGateway {
     const started = this.environment.now();
     const generation = ++this.#generation;
     let record: StartRecord | undefined;
-    let mode = generation === 1 ? "adopted" : "reprobe";
+    let mode: LogFields["mode"] = generation === 1 ? "adopted" : "reprobe";
     const image = container.images[this.settings.imageName];
     try {
       const stored = this.store.read();

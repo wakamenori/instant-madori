@@ -40,6 +40,16 @@ void test(
         summary.free();
         const log = await worker.logLine(response.headers.get("x-trace-id") ?? "");
         assert.equal(log["geometryStart"], start);
+        if (start === "cold") {
+          for (const [event, keys] of [
+            ["container.started", ["level", "event", "traceId", "image"]],
+            ["container.ready", ["level", "event", "traceId", "mode", "ms"]],
+          ] as const) {
+            const entry = await worker.logLine(response.headers.get("x-trace-id") ?? "", event);
+            assert.deepEqual(Object.keys(entry).sort(), [...keys].sort());
+            assert.equal(entry["level"], "info");
+          }
+        }
         console.info(
           JSON.stringify({
             environment: "local Docker amd64 emulation",
