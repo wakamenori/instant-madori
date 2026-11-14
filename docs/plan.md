@@ -470,7 +470,7 @@ SolidCraft一式を保持することと、通常のビルド・テスト対象�
 
 本番はWorkerと静的ファイル、D1マイグレーション、R2、DO・Workflow、Containerイメージを一組の版としてデプロイする。RustはContainerの対象であるLinux向けにビルドし、Wasmは別の成果物として作る。形状処理のメモリと起動時間を測り、Containerのサイズ・同時実行数・休止条件を選ぶ。
 
-stagingのデプロイ前に、Worker routeまたはCustom Domainで到達できるホスト名を設定する（workers.devとpreview URLは無効）。そのホスト名を保護するAccessアプリとD1を作成し、`apps/worker/wrangler.jsonc` の `env.staging` にDB ID、Accessの発行元とaudience、画面のOriginを設定する。初期値の `.invalid` 発行元はローカル以外で拒否する。設定後のデプロイとD1のマイグレーションは運営が別途実行する。インスタンスの種類と休止時間も環境別の変数で指定し、stagingでの計測に基づいて決める。接続用DOが出す `container.ready` ログの `mode: cold` で起動時間、Rustの要求ログの `vmHwmKib` でLinux上のメモリ最大値を読む。
+stagingはworkers.devのホスト名で公開し、Worker宛先のAccessアプリで守る（preview URLは無効）。手順の順序はREADMEに従う。Accessアプリとstaging用のD1を作成し、`apps/worker/wrangler.jsonc` の `env.staging` にDB ID、Accessの発行元とaudience、画面のOriginを設定する。初期値の `.invalid` 発行元はローカル以外で拒否する。インスタンスの種類と休止時間は環境別の変数で指定し、stagingでの計測（[検証3](verification/verification-03.md)）に基づいて決める。Workers Logsを有効にし、Container内の標準出力もそこへ集める。stagingのCloudflareリソースの作成、デプロイ、D1のマイグレーションは、AGENTS.mdのとおり、ユーザーが明示して許可した場合に限りエージェントが行う。接続用DOが出す `container.ready` ログの `mode: cold` で起動時間、Rustの要求ログの `vmHwmKib` でLinux上のメモリ最大値を読む。
 
 起動確認が終わってから処理を渡す。長い処理ではコンテナの生存時間を明示的に管理する。ブラウザ、Workflow、ContainerのHTTP接続が切れたことだけを、ジョブの完了や取消の証拠にしない。
 
@@ -569,11 +569,13 @@ Linux Container上のSolidCraftの動作、必要メモリと起動時間、WebG
 | --- | ---------------------------------------------------------------------------------- | ------------- |
 | 1   | Accessによるログイン、内部ユーザー、案件とパターンのAPI（D1）                      | 完了（PR #4） |
 | 2   | 形状の表示経路（Container → DO → Worker → Wasmビューア）                           | 完了（PR #6） |
-| 3   | stagingへのデプロイと計測                                                          | 次に行う      |
-| 4   | R2への保存と案（revision）、案と履歴のD1の構造                                     | 未着手        |
+| 3   | stagingへのデプロイと計測                                                          | 完了（検証3） |
+| 4   | R2への保存と案（revision）、案と履歴のD1の構造                                     | 次に行う      |
 | 5   | 一パターン一編集、ジョブの開始・停止・復帰、条件付き確定、完了条件にある障害の試験 | 未着手        |
 
-単位3では、設定分離とデプロイ手順のうち、stagingの分を実際の環境で確かめる。設定の枠（`env.staging`）とREADMEの手順は単位2で用意した。本番の設定とデプロイ手順は、まだ作っておらず、どの単位で用意するかも決めていない。5.1のとおり本番はR2・DO・Workflow・Containerイメージを一組の版としてデプロイするため、単位4と単位5の内容が固まった時点で決める。
+単位5では、単位3から持ち越した次の二つも扱う。一つは、Containerを休止時間どおりに止めることである。接続用DOが最後の操作の時刻を記録し、DOのアラームで休止時間の経過を確かめて、自分でContainerを止める（[`@cloudflare/containers`](https://github.com/cloudflare/containers) の `sleepAfter` と同じ考え方。2026-11-14にソースの `src/lib/container.ts` を読み、最後の操作の時刻を更新し、アラームで期限切れを確かめて止める実装であることを確かめた）。Cloudflare側の休止の仕組みは、停止の時刻を決められず、仕組みも確かめられていないため使わない。もう一つは、同時に動かすContainerの上限を決めることである。
+
+単位3で、設定分離とデプロイ手順のうち、stagingの分を実際の環境で確かめた。本番の設定とデプロイ手順は、まだ作っておらず、どの単位で用意するかも決めていない。5.1のとおり本番はR2・DO・Workflow・Containerイメージを一組の版としてデプロイするため、単位4と単位5の内容が固まった時点で決める。
 
 **確かめた結果（単位2まで）**
 
@@ -581,12 +583,15 @@ Linux Container上のSolidCraftの動作、必要メモリと起動時間、WebG
 - 2026-11-14に `pnpm dev` を起動し、T3のプレビュー（Chromium、WebGPUのアダプタあり）で、サンプルの描画を確かめた。操作は、canvasへ合成したポインタイベントで回転し、合成したホイールイベントで拡大することを確かめた。縮小、実際のマウス・トラックパッドでの操作感、Chromium以外のブラウザは確かめていない。
 - Cloudflare上の起動時間とメモリは、ローカルの検査からは確かめられない。ローカルの値はamd64のエミュレーション上の値なので、資源設定の根拠にしない。単位3で測る。
 
-**stagingでの計測（単位3）**
+**stagingでの計測（単位3）の結果**
 
-- 手順：READMEの「stagingへデプロイする」に従う。D1とAccessアプリの作成、`env.staging` への値の設定、デプロイは運営が行う。
-- 測るもの：Containerのコールドスタートの時間（接続用DOの `container.ready` のうち `mode: cold` の `ms`）、要求ごとの処理時間（Workerの `api.request` の `geometryMs`）、Container内のメモリの最大値（Rustの `geometry.request` の `vmHwmKib`）、圧縮後のWasmと表示データの転送サイズ、休止時間の経過後にContainerが実際に止まるか。
-- 決めるもの：`GEOMETRY_INSTANCE_TYPE`、`GEOMETRY_IDLE_TIMEOUT_MS`、内部APIの時間切れ（`apps/worker/src/geometry/geometry-protocol.ts` の `routeTimeouts`）、Containerを同時に何台まで動かすか。
-- 記録：計測の手順と結果を `docs/verification/verification-03.md` に残す。インスタンスの種類と休止時間は `wrangler.jsonc` の変数に、時間切れは `routeTimeouts` に反映する。同時に動かす台数の上限を置く場所は、計測の結果とあわせて決める。決めた内容は本計画にも書く。
+手順と数値は[検証3](verification/verification-03.md)に記録した。stagingは `instant-madori-staging.firpmnfiywl.workers.dev` で、Worker宛先のAccessアプリで守る。
+
+- Container上のSolidCraftは、standard-1（仕様は1/2 vCPU、4 GiB）の範囲で動いた。メモリの上限が設定どおりに適用されていることを、Container内のcgroupの値で確かめた。サンプルのメモリの最大値は約46 MiB、温まった後のContainer内の処理は中央値29 msだった。コールドスタートは5回が339〜377 msで、イメージを変えた後の最初の起動だけが8,078 msと38,247 msだった。4.1の構成は変えない。
+- `GEOMETRY_INSTANCE_TYPE` はstandard-1のままにする。liteも設定どおり適用されたが、サンプルの処理が約30 msと短く、処理時間に差が出なかった。6.2で住宅一軒分の形状処理を測って決め直す。
+- `routeTimeouts`（health 2秒、sampleDisplay 30秒）は変えない。readinessの期限（60秒）も変えない。新しいイメージの最初の起動（38.2秒）まで余裕は約22秒なので、6.2でイメージを小さくする方法を検討する。期限を延ばすと、本当に起動できないときに利用者が失敗を知るまでの待ち時間が延びる。
+- `GEOMETRY_IDLE_TIMEOUT_MS` は10分のままにする。再デプロイを挟まなかった各1回では、休止時間を10分にしても60秒にしても、Containerは起動から約16分で止まった。接続用DOが待ち続ける `container.monitor()` がDOの退去を最長15分防ぐことが原因と推測しているが、10分の回の停止時刻はCloudflareの文書の説明だけでは説明できない。DOがメモリから退去した時刻がログに出ないため、原因は確かめられない。確かめるには、退去の時刻を記録し、休止時間を15分より長くした回と比べる。休止時間どおりに止める方法は、上の単位5の注記のとおりDOのアラームで止める方式に決めた。実装は単位5で行う。
+- 同時に動かすContainerの上限は、複数のDOがContainerを使う経路ができる単位5で決める。
 
 ### 6.2 AIで平屋を生成・変更・保存する一往復
 
@@ -602,7 +607,7 @@ Linux Container上のSolidCraftの動作、必要メモリと起動時間、WebG
 
 **この段階で確かめること**
 
-住宅情報とCADの更新方式、共有境界と斜めの接合に拡張できる形、面積計算の許容差、AIのツール往復に必要な情報。間取りの提案品質は記録して改善し、初期に高品質な提案が出ないことだけで全体の実装を止めない。
+住宅情報とCADの更新方式、共有境界と斜めの接合に拡張できる形、面積計算の許容差、AIのツール往復に必要な情報。住宅一軒分の形状処理でContainerのメモリと処理時間、表示データの大きさを測り、インスタンスの種類を決め直す（6.1bの単位3では、サンプルが軽すぎて決められなかった）。Containerのイメージを小さくする方法を検討し、新しいイメージの最初の起動時間を測る（単位3では38.2秒で、readinessの期限60秒に近かった）。計測には、単位3で使ったbashのスクリプト（`docs/verification/evidence/verification-03/`）をTypeScriptで `scripts/measure/` に作り直したものを使う。`scripts/` の型検査・ESLint・テストの決まりに合わせるためで、フォルダの追加は合意済み。間取りの提案品質は記録して改善し、初期に高品質な提案が出ないことだけで全体の実装を止めない。
 
 ### 6.3 住宅の対応範囲の拡張
 
@@ -671,13 +676,14 @@ Linux Container上のSolidCraftの動作、必要メモリと起動時間、WebG
 
 ## 付録A. 検証結果と設計判断の根拠
 
-| 根拠                                                                                                                                    | 今の設計に引き継ぐ内容                                                                              |
-| --------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| [検証1](verification/verification-01.md)                                                                                                | 限定した二部屋で住宅情報・CAD・2D・面積の連動、色と家具形状の維持、保存・再編集、失敗時の保護を確認 |
-| [検証2](verification/verification-02.md)                                                                                                | 壁の分割後の色は利用側で引き継ぐ必要がある。専用Wasmとサーバーの接続、固定例の床への直射光を確認    |
-| [SolidCraftの構成](../third_party/solidcraft/docs/architecture.md)、[Session](../third_party/solidcraft/crates/engine/src/lib.rs)       | 形状処理を専用画面と分けて利用する。同期的な処理と協調的な停止をサービス側で扱う                    |
-| [外観](../third_party/solidcraft/crates/doc/src/appearance.rs)、[面の名前](../third_party/solidcraft/docs/book/src/dev/naming.md)       | 見た目と面の追跡を利用し、住宅としての役割と対応を補う                                              |
-| [素材画像](../third_party/solidcraft/docs/render-runtime-textures.md)、[描画経路](../third_party/solidcraft/docs/render-integration.md) | 通常の描画経路に素材・影の機能がすべて揃っているとは扱わず、追加実装を計画する                      |
+| 根拠                                                                                                                                    | 今の設計に引き継ぐ内容                                                                                                                                                                                |
+| --------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [検証1](verification/verification-01.md)                                                                                                | 限定した二部屋で住宅情報・CAD・2D・面積の連動、色と家具形状の維持、保存・再編集、失敗時の保護を確認                                                                                                   |
+| [検証2](verification/verification-02.md)                                                                                                | 壁の分割後の色は利用側で引き継ぐ必要がある。専用Wasmとサーバーの接続、固定例の床への直射光を確認                                                                                                      |
+| [検証3](verification/verification-03.md)                                                                                                | Cloudflare上のContainerで、サンプルの起動時間・処理時間・メモリを計測。再デプロイを挟まない場合、休止時間を10分にしても60秒にしてもContainerが起動から約16分動き続けることを観測（各1回、原因は推測） |
+| [SolidCraftの構成](../third_party/solidcraft/docs/architecture.md)、[Session](../third_party/solidcraft/crates/engine/src/lib.rs)       | 形状処理を専用画面と分けて利用する。同期的な処理と協調的な停止をサービス側で扱う                                                                                                                      |
+| [外観](../third_party/solidcraft/crates/doc/src/appearance.rs)、[面の名前](../third_party/solidcraft/docs/book/src/dev/naming.md)       | 見た目と面の追跡を利用し、住宅としての役割と対応を補う                                                                                                                                                |
+| [素材画像](../third_party/solidcraft/docs/render-runtime-textures.md)、[描画経路](../third_party/solidcraft/docs/render-integration.md) | 通常の描画経路に素材・影の機能がすべて揃っているとは扱わず、追加実装を計画する                                                                                                                        |
 
 検証記録は実施時点の条件と結果を保存した資料であり、現在の仕様・次の作業は本文に従う。試作コードとビルド成果物は片付け済み。計測した限定例の時間を、家一軒やAIを含む商談の性能へ一般化しない。
 

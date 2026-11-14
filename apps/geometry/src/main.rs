@@ -13,10 +13,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _session = madori_modeling::new_session("Service startup");
     let listener = tokio::net::TcpListener::bind(address).await?;
     eprintln!("Geometry service: http://{}", listener.local_addr()?);
+    eprintln!("{}", resource_limits_log());
     axum::serve(listener, app::router(app::AppState::new(token)))
         .with_graceful_shutdown(shutdown())
         .await?;
     Ok(())
+}
+/// The cgroup memory limit shows which instance type the platform actually applied; the
+/// container configuration does not report it. The CPU share is not set in the cgroup.
+fn resource_limits_log() -> serde_json::Value {
+    let read = |path: &str| {
+        std::fs::read_to_string(path)
+            .ok()
+            .map(|text| text.trim().to_owned())
+    };
+    serde_json::json!({
+        "level": "info",
+        "event": "geometry.limits",
+        "cgroupCpuMax": read("/sys/fs/cgroup/cpu.max"),
+        "cgroupMemoryMax": read("/sys/fs/cgroup/memory.max"),
+        "parallelism": std::thread::available_parallelism().ok().map(|n| n.get()),
+    })
 }
 async fn shutdown() {
     #[cfg(unix)]

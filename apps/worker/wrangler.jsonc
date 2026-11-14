@@ -5,6 +5,8 @@
   "compatibility_date": "2026-11-08",
   "workers_dev": false,
   "preview_urls": false,
+  // Workers Logs also collects container stdout; staging measurements read it (plan 6.1b).
+  "observability": { "enabled": true },
   "assets": {
     "directory": "../web/dist",
     "binding": "ASSETS",
@@ -60,19 +62,23 @@
   "env": {
     "staging": {
       "name": "instant-madori-staging",
+      // Reached at its workers.dev host; an Access app with a Worker destination guards it.
+      // Keep it false until that app exists (README, staging steps): static assets skip the Worker.
+      "workers_dev": true,
+      "preview_urls": false,
       "vars": {
         "GEOMETRY_INSTANCE_TYPE": "standard-1",
         "GEOMETRY_IDLE_TIMEOUT_MS": "600000",
         "ENVIRONMENT": "staging",
-        "APP_ORIGINS": "https://staging.example.invalid",
-        "ACCESS_TEAM_DOMAIN": "https://team.example.invalid",
-        "ACCESS_AUD": "replace-me",
+        "APP_ORIGINS": "https://instant-madori-staging.firpmnfiywl.workers.dev",
+        "ACCESS_TEAM_DOMAIN": "https://wild-water-1feb.cloudflareaccess.com",
+        "ACCESS_AUD": "0b18b47f9a9305690d90a632359c0066a9aba1717eaf7572cb07d14679fdaab3",
       },
       "d1_databases": [
         {
           "binding": "DB",
           "database_name": "instant-madori-staging",
-          "database_id": "00000000-0000-0000-0000-000000000000",
+          "database_id": "633c1cdb-35f7-4bac-8779-513a8a297bfc",
           "migrations_dir": "migrations",
         },
       ],
