@@ -12,7 +12,8 @@
         "scripts/check/check-sql.ts",
         "scripts/check/smoke.ts",
         "scripts/check/staging-smoke.ts",
-        "scripts/check/r2-create-only/worker.ts"
+        "scripts/check/r2-create-only/worker.ts",
+        "scripts/deploy/registry-retention.ts"
       ],
       "project": ["scripts/**/*.ts", "*.mjs"]
     },
