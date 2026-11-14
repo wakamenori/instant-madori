@@ -1,8 +1,32 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { z } from "zod";
 import { describeError, logEvent } from "../src/log.ts";
 import type { LogFields } from "../src/log.ts";
 import type { GatewayEnvironment } from "../src/geometry/container-gateway.ts";
+
+await test("request and gateway adapters omit extra keys from nonliteral fields", (t) => {
+  const lines: string[] = [];
+  t.mock.method(console, "log", (line: string) => {
+    lines.push(line);
+  });
+  const gateway: Pick<GatewayEnvironment, "log"> = {
+    log: (event, fields, level) => logEvent(level ?? "info", event, fields),
+  };
+  const assigned: LogFields = { status: 200 };
+  Object.assign(assigned, { name: "private name", accessJwt: "test-only-token" });
+  const extra = { status: 201, accessJwt: "test-only-token" };
+  for (const fields of [assigned, extra]) {
+    logEvent("info", "api.request", fields);
+    gateway.log("api.request", fields);
+  }
+  assert.deepEqual(lines, [
+    JSON.stringify({ level: "info", event: "api.request", status: 200 }),
+    JSON.stringify({ level: "info", event: "api.request", status: 200 }),
+    JSON.stringify({ level: "info", event: "api.request", status: 201 }),
+    JSON.stringify({ level: "info", event: "api.request", status: 201 }),
+  ]);
+});
 
 await test("structured logs preserve request and container fields at both levels", (t) => {
   const info: string[] = [];
@@ -77,6 +101,19 @@ await test("structured logs preserve request and container fields at both levels
     environment.log("container.ready", { ms: "5" });
     // @ts-expect-error Container logs also require describeError results.
     environment.log("container.destroy_failed", { error: "private content" });
+    const forged = z.string().brand<"ErrorDescription">().parse("private content");
+    // @ts-expect-error A public Zod brand cannot forge the private error brand.
+    logEvent("error", "api.unexpected_error", { error: forged });
+    // @ts-expect-error Gateway adapters also require the private error brand.
+    environment.log("container.destroy_failed", { error: forged });
+    // @ts-expect-error Only cold and warm geometry starts are supported.
+    logEvent("info", "api.request", { geometryStart: "unknown" });
+    // @ts-expect-error Gateway adapters must preserve geometry start literals.
+    environment.log("container.ready", { geometryStart: "unknown" });
+    // @ts-expect-error Only cold, adopted and reprobe lifecycle modes are supported.
+    logEvent("info", "container.ready", { mode: "unknown" });
+    // @ts-expect-error Gateway adapters must preserve lifecycle mode literals.
+    environment.log("container.ready", { mode: "unknown" });
     const fields: LogFields = {};
     // @ts-expect-error Route handlers cannot attach request content.
     fields.body = "private content";
