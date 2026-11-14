@@ -243,6 +243,7 @@ instant-madori/
 │   ├── generate/
 │   ├── build/
 │   ├── upstream/
+│   ├── deploy/
 │   └── shared/
 ├── .github/
 │   ├── workflows/
@@ -260,23 +261,23 @@ instant-madori/
 └── AGENTS.md
 ```
 
-| 配置                      | 責務                                                                                                                |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| apps/web/                 | React画面、APIクライアント、Wasmの読み込み、会話・履歴・表示状態                                                    |
-| apps/worker/              | API、AI接続、Workflows、Durable Objects、D1・R2アクセス。マイグレーションとCloudflareのデプロイ設定もまとめる       |
-| apps/geometry/            | Container内のHTTP受付、処理の実行・停止、スナップショットの読込・出力。ContainerのDockerfileも置く                  |
-| crates/display/           | 表示データの不変条件と版付きバイナリ形式。依存を持たず、modelingとviewerが共有する                                  |
-| crates/geometry-api/      | WorkerとContainerの内部API契約。packages/contractsへTypeScript定義を生成する                                        |
-| crates/housing/           | 住宅データ、共有境界、寸法・面積、住宅の関係の検査                                                                  |
-| crates/modeling/          | 住宅用コマンド、SolidCraftとの対応、変更の引き継ぎ、保存用スナップショット                                          |
-| crates/viewer/            | Web画面へ組み込むWasmライブラリ。選択補助、カメラ操作、素材・日差しの表示                                           |
-| packages/contracts/       | 通信スキーマと共有型。Rust側の定義から生成した型・スキーマの受け渡し先                                              |
-| third_party/solidcraft/   | 固定した版のSolidCraft一式。SolidCraft自体に必要な修正もこの領域で行う                                              |
-| third_party/solidcraft.md | 取り込み元、採用コミット、独自変更の理由、更新手順。subtreeの外に置く                                               |
-| docs/・scripts/           | サービスの計画・検証記録。scripts/はcheck・dev・generate・build・upstreamに分け、複数の目的で使う部品はsharedに置く |
-| .github/workflows/        | PRの検査（check.yml）とstagingへのデプロイ（deploy-staging.yml）。開発用Macのself-hosted runnerで動く               |
-| .github/ISSUE_TEMPLATE/   | 作業の単位（Issue）のテンプレート                                                                                   |
-| .github/dependabot.yml    | npm・Cargoの依存関係の更新提案                                                                                      |
+| 配置                      | 責務                                                                                                                        |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| apps/web/                 | React画面、APIクライアント、Wasmの読み込み、会話・履歴・表示状態                                                            |
+| apps/worker/              | API、AI接続、Workflows、Durable Objects、D1・R2アクセス。マイグレーションとCloudflareのデプロイ設定もまとめる               |
+| apps/geometry/            | Container内のHTTP受付、処理の実行・停止、スナップショットの読込・出力。ContainerのDockerfileも置く                          |
+| crates/display/           | 表示データの不変条件と版付きバイナリ形式。依存を持たず、modelingとviewerが共有する                                          |
+| crates/geometry-api/      | WorkerとContainerの内部API契約。packages/contractsへTypeScript定義を生成する                                                |
+| crates/housing/           | 住宅データ、共有境界、寸法・面積、住宅の関係の検査                                                                          |
+| crates/modeling/          | 住宅用コマンド、SolidCraftとの対応、変更の引き継ぎ、保存用スナップショット                                                  |
+| crates/viewer/            | Web画面へ組み込むWasmライブラリ。選択補助、カメラ操作、素材・日差しの表示                                                   |
+| packages/contracts/       | 通信スキーマと共有型。Rust側の定義から生成した型・スキーマの受け渡し先                                                      |
+| third_party/solidcraft/   | 固定した版のSolidCraft一式。SolidCraft自体に必要な修正もこの領域で行う                                                      |
+| third_party/solidcraft.md | 取り込み元、採用コミット、独自変更の理由、更新手順。subtreeの外に置く                                                       |
+| docs/・scripts/           | サービスの計画・検証記録。scripts/はcheck・dev・generate・build・upstream・deployに分け、複数の目的で使う部品はsharedに置く |
+| .github/workflows/        | PRの検査（check.yml）とstagingへのデプロイ（deploy-staging.yml）。開発用Macのself-hosted runnerで動く                       |
+| .github/ISSUE_TEMPLATE/   | 作業の単位（Issue）のテンプレート                                                                                           |
+| .github/dependabot.yml    | npm・Cargoの依存関係の更新提案                                                                                              |
 
 Workerの依存は、層に属さない `apps/worker/src/compose.ts` の `serviceDeps(env, runtime)` で構築する。サービスはDOのnamespaceではなく、型付き `GeometryInstance` を受けて `GeometryApi` を返す関数に依存する。インスタンス名の導出とRPCのretryable/overloaded例外からunavailableへの変換は `geometry/geometry-client.ts` に集める。サービス基盤のジョブは、パターンごとの接続用DOのインスタンスでContainerを呼ぶ。インスタンスのキーを加えるときも導出はこのファイルに置き、呼び出し側はDOの名前を組み立てない。
 
@@ -507,6 +508,10 @@ SolidCraft一式を保持することと、通常のビルド・テスト対象�
 stagingはworkers.devのホスト名で公開し、Worker宛先のAccessアプリで守る（preview URLは無効）。mainへのpushまたは `gh workflow run deploy-staging.yml --ref <ブランチまたはmain>` で、self-hosted runnerが `pnpm check --full`、D1のマイグレーション、デプロイ、Accessのservice tokenを使った疎通の確認を順に行う。マイグレーションはデプロイの前に適用するため、動いている前の版のWorkerと両立する形で書く。初回のWorker作成を除き、再デプロイはこのworkflowだけを使う。試験用ブランチも同じ順に実行し、そのマイグレーションはmainに入る前にstagingのD1へ適用される。手順の順序はREADMEに従う。Accessアプリとstaging用のD1を作成し、`apps/worker/wrangler.jsonc` の `env.staging` にDB ID、Accessの発行元とaudience、画面のOriginを設定する。初期値の `.invalid` 発行元はローカル以外で拒否する。インスタンスの種類と休止時間は環境別の変数で指定する。Workers Logsを有効にし、Container内の標準出力もそこへ集める。接続用DOが出す `container.ready` ログの `mode: cold` で起動時間、Rustの要求ログの `vmHwmKib` でLinux上のメモリ最大値を読む。
 
 デプロイでは、runnerの `MADORI_ENV_FILE` にある `STAGING_ACCESS_CLIENT_ID` をログでマスクしてから、`--var` で `ACCESS_VERIFIER_CLIENT_ID` に渡す。値が空または空白だけならデプロイ前に失敗させ、Client IDはリポジトリに保存しない。疎通確認ではservice tokenを4.4の検証用ユーザーとして使う。token無しの302、healthの200、検証用メールアドレスを返すmeの200、案件の作成・再送・名前の変更・一覧の読取、存在しない案件の404、Containerを経由するサンプル表示データの200とメディア型を確かめる。変更要求にはstagingのOriginを付ける。案件の作成には固定のrequest IDを使い、一つの案件と最初のパターンを再利用する。名前の変更は一覧から読んだ現在のversionを送り、versionが一つ増えて再読取に反映されることを確かめる。二回目以降に増えるのは確認ごとのrequestsの一行だけで、R2には書かない。要求の期限はreadinessの60秒と表示処理の30秒に通信の余裕を加えた120秒とする。手元からも同じスクリプトを実行し、資格情報は出力しない。
+
+デプロイ・疎通・R2の確認が成功した後、`scripts/deploy/registry-retention.ts --apply` でstagingのContainerイメージを回収する。新しい順に10のWorkerの版と、今のデプロイに含まれるすべての版が指すダイジェストのタグを残す。タグの新しさでは判断せず、古い版だけが指すダイジェストのタグを消す。同じダイジェストを持つ別名のタグもすべて残す。どの版からも指されていないタグは、デプロイ途中のタグと区別できないため、消さずに別にログへ出す。
+
+対象リポジトリは保持対象の版のイメージ参照から求める。参照先が一つに決まらない場合、Workerの版を全ページ読み切れない場合、対象タグのダイジェストを一つでも読めない場合は、何も消さずに失敗する。他のリポジトリは対象にしない。入力はすべて集めて検証してから削除を始める。表示だけの実行は同じ判定を使い、削除しない。workflowはデプロイと回収を一つずつ実行し、デプロイか疎通確認が失敗した実行では回収しない。
 
 stagingの計測から、次の構成と値を使う。数値と手順は[検証3](verification/verification-03.md)にある。
 

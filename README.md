@@ -174,7 +174,7 @@ SolidCraftの元のREADME・資料・ライセンスは取り込み領域に保�
 
 ## stagingへデプロイする
 
-mainへのpushで、`.github/workflows/deploy-staging.yml` がself-hosted runnerでstagingへデプロイします。`pnpm check --full`、D1のマイグレーションの適用、`wrangler deploy --env staging` の順に進め、最後に `scripts/check/staging-smoke.ts` で、Accessを通した疎通を確かめます。デプロイは途中で止めず、後から来たpushは前のデプロイが終わってから最新のmainをデプロイします。マイグレーションはデプロイの前に適用するため、動いている前の版のWorkerと両立する形で書きます。mainに入ったマイグレーションは変更せず、修正は番号の大きいファイルを追加します。`pnpm check` の全モードがこの不変条件を検査し、デプロイ時は一つ前のmainと比較します。
+mainへのpushで、`.github/workflows/deploy-staging.yml` がself-hosted runnerでstagingへデプロイします。`pnpm check --full`、D1のマイグレーションの適用、`wrangler deploy --env staging` の順に進め、その後 `scripts/check/staging-smoke.ts` で、Accessを通した疎通を確かめます。デプロイは途中で止めず、後から来たpushは前のデプロイが終わってから最新のmainをデプロイします。マイグレーションはデプロイの前に適用するため、動いている前の版のWorkerと両立する形で書きます。mainに入ったマイグレーションは変更せず、修正は番号の大きいファイルを追加します。`pnpm check` の全モードがこの不変条件を検査し、デプロイ時は一つ前のmainと比較します。
 
 疎通の確認では、Accessのservice tokenを、固定の検証用ユーザー（subjectは `staging:verifier`、メールアドレスは `verifier@staging.invalid`）として使います。token無しの302、`/api/health` の200、`/api/me` の200と検証用メールアドレスを確かめます。案件を固定のrequest IDで作成・再送し、一覧から現在のversionを読んで名前を変更します。versionが一つ増え、読み直した一覧に変更が反映されること、存在しない案件のパターン一覧が404 `not_found` になること、`/api/sample/display` が表示データを返すことも確かめます。Containerの起動を待てるよう、要求の期限は120秒です。検証用の案件と最初のパターンは一つに保ち、二回目以降は確認ごとに `requests` の行だけが一つ増えます。R2には書き込みません。
 
@@ -199,6 +199,14 @@ mise exec -- node --env-file=/path/to/.env scripts/check/staging-smoke.ts
 手で実行するときは `CLOUDFLARE_API_TOKEN` と `CLOUDFLARE_ACCOUNT_ID` の両方を環境変数に設定し、`mise exec -- node scripts/check/r2-create-only/main.ts` を実行します。空のトークンは個人のWrangler認証へ切り替えず失敗します。トークンには、対象アカウントのedge previewを使うWorkers Scripts Editと、stagingのバケットをRESTで読み書き・一覧するWorkers R2 Storage Writeの権限が必要です。通常の `pnpm check` は差し替えたバケットで判定を検査し、認証情報やネットワークを使いません。
 
 検査は `checks/r2-create-only/` に実行ごとのキーを作り、失敗時も削除を試みます。強制終了時の残りは、次回実行の先頭で、同じprefixの1時間より古いオブジェクトだけをRESTで回収します。検査や回収が失敗すると非ゼロで終了します。
+
+疎通とR2の確認が成功した後、レジストリのstaging用イメージを回収します。新しい順に10のWorkerの版と、今のデプロイに含まれるすべての版が指すダイジェストのタグを残します。同じダイジェストの別名のタグもすべて残します。古い版だけが指すタグを消し、Wranglerに未使用レイヤーの回収を依頼します。どの版からも指されていないタグは消さず、`unreferenced` に出します。他のリポジトリは対象にしません。全版のページ送り、対象リポジトリの特定、すべての対象タグのダイジェストの取得が成功しなければ、削除前に失敗します。
+
+手元から候補だけを見るには、staging用の `CLOUDFLARE_API_TOKEN` が入った `.env` を指定します。既定は表示だけです。出力の `keep` は保持、`remove` は削除候補、`unreferenced` は参照のない保持タグです。トークンとレジストリのパスワードは出力しません。削除する `--apply` はworkflowが使います。
+
+```sh
+mise exec -- node --env-file=/path/to/.env scripts/deploy/registry-retention.ts --dry-run
+```
 
 以下は、stagingの環境を最初に作るときの手順です。Cloudflareリソースの作成とデプロイを伴い、ローカルの検査では実行しません。現在のstagingは `https://instant-madori-staging.firpmnfiywl.workers.dev` です。
 
