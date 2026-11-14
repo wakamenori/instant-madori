@@ -16,8 +16,8 @@
     "@types/node": "catalog:",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
-    "@vitejs/plugin-react": "6.2.1",
+    "@vitejs/plugin-react": "6.3.0",
     "typescript": "catalog:",
-    "vite": "8.3.6"
+    "vite": "8.3.8"
   }
 }
