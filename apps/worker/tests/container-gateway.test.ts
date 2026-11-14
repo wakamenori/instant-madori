@@ -475,6 +475,7 @@ void test("operations move the idle deadline; early alarms rearm and expiry stop
   assert.equal(f.store.readActivity(), 40_000);
   assert.equal(f.alarm(), 100_000);
   f.at(60_000);
+  await f.store.deleteAlarm();
   await gateway.alarm();
   assert.equal(f.container.running, true);
   assert.equal(f.alarm(), 100_000);
