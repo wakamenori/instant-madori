@@ -1,10 +1,44 @@
 import { glob, readFile } from "node:fs/promises";
+import { relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
 import { repositoryRoot } from "../shared/repository.ts";
 
+function writesRequests(sql: string): boolean {
+  const tokens = Array.from(
+    sql.matchAll(
+      /--[^\r\n]*|\/\*[\s\S]*?\*\/|'(?:''|[^'])*'|"(?:""|[^"])*"|`(?:``|[^`])*`|\[[^\]]*\]|[\w$]+|[^\s]/g,
+    ),
+    (match) => match[0].toLowerCase(),
+  ).filter((token) => !token.startsWith("--") && !token.startsWith("/*"));
+
+  for (const [index, token] of tokens.entries()) {
+    let target = index + 1;
+    if ((token === "insert" || token === "update") && tokens[target] === "or") target += 2;
+    if (token === "insert" || token === "replace") {
+      if (tokens[target] !== "into") continue;
+      target++;
+    } else if (token === "delete") {
+      if (tokens[target] !== "from") continue;
+      target++;
+    } else if (token !== "update") {
+      continue;
+    }
+    if (tokens[target + 1] === ".") target += 2;
+    if (/^(?:requests|"requests"|'requests'|`requests`|\[requests\])$/.test(tokens[target] ?? "")) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export function checkSqlSource(path: string, source: string) {
   const violations: string[] = [];
+  const root = fileURLToPath(repositoryRoot);
+  const sourcePath = relative(root, resolve(root, path));
+  const restrictRequestWrites =
+    sourcePath.startsWith("apps/worker/src/") &&
+    sourcePath !== "apps/worker/src/storage/requests.ts";
   const sourceFile = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true);
   function checkText(text: string, offset: number) {
     for (const match of text.matchAll(/\b(?:changes|total_changes|last_insert_rowid)(?=\s*\()/gi)) {
@@ -35,6 +69,12 @@ export function checkSqlSource(path: string, source: string) {
           scanner.reScanTemplateToken(false);
         }
         checkText(scanner.getTokenText(), start);
+        if (restrictRequestWrites && writesRequests(node.text)) {
+          const { line, character } = sourceFile.getLineAndCharacterOfPosition(start);
+          violations.push(
+            `${path}:${line + 1}:${character + 1}: writes to requests are only allowed in apps/worker/src/storage/requests.ts.`,
+          );
+        }
       }
       ts.forEachChild(node, visit);
     }
@@ -57,6 +97,6 @@ if (import.meta.main) {
     console.error(violations.join("\n"));
     process.exitCode = 1;
   } else {
-    console.log(`SQL connection-state check passed: ${checked} files.`);
+    console.log(`SQL connection-state and request-write checks passed: ${checked} files.`);
   }
 }
