@@ -133,8 +133,19 @@ interface BatchParts {
   after: readonly SqlPart[];
 }
 
+function copyBinding(value: unknown): string | number | boolean | null {
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  )
+    return value;
+  throw new TypeError("Once-only bindings must be strings, numbers, booleans or null");
+}
+
 function copyStatement(part: SqlPart): SqlPart {
-  const bindings = [...part.bindings];
+  const bindings = Array.from(part.bindings, copyBinding);
   Object.freeze(bindings);
   return Object.freeze({ sql: part.sql, bindings });
 }

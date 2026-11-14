@@ -119,6 +119,107 @@ void test("once-only batches preserve their private protocol on real D1", async 
     );
 
     await t.test(
+      "byte-array getters are rejected before a conditional update can be built",
+      async () => {
+        const made = creation();
+        await runOnce(db, schema, made.batch);
+        const request = key();
+        let reads = 0;
+        const bytes = [0];
+        Object.defineProperty(bytes, 0, { get: () => (++reads % 2 === 1 ? 1 : 2) });
+        const before = await counts();
+        assert.throws(
+          () =>
+            updateOnceStatements(request, now, {
+              table: "projects",
+              set: { sql: "name = ?, version = version + 1", bindings: ["renamed"] },
+              where: {
+                sql: "id = ? AND owner_id = ? AND version = 1 AND ? = X'01'",
+                bindings: [made.input.id, ownerA, bytes],
+              },
+              result: { sql: "SELECT json_object('name', 'renamed')", bindings: [] },
+            }),
+          TypeError,
+        );
+        assert.equal(reads, 0);
+        assert.deepEqual(await counts(), before);
+        assert.equal(await record(request), null);
+        assert.deepEqual(
+          await raw
+            .prepare("SELECT name, version FROM projects WHERE id = ?")
+            .bind(made.input.id)
+            .first(),
+          { name: "original", version: 1 },
+        );
+      },
+    );
+
+    await t.test(
+      "typed-array bindings are rejected before creation statements can be built",
+      async () => {
+        const made = creation();
+        const bytes = new Uint8Array([1]);
+        const before = await counts();
+        assert.throws(
+          () =>
+            createOnceStatements(made.request, now, {
+              ...made.input,
+              statements: [
+                {
+                  sql: "INSERT INTO projects (id, owner_id, name, version, next_pattern_number, created_at, updated_at) SELECT ?, ?, 'original', 1, 1, ?, ? WHERE ? = X'01'",
+                  bindings: [made.input.id, ownerA, now, now, bytes],
+                },
+              ],
+            }),
+          TypeError,
+        );
+        bytes[0] = 2;
+        assert.deepEqual(await counts(), before);
+        assert.equal(await record(made.request), null);
+        assert.equal(
+          await raw.prepare("SELECT id FROM projects WHERE id = ?").bind(made.input.id).first(),
+          null,
+        );
+      },
+    );
+
+    await t.test(
+      "string, number, boolean and null bindings remain usable for updates and replay",
+      async () => {
+        const made = creation();
+        await runOnce(db, schema, made.batch);
+        const request = key();
+        const batch = updateOnceStatements(request, now, {
+          table: "projects",
+          set: { sql: "name = ?, version = version + ?", bindings: ["renamed", 1] },
+          where: {
+            sql: "id = ? AND owner_id = ? AND ? = 1 AND ? IS NULL",
+            bindings: [made.input.id, ownerA, true, null],
+          },
+          result: { sql: "SELECT json_object('name', ?)", bindings: ["renamed"] },
+        });
+        assert.deepEqual(await runOnce(db, schema, batch), {
+          kind: "applied",
+          result: { name: "renamed" },
+        });
+        assert.deepEqual(
+          await raw
+            .prepare("SELECT name, version FROM projects WHERE id = ?")
+            .bind(made.input.id)
+            .first(),
+          { name: "renamed", version: 2 },
+        );
+        assert.equal(await record(request), '{"name":"renamed"}');
+        const after = await counts();
+        assert.deepEqual(await runOnce(db, schema, batch), {
+          kind: "replayed",
+          result: { name: "renamed" },
+        });
+        assert.deepEqual(await counts(), after);
+      },
+    );
+
+    await t.test(
       "caller array methods and species cannot change the captured writes",
       async (t) => {
         for (const mode of ["subclass", "own constructor"] as const) {
