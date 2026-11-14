@@ -1,9 +1,11 @@
+import type { OwnerId } from "../owner.ts";
+import { foundSchema, jsonRows, rows } from "./d1.ts";
+import type { D1, SqlPart } from "./d1.ts";
 import { patternSchema } from "@madori/contracts";
 import type { Pattern } from "@madori/contracts";
 import { z } from "zod";
 import { mapOnce, recordStatement, runOnce, updateOnceStatements } from "./requests.ts";
 import type { Once, RequestKey } from "./requests.ts";
-import { parseJsonColumn, parseJsonRows } from "./rows.ts";
 
 /**
  * The single mapping from a `patterns` row to `Pattern`. `t` is the table name or alias.
@@ -24,7 +26,6 @@ const patternResultSchema = z.object({ pattern: patternSchema });
 export interface NewPattern {
   id: string;
   projectId: string;
-  ownerId: string;
   /** Null gives the default name `${defaultNamePrefix}${number}`. */
   name: string | null;
   defaultNamePrefix: string;
@@ -37,32 +38,30 @@ export interface NewPattern {
  * the batch's transaction either both apply or, for a missing or foreign project, neither
  * does. Numbers therefore have no gaps or duplicates.
  */
-export function insertPatternStatements(db: D1Database, pattern: NewPattern) {
+export function insertPatternStatements(ownerId: OwnerId, pattern: NewPattern): SqlPart[] {
   // One condition for both statements, so they cannot drift apart.
-  const owned = { sql: "id = ? AND owner_id = ?", bindings: [pattern.projectId, pattern.ownerId] };
+  const owned = { sql: "id = ? AND owner_id = ?", bindings: [pattern.projectId, ownerId] };
   return [
-    db
-      .prepare(
-        `UPDATE projects SET next_pattern_number = next_pattern_number + 1 WHERE ${owned.sql}`,
-      )
-      .bind(...owned.bindings),
-    db
-      .prepare(
-        `INSERT INTO patterns
+    {
+      sql: `UPDATE projects SET next_pattern_number = next_pattern_number + 1 WHERE ${owned.sql}`,
+      bindings: [...owned.bindings],
+    },
+    {
+      sql: `INSERT INTO patterns
            (id, project_id, owner_id, number, name, version, created_at, updated_at)
          SELECT ?, id, owner_id, next_pattern_number - 1,
            coalesce(?, ? || (next_pattern_number - 1)), 1, ?, ?
          FROM projects
          WHERE ${owned.sql}`,
-      )
-      .bind(
+      bindings: [
         pattern.id,
         pattern.name,
         pattern.defaultNamePrefix,
         pattern.now,
         pattern.now,
         ...owned.bindings,
-      ),
+      ],
+    },
   ];
 }
 
@@ -71,44 +70,57 @@ export function insertPatternStatements(db: D1Database, pattern: NewPattern) {
  * foreign. Both reads go in one batch: one round trip, one consistent snapshot.
  */
 export async function listProjectPatterns(
-  db: D1Database,
-  scope: { ownerId: string; projectId: string },
+  db: D1,
+  scope: { ownerId: OwnerId; projectId: string },
 ): Promise<Pattern[] | null> {
   const [project, patterns] = await db.batch([
-    db
-      .prepare("SELECT 1 AS found FROM projects WHERE id = ? AND owner_id = ?")
-      .bind(scope.projectId, scope.ownerId),
-    db
-      .prepare(
-        `SELECT ${patternJson("t")} AS json FROM patterns t
+    rows(
+      {
+        sql: "SELECT 1 AS found FROM projects WHERE id = ? AND owner_id = ?",
+        bindings: [scope.projectId, scope.ownerId],
+      },
+      foundSchema,
+      "existence",
+    ),
+    jsonRows(
+      {
+        sql: `SELECT ${patternJson("t")} AS json FROM patterns t
          WHERE t.owner_id = ? AND t.project_id = ?
          ORDER BY t.number`,
-      )
-      .bind(scope.ownerId, scope.projectId),
+        bindings: [scope.ownerId, scope.projectId],
+      },
+      patternSchema,
+      "pattern",
+    ),
   ]);
-  if (!project || !patterns) throw new Error("D1 batch returned fewer results than statements");
-  if (project.results.length === 0) return null;
-  return parseJsonRows(patterns.results, patternSchema, "pattern");
+  if (project.length === 0) return null;
+  return patterns;
 }
 
 export async function getPattern(
-  db: D1Database,
-  scope: { ownerId: string; patternId: string },
+  db: D1,
+  scope: { ownerId: OwnerId; patternId: string },
 ): Promise<Pattern | null> {
-  const json = await db
-    .prepare(`SELECT ${patternJson("t")} AS json FROM patterns t WHERE t.owner_id = ? AND t.id = ?`)
-    .bind(scope.ownerId, scope.patternId)
-    .first("json");
-  return json === null ? null : parseJsonColumn(json, patternSchema, "pattern");
+  const json = await db.first(
+    jsonRows(
+      {
+        sql: `SELECT ${patternJson("t")} AS json FROM patterns t WHERE t.owner_id = ? AND t.id = ?`,
+        bindings: [scope.ownerId, scope.patternId],
+      },
+      patternSchema,
+      "pattern",
+    ),
+  );
+  return json;
 }
 
 /** Adds a pattern once per request. `not_applied` means the project is missing or foreign. */
 export async function createPatternOnce(
-  db: D1Database,
+  db: D1,
   key: RequestKey,
   pattern: NewPattern,
 ): Promise<Once<Pattern>> {
-  const record = recordStatement(db, key, pattern.now, {
+  const record = recordStatement(key, pattern.now, {
     result: {
       sql: `SELECT json_object('pattern', ${patternJson("t")}) FROM patterns t WHERE t.id = ?`,
       bindings: [pattern.id],
@@ -116,18 +128,15 @@ export async function createPatternOnce(
     // The pattern ID is new to this request, so its row exists only if the inserts applied.
     when: { sql: "SELECT 1 FROM patterns WHERE id = ?", bindings: [pattern.id] },
   });
-  const once = await runOnce(
-    db,
-    key,
-    patternResultSchema,
-    [...insertPatternStatements(db, pattern), record],
+  const once = await runOnce(db, key, patternResultSchema, {
+    before: insertPatternStatements(key.ownerId, pattern),
     record,
-  );
+    after: [],
+  });
   return mapOnce(once, ({ pattern }) => pattern);
 }
 
 export interface PatternRename {
-  ownerId: string;
   patternId: string;
   expectedVersion: number;
   name: string;
@@ -136,11 +145,11 @@ export interface PatternRename {
 
 /** Renames once per request if the version matches. `not_applied`: missing, foreign or stale. */
 export async function renamePatternOnce(
-  db: D1Database,
+  db: D1,
   key: RequestKey,
   rename: PatternRename,
 ): Promise<Once<Pattern>> {
-  const { record, statements } = updateOnceStatements(db, key, rename.now, {
+  const batch = updateOnceStatements(key, rename.now, {
     table: "patterns",
     set: {
       sql: "name = ?, version = version + 1, updated_at = ?",
@@ -148,7 +157,7 @@ export async function renamePatternOnce(
     },
     where: {
       sql: "id = ? AND owner_id = ? AND version = ?",
-      bindings: [rename.patternId, rename.ownerId, rename.expectedVersion],
+      bindings: [rename.patternId, key.ownerId, rename.expectedVersion],
     },
     result: {
       sql: `SELECT json_object('pattern',
@@ -157,6 +166,6 @@ export async function renamePatternOnce(
       bindings: [rename.name, rename.now, rename.patternId],
     },
   });
-  const once = await runOnce(db, key, patternResultSchema, statements, record);
+  const once = await runOnce(db, key, patternResultSchema, batch);
   return mapOnce(once, ({ pattern }) => pattern);
 }

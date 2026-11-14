@@ -1,12 +1,7 @@
+import type { OwnerId } from "../owner.ts";
 import type { Pattern } from "@madori/contracts";
-import {
-  createPatternOnce,
-  getPattern,
-  listProjectPatterns,
-  renamePatternOnce,
-} from "../storage/patterns.ts";
 import { requestKey } from "./requests.ts";
-import type { ServiceDeps } from "./deps.ts";
+import type { ServiceDeps, StoreDeps } from "./deps.ts";
 
 /** Default pattern names are this prefix plus the project's next pattern number. */
 export const defaultPatternNamePrefix = "パターン";
@@ -14,10 +9,10 @@ export const defaultPatternNamePrefix = "パターン";
 export type ListPatternsOutcome = { kind: "listed"; patterns: Pattern[] } | { kind: "not_found" };
 
 export async function listPatterns(
-  { db }: ServiceDeps,
-  scope: { ownerId: string; projectId: string },
+  { store }: StoreDeps<"patterns", "list">,
+  scope: { ownerId: OwnerId; projectId: string },
 ): Promise<ListPatternsOutcome> {
-  const patterns = await listProjectPatterns(db, scope);
+  const patterns = await store.patterns.list(scope);
   return patterns === null ? { kind: "not_found" } : { kind: "listed", patterns };
 }
 
@@ -25,17 +20,16 @@ export type CreatePatternOutcome =
   { kind: "created"; pattern: Pattern } | { kind: "not_found" } | { kind: "request_id_reused" };
 
 export async function createPattern(
-  { db, runtime }: ServiceDeps,
-  input: { ownerId: string; requestId: string; projectId: string; name: string | undefined },
+  { store, runtime }: StoreDeps<"patterns", "createOnce"> & Pick<ServiceDeps, "runtime">,
+  input: { ownerId: OwnerId; requestId: string; projectId: string; name: string | undefined },
 ): Promise<CreatePatternOutcome> {
   const key = await requestKey(input.ownerId, input.requestId, "pattern.create", {
     projectId: input.projectId,
     name: input.name,
   });
-  const once = await createPatternOnce(db, key, {
+  const once = await store.patterns.createOnce(key, {
     id: runtime.newId(),
     projectId: input.projectId,
-    ownerId: input.ownerId,
     name: input.name ?? null,
     defaultNamePrefix: defaultPatternNamePrefix,
     now: runtime.now(),
@@ -59,16 +53,15 @@ export type RenamePatternOutcome =
   | { kind: "request_id_reused" };
 
 export async function renamePattern(
-  { db, runtime }: ServiceDeps,
-  input: { ownerId: string; requestId: string; patternId: string; version: number; name: string },
+  { store, runtime }: StoreDeps<"patterns", "renameOnce" | "get"> & Pick<ServiceDeps, "runtime">,
+  input: { ownerId: OwnerId; requestId: string; patternId: string; version: number; name: string },
 ): Promise<RenamePatternOutcome> {
   const key = await requestKey(input.ownerId, input.requestId, "pattern.rename", {
     patternId: input.patternId,
     version: input.version,
     name: input.name,
   });
-  const once = await renamePatternOnce(db, key, {
-    ownerId: input.ownerId,
+  const once = await store.patterns.renameOnce(key, {
     patternId: input.patternId,
     expectedVersion: input.version,
     name: input.name,
@@ -81,7 +74,10 @@ export async function renamePattern(
     case "request_id_reused":
       return once;
     case "not_applied": {
-      const current = await getPattern(db, { ownerId: input.ownerId, patternId: input.patternId });
+      const current = await store.patterns.get({
+        ownerId: input.ownerId,
+        patternId: input.patternId,
+      });
       return { kind: current ? "version_conflict" : "not_found" };
     }
   }

@@ -5,27 +5,36 @@ import { join } from "node:path";
 import process from "node:process";
 import { getPlatformProxy } from "wrangler";
 import { z } from "zod";
+import { requestKey } from "../../src/services/requests.ts";
 import { commitRevision } from "../../src/services/revisions.ts";
 import type { Runtime } from "../../src/services/deps.ts";
-import { commitRevision as commitRow, getRevisionSnapshot } from "../../src/storage/revisions.ts";
-import { readSnapshotDisplay, writeSnapshot } from "../../src/storage/snapshots.ts";
+import { createStore } from "../../src/storage/store.ts";
+import { d1 } from "../../src/storage/d1.ts";
+import { r2 } from "../../src/storage/r2.ts";
+import { authenticatedUser } from "../../src/owner.ts";
 import { StorageCorruption } from "../../src/storage/rows.ts";
+
+// The HTTP test has already signed these users in; their IDs arrive as plain strings.
+const signedInOwner = z
+  .uuid()
+  .transform((id) => authenticatedUser({ id, email: "fixture@example.test" }).id);
 
 const input = z
   .discriminatedUnion("kind", [
     z.object({
       kind: z.literal("commit"),
-      ownerId: z.uuid(),
-      otherId: z.uuid(),
+      ownerId: signedInOwner,
+      otherId: signedInOwner,
       patternId: z.uuid(),
     }),
     z.object({
       kind: z.literal("damage"),
-      ownerId: z.uuid(),
+      ownerId: signedInOwner,
       revisionId: z.uuid(),
       target: z.enum(["display", "manifest"]),
       missing: z.boolean(),
     }),
+    z.object({ kind: z.literal("once"), ownerId: signedInOwner }),
   ])
   .parse(JSON.parse(process.argv[3] ?? ""));
 const state = z.string().min(1).parse(process.argv[2]);
@@ -38,8 +47,9 @@ const proxy = await getPlatformProxy<Pick<Env, "DB" | "BLOBS">>({
 });
 try {
   const { DB: db, BLOBS: bucket } = proxy.env;
+  const store = createStore(d1(db), r2(bucket));
   if (input.kind === "damage") {
-    const snapshot = await getRevisionSnapshot(db, input);
+    const snapshot = await store.revisions.snapshot(input);
     assert(snapshot);
     const key =
       input.target === "manifest"
@@ -64,7 +74,54 @@ try {
         await bucket.put(key, bytes);
       }
     }
-    await assert.rejects(readSnapshotDisplay(bucket, snapshot), StorageCorruption);
+    await assert.rejects(store.snapshots.display(snapshot), StorageCorruption);
+    console.log(JSON.stringify({ ok: true }));
+  } else if (input.kind === "once") {
+    // Services treat applied and replayed alike, so only this shows where runOnce reads the record.
+    const now = "2026-11-14T00:00:00.000Z";
+    const key = (operation: string) =>
+      requestKey(input.ownerId, crypto.randomUUID(), operation, {});
+    const twice = async (run: () => Promise<{ kind: string }>) => [
+      (await run()).kind,
+      (await run()).kind,
+    ];
+    const projectId = crypto.randomUUID();
+    const createProject = await key("project.create");
+    assert.deepEqual(
+      await twice(() =>
+        store.projects.createOnce(createProject, {
+          id: projectId,
+          name: "once",
+          now,
+          firstPattern: { id: crypto.randomUUID(), name: null, defaultNamePrefix: "パターン" },
+        }),
+      ),
+      ["applied", "replayed"],
+    );
+    const createPattern = await key("pattern.create");
+    const pattern = {
+      id: crypto.randomUUID(),
+      projectId,
+      name: null,
+      defaultNamePrefix: "パターン",
+      now,
+    };
+    assert.deepEqual(await twice(() => store.patterns.createOnce(createPattern, pattern)), [
+      "applied",
+      "replayed",
+    ]);
+    const renameProject = await key("project.rename");
+    assert.deepEqual(
+      await twice(() =>
+        store.projects.renameOnce(renameProject, {
+          projectId,
+          expectedVersion: 1,
+          name: "renamed",
+          now,
+        }),
+      ),
+      ["applied", "replayed"],
+    );
     console.log(JSON.stringify({ ok: true }));
   } else {
     const firstDisplay = new Uint8Array(
@@ -83,7 +140,7 @@ try {
       newId: () => crypto.randomUUID(),
       newTraceId: () => crypto.randomUUID(),
     };
-    const deps = { db, bucket, runtime };
+    const deps = { store, runtime };
     const commit = (baseRevisionId: string | null, ownerId = input.ownerId, name = "案") =>
       commitRevision(deps, { ownerId, patternId: input.patternId, baseRevisionId, name, display });
     const count = async (table: "snapshots" | "revisions") =>
@@ -136,19 +193,19 @@ try {
       latest = result.revision;
       revisions.push(latest);
     }
-    const snapshot = await getRevisionSnapshot(db, {
+    const snapshot = await store.revisions.snapshot({
       ownerId: input.ownerId,
       revisionId: first.revision.id,
     });
     assert(snapshot);
-    assert.deepEqual((await readSnapshotDisplay(bucket, snapshot)).bytes, firstDisplay);
+    assert.deepEqual((await store.snapshots.display(snapshot)).bytes, firstDisplay);
     const originalDisplay = await bucket.get(
       snapshot.manifestKey.replace(/manifest\.json$/, "display.mdsp"),
     );
     assert(originalDisplay);
     const originalBytes = await originalDisplay.arrayBuffer();
     await assert.rejects(
-      writeSnapshot(bucket, {
+      store.snapshots.write({
         id: snapshot.id,
         ownerId: input.ownerId,
         now: runtime.now(),
@@ -165,7 +222,7 @@ try {
     }
     assert.deepEqual([await count("snapshots"), await count("revisions")], counts);
     const fresh = () =>
-      writeSnapshot(bucket, {
+      store.snapshots.write({
         id: crypto.randomUUID(),
         ownerId: input.ownerId,
         now: runtime.now(),
@@ -173,9 +230,8 @@ try {
       });
     // A failing revision insert must also roll back its preceding snapshot insert.
     await assert.rejects(
-      commitRow(db, {
+      store.revisions.commit({
         id: crypto.randomUUID(),
-        ownerId: input.ownerId,
         patternId: input.patternId,
         name: "",
         baseRevisionId: latest.id,
@@ -184,33 +240,31 @@ try {
       /CHECK constraint failed/,
     );
     assert.deepEqual([await count("snapshots"), await count("revisions")], counts);
-    const foreignSnapshot = await writeSnapshot(bucket, {
+    const foreignSnapshot = await store.snapshots.write({
       id: crypto.randomUUID(),
       ownerId: input.otherId,
       now: runtime.now(),
       display,
     });
-    await assert.rejects(
-      commitRow(db, {
+    assert.deepEqual(
+      await store.revisions.commit({
         id: crypto.randomUUID(),
-        ownerId: input.ownerId,
         patternId: input.patternId,
         name: "案",
         baseRevisionId: latest.id,
         snapshot: foreignSnapshot,
       }),
-      /another owner/,
+      { kind: "not_committed" },
     );
     assert.deepEqual([await count("snapshots"), await count("revisions")], counts);
     // An already stored snapshot skips the snapshot insert; the base must still hold.
     assert.deepEqual(
-      await commitRow(db, {
+      await store.revisions.commit({
         id: crypto.randomUUID(),
-        ownerId: input.ownerId,
         patternId: input.patternId,
         name: "案",
         baseRevisionId: first.revision.id,
-        snapshot,
+        snapshot: { ...snapshot, ownerId: input.ownerId },
       }),
       { kind: "not_committed" },
     );

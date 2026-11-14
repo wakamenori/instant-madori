@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { z } from "zod";
 import { handleApi } from "../../src/api/app.ts";
-import { systemRuntime } from "../../src/services/deps.ts";
+import { systemRuntime } from "../../src/runtime.ts";
 
 void test("API request logs classify server failures and successful/client responses", async (t) => {
   const lines: string[] = [];

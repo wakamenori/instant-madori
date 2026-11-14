@@ -72,6 +72,9 @@ await test("Immutable revisions through local D1, R2 and public HTTP", async (t)
   const { revisions } = revisionListResponseSchema
     .omit({ nextCursor: true })
     .parse(await fixture(worker, { kind: "commit", ownerId, otherId, patternId: pattern.id }));
+  await t.test("once-only storage operations apply first and replay on a resend", async () => {
+    assert.deepEqual(await fixture(worker, { kind: "once", ownerId }), { ok: true });
+  });
   const latest = revisions.at(-1);
   const first = revisions[0];
   assert(latest && first);

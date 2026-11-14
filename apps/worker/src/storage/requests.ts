@@ -1,3 +1,6 @@
+import type { OwnerId } from "../owner.ts";
+import { rows, write } from "./d1.ts";
+import type { D1, SqlPart } from "./d1.ts";
 import { z } from "zod";
 import { parseJsonColumn, StorageCorruption } from "./rows.ts";
 
@@ -17,7 +20,7 @@ const storedRowSchema = z.object({
  * same request ID cannot be reused for a different change.
  */
 export interface RequestKey {
-  ownerId: string;
+  ownerId: OwnerId;
   requestId: string;
   operation: string;
   fingerprint: string;
@@ -50,31 +53,27 @@ export function mapOnce<T, U>(once: Once<T>, transform: (result: T) => U): Once<
 }
 
 async function storedResult<T>(
-  db: D1Database,
+  db: D1,
   key: RequestKey,
   schema: z.ZodType<T>,
 ): Promise<Once<T> | null> {
-  const found = await db
-    .prepare(
-      `SELECT operation, fingerprint, result FROM requests
+  const found = await db.first(
+    rows(
+      {
+        sql: `SELECT operation, fingerprint, result FROM requests
        WHERE owner_id = ? AND request_id = ?`,
-    )
-    .bind(key.ownerId, key.requestId)
-    .first();
+        bindings: [key.ownerId, key.requestId],
+      },
+      storedRowSchema,
+      "request record",
+    ),
+  );
   if (found === null) return null;
-  const parsed = storedRowSchema.safeParse(found);
-  if (!parsed.success) throw new StorageCorruption("request record");
-  const row = parsed.data;
+  const row = found;
   if (row.operation !== key.operation || row.fingerprint !== key.fingerprint) {
     return { kind: "request_id_reused" };
   }
   return { kind: "replayed", result: parseJsonColumn(row.result, schema, key.operation) };
-}
-
-/** A piece of SQL with its `?` bindings in the order the placeholders appear. */
-export interface SqlPart {
-  sql: string;
-  bindings: unknown[];
 }
 
 /**
@@ -95,19 +94,16 @@ export interface SqlPart {
  * rolls back the whole batch.
  */
 export function recordStatement(
-  db: D1Database,
   key: RequestKey,
   createdAt: string,
   parts: { result: SqlPart; when: SqlPart },
-): D1PreparedStatement {
-  return db
-    .prepare(
-      `INSERT INTO requests (owner_id, request_id, operation, fingerprint, result, created_at)
+): SqlPart {
+  return {
+    sql: `INSERT INTO requests (owner_id, request_id, operation, fingerprint, result, created_at)
        SELECT ?, ?, ?, ?, (${parts.result.sql}), ?
        WHERE EXISTS (${parts.when.sql})
        RETURNING result`,
-    )
-    .bind(
+    bindings: [
       key.ownerId,
       key.requestId,
       key.operation,
@@ -115,7 +111,8 @@ export function recordStatement(
       ...parts.result.bindings,
       createdAt,
       ...parts.when.bindings,
-    );
+    ],
+  };
 }
 
 /** True while this exact request (ID, operation and fingerprint) is recorded. */
@@ -148,12 +145,11 @@ export type UpdatableTable = "projects" | "patterns";
  * parameter of the table's JSON mapping).
  */
 export function updateOnceStatements(
-  db: D1Database,
   key: RequestKey,
   createdAt: string,
   update: { table: UpdatableTable; set: SqlPart; where: SqlPart; result: SqlPart },
-): { record: D1PreparedStatement; statements: D1PreparedStatement[] } {
-  const record = recordStatement(db, key, createdAt, {
+): OnceBatch {
+  const record = recordStatement(key, createdAt, {
     result: update.result,
     when: {
       sql: `SELECT 1 FROM ${update.table} WHERE (${update.where.sql})`,
@@ -161,41 +157,49 @@ export function updateOnceStatements(
     },
   });
   const recorded = recordedBy(key);
-  const statement = db
-    .prepare(
-      `UPDATE ${update.table} SET ${update.set.sql}
+  const statement = {
+    sql: `UPDATE ${update.table} SET ${update.set.sql}
        WHERE (${update.where.sql}) AND ${recorded.sql}`,
-    )
-    .bind(...update.set.bindings, ...update.where.bindings, ...recorded.bindings);
-  return { record, statements: [record, statement] };
+    bindings: [...update.set.bindings, ...update.where.bindings, ...recorded.bindings],
+  };
+  return { before: [], record, after: [statement] };
+}
+
+/** The writes of a once-only batch around its request record, in execution order. */
+export interface OnceBatch {
+  before: SqlPart[];
+  record: SqlPart;
+  after: SqlPart[];
 }
 
 /**
- * Runs a once-only operation: `statements` as one D1 batch (a transaction) that contains
- * `record`. This function only orders the checks around the batch; it cannot see whether
- * the statements are coupled correctly. Each operation designs its own SQL so that the
- * record exists exactly when the whole change happened, either through
- * `updateOnceStatements` or, for inserts, a record conditioned on the new rows.
+ * Runs a once-only operation: `batch` as one D1 batch (a transaction). This function only
+ * orders the checks around the batch; it cannot see whether the statements are coupled
+ * correctly. Each operation designs its own SQL so that the record exists exactly when the
+ * whole change happened, either through `updateOnceStatements` or, for inserts, a record
+ * conditioned on the new rows.
  *
  * A request ID that already has a record can never apply twice: either its operation's
  * condition no longer holds and nothing is written, or the record insert hits the primary
- * key and the whole transaction rolls back. So the batch runs first, and the
- * stored result is read only when the batch failed or did not apply, which covers resends,
- * concurrent resends and reused IDs alike.
+ * key and the whole transaction rolls back. So the batch runs first, and the stored result is
+ * read only when the batch failed or did not apply, which covers resends, concurrent resends
+ * and reused IDs alike.
  */
 export async function runOnce<T>(
-  db: D1Database,
+  db: D1,
   key: RequestKey,
   schema: z.ZodType<T>,
-  statements: D1PreparedStatement[],
-  record: D1PreparedStatement,
+  batch: OnceBatch,
 ): Promise<Once<T>> {
-  const recordIndex = statements.indexOf(record);
-  if (recordIndex === -1) throw new Error(`${key.operation}: the batch has no request record`);
-  let results: D1Result<unknown>[];
+  let results: readonly (void | z.infer<typeof recordedRowSchema>[])[];
   try {
-    results = await db.batch(statements);
+    results = await db.batch([
+      ...batch.before.map(write),
+      rows(batch.record, recordedRowSchema, key.operation),
+      ...batch.after.map(write),
+    ]);
   } catch (error) {
+    if (error instanceof StorageCorruption) throw error;
     let stored: Once<T> | null;
     try {
       stored = await storedResult(db, key, schema);
@@ -210,11 +214,9 @@ export async function runOnce<T>(
     if (stored) return stored;
     throw error;
   }
-  const recorded: unknown = results[recordIndex]?.results[0];
+  const recorded = results[batch.before.length]?.[0];
   if (recorded !== undefined) {
-    const row = recordedRowSchema.safeParse(recorded);
-    if (!row.success) throw new StorageCorruption(key.operation);
-    return { kind: "applied", result: parseJsonColumn(row.data.result, schema, key.operation) };
+    return { kind: "applied", result: parseJsonColumn(recorded.result, schema, key.operation) };
   }
   return (await storedResult(db, key, schema)) ?? { kind: "not_applied" };
 }

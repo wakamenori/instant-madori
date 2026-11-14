@@ -34,6 +34,13 @@ const scopes = {
   "worker-storage": "apps/worker/src/storage/projects.ts",
   "worker-geometry": "apps/worker/src/geometry/geometry-client.ts",
   "worker-objects": "apps/worker/src/objects/pattern.ts",
+  "worker-api-entry": "apps/worker/src/api/app.ts",
+  "worker-access": "apps/worker/src/api/access.ts",
+  "worker-d1": "apps/worker/src/storage/d1.ts",
+  "worker-r2": "apps/worker/src/storage/r2.ts",
+  "worker-composition": "apps/worker/src/compose.ts",
+  "worker-owner": "apps/worker/src/owner.ts",
+  "worker-user-service": "apps/worker/src/services/users.ts",
   "worker-other": "apps/worker/src/index.ts",
   contracts: "packages/contracts/src/index.ts",
 };
@@ -46,7 +53,7 @@ const workerLayerPermissions: Record<
   { allowed: string[]; typeOnly: string[] }
 > = {
   api: { allowed: ["services"], typeOnly: ["geometry"] },
-  services: { allowed: ["storage", "geometry"], typeOnly: [] },
+  services: { allowed: ["geometry"], typeOnly: ["storage"] },
   storage: { allowed: [], typeOnly: [] },
   geometry: { allowed: [], typeOnly: [] },
   objects: { allowed: ["services"], typeOnly: [] },
@@ -156,6 +163,69 @@ const cases: Record<string, BoundaryCases> = {
     ],
   },
   ...workerLayerCases,
+  "storage-binding-types": {
+    rejected: [
+      "type X = D1Database;",
+      "type X = R2Bucket;",
+      "type X = globalThis.D1Database;",
+      "type X = typeof self.R2Bucket;",
+      "type X = D1PreparedStatement;",
+      "type X = R2ObjectBody;",
+    ],
+    allowed: ["type X = string;"],
+  },
+  "storage-binding-access": {
+    rejected: [
+      "env.DB;",
+      'env["BLOBS"];',
+      "const { DB: database } = env;",
+      'const { ["BLOBS"]: bucket } = this.env;',
+      'type X = Env["DB"];',
+      'type X = Pick<Env, "BLOBS">;',
+      "this.env.DB;",
+      'import { env as bindings } from "cloudflare:workers";',
+      'import * as cloudflare from "cloudflare:workers";',
+      'void import("cloudflare:workers");',
+      'export { env as bindings } from "cloudflare:workers";',
+      'export * from "cloudflare:workers";',
+    ],
+    allowed: ["env.ASSETS;", 'type X = Env["GEOMETRY"];'],
+  },
+  "worker-composition-entry": {
+    rejected: [importValue("../compose.ts"), 'export { serviceDeps } from "../compose.ts";'],
+    allowed: [importType("../compose.ts", "Dependencies"), importValue("../runtime.ts")],
+  },
+  "worker-store-construction": {
+    rejected: [
+      importValue("../storage/store.ts"),
+      importValue("../storage/d1.ts"),
+      importValue("../storage/r2.ts"),
+    ],
+    allowed: [importValue("../runtime.ts")],
+  },
+  "owner-construction": {
+    rejected: [importValue("../owner.ts")],
+    allowed: [importType("../owner.ts", "OwnerId")],
+  },
+  "owner-assertions": {
+    rejected: [
+      "const id = value as OwnerId;",
+      "const id = value as ids.OwnerId;",
+      "const id = <OwnerId>value;",
+    ],
+    allowed: ["const id: OwnerId = user.id;"],
+  },
+  "identity-assertions": {
+    rejected: [
+      "const identity = value as VerifiedIdentity;",
+      "const identity = value as ids.VerifiedIdentity;",
+    ],
+    allowed: ["const identity: VerifiedIdentity = verified;"],
+  },
+  "never-assertions": {
+    rejected: ["const id: OwnerId = value as never;", "const id: OwnerId = <never>value;"],
+    allowed: ["const unreachable: never = value;", "const checked = value satisfies never;"],
+  },
   "storage-response": {
     rejected: [
       importType("@madori/contracts", "ProjectResponse"),
@@ -170,6 +240,14 @@ const cases: Record<string, BoundaryCases> = {
       'import { apiErrorCodeSchema } from "@madori/contracts";',
     ],
     allowed: [importType("@madori/contracts", "Project"), importValue("./rows.ts")],
+  },
+  "storage-unchecked-schemas": {
+    rejected: [
+      "const row = z.custom<{ name: string }>();",
+      "const row = z.any();",
+      'import { custom } from "zod";',
+    ],
+    allowed: ["const row = z.object({ json: z.unknown() });"],
   },
   "services-http": {
     rejected: [
@@ -339,9 +417,13 @@ void test("test files may cross layers except rows marked for tests", async () =
   assert(marked.length > 0);
   for (const row of marked) {
     for (const source of cases[row.id]?.rejected ?? []) {
-      for (const path of row.id === "web-viewer-bindings"
-        ? ["apps/web/src/api.test.ts", "apps/web/tests/x.ts"]
-        : ["apps/web/src/viewer/viewport-session.test.ts", "apps/web/tests/x.ts"]) {
+      for (const path of ["owner-assertions", "identity-assertions", "never-assertions"].includes(
+        row.id,
+      )
+        ? ["apps/worker/src/services/example.test.ts", "apps/worker/tests/rpc/example.ts"]
+        : row.id === "web-viewer-bindings"
+          ? ["apps/web/src/api.test.ts", "apps/web/tests/x.ts"]
+          : ["apps/web/src/viewer/viewport-session.test.ts", "apps/web/tests/x.ts"]) {
         assert(
           (await diagnostics(source, path)).some((m) => m.message.includes(row.message)),
           `${path}: ${source}`,
@@ -674,6 +756,21 @@ void test("review 4 every Worker scope rejects Web and viewer tests reject Worke
   }
 });
 
+void test("brand cast rows cover their intended Worker scopes and test files", () => {
+  const workerScopes = Object.keys(typescriptScopes).filter((scope) => scope.startsWith("worker-"));
+  const expected = {
+    "owner-assertions": workerScopes.filter((scope) => scope !== "worker-owner"),
+    "identity-assertions": workerScopes.filter((scope) => scope !== "worker-access"),
+    "never-assertions": workerScopes,
+  };
+  for (const [id, from] of Object.entries(expected)) {
+    const row = typescriptBoundaries.find((row) => row.id === id);
+    assert(row, id);
+    assert.deepEqual(row.from, from, id);
+    assert.equal(row.appliesToTests, true, id);
+  }
+});
+
 void test("review 5 package subpaths are not mistaken for relative layers or apps", async (t) => {
   for (const path of Object.values(scopes)) {
     for (const specifier of [
@@ -772,4 +869,46 @@ void test("source files ban glob and file URLs; test files may read fixtures by 
       path,
     );
   }
+});
+
+void test("storage composition exceptions permit only their intended entry points", async () => {
+  for (const path of [scopes["worker-d1"], scopes["worker-r2"], scopes["worker-composition"]]) {
+    assert.deepEqual(
+      await diagnostics("type Database = D1Database; type Bucket = R2Bucket;", path),
+      [],
+    );
+  }
+  for (const source of cases["storage-binding-access"]?.rejected ?? []) {
+    assert.deepEqual(await diagnostics(source, scopes["worker-composition"]), []);
+  }
+  assert.deepEqual(
+    await diagnostics('import { serviceDeps } from "../compose.ts";', scopes["worker-api-entry"]),
+    [],
+  );
+  assert.deepEqual(
+    await diagnostics('import * as deps from "./deps.ts";', scopes["worker-services"]),
+    [],
+  );
+  for (const specifier of ["./storage/store.ts", "./storage/d1.ts", "./storage/r2.ts"]) {
+    assert.deepEqual(await diagnostics(importValue(specifier), scopes["worker-composition"]), []);
+  }
+  assert.deepEqual(
+    await diagnostics(
+      'import { authenticatedUser } from "../owner.ts";',
+      scopes["worker-user-service"],
+    ),
+    [],
+  );
+  assert.deepEqual(
+    await diagnostics("const verified = value as VerifiedIdentity;", scopes["worker-access"]),
+    [],
+  );
+  assert.deepEqual(await diagnostics("const id = value as OwnerId;", scopes["worker-owner"]), []);
+  assert.deepEqual(
+    await diagnostics(
+      'import type { Store } from "../storage/store.ts";',
+      scopes["worker-services"],
+    ),
+    [],
+  );
 });

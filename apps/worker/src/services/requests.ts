@@ -1,3 +1,4 @@
+import type { OwnerId } from "../owner.ts";
 import type { RequestKey } from "../storage/requests.ts";
 
 // Which fields identify a request is a decision of each service operation; storage only
@@ -5,7 +6,7 @@ import type { RequestKey } from "../storage/requests.ts";
 
 /** Hashes what a request asks for; the request ID itself is not part of the fingerprint. */
 export async function requestKey(
-  ownerId: string,
+  ownerId: OwnerId,
   requestId: string,
   operation: string,
   input: Record<string, string | number | undefined>,

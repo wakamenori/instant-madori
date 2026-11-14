@@ -1,15 +1,8 @@
 import { nameSchema } from "@madori/contracts";
 import type { Revision } from "@madori/contracts";
-import { getPattern } from "../storage/patterns.ts";
+import type { OwnerId } from "../owner.ts";
 import type { PatternState, RevisionPage } from "../storage/revisions.ts";
-import {
-  commitRevision as commitRow,
-  getPatternState as getStateRows,
-  getRevisionSnapshot,
-  listRevisions as listRows,
-} from "../storage/revisions.ts";
-import { readSnapshotDisplay, writeSnapshot } from "../storage/snapshots.ts";
-import type { ServiceDeps } from "./deps.ts";
+import type { ServiceDeps, StoreDeps } from "./deps.ts";
 
 export type CommitOutcome =
   | { kind: "committed"; revision: Revision }
@@ -18,9 +11,15 @@ export type CommitOutcome =
   | { kind: "invalid_name" };
 
 export async function commitRevision(
-  { db, bucket, runtime }: Pick<ServiceDeps, "db" | "bucket" | "runtime">,
+  {
+    store,
+    runtime,
+  }: StoreDeps<"revisions", "commit"> &
+    StoreDeps<"patterns", "get"> &
+    StoreDeps<"snapshots", "write"> &
+    Pick<ServiceDeps, "runtime">,
   input: {
-    ownerId: string;
+    ownerId: OwnerId;
     patternId: string;
     baseRevisionId: string | null;
     name: string;
@@ -31,32 +30,31 @@ export async function commitRevision(
   // revision that makes every later read of the pattern fail.
   const name = nameSchema.safeParse(input.name);
   if (!name.success) return { kind: "invalid_name" };
-  const snapshot = await writeSnapshot(bucket, {
+  const snapshot = await store.snapshots.write({
     id: runtime.newId(),
     ownerId: input.ownerId,
     now: runtime.now(),
     display: input.display,
   });
-  const result = await commitRow(db, {
+  const result = await store.revisions.commit({
     id: runtime.newId(),
-    ownerId: input.ownerId,
     patternId: input.patternId,
     name: name.data,
     baseRevisionId: input.baseRevisionId,
     snapshot,
   });
   if (result.kind === "committed") return result;
-  const pattern = await getPattern(db, { ownerId: input.ownerId, patternId: input.patternId });
+  const pattern = await store.patterns.get({ ownerId: input.ownerId, patternId: input.patternId });
   return { kind: pattern ? "base_mismatch" : "not_found" };
 }
 
 export type PatternStateOutcome = { kind: "found"; state: PatternState } | { kind: "not_found" };
 
 export async function getPatternState(
-  { db }: ServiceDeps,
-  scope: { ownerId: string; patternId: string },
+  { store }: StoreDeps<"revisions", "state">,
+  scope: { ownerId: OwnerId; patternId: string },
 ): Promise<PatternStateOutcome> {
-  const state = await getStateRows(db, scope);
+  const state = await store.revisions.state(scope);
   return state === null ? { kind: "not_found" } : { kind: "found", state };
 }
 
@@ -65,10 +63,10 @@ const revisionPageSize = 50;
 export type ListRevisionsOutcome = { kind: "listed"; page: RevisionPage } | { kind: "not_found" };
 
 export async function listRevisions(
-  { db }: ServiceDeps,
-  query: { ownerId: string; patternId: string; after: number | null },
+  { store }: StoreDeps<"revisions", "list">,
+  query: { ownerId: OwnerId; patternId: string; after: number | null },
 ): Promise<ListRevisionsOutcome> {
-  const page = await listRows(db, { ...query, limit: revisionPageSize });
+  const page = await store.revisions.list({ ...query, limit: revisionPageSize });
   return page === null ? { kind: "not_found" } : { kind: "listed", page };
 }
 
@@ -77,10 +75,10 @@ export type RevisionViewOutcome =
   | { kind: "not_found" };
 
 export async function getRevisionView(
-  { db, bucket }: ServiceDeps,
-  scope: { ownerId: string; revisionId: string },
+  { store }: StoreDeps<"revisions", "snapshot"> & StoreDeps<"snapshots", "display">,
+  scope: { ownerId: OwnerId; revisionId: string },
 ): Promise<RevisionViewOutcome> {
-  const snapshot = await getRevisionSnapshot(db, scope);
+  const snapshot = await store.revisions.snapshot(scope);
   if (snapshot === null) return { kind: "not_found" };
-  return { kind: "found", artifact: await readSnapshotDisplay(bucket, snapshot) };
+  return { kind: "found", artifact: await store.snapshots.display(snapshot) };
 }
