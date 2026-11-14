@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
-import { readUpstreamPin } from "./repository.ts";
+import { readUpstreamPin } from "../shared/repository.ts";
 
 const file = "third_party/solidcraft.json";
 const pin = readUpstreamPin();
@@ -35,5 +35,5 @@ if (command === "check") {
     );
   }
 } else {
-  throw new Error("Usage: node scripts/upstream.ts check | update <commit>");
+  throw new Error("Usage: node scripts/upstream/upstream.ts check | update <commit>");
 }

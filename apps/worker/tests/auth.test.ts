@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { accessAssertionHeader, meResponseSchema } from "@madori/contracts";
-import { createAccessKey, signAccessToken } from "../../../scripts/local-access.ts";
+import { createAccessKey, signAccessToken } from "../../../scripts/dev/local-access.ts";
 import {
   newUser,
   startLocalWorker,

@@ -1,8 +1,9 @@
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { repositoryRoot } from "../shared/repository.ts";
 
-const root = fileURLToPath(new URL("../", import.meta.url));
-const bindgen = fileURLToPath(new URL("../.tools/bin/wasm-bindgen", import.meta.url));
+const root = fileURLToPath(repositoryRoot);
+const bindgen = fileURLToPath(new URL(".tools/bin/wasm-bindgen", repositoryRoot));
 try {
   const version = execFileSync(bindgen, ["--version"], { encoding: "utf8" }).trim();
   if (version !== "wasm-bindgen 0.2.129") throw new Error(`Unexpected version: ${version}`);

@@ -1,8 +1,11 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { lstatSync, readFileSync, readlinkSync } from "node:fs";
+import ts from "typescript";
 import { z } from "zod";
-import { readUpstreamPin } from "./repository.ts";
+import { geometryInternal } from "../../packages/contracts/src/generated/geometry-internal.ts";
+import { readUpstreamPin, repositoryRoot } from "../shared/repository.ts";
+import { assertStagingBindings, upstreamFilePath } from "./layout-contract.ts";
 
 const pin = readUpstreamPin();
 const tree = execFileSync("git", ["ls-tree", "-rz", pin.commit], {
@@ -19,7 +22,7 @@ for (const entry of tree.split("\0").filter(Boolean)) {
     .parse(metadata.split(" "));
   upstreamPaths.add(path);
   if (type !== "blob") throw new Error(`Unexpected upstream object: ${path}`);
-  const target = `third_party/solidcraft/${path}`;
+  const target = upstreamFilePath(repositoryRoot, path);
   const stat = lstatSync(target);
   if (patches.has(path)) continue;
   const bytes = stat.isSymbolicLink() ? Buffer.from(readlinkSync(target)) : readFileSync(target);
@@ -57,7 +60,14 @@ const actualMembers = metadata.packages
   .filter((pkg) => metadata.workspace_members.includes(pkg.id))
   .map((pkg) => pkg.name)
   .sort();
-const expectedMembers = ["madori-geometry", "madori-housing", "madori-modeling", "madori-viewer"];
+const expectedMembers = [
+  "madori-display",
+  "madori-geometry",
+  "madori-geometry-api",
+  "madori-housing",
+  "madori-modeling",
+  "madori-viewer",
+];
 if (JSON.stringify(actualMembers) !== JSON.stringify(expectedMembers))
   throw new Error(`Unexpected workspace members: ${actualMembers.join(", ")}`);
 const viewerDependencies = execFileSync(
@@ -95,6 +105,31 @@ if (
   nativeFeatures.includes('solidcraft-io feature "trust-unknown-source"')
 )
   throw new Error("The service must not trust a cache fingerprint from the upstream workspace");
+
+const displayTree = execFileSync(
+  "cargo",
+  ["tree", "--locked", "-p", "madori-display", "--edges", "normal", "--prefix", "none"],
+  { encoding: "utf8" },
+);
+if (displayTree.trim().split("\n").length !== 1)
+  throw new Error("Display format must have no dependencies");
+
+if (/^madori-modeling /m.test(viewerDependencies))
+  throw new Error("Viewer must not include modeling");
+const dockerfile = readFileSync(new URL("apps/geometry/Dockerfile", repositoryRoot), "utf8");
+if (
+  !dockerfile.includes(`EXPOSE ${geometryInternal.port}`) ||
+  !dockerfile.includes(`MADORI_GEOMETRY_BIND=0.0.0.0:${geometryInternal.port}`)
+)
+  throw new Error("Dockerfile must use the internal API port");
+
 console.log(
-  `Layout passed: ${checked} unchanged upstream files, ${patches.size} recorded patch files, four service Rust crates.`,
+  `Layout passed: ${checked} unchanged upstream files, ${patches.size} recorded patch files, ${actualMembers.length} service Rust crates.`,
+);
+
+assertStagingBindings(
+  ts.parseConfigFileTextToJson(
+    "wrangler.jsonc",
+    readFileSync(new URL("apps/worker/wrangler.jsonc", repositoryRoot), "utf8"),
+  ).config,
 );

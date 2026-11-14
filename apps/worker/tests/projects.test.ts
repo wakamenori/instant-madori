@@ -9,7 +9,7 @@ import {
   projectResponseSchema,
 } from "@madori/contracts";
 import type { CreateProjectResponse, Project } from "@madori/contracts";
-import type { AccessUser } from "../../../scripts/local-access.ts";
+import type { AccessUser } from "../../../scripts/dev/local-access.ts";
 import { newUser, startLocalWorker } from "./support/local-worker.ts";
 import type { LocalWorker } from "./support/local-worker.ts";
 

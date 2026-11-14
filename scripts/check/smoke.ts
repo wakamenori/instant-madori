@@ -1,11 +1,18 @@
+import { randomBytes } from "node:crypto";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { freePort, ready, start, stop } from "./processes.ts";
+import { repositoryRoot } from "../shared/repository.ts";
+import { freePort, ready, start, stop } from "../shared/processes.ts";
 
 const workerPort = await freePort();
 const geometryPort = await freePort();
+const token = randomBytes(32).toString("base64url");
 const geometry = start("target/debug/madori-geometry", [], {
-  env: { ...process.env, MADORI_GEOMETRY_BIND: `127.0.0.1:${geometryPort}` },
+  env: {
+    ...process.env,
+    MADORI_INTERNAL_TOKEN: token,
+    MADORI_GEOMETRY_BIND: `127.0.0.1:${geometryPort}`,
+  },
 });
 const worker = start("pnpm", [
   "--filter",
@@ -14,6 +21,7 @@ const worker = start("pnpm", [
   "wrangler",
   "dev",
   "--local",
+  "--enable-containers=false",
   "--ip",
   "127.0.0.1",
   "--port",
@@ -34,7 +42,7 @@ for (const signal of ["SIGINT", "SIGTERM"])
 
 try {
   const native = await ready(`http://127.0.0.1:${geometryPort}/healthz`, geometry.child);
-  assert.deepEqual(await native.json(), { status: "ok", service: "geometry" });
+  assert.deepEqual(await native.json(), { status: "ok", service: "geometry", protocol: 1 });
   const origin = `http://127.0.0.1:${workerPort}`;
   const health = await ready(`${origin}/api/health`, worker.child);
   assert.deepEqual(await health.json(), { status: "ok", service: "worker" });
@@ -56,14 +64,27 @@ try {
   const wasmBytes = Buffer.from(await wasmResponse.arrayBuffer());
   assert.deepEqual(
     wasmBytes,
-    await readFile(new URL("../crates/viewer/pkg/madori_viewer_bg.wasm", import.meta.url)),
+    await readFile(new URL("crates/viewer/pkg/madori_viewer_bg.wasm", repositoryRoot)),
   );
-  const viewer = await import("../crates/viewer/pkg/madori_viewer.js");
+  const viewer = await import("../../crates/viewer/pkg/madori_viewer.js");
   await viewer.default({ module_or_path: wasmBytes });
-  assert.equal(viewer.check_runtime(), true);
+  const displayUrl = `http://127.0.0.1:${geometryPort}/v1/sample/display`;
+  assert.equal((await fetch(displayUrl)).status, 401);
+  const display = await fetch(displayUrl, { headers: { authorization: `Bearer ${token}` } });
+  assert.equal(display.status, 200);
+  const summary = viewer.describe_display(new Uint8Array(await display.arrayBuffer()));
+  assert.equal(summary.bodies, 4);
+  assert.deepEqual(summary.elements, [
+    "sample:slab",
+    "sample:wall-north",
+    "sample:wall-west",
+    "sample:wall-east",
+  ]);
+  summary.free();
+  assert.throws(() => viewer.describe_display(new Uint8Array([0])));
   if (interrupted) throw new Error("Smoke check interrupted");
   console.log(
-    "Smoke passed: native engine startup, Worker routes, static assets, Wasm delivery and initialization.",
+    "Smoke passed: native engine startup, Worker routes, static assets, Wasm delivery, native-to-Wasm display decoding and authentication failure.",
   );
 } finally {
   await stop(processes);

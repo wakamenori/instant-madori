@@ -5,6 +5,7 @@ import type { ServiceDeps } from "../services/deps.ts";
 
 /** What an authenticated route handler receives. */
 export interface RouteContext {
+  traceId: string;
   request: Request;
   url: URL;
   deps: ServiceDeps;

@@ -1,6 +1,8 @@
+import { finishDevelopment } from "./dev-session.ts";
+import { cleanupWorkerContainers, snapshotWorkerContainers } from "./wrangler-containers.ts";
 import { ensureDevAccess } from "./local-access.ts";
-import { assertSucceeded, start, stop } from "./processes.ts";
-import type { ProcessOutcome } from "./processes.ts";
+import { assertSucceeded, start, stop } from "../shared/processes.ts";
+import type { ProcessOutcome } from "../shared/processes.ts";
 
 const wrangler = "node_modules/wrangler/bin/wrangler.js";
 
@@ -41,24 +43,42 @@ const migrated = await setupStep("Local D1 migration", () =>
 );
 
 if (migrated) {
+  console.info(
+    "Geometry runs in Docker; the first amd64 image build takes several minutes. MADORI_DEV_CONTAINERS=0 disables containers.",
+  );
+  const before =
+    process.env["MADORI_DEV_CONTAINERS"] === "0" ? undefined : snapshotWorkerContainers();
   const processes = [
-    start("cargo", ["run", "--locked", "-p", "madori-geometry"]),
-    start(process.execPath, [wrangler, "dev", "--local", "--ip", "127.0.0.1", "--port", "8787"], {
-      cwd: "apps/worker",
-    }),
+    start(
+      process.execPath,
+      [
+        wrangler,
+        "dev",
+        "--local",
+        "--ip",
+        "127.0.0.1",
+        "--port",
+        "8787",
+        ...(process.env["MADORI_DEV_CONTAINERS"] === "0" ? ["--enable-containers=false"] : []),
+      ],
+      {
+        cwd: "apps/worker",
+      },
+    ),
     start(
       process.execPath,
       ["node_modules/vite/bin/vite.js", "--host", "127.0.0.1", "--port", "5173", "--strictPort"],
       { cwd: "apps/web" },
     ),
   ];
-  console.log(
-    "Web: http://127.0.0.1:5173 | Worker: http://127.0.0.1:8787 | Geometry: http://127.0.0.1:3001/healthz",
-  );
+  console.log("Web: http://127.0.0.1:5173 | Worker: http://127.0.0.1:8787");
   const result = await Promise.race([...processes.map(({ finished }) => finished), interruption]);
   // Decide the exit status before stopping: a Ctrl-C during shutdown must not hide a crash.
   const stoppedByUser = interrupted;
-  await stop(processes);
-  if (result.kind === "error") console.error(result.error);
-  process.exitCode = stoppedByUser ? 0 : result.kind === "error" ? 1 : (result.code ?? 1);
+  await finishDevelopment(result, stoppedByUser, {
+    stop: () => stop(processes),
+    cleanup: () => {
+      if (before) cleanupWorkerContainers(before);
+    },
+  });
 }

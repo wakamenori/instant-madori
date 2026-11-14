@@ -1,3 +1,4 @@
+export { displayContentType } from "./generated/display.ts";
 import { z } from "zod";
 
 export const workerHealthSchema = z.object({
@@ -27,6 +28,7 @@ export const apiErrorCodeSchema = z.enum([
   "version_conflict",
   "request_id_reused",
   "internal_error",
+  "service_unavailable",
 ]);
 
 export type ApiErrorCode = z.infer<typeof apiErrorCodeSchema>;

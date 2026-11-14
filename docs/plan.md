@@ -210,6 +210,7 @@ instant-madori/
 │   │   ├── src/
 │   │   │   ├── api/
 │   │   │   ├── services/
+│   │   │   ├── geometry/
 │   │   │   ├── storage/
 │   │   │   ├── ai/
 │   │   │   ├── workflows/
@@ -222,6 +223,8 @@ instant-madori/
 │       ├── Cargo.toml
 │       └── Dockerfile
 ├── crates/
+│   ├── display/
+│   ├── geometry-api/
 │   ├── housing/
 │   ├── modeling/
 │   └── viewer/
@@ -235,6 +238,12 @@ instant-madori/
 │   ├── plan.md
 │   └── verification/       # 検証記録と画像・データ
 ├── scripts/
+│   ├── check/
+│   ├── dev/
+│   ├── generate/
+│   ├── build/
+│   ├── upstream/
+│   └── shared/
 ├── .github/
 │   └── dependabot.yml
 ├── Cargo.toml
@@ -247,35 +256,45 @@ instant-madori/
 └── AGENTS.md
 ```
 
-| 配置                      | 責務                                                                                                      |
-| ------------------------- | --------------------------------------------------------------------------------------------------------- |
-| apps/web/                 | React画面、APIクライアント、Wasmの読み込み、会話・履歴・表示状態                                          |
-| apps/worker/              | API、AI接続、Workflows、Durable Objects、D1・R2アクセス。マイグレーションとCloudflareの配備設定もまとめる |
-| apps/geometry/            | Container内のHTTP受付、処理の実行・停止、スナップショットの読込・出力。ContainerのDockerfileも置く        |
-| crates/housing/           | 住宅データ、共有境界、寸法・面積、住宅の関係の検査                                                        |
-| crates/modeling/          | 住宅用コマンド、SolidCraftとの対応、変更の引き継ぎ、保存用スナップショット                                |
-| crates/viewer/            | Web画面へ組み込むWasmライブラリ。選択補助、カメラ操作、素材・日差しの表示                                 |
-| packages/contracts/       | 通信スキーマと共有型。Rust側の定義から生成した型・スキーマの受け渡し先                                    |
-| third_party/solidcraft/   | 固定した版のSolidCraft一式。SolidCraft自体に必要な修正もこの領域で行う                                    |
-| third_party/solidcraft.md | 取り込み元、採用コミット、独自変更の理由、更新手順。subtreeの外に置く                                     |
-| docs/・scripts/           | サービスの計画・検証記録、開発・ビルド・upstream更新の補助                                                |
-| .github/dependabot.yml    | npm・Cargoの依存関係の更新提案                                                                            |
+| 配置                      | 責務                                                                                                                |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| apps/web/                 | React画面、APIクライアント、Wasmの読み込み、会話・履歴・表示状態                                                    |
+| apps/worker/              | API、AI接続、Workflows、Durable Objects、D1・R2アクセス。マイグレーションとCloudflareのデプロイ設定もまとめる       |
+| apps/geometry/            | Container内のHTTP受付、処理の実行・停止、スナップショットの読込・出力。ContainerのDockerfileも置く                  |
+| crates/display/           | 表示データの不変条件と版付きバイナリ形式。依存を持たず、modelingとviewerが共有する                                  |
+| crates/geometry-api/      | WorkerとContainerの内部API契約。packages/contractsへTypeScript定義を生成する                                        |
+| crates/housing/           | 住宅データ、共有境界、寸法・面積、住宅の関係の検査                                                                  |
+| crates/modeling/          | 住宅用コマンド、SolidCraftとの対応、変更の引き継ぎ、保存用スナップショット                                          |
+| crates/viewer/            | Web画面へ組み込むWasmライブラリ。選択補助、カメラ操作、素材・日差しの表示                                           |
+| packages/contracts/       | 通信スキーマと共有型。Rust側の定義から生成した型・スキーマの受け渡し先                                              |
+| third_party/solidcraft/   | 固定した版のSolidCraft一式。SolidCraft自体に必要な修正もこの領域で行う                                              |
+| third_party/solidcraft.md | 取り込み元、採用コミット、独自変更の理由、更新手順。subtreeの外に置く                                               |
+| docs/・scripts/           | サービスの計画・検証記録。scripts/はcheck・dev・generate・build・upstreamに分け、複数の目的で使う部品はsharedに置く |
+| .github/dependabot.yml    | npm・Cargoの依存関係の更新提案                                                                                      |
 
-Workerの内部は、`api/` → `services/` → `storage/` の向きにだけ依存させる。
+Workerの依存は `services/deps.ts` の `serviceDeps(env, runtime)` で構築する。サービスはDOのnamespaceではなく、型付き `GeometryInstance` を受けて `GeometryApi` を返す関数に依存する。インスタンス名の導出とRPCのretryable/overloaded例外からunavailableへの変換は `geometry/geometry-client.ts` に集める。現在のキーはsampleであり、6.2のパターン・ジョブ用キーはその段階で加える。
+
+内部ルートは `geometry/` の `callGeometry` で呼び、成功のバイナリまたはJSON、エラー本文、ストリームのサイズ上限と中断を共通処理する。ルートとメソッドは生成された定義を使い、タイムアウトは同じモジュールの表で管理する。HTTPへのエラー変換とログ項目は `api/geometry.ts` が受け持つ。
+
+Workerの内部は、`api/` から `services/` を呼び、`services/` から保存用の `storage/` または形状処理用の `geometry/` を呼ぶ。
 
 | 層          | 受け持つこと                                                                                                                                                                                                                    | 持ち込まないもの       |
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------- |
 | `api/`      | ルーティング、Accessの検証、Originの検査、入力の検証、業務の結果からエラーコードとHTTPへの対応付け                                                                                                                              | SQL、業務の判断        |
 | `services/` | 業務の判断（初期名の決め方、要求を識別する項目、条件が成り立たなかった理由の判定）。時刻とIDは外から受け取る                                                                                                                    | Request・Response・SQL |
+| `objects/`  | 案ごとの調整DO。`services/` を呼び、永続的な実行権と世代を調整する                                                                                                                                                              | Containerへの接続処理  |
+| `geometry/` | Container接続用DO。起動、準備確認、内部認証、転送と内部APIの呼出し                                                                                                                                                              | 業務の判断             |
 | `storage/`  | D1・R2への読み書き。条件付きの書込みと冪等性の記録を、操作ごとに名前を付けた関数で原子的に行う。採番のように同じトランザクションの中でしか決まらない値は、`services/` から受け取った材料（初期名の接頭辞など）でSQLが組み立てる | HTTP、業務の判断       |
 
 `services/` を分けるのは、Workflow・Durable Objectが同じ業務の判断をHTTPを通らずに使うためである。`services/` は書込みの文を組み立てず、`storage/` の操作（例：`renameProjectOnce`、将来の `commitRevision`）を呼ぶ。文どうしの条件を確かめないまま、任意の文の列を一括で確定させる仕組みは作らない。D1のbatchでは条件付き更新が0件でもエラーにならず、後続の文が確定してしまうためである。`storage/` の `runOnce` はbatchの前後の確認の順番だけを受け持ち、文どうしの結び付けは操作ごとに設計する。複数の条件を含む操作は、各条件が後続の文を止めるように、その操作専用のSQLとして設計する。後続の文の条件は、行の有無や値といったデータの状態で書き、`changes()` のような接続の状態には依存しない。依存してよいのは、D1の文書が保証している次の性質だけである：batchが一つのトランザクションとして順に実行され、後の文が前の文の書込みを見ること、途中の文が失敗するとbatch全体が取り消されること、一つのデータベースが一度に一つのクエリを処理すること。冪等性の記録と変更は、この条件で結び付ける。作成は「この要求で生成した新しいIDの行がある」ことを記録の条件にする。更新は `updateOnceStatements` で記録を先に置き、一度だけ書いた前提条件を、記録と更新の両方の条件にする。
 
 DBの行は、テーブルごとに一つのSQLの `json_object` で読み、`storage/` で共有スキーマにより検証してから返す。型引数による決めつけで行を扱わない。業務上の結果（見つからない、版の競合など）は例外でなく判別可能な結果として返し、`api/` がエラーコードへ対応付ける。予期しない例外だけを500とし、本文を含めずに記録する。
 
-`apps/` は起動・配備するもの、`crates/` はRustの機能をまとめたモジュール、`packages/` はJS/TS側から共有する定義を置く。`apps/geometry` は `crates/modeling` を呼ぶ入口とし、住宅の計算やCADとの対応をHTTP処理に散らさない。
+`apps/` は起動・デプロイするもの、`crates/` はRustの機能をまとめたモジュール、`packages/` はJS/TS側から共有する定義を置く。`apps/geometry` は `crates/modeling` を呼ぶ入口とし、住宅の計算やCADとの対応をHTTP処理に散らさない。
 
-`crates/housing` は画面・HTTP・Cloudflareへ依存させない。`crates/modeling` が住宅モデルとSolidCraftのengine・doc・kernelを利用し、`crates/viewer` はgeom・render・gpuを利用する。ビューアには編集エンジンや既存のegui UIを含めず、表示用の契約で接続する。
+`crates/housing` は画面・HTTP・Cloudflareへ依存させない。`crates/modeling` が住宅モデルとSolidCraftのengine・doc・kernelを利用し、`crates/viewer` はgeom・render・gpuを利用する。ビューアには編集エンジンや既存のegui UIを含めず、依存を持たない `crates/display` の表示データで接続する。`crates/modeling` が符号化し、`crates/viewer` が復号する。`crates/geometry-api` は形状処理の内部APIを定義し、TypeScriptの定義を `packages/contracts/src/generated/geometry-internal.ts` へ生成する。公開する表示メディア型は同じ生成処理で `packages/contracts/src/generated/display.ts` に出し、`@madori/contracts` から公開する。Webは内部API定義をimportしない。
+
+内部API本文は `crates/geometry-api` のRust型にschemarsを適用し、インライン化したJSON Schemaからjson-schema-to-zodでZod検証とTypeScript型を生成する。`pnpm generate:geometry` で定数と本文を一緒に更新し、RustとNodeのテストが生成結果のずれを検出する。再帰型と参照が残る型は生成時に拒否する。結果の共用体は `kind` を判別子とする。固定幅整数には範囲を付け、JavaScriptで正確に表せない64/128ビット整数は文字列で運ぶ。ポインター幅に依存する整数も生成時に拒否し、通信には固定幅の型を選ぶ。Optionは `skip_serializing_if = "Option::is_none"` でNoneを省略し、受信時は省略とnullを許す。各ルートに本文型のスキーマ生成関数を登録し、要求・応答のスロットから方向を導出する。エラー本文はルートごとに登録せず、プロトコル共通のスキーマ・メディア型・本文上限を定義し、Rustのエラー応答とWorkerの検証で使う。同名の本文を異なる契約で登録すると生成を停止する。要求はDeserialize契約で生成し、オブジェクトの未知フィールド拒否を生成時に検査する。応答はSerialize契約で生成し、共有型に指定された未知フィールド拒否を応答スキーマから再帰的に除き、追加フィールドを許容する。ルートにはHTTPメソッドと要求・応答本文の形式（なし、JSONのスキーマと本文上限、バイナリのメディア型と本文上限）を登録し、Workerの受信方針をそこから組み立てる。
 
 住宅データはRust側で定義し、通信に必要な型とスキーマを生成してJS/TS側へ渡す。WebとWorkerの共通の通信定義も `packages/contracts` で管理し、同じ型を両側で独立に手書きしない。
 
@@ -320,7 +339,7 @@ Accessで認証済みであることと、利用者が意図した変更であ�
 
 案件・パターン・会話・案・添付・表示データ・進捗のすべてで所有権を確認する。R2は非公開とし、Worker経由または所有権確認後に発行する短時間のURLで配信する。ファイル名やR2キーを知っているだけでは読めない構成にする。
 
-AIキーと内部サービスの資格情報はサーバー側に保存する。Containerは公開の編集APIとして使わず、ジョブ・操作・入力スナップショットを指定した認証済みの内部要求だけを受ける。
+AIキーと内部サービスの資格情報はサーバー側に保存する。Containerは公開の編集APIとして使わず、認証済みの内部要求だけを受ける。接続用DOは起動ごとにランダムなトークンを作り、DOのストレージへ保存してContainerの環境変数へ渡す。Containerは `/healthz` 以外の内部要求でBearerトークンを検査する。DOの再起動後は保存したトークンで実行中のContainerを引き継ぎ、起動時のイメージが現在の設定と違う場合は置き換える。
 
 ### 4.5 AIに渡す情報と、呼び出せる操作
 
@@ -384,41 +403,50 @@ DOの再起動、Workflow開始前後の失敗、完了通知の消失を回復�
 
 ### 4.7 APIと途中経過の配信・再接続
 
+6.2で最初のJSONまたはバイナリ要求ルートを追加するとき、そのルートに適した本文上限を選び、axumの既定の2 MB上限を調整する。413/422拒否応答は内部APIのErrorBodyコードへ変換し、実際のルートで本文の転送を検査するテストを追加する。最初の本文ルートではハンドラーの要求・応答型をルート表に結び付け、表の `request.max_bytes` からaxumの本文上限を適用し、バイナリ要求のメディア型も検証する。
+
 以下を初期の公開APIとする。変更要求はrequest IDを持ち、同じIDと内容の再送は同じ結果へ対応付ける。復帰や管理情報の変更では期待する版を送り、意図しない上書きを防ぐ。
 
 request IDは利用者ごとの範囲で一意とし、固定するのは成功した結果だけとする。失敗した要求は記録せず、同じIDで内容を直した再試行を新しい要求として扱う。一度成功したIDを別の操作・内容に使った場合は拒否する。同じ要求の同時の再送では、先に確定した結果を全員に返す。
 
-応答はJSONで、失敗は共有定義のエラーコードを `{ error }` で返す。利用者ごとのデータを返すため、API応答はすべてキャッシュさせない。応答と構造化ログに追跡用のIDを付け、ログには会話・名前などの本文を出さない。一覧は作成日時の新しい順に、続きを取得するためのカーソルを付けて返す。
+表示データ以外の応答はJSONで、失敗は共有定義のエラーコードを `{ error }` で返す。利用者ごとのデータを返すため、API応答はすべてキャッシュさせない。応答と構造化ログに追跡用のIDを付け、ログには会話・名前などの本文を出さない。一覧は作成日時の新しい順に、続きを取得するためのカーソルを付けて返す。
 
-| API                                         | 役割                                               |
-| ------------------------------------------- | -------------------------------------------------- |
-| GET /api/me                                 | 内部ユーザーと利用可能な設定                       |
-| GET・POST /api/projects                     | 案件一覧・作成                                     |
-| PATCH /api/projects/:id                     | 案件名などの管理情報                               |
-| GET・POST /api/projects/:id/patterns        | パターン一覧・作成                                 |
-| PATCH /api/patterns/:id                     | パターン名などの管理情報                           |
-| GET /api/patterns/:id/state                 | 現在の案、会話・履歴の位置、ジョブ、待機・保留状態 |
-| GET /api/patterns/:id/messages・revisions   | 会話と履歴のページ取得                             |
-| POST /api/patterns/:id/messages             | 指示・質問への回答を受け付ける                     |
-| POST /api/patterns/:id/restore・clone       | 確定案からの復帰・複製                             |
-| POST /api/jobs/:id/stop                     | 実行中の処理の停止                                 |
-| POST /api/patterns/:id/queue/resume・cancel | 保留指示の再開・取り消し                           |
-| POST /api/assets                            | 添付画像の登録・検査                               |
-| GET /api/revisions/:id/view                 | 2D・3D表示データと取得先                           |
-| POST /api/revisions/:id/pick・sunlight      | 対象選択の確定と日差しの計算                       |
-| GET /api/patterns/:id/events                | 途中経過と状態変更をSSEで配信                      |
+| API                                         | 役割                                                                     |
+| ------------------------------------------- | ------------------------------------------------------------------------ |
+| GET /api/me                                 | 内部ユーザーと利用可能な設定                                             |
+| GET・POST /api/projects                     | 案件一覧・作成                                                           |
+| PATCH /api/projects/:id                     | 案件名などの管理情報                                                     |
+| GET・POST /api/projects/:id/patterns        | パターン一覧・作成                                                       |
+| PATCH /api/patterns/:id                     | パターン名などの管理情報                                                 |
+| GET /api/patterns/:id/state                 | 現在の案、会話・履歴の位置、ジョブ、待機・保留状態                       |
+| GET /api/patterns/:id/messages・revisions   | 会話と履歴のページ取得                                                   |
+| POST /api/patterns/:id/messages             | 指示・質問への回答を受け付ける                                           |
+| POST /api/patterns/:id/restore・clone       | 確定案からの復帰・複製                                                   |
+| POST /api/jobs/:id/stop                     | 実行中の処理の停止                                                       |
+| POST /api/patterns/:id/queue/resume・cancel | 保留指示の再開・取り消し                                                 |
+| POST /api/assets                            | 添付画像の登録・検査                                                     |
+| GET /api/sample/display                     | サンプルの3D表示データ。一時的なAPIで、revisionの表示APIを追加したら削除 |
+| GET /api/revisions/:id/view                 | 2D・3D表示データと取得先                                                 |
+| POST /api/revisions/:id/pick・sunlight      | 対象選択の確定と日差しの計算                                             |
+| GET /api/patterns/:id/events                | 途中経過と状態変更をSSEで配信                                            |
 
 SSEのイベントにはパターン、job ID、案IDまたは作業版、増加するイベント番号を付ける。画像・メッシュの本体は含めず、取得先を通知する。操作中にパターンや条件を変えた場合、遅れて届いた別の版の結果を表示しない。
 
 再接続時はイベント番号から差分を読み、保存範囲を外れていたらstateと現在の表示データを再取得する。SSEの接続をジョブの生存条件にしない。通信できない間の入力は送信済みとせず、再送時にもrequest IDを保持する。
 
-Containerの内部APIは、スナップショットの読込、操作バッチ、検査、保存、停止、表示データ取得に分ける。要求にはjob ID、操作ID、実行世代、入力スナップショットを必須にし、Sessionを共有して同時変更しない。
+Containerの内部APIは、スナップショットの読込、操作バッチ、検査、保存、停止、表示データ取得に分ける。内部APIは `/v1` のパスで版を識別し、`/healthz` もプロトコルの版を返す。DOは自分の扱える版だけを受け付ける。ジョブを扱う要求にはjob ID、操作ID、実行世代、入力スナップショットを必須にし、Sessionを共有して同時変更しない。固定サンプルの `GET /v1/sample/display` はジョブの識別子を持たず、要求ごとのSessionで評価する。起動・接続失敗は公開APIの503 `service_unavailable` と `retry-after` に対応付け、形状生成の失敗と内部プロトコル違反は500にする。
 
 ### 4.8 2D生成・3D描画・素材表示・日差しの計算
 
 2Dは住宅の輪郭・開口・階段情報と、家具の投影から生成する。部屋名・面積・方位・寸法を同じ案に結び付ける。SVGを表示とPNG出力の共通の入力にする初期設計とする。
 
 3Dはサーバーで評価した形状から表示メッシュを作り、住宅要素IDとの対応、色、素材を付けてWasmへ渡す。モデルの判断は住宅情報とCADの形状に基づき、表示メッシュの変更を住宅編集として保存しない。対象選択はブラウザで候補を求め、サーバーがその案の形状と対応表で確定する。
+
+表示形式は `crates/display` で管理する。版1は `MDSP` ヘッダー、全体の長さ、8バイト境界にそろえたセクション表を持つ。ボディごとのf32メッシュ、三角形のB-rep面番号、RGBA色、閉じたボディかどうか、面のRGB色、住宅要素IDを格納する。WorkerとWebはバイト列を解釈せずに渡し、Wasmの復号時に検証する。内部APIは16 MiBを上限にする。
+
+版1の必須セクションは ELEM、BODY、POSN、NORM、TRIS、TFAC、FCOL の順に固定する。その後に任意セクションを表の順で追加し、任意セクションのフラグは0とする。各セクションの前には8バイト境界にそろえる最小限のゼロ埋めだけを置き、最後のセクションの後に余分なバイトを置かない。既知の任意セクションがない場合は、その情報の既定値を使う。
+
+新しい情報はセクションとして追加する。旧ビューアが無視できる追加は任意とし、必須の未知セクションは読込を拒否する。任意セクションは旧読込側も保持し、受理したバイト列は再符号化しても一致する。既存セクションの意味を変える場合は形式の版を上げる。R2に保存したオブジェクトは書き換えず、ビューアに保存済みの各版の読込処理を残す。
 
 素材は、画像の読み込み、面への座標の割り当て、柄の実寸・向き、表示用キャッシュを追加する。通常のSolidCraftビューアの色指定だけでは木目やタイルの表示は完成しない。6.4で、壁の移動・分割・伸縮後にも柄と適用面が保たれることを確認する。
 
@@ -428,7 +456,7 @@ Containerの内部APIは、スナップショットの読込、操作バッチ�
 
 ## 5. 運用と保守
 
-### 5.1 開発環境と本番への配備
+### 5.1 開発環境と本番へのデプロイ
 
 ルートに自作RustコードのCargo workspaceとJS/TSコードのpnpm workspaceを置く。Rust側は `apps/geometry` と自作の `crates/`、JS/TS側は `apps/web`・`apps/worker`・`packages/contracts` を対象にする。SolidCraft側のCargo workspaceは別に保持し、自作側から必要なクレートをpath依存で利用する。
 
@@ -438,9 +466,11 @@ SolidCraft一式を保持することと、通常のビルド・テスト対象�
 
 サービスの依存解決はルートのCargo.lockとpnpm-lock.yamlで固定する。Cargoのプロファイル・依存パッチは利用側ルートで必要な設定を管理し、SolidCraft側の設定が自動で引き継がれるとは仮定しない。相対パスで参照する資産、ビルドスクリプト、評価キャッシュの識別処理も移行時に確認する。キャッシュを利用する場合は、識別値に実際の依存解決とビルド条件を反映する。環境整備では誤った再利用を避けるため、サービスから使うSolidCraftの評価キャッシュを無効にする。
 
-開発ではWeb画面、Worker・D1などのローカル環境、Rust形状処理、Wasmを接続して動かす。テスト用と本番用の認証設定・DB・R2・秘密情報は分離する。
+開発では `pnpm dev` がWeb画面、Worker・D1、Wasmと、`wrangler dev` 経由のDocker Containerを接続する。画面だけを扱うときは `MADORI_DEV_CONTAINERS=0` でContainerを無効にする。`pnpm check --full` はDockerイメージをビルドし、実Containerとの接続も検査する。Dockerはビルドプラットフォーム上のRustからLinux amd64向けにコンパイルし、Cargoのキャッシュを再利用する。テスト用と本番用の認証設定・DB・R2・秘密情報は分離する。
 
-本番はWorkerと静的ファイル、D1マイグレーション、R2、DO・Workflow、Containerイメージを一組の版として配備する。RustはContainerの対象であるLinux向けにビルドし、Wasmは別の成果物として作る。形状処理のメモリと起動時間を測り、Containerのサイズ・同時実行数・休止条件を選ぶ。
+本番はWorkerと静的ファイル、D1マイグレーション、R2、DO・Workflow、Containerイメージを一組の版としてデプロイする。RustはContainerの対象であるLinux向けにビルドし、Wasmは別の成果物として作る。形状処理のメモリと起動時間を測り、Containerのサイズ・同時実行数・休止条件を選ぶ。
+
+stagingのデプロイ前に、Worker routeまたはCustom Domainで到達できるホスト名を設定する（workers.devとpreview URLは無効）。そのホスト名を保護するAccessアプリとD1を作成し、`apps/worker/wrangler.jsonc` の `env.staging` にDB ID、Accessの発行元とaudience、画面のOriginを設定する。初期値の `.invalid` 発行元はローカル以外で拒否する。設定後のデプロイとD1のマイグレーションは運営が別途実行する。インスタンスの種類と休止時間も環境別の変数で指定し、stagingでの計測に基づいて決める。接続用DOが出す `container.ready` ログの `mode: cold` で起動時間、Rustの要求ログの `vmHwmKib` でLinux上のメモリ最大値を読む。
 
 起動確認が終わってから処理を渡す。長い処理ではコンテナの生存時間を明示的に管理する。ブラウザ、Workflow、ContainerのHTTP接続が切れたことだけを、ジョブの完了や取消の証拠にしない。
 
@@ -464,7 +494,7 @@ SolidCraft一式を保持することと、通常のビルド・テスト対象�
 
 request ID、job ID、操作ID、案IDを通して処理を追えるようにする。AI待ち、形状計算、検査、保存、転送、描画、初回プレビューまでの時間、Containerのメモリ、API利用量・費用を分けて記録する。
 
-エラーログには段階と原因を残し、会話・画像・CADデータの本文や秘密情報を無条件に出力しない。必要な調査では、権限のある保存データを参照する。
+WorkerとContainerの要求ログは、503を含む5xxをerror、それ以外をinfoとする。エラーログには段階と原因を残し、会話・画像・CADデータの本文や秘密情報を無条件に出力しない。必要な調査では、権限のある保存データを参照する。
 
 利用時の確認は、希望の反映、空間の整合性、変更の引き継ぎ、質問の有用さ、待ち時間を分けて記録する。どれを改善すればよいか判断できる粒度を保つ。
 
@@ -516,12 +546,14 @@ workspace継承、依存パッチ、資産参照、評価キャッシュの誤�
 
 #### 6.1b サービス基盤
 
+サンプルの経路は、`pnpm check --full` の実Containerテストで、認証済みWorker → DO → Linux Containerから表示データを取得し、生成済みWasmで4ボディと要素IDを復号することを確認した。ビューアのシーン変換とカメラはnativeテスト、初期化中断とGPU切断通知はNodeの境界テストで検査する。WebGPUによる実際の描画と操作、Cloudflare上の起動時間・メモリは、このローカル検査からは確かめられない。WebGPUを利用できるブラウザでの描画確認と、stagingでの計測を別に行う。
+
 **実装するもの**
 
 - Accessによるログイン、内部ユーザー、案件と一つのパターン。
 - D1とR2の保存構造、一パターン一編集、ジョブの開始・停止・復帰、条件付き確定。
 - Containerへの形状処理依頼と、Wasmへの表示データの受け渡し。
-- 開発・検証・本番の設定分離と配備手順。
+- 開発・検証・本番の設定分離とデプロイ手順。
 
 **完了条件**
 
@@ -626,7 +658,7 @@ Linux Container上のSolidCraftの動作、必要メモリと起動時間、WebG
 
 ## 付録B. 外部仕様・ツールの参照先
 
-外部仕様は2026-11-08の調査に基づく。配備時と依存更新時に利用条件・料金・制限を再確認する。以下は採用する設計の根拠であり、本サービスを配備して実測した結果ではない。
+外部仕様は2026-11-08の調査に基づく。デプロイ時と依存更新時に利用条件・料金・制限を再確認する。以下は採用する設計の根拠であり、本サービスをデプロイして実測した結果ではない。
 
 - [git subtree](https://raw.githubusercontent.com/git/git/master/contrib/subtree/git-subtree.adoc)：SolidCraft一式の取り込み、独自変更を含む状態でのupstream更新。
 - [Cargo workspace](https://doc.rust-lang.org/cargo/reference/workspaces.html)・[依存パッチ](https://doc.rust-lang.org/cargo/reference/overriding-dependencies.html)：自作側と取り込み側のworkspaceを分け、利用側ルートで必要なビルド設定を管理する。

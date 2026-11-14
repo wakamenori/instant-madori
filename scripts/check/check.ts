@@ -1,6 +1,8 @@
 import { access, glob } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { start, stop } from "./processes.ts";
+import { start, stop } from "../shared/processes.ts";
+import { repositoryRoot, serviceCrates } from "../shared/repository.ts";
+import { assertContainerE2eFiles } from "./layout-contract.ts";
 
 const usage = `Usage: pnpm check [--fast | --full]
   --fast  Autofix, TypeScript types/lint, Rust native/Wasm Clippy, local static checks.
@@ -19,7 +21,7 @@ async function main() {
     throw new Error(usage);
   }
   const mode = args[0] ?? "default";
-  process.chdir(fileURLToPath(new URL("../", import.meta.url)));
+  process.chdir(fileURLToPath(repositoryRoot));
 
   const active = new Set<ReturnType<typeof start>>();
   let interrupted = false;
@@ -51,26 +53,27 @@ async function main() {
   const script = (label: string, path: string) => run(label, process.execPath, [path]);
   const format = () =>
     pnpm("Format service files", "exec", "prettier", "--write", ".", "--log-level", "warn");
+  const crates = serviceCrates();
   const rustFormat = () =>
-    cargo(
-      "Format service Rust",
-      "fmt",
-      "-p",
-      "madori-geometry",
-      "-p",
-      "madori-housing",
-      "-p",
-      "madori-modeling",
-      "-p",
-      "madori-viewer",
-    );
+    cargo("Format service Rust", "fmt", ...crates.flatMap((crate) => ["-p", crate.name]));
 
   try {
     await format();
     await rustFormat();
     await pnpm("Generate Worker types", "--filter", "@madori/worker", "types");
+    await cargo(
+      "Generate internal API contract",
+      "run",
+      "--locked",
+      "-q",
+      "-p",
+      "madori-geometry-api",
+      "--bin",
+      "emit-typescript",
+    );
+    await script("Generate internal body validators", "scripts/generate/generate-geometry.ts");
     if (mode === "--full") {
-      await script("Build Wasm bindings", "scripts/build-wasm.ts");
+      await script("Build Wasm bindings", "scripts/build/build-wasm.ts");
     } else {
       await access("crates/viewer/pkg/madori_viewer.d.ts").catch(() => {
         throw new Error("Wasm bindings are missing. Run pnpm setup first (or pnpm check --full).");
@@ -86,6 +89,7 @@ async function main() {
       "apps/web",
       "apps/worker",
       "apps/worker/tests",
+      "apps/worker/tests/rpc",
       "scripts",
     ]) {
       await pnpm(`TypeScript types: ${project}`, "exec", "tsc", "-p", `${project}/tsconfig.json`);
@@ -96,14 +100,14 @@ async function main() {
       "--",
       "cargo",
       "machete",
-      "apps/geometry",
-      "crates/housing",
-      "crates/modeling",
-      "crates/viewer",
+      ...crates.map((crate) => crate.dir),
     ]);
     await run("Dockerfile", "mise", ["exec", "--", "hadolint", "apps/geometry/Dockerfile"]);
-    await script("Upstream boundary", "scripts/check-layout.ts");
-    await script("Secret scan", "scripts/check-secrets.ts");
+    const e2eFiles: string[] = [];
+    for await (const file of glob("apps/*/tests/**/*.e2e.ts")) e2eFiles.push(file);
+    assertContainerE2eFiles(e2eFiles);
+    await script("Upstream boundary", "scripts/check/check-layout.ts");
+    await script("Secret scan", "scripts/check/check-secrets.ts");
 
     const native = ["--workspace", "--all-targets"];
     const wasm = ["-p", "madori-viewer", "--target", "wasm32-unknown-unknown", "--all-targets"];
@@ -159,8 +163,25 @@ async function main() {
       await pnpm("Build web", "--filter", "@madori/web", "build");
       await pnpm("Build Worker (dry run)", "--filter", "@madori/worker", "build");
       await cargo("Build geometry service", "build", "--locked", "-p", "madori-geometry");
-      await script("Local integration", "scripts/smoke.ts");
-      await script("JavaScript dependency licenses", "scripts/check-licenses.ts");
+      await script("Local integration", "scripts/check/smoke.ts");
+      await pnpm(
+        "Build staging Worker (dry run)",
+        "--filter",
+        "@madori/worker",
+        "exec",
+        "wrangler",
+        "deploy",
+        "--dry-run",
+        "--env",
+        "staging",
+        "--containers-rollout=none",
+      );
+      await run("Container integration", process.execPath, [
+        "--test",
+        "--test-reporter=spec",
+        "apps/worker/tests/container.e2e.ts",
+      ]);
+      await script("JavaScript dependency licenses", "scripts/check/check-licenses.ts");
       await pnpm("JavaScript vulnerability audit", "audit", "--audit-level", "low");
       await run("Rust dependency audit", "mise", [
         "exec",

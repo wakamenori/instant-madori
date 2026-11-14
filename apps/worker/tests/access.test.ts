@@ -9,8 +9,8 @@ import { errors } from "jose";
 import { verifyAccessToken } from "../src/api/access.ts";
 import type { AccessConfig } from "../src/api/config.ts";
 import { ApiFailure } from "../src/api/http.ts";
-import { createAccessKey, signAccessToken } from "../../../scripts/local-access.ts";
-import type { AccessKey } from "../../../scripts/local-access.ts";
+import { createAccessKey, signAccessToken } from "../../../scripts/dev/local-access.ts";
+import type { AccessKey } from "../../../scripts/dev/local-access.ts";
 
 const user = { subject: "user-1", email: "user@example.com" };
 

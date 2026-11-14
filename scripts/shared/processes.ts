@@ -79,3 +79,16 @@ export async function ready(url: string, child: ChildProcess, timeoutMs = 60_000
   }
   throw new Error(`Server startup timed out: ${url}`);
 }
+
+/** Runs every teardown step, retaining failures in their original order. */
+export async function cleanupSteps(actions: (() => void | Promise<void>)[]): Promise<unknown[]> {
+  const problems: unknown[] = [];
+  for (const action of actions) {
+    try {
+      await action();
+    } catch (error) {
+      problems.push(error);
+    }
+  }
+  return problems;
+}

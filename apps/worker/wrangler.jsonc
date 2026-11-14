@@ -11,9 +11,9 @@
     "not_found_handling": "single-page-application",
     "run_worker_first": ["/api/*"],
   },
-  // Local runs only. The deployed databases and the per-environment settings
-  // (ENVIRONMENT, APP_ORIGINS, ACCESS_*) are added with the environment split in plan 6.1b.
-  // Local settings come from the generated .dev.vars (scripts/local-access.ts).
+  // Staging repeats bindings; exports is inheritable but repeated for explicit symmetry.
+  // scripts/check/check-layout.ts checks names against the local configuration.
+  // Local settings come from the generated .dev.vars (scripts/dev/local-access.ts).
   "d1_databases": [
     {
       "binding": "DB",
@@ -22,4 +22,86 @@
       "migrations_dir": "migrations",
     },
   ],
+
+  "containers": [
+    {
+      "class_name": "GeometryContainer",
+      "scheduling_policy": "durable_object",
+      "images": {
+        "geometry": {
+          "dockerfile": "../geometry/Dockerfile",
+          "build_context": "../..",
+        },
+      },
+    },
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "GEOMETRY",
+        "class_name": "GeometryContainer",
+      },
+    ],
+  },
+  "exports": {
+    "GeometryContainer": {
+      "type": "durable-object",
+      "storage": "sqlite",
+    },
+  },
+  "vars": {
+    "ENVIRONMENT": "local",
+    "APP_ORIGINS": "http://127.0.0.1:5173",
+    "ACCESS_TEAM_DOMAIN": "https://team.example.invalid",
+    "ACCESS_AUD": "replace-me",
+    "GEOMETRY_INSTANCE_TYPE": "standard-1",
+    "GEOMETRY_IDLE_TIMEOUT_MS": "600000",
+  },
+  "env": {
+    "staging": {
+      "name": "instant-madori-staging",
+      "vars": {
+        "GEOMETRY_INSTANCE_TYPE": "standard-1",
+        "GEOMETRY_IDLE_TIMEOUT_MS": "600000",
+        "ENVIRONMENT": "staging",
+        "APP_ORIGINS": "https://staging.example.invalid",
+        "ACCESS_TEAM_DOMAIN": "https://team.example.invalid",
+        "ACCESS_AUD": "replace-me",
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "instant-madori-staging",
+          "database_id": "00000000-0000-0000-0000-000000000000",
+          "migrations_dir": "migrations",
+        },
+      ],
+      "containers": [
+        {
+          "class_name": "GeometryContainer",
+          "scheduling_policy": "durable_object",
+          "images": {
+            "geometry": {
+              "dockerfile": "../geometry/Dockerfile",
+              "build_context": "../..",
+            },
+          },
+        },
+      ],
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "GEOMETRY",
+            "class_name": "GeometryContainer",
+          },
+        ],
+      },
+      "exports": {
+        "GeometryContainer": {
+          "type": "durable-object",
+          "storage": "sqlite",
+        },
+      },
+    },
+  },
 }

@@ -1,5 +1,9 @@
 //! Connects housing operations to SolidCraft's editing engine.
 
+pub mod commands;
+pub mod display;
+pub mod sample;
+
 use solidcraft_doc::Document;
 use solidcraft_engine::Session;
 
@@ -15,11 +19,12 @@ mod tests {
     #[test]
     fn relocated_engine_builds_and_reloads_a_box() -> Result<(), Box<dyn std::error::Error>> {
         let mut session = new_session("Workspace smoke test");
-        session.execute(
+        commands::execute_checked(
+            &mut session,
             "solid.box",
             &json!({"length": 10, "width": 20, "height": 30}),
         )?;
-        let measured = session.execute("inspect.measure", &json!({}))?;
+        let measured = commands::execute_checked(&mut session, "inspect.measure", &json!({}))?;
         let volume = measured["total"]["volume_mm3"]
             .as_f64()
             .ok_or("missing volume")?;
@@ -27,7 +32,7 @@ mod tests {
         assert_eq!(session.model.state().bodies.len(), 1);
         let document = Document::from_json(&session.doc.to_json())?;
         let mut restored = Session::new(document);
-        let after = restored.execute("inspect.measure", &json!({}))?;
+        let after = commands::execute_checked(&mut restored, "inspect.measure", &json!({}))?;
         assert_eq!(
             measured["total"]["volume_mm3"],
             after["total"]["volume_mm3"]

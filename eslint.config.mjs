@@ -5,6 +5,11 @@ import reactHooks from "eslint-plugin-react-hooks";
 import prettier from "eslint-config-prettier";
 import globals from "globals";
 
+const internalGeometryImport = {
+  name: "@madori/contracts/geometry-internal",
+  message: "Use public @madori/contracts exports in web.",
+};
+
 export default defineConfig(
   globalIgnores([
     "third_party/solidcraft/**",
@@ -38,7 +43,25 @@ export default defineConfig(
   {
     files: ["apps/web/src/**/*.{ts,tsx}"],
     extends: [reactHooks.configs.flat.recommended],
-    rules: { "no-console": ["error", { allow: ["warn", "error"] }] },
+    rules: {
+      "no-console": ["error", { allow: ["warn", "error"] }],
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: [internalGeometryImport],
+          patterns: [
+            {
+              group: ["**/crates/viewer/pkg/*"],
+              message: "Import viewer bindings through viewer/wasm.ts.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ["apps/web/src/viewer/wasm.ts", "apps/web/src/viewer/*.test.ts"],
+    rules: { "no-restricted-imports": ["error", { paths: [internalGeometryImport] }] },
   },
   prettier,
 );
