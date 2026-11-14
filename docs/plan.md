@@ -340,7 +340,7 @@ SolidCraftには、形状操作、フィーチャー評価、編集可能な設�
 
 確定案のR2オブジェクトは変更しない。新しい案は新しいキーで保存し、D1の履歴へ追加することで現在の案にする。復帰・複製では不変の内容を共有してよいが、新しいパターンの履歴項目と、その後の会話・ジョブは独立させる。
 
-snapshotのオブジェクトは、既存のキーへの上書きを拒む書込み（作成だけのput）で保存し、同じキーへの二度目の書込みを失敗させる。`apps/worker/src/storage/r2.ts` の `putNew` は、`onlyIf: { etagDoesNotMatch: "*" }` でこれを表している。ただし、R2のWorkers APIの文書は `etagDoesNotMatch` にワイルドカードを定めておらず（[R2のWorkers API](https://developers.cloudflare.com/r2/api/workers/workers-api-reference/)）、miniflareでは `onlyIf` の判定が逆になるという報告がある（[miniflare#774](https://github.com/cloudflare/miniflare/issues/774)）。そのため、上書きを拒むことはローカルのテストを証拠にせず、実際のR2で確かめた書き方を使う。
+snapshotのオブジェクトは、既存のキーへの上書きを拒む書込み（作成だけのput）で保存し、同じキーへの二度目の書込みを失敗させる。`apps/worker/src/storage/r2.ts` の `putNew` は、`onlyIf: { etagDoesNotMatch: "*" }` でこれを表す。Cloudflareのedge preview内で実際のアダプターをstagingのR2へ接続し、二回目の書込みの例外と、直接の条件付きputの `null` を確かめた書き方を使う。stagingへのデプロイ後にもこの検査を実行し、外側のREST APIで元のバイト列が維持されることと作業用キーの削除を照合する。ローカルのminiflareやremote bindingだけを、この振る舞いの証拠にしない。
 
 保存内容を識別するsnapshot IDと、履歴項目を識別するrevision IDを分ける。復帰・複製で同じ内容を再利用した場合も、表示応答には閲覧対象のrevision IDを付け、古い履歴の表示と混同しない。
 
