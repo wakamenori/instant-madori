@@ -22,27 +22,28 @@ export function start(command: string, args: string[], options: SpawnOptions = {
 }
 
 export async function stop(processes: ReturnType<typeof start>[]) {
-  function signal(child: ChildProcess, name: NodeJS.Signals) {
+  const grace = setTimeout(5000, undefined, { ref: false });
+  async function signal({ child, finished }: ReturnType<typeof start>, name: NodeJS.Signals) {
     if (!child.pid) return;
     try {
       if (process.platform === "win32") {
         if (child.exitCode === null && child.signalCode === null) child.kill(name);
       } else process.kill(-child.pid, name);
     } catch (error) {
-      if (
-        error instanceof Error &&
-        "code" in error &&
-        (error.code === "ESRCH" ||
-          (error.code === "EPERM" && (child.exitCode !== null || child.signalCode !== null)))
-      )
-        return;
+      if (error instanceof Error && "code" in error) {
+        if (error.code === "ESRCH") return;
+        if (error.code === "EPERM") {
+          if (name === "SIGTERM") await Promise.race([finished, grace]);
+          if (child.exitCode !== null || child.signalCode !== null) return;
+        }
+      }
       throw error;
     }
   }
-  for (const { child } of processes) signal(child, "SIGTERM");
+  await Promise.all(processes.map((run) => signal(run, "SIGTERM")));
   const done = Promise.all(processes.map(({ finished }) => finished));
-  await Promise.race([done, setTimeout(5000, undefined, { ref: false })]);
-  for (const { child } of processes) signal(child, "SIGKILL");
+  await Promise.race([done, grace]);
+  await Promise.all(processes.map((run) => signal(run, "SIGKILL")));
   await done;
 }
 
