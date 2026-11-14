@@ -57,3 +57,88 @@ await test("Schema constraints", async (t) => {
     }
   });
 });
+
+await test("Revision and snapshot constraints", async (t) => {
+  const db = await migratedDatabase();
+  t.after(() => db.remove());
+  const now = "2026-11-14T00:00:00.000Z";
+  const hash = "a".repeat(64);
+  await db.execute(`
+    INSERT INTO users VALUES
+      ('u1', 'https://a.invalid', 's1', 'one@example.com', '${now}'),
+      ('u2', 'https://a.invalid', 's2', 'two@example.com', '${now}');
+    INSERT INTO projects VALUES
+      ('p1', 'u1', 'P', 1, 3, '${now}', '${now}'),
+      ('p2', 'u2', 'P', 1, 2, '${now}', '${now}');
+    INSERT INTO patterns VALUES
+      ('t1', 'p1', 'u1', 1, 'T', 1, '${now}', '${now}'),
+      ('t2', 'p1', 'u1', 2, 'T', 1, '${now}', '${now}'),
+      ('t3', 'p2', 'u2', 1, 'T', 1, '${now}', '${now}');
+    INSERT INTO snapshots VALUES
+      ('s1', 'u1', 1, 'one/manifest.json', '${hash}', '${now}'),
+      ('s2', 'u2', 1, 'two/manifest.json', '${hash}', '${now}');
+    INSERT INTO revisions VALUES ('r1', 't1', 'u1', 1, 'R', 's1', NULL, '${now}');
+  `);
+  for (const [label, sql, expected] of [
+    [
+      "revision owner must equal pattern owner",
+      `INSERT INTO revisions VALUES ('bad', 't1', 'u2', 2, 'R', 's2', NULL, '${now}')`,
+      /FOREIGN KEY constraint failed/,
+    ],
+    [
+      "revision owner must equal snapshot owner",
+      `INSERT INTO revisions VALUES ('bad', 't1', 'u1', 2, 'R', 's2', NULL, '${now}')`,
+      /FOREIGN KEY constraint failed/,
+    ],
+    [
+      "base must belong to the same pattern",
+      `INSERT INTO revisions VALUES ('bad', 't2', 'u1', 1, 'R', 's1', 'r1', '${now}')`,
+      /FOREIGN KEY constraint failed/,
+    ],
+    [
+      "history numbers cannot repeat",
+      `INSERT INTO revisions VALUES ('bad', 't1', 'u1', 1, 'R', 's1', NULL, '${now}')`,
+      /UNIQUE constraint failed: revisions.pattern_id, revisions.number/,
+    ],
+    [
+      "number starts at one",
+      `INSERT INTO revisions VALUES ('bad', 't1', 'u1', 0, 'R', 's1', NULL, '${now}')`,
+      /CHECK constraint failed: number >= 1/,
+    ],
+    [
+      "revision name cannot be empty",
+      `INSERT INTO revisions VALUES ('bad', 't1', 'u1', 2, '', 's1', NULL, '${now}')`,
+      /CHECK constraint failed: length\(name\)/,
+    ],
+    [
+      "revision name cannot exceed 100 characters",
+      `INSERT INTO revisions VALUES ('bad', 't1', 'u1', 2, '${"あ".repeat(101)}', 's1', NULL, '${now}')`,
+      /CHECK constraint failed: length\(name\)/,
+    ],
+    [
+      "snapshot owner must exist",
+      `INSERT INTO snapshots VALUES ('bad', 'missing', 1, 'bad', '${hash}', '${now}')`,
+      /FOREIGN KEY constraint failed/,
+    ],
+    [
+      "only implemented manifest versions can be stored",
+      `INSERT INTO snapshots VALUES ('bad', 'u1', 2, 'bad', '${hash}', '${now}')`,
+      /CHECK constraint failed: format_version = 1/,
+    ],
+    [
+      "hash must be lowercase hex",
+      `INSERT INTO snapshots VALUES ('bad', 'u1', 1, 'bad', '${"z".repeat(64)}', '${now}')`,
+      /CHECK constraint failed/,
+    ],
+    [
+      "hash must have 64 digits",
+      `INSERT INTO snapshots VALUES ('bad', 'u1', 1, 'bad', 'aa', '${now}')`,
+      /CHECK constraint failed/,
+    ],
+  ] as const) {
+    await t.test(label, () => assert.rejects(db.execute(sql), expected));
+  }
+  await db.execute(
+    `INSERT INTO revisions VALUES ('r2', 't1', 'u1', 2, 'R2', 's1', 'r1', '${now}')`,
+  );
+});

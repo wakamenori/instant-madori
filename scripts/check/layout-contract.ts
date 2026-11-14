@@ -7,6 +7,7 @@ const bindingSchema = z.object({
   }),
   containers: z.array(z.object({ class_name: z.string() })),
   exports: z.record(z.string(), z.unknown()),
+  r2_buckets: z.array(z.object({ binding: z.string() })),
   d1_databases: z.array(z.object({ binding: z.string() })),
   vars: z.record(z.string(), z.unknown()),
 });
@@ -15,6 +16,7 @@ function names(value: z.infer<typeof bindingSchema>) {
     durable_objects: value.durable_objects.bindings.map((b) => `${b.name}:${b.class_name}`).sort(),
     containers: value.containers.map((c) => c.class_name).sort(),
     exports: Object.keys(value.exports).sort(),
+    r2_buckets: value.r2_buckets.map((b) => b.binding).sort(),
     d1_databases: value.d1_databases.map((d) => d.binding).sort(),
     vars: Object.keys(value.vars).sort(),
   };

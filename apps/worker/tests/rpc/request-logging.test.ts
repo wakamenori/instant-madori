@@ -16,6 +16,9 @@ void test("API request logs classify server failures and successful/client respo
     ACCESS_JWKS: "",
     GEOMETRY_INSTANCE_TYPE: "standard-1",
     GEOMETRY_IDLE_TIMEOUT_MS: "600000",
+    get BLOBS(): never {
+      throw new Error("Bucket must not be accessed");
+    },
     get DB(): never {
       throw new Error("not reached");
     },

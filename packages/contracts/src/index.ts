@@ -48,7 +48,7 @@ const requestIdSchema = z.uuid().transform((id) => id.toLowerCase());
 // A name must show something: control characters are rejected, and a name made only of
 // invisible format characters (e.g. U+200B) counts as empty. Lone surrogates are rejected
 // because storage would silently replace them.
-const nameSchema = z
+export const nameSchema = z
   .string()
   .trim()
   // With the `u` flag, \p{Cs} matches only unpaired surrogates (pairs form one code point).
@@ -146,3 +146,32 @@ export type CreatePatternRequest = z.infer<typeof createPatternRequestSchema>;
 export const patternResponseSchema = z.object({ pattern: patternSchema });
 
 export type PatternResponse = z.infer<typeof patternResponseSchema>;
+
+export const revisionSchema = z.object({
+  id: idSchema,
+  patternId: idSchema,
+  number: z.int().positive(),
+  name: nameSchema,
+  baseRevisionId: idSchema.nullable(),
+  createdAt: timestampSchema,
+});
+
+export type Revision = z.infer<typeof revisionSchema>;
+
+export const patternStateResponseSchema = z.object({
+  pattern: patternSchema,
+  currentRevision: revisionSchema.nullable(),
+});
+
+export type PatternStateResponse = z.infer<typeof patternStateResponseSchema>;
+
+export const revisionListQuerySchema = z.strictObject({
+  cursor: z.string().min(1).max(200).optional(),
+});
+
+export const revisionListResponseSchema = z.object({
+  revisions: z.array(revisionSchema),
+  nextCursor: z.string().nullable(),
+});
+
+export type RevisionListResponse = z.infer<typeof revisionListResponseSchema>;
