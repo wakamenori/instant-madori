@@ -207,6 +207,11 @@ await test("Verifier service tokens", async (t) => {
   for (const [label, claims, config] of [
     ["an unconfigured service token", serviceClaims, access],
     ["a different Client ID", { ...serviceClaims, common_name: "other.access" }, enabled],
+    [
+      "a Client ID with different case",
+      { ...serviceClaims, common_name: clientId.toUpperCase() },
+      enabled,
+    ],
     ["a nonempty subject", { ...serviceClaims, sub: user.subject }, enabled],
     [
       "a service token with user claims",

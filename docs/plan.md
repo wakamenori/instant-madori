@@ -502,7 +502,9 @@ SolidCraft一式を保持することと、通常のビルド・テスト対象�
 
 招待した利用者が使い始めるまでは、stagingだけを環境とし、本番の環境は作らない。本番の環境（設定、Accessアプリ、D1、R2、デプロイ手順）は、招待の前に6.6で用意する。本番はWorkerと静的ファイル、D1マイグレーション、R2、DO・Workflow、Containerイメージを一組の版としてデプロイする。RustはContainerの対象であるLinux向けにビルドし、Wasmは別の成果物として作る。形状処理のメモリと起動時間を測り、Containerのサイズ・同時実行数・休止条件を選ぶ。
 
-stagingはworkers.devのホスト名で公開し、Worker宛先のAccessアプリで守る（preview URLは無効）。mainへのpushで、self-hosted runnerが `pnpm check --full`、D1のマイグレーション、デプロイ、Accessのservice tokenを使った疎通の確認を順に行う。マイグレーションはデプロイの前に適用するため、動いている前の版のWorkerと両立する形で書く。手順の順序はREADMEに従う。Accessアプリとstaging用のD1を作成し、`apps/worker/wrangler.jsonc` の `env.staging` にDB ID、Accessの発行元とaudience、画面のOriginを設定する。初期値の `.invalid` 発行元はローカル以外で拒否する。インスタンスの種類と休止時間は環境別の変数で指定する。Workers Logsを有効にし、Container内の標準出力もそこへ集める。接続用DOが出す `container.ready` ログの `mode: cold` で起動時間、Rustの要求ログの `vmHwmKib` でLinux上のメモリ最大値を読む。
+stagingはworkers.devのホスト名で公開し、Worker宛先のAccessアプリで守る（preview URLは無効）。mainへのpushまたは `gh workflow run deploy-staging.yml --ref <ブランチまたはmain>` で、self-hosted runnerが `pnpm check --full`、D1のマイグレーション、デプロイ、Accessのservice tokenを使った疎通の確認を順に行う。マイグレーションはデプロイの前に適用するため、動いている前の版のWorkerと両立する形で書く。初回のWorker作成を除き、再デプロイはこのworkflowだけを使う。試験用ブランチも同じ順に実行し、そのマイグレーションはmainに入る前にstagingのD1へ適用される。手順の順序はREADMEに従う。Accessアプリとstaging用のD1を作成し、`apps/worker/wrangler.jsonc` の `env.staging` にDB ID、Accessの発行元とaudience、画面のOriginを設定する。初期値の `.invalid` 発行元はローカル以外で拒否する。インスタンスの種類と休止時間は環境別の変数で指定する。Workers Logsを有効にし、Container内の標準出力もそこへ集める。接続用DOが出す `container.ready` ログの `mode: cold` で起動時間、Rustの要求ログの `vmHwmKib` でLinux上のメモリ最大値を読む。
+
+デプロイでは、runnerの `MADORI_ENV_FILE` にある `STAGING_ACCESS_CLIENT_ID` をログでマスクしてから、`--var` で `ACCESS_VERIFIER_CLIENT_ID` に渡す。値が空または空白だけならデプロイ前に失敗させ、Client IDはリポジトリに保存しない。疎通確認ではservice tokenを4.4の検証用ユーザーとして使う。token無しの302、healthの200、検証用メールアドレスを返すmeの200、案件の作成・再送・名前の変更・一覧の読取、存在しない案件の404、Containerを経由するサンプル表示データの200とメディア型を確かめる。変更要求にはstagingのOriginを付ける。案件の作成には固定のrequest IDを使い、一つの案件と最初のパターンを再利用する。名前の変更は一覧から読んだ現在のversionを送り、versionが一つ増えて再読取に反映されることを確かめる。二回目以降に増えるのは確認ごとのrequestsの一行だけで、R2には書かない。要求の期限はreadinessの60秒と表示処理の30秒に通信の余裕を加えた120秒とする。手元からも同じスクリプトを実行し、資格情報は出力しない。
 
 stagingの計測から、次の構成と値を使う。数値と手順は[検証3](verification/verification-03.md)にある。
 

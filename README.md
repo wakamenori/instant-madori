@@ -176,7 +176,23 @@ SolidCraftの元のREADME・資料・ライセンスは取り込み領域に保�
 
 mainへのpushで、`.github/workflows/deploy-staging.yml` がself-hosted runnerでstagingへデプロイします。`pnpm check --full`、D1のマイグレーションの適用、`wrangler deploy --env staging` の順に進め、最後に `scripts/check/staging-smoke.ts` で、Accessを通した疎通を確かめます。デプロイは途中で止めず、後から来たpushは前のデプロイが終わってから最新のmainをデプロイします。マイグレーションはデプロイの前に適用するため、動いている前の版のWorkerと両立する形で書きます。
 
-疎通の確認では、Accessのservice tokenを使います。token無しでAccessのログインへ302でリダイレクトされること、`/api/health` が200を返すこと、`/api/me` が403 `forbidden` を返すことを確かめます。Workerはservice tokenの利用者を受け付けないため、403は、WorkerがAccessのJWTを設定した発行元・audienceで検証したことを示します。認証の要るAPIはこの確認では呼びません。runnerは、`MADORI_ENV_FILE` が指す `.env` から、`CLOUDFLARE_API_TOKEN`、`STAGING_ACCESS_CLIENT_ID`、`STAGING_ACCESS_CLIENT_SECRET` だけを読みます。service tokenはAccessアプリの `non_identity` のポリシーで許可し、期限は1年です。
+疎通の確認では、Accessのservice tokenを、固定の検証用ユーザー（subjectは `staging:verifier`、メールアドレスは `verifier@staging.invalid`）として使います。token無しの302、`/api/health` の200、`/api/me` の200と検証用メールアドレスを確かめます。案件を固定のrequest IDで作成・再送し、一覧から現在のversionを読んで名前を変更します。versionが一つ増え、読み直した一覧に変更が反映されること、存在しない案件のパターン一覧が404 `not_found` になること、`/api/sample/display` が表示データを返すことも確かめます。Containerの起動を待てるよう、要求の期限は120秒です。検証用の案件と最初のパターンは一つに保ち、二回目以降は確認ごとに `requests` の行だけが一つ増えます。R2には書き込みません。
+
+runnerは、`MADORI_ENV_FILE` が指す `.env` から、マイグレーションには `CLOUDFLARE_API_TOKEN`、デプロイには加えて `STAGING_ACCESS_CLIENT_ID`、疎通確認には `STAGING_ACCESS_CLIENT_ID` と `STAGING_ACCESS_CLIENT_SECRET` を読みます。Client IDはログにマスクしてから、デプロイの `--var ACCESS_VERIFIER_CLIENT_ID:<Client ID>` でWorkerへ渡します。空の値や空白だけならデプロイ前に失敗します。Client IDはリポジトリに保存しません。service tokenはAccessアプリの `non_identity` のポリシーで許可し、期限は1年です。
+
+stagingをデプロイし直す方法は、このworkflowだけです。試験用のブランチも同じ方法を使います。
+
+```sh
+gh workflow run deploy-staging.yml --ref <ブランチまたはmain>
+```
+
+指定したrefで、検査・マイグレーション・デプロイ・疎通確認を同じ順に実行します。マイグレーションを含むブランチでは、mainに入る前にそのマイグレーションがstagingのD1に適用されます。`--var` なしの手動デプロイは検証用IDの設定を消し、疎通確認も実行しないため使いません。
+
+手元で同じ疎通確認を行うには、上記のservice tokenの二つの値を入れた `.env` のパスを指定します。値をコマンドや出力に表示する必要はありません。成功すると `Staging smoke passed: <Origin>` が出ます。
+
+```sh
+mise exec -- node --env-file=/path/to/.env scripts/check/staging-smoke.ts
+```
 
 以下は、stagingの環境を最初に作るときの手順です。Cloudflareリソースの作成とデプロイを伴い、ローカルの検査では実行しません。現在のstagingは `https://instant-madori-staging.firpmnfiywl.workers.dev` です。
 
@@ -186,7 +202,7 @@ mainへのpushで、`.github/workflows/deploy-staging.yml` がself-hosted runner
 4. `pnpm --filter @madori/worker exec wrangler d1 migrations apply DB --remote --env staging` でマイグレーションを適用します。
 5. `workers_dev` を無効にしたまま `pnpm --filter @madori/worker exec wrangler deploy --env staging` でデプロイし、公開前にWorkerを作ります。
 6. Worker宛先（`destinations: [{"type": "worker", "worker_id": "<WorkerのID>"}]`）のAccessアプリと招待ポリシーを作成します。WorkerのIDは `GET /accounts/{account_id}/workers/scripts` の `tag` です。APIで作る場合は、Accessのアプリとポリシーを編集できるトークンを使います。
-7. Accessアプリのaudienceを `ACCESS_AUD` に設定し、`workers_dev` を有効にして再度デプロイします。ログインせずに `/` へアクセスすると、Accessのログイン画面へリダイレクトされることを確かめます。
+7. Accessアプリのaudienceを `ACCESS_AUD` に設定し、`workers_dev` を有効にします。service tokenをAccessで許可して `.env` に設定し、そのrefを上記のworkflowでデプロイします。ログインせずに `/` へアクセスすると、Accessのログイン画面へリダイレクトされることを確かめます。
 
 `GEOMETRY_INSTANCE_TYPE` と `GEOMETRY_IDLE_TIMEOUT_MS` は環境別の設定です。値の根拠は[検証3](docs/verification/verification-03.md)にあります。Workers Logsを有効にしているので、接続用DOの `container.ready`（`mode: cold` の `ms` が起動時間）とContainer内の `geometry.request`（`vmHwmKib` がメモリの最大値）を、Workers Logsの検索APIで読めます。検索には `Workers Observability Write` の権限を持つトークンが要ります。検証3で使った取得と集計のスクリプトは[記録フォルダ](docs/verification/evidence/verification-03/)にあります。
 
