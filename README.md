@@ -23,9 +23,9 @@ mise exec -- pnpm dev
 
 初回はRust・Wasmと依存ライブラリをビルドします。`pnpm setup`はツールの準備、Wasmバインディング・Worker型の生成、コミット時の検査フックの登録を行います。wasm-bindgen CLIはライブラリと同じ版を、このリポジトリの`.tools/`へインストールします。依存のインストールだけではGitフックを変更しません。
 
-`pnpm dev`は、ローカルのD1へマイグレーションを適用してから次のプロセスを起動し、Ctrl-Cでまとめて終了します。Wrangler 4.158の終了処理は形状イメージに属するContainerを削除しますが、別イメージの通信プロキシが残るため、Wrangler起動前に全ContainerのIDと、このWorker名・宣言したContainerクラスの名前のパターンを保存します。終了後は保存したパターンに一致し、開始時に存在しなかったIDのContainerとプロキシを削除します。途中で設定を変更しても対象パターンを広げず、開始時に存在したIDは削除しません。終了処理の失敗は報告し、起動・実行結果と終了コードを維持します。実Containerテストも同じ終了処理を使います。
+`pnpm dev`は、ローカルのD1へマイグレーションを適用してから次のプロセスを起動し、Ctrl-Cでまとめて終了します。ContainerとプロキシはWranglerが終了時に削除します。終了処理の失敗は報告し、起動・実行結果と終了コードを維持します。
 
-このWorkerのローカルセッション（`pnpm dev`、`pnpm check --full`、別worktreeでの実行を含む）の同時起動はサポートしません。MiniflareはWorker名とContainerクラス名から同じ名前を作るため、終了処理に関係なく衝突し、重複して起動すると他セッションの新しいContainerを終了処理で削除することもあります。クラッシュ後に残ったContainerは次回起動時のIDとして保存されるため、自動削除しません。残りを削除する場合は、このWorkerの全ローカルセッションを停止してから `docker ps -a --no-trunc --format '{{.ID}} {{.Names}}'` で一覧を確認し、このWorker・Containerクラスに属する残りのIDを選んで `docker rm --force <ID>...` を実行します。
+Containerを使うローカルセッション（実Containerテスト、別worktreeやself-hosted runnerでの `pnpm check --full`）は同時に起動できます。Miniflareがセッションごとに異なるIDをContainerの名前（`workerd-<ID>-instant-madori-GeometryContainer-...`）に付けるためです。`pnpm dev` だけは8787番と5173番のポートを固定しているので、同時に一つしか起動できません。クラッシュしたセッションのContainerは残ることがあります。`docker ps -a --format '{{.ID}} {{.Names}}'` で `workerd-` で始まる名前を確かめ、動いているセッションがないときに `docker rm --force <ID>...` で削除します。
 
 | URL                   | 内容                                                            |
 | --------------------- | --------------------------------------------------------------- |
@@ -102,7 +102,7 @@ Dependabotはnpm・Cargoの更新提案用に残し、upstream本体はsubtree�
 
 PRごとに `.github/workflows/check.yml` が、開発用Macのself-hosted runner（ラベル `madori`）で `pnpm setup` と `pnpm check` を実行します。変更したファイルから `scripts/check/ci-mode.ts` が `--full` を付けるかを決めます。最後に、自動修正で差分が出ていないことを確かめます。GitHubのrunnerは使いません。無料プランのprivateリポジトリでは2コア・ディスクの空き13 GBで、`--full` がディスク不足で失敗し、無料枠も足りないためです。
 
-checkoutは毎回clone直後と同じ状態から始めます。Rustの `target/` と `.tools/` だけは、`$RUNNER_TOOL_CACHE/madori` へのシンボリックリンクで実行の間に再利用します。runnerの `--full` もこのMac上のローカルセッションなので、`pnpm dev` や手元の `pnpm check --full` と同時に動かさないでください（前述のとおり同時起動はサポートしません。計画6.1bの整備5で解消します）。
+checkoutは毎回clone直後と同じ状態から始めます。Rustの `target/` と `.tools/` だけは、`$RUNNER_TOOL_CACHE/madori` へのシンボリックリンクで実行の間に再利用します。runnerの `--full` は、手元の `pnpm dev` や `pnpm check --full` と同時に動いても衝突しません。
 
 このリポジトリではブランチ保護を使えないため、検査の成功はマージの条件として強制されません。マージの前に、PRの最新のheadで `check` が成功していることを確かめます。
 
