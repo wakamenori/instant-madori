@@ -5,30 +5,90 @@ import { describeError, logEvent } from "../src/log.ts";
 import type { LogFields } from "../src/log.ts";
 import type { GatewayEnvironment } from "../src/geometry/container-gateway.ts";
 
-await test("request and gateway adapters omit extra keys from nonliteral fields", (t) => {
+await test("request logs omit extra keys from nonliteral fields", (t) => {
   const lines: string[] = [];
   t.mock.method(console, "log", (line: string) => {
     lines.push(line);
   });
-  const gateway: Pick<GatewayEnvironment, "log"> = {
-    log: (event, fields, level) => logEvent(level ?? "info", event, fields),
-  };
   const assigned: LogFields = { status: 200 };
   Object.assign(assigned, { name: "private name", accessJwt: "test-only-token" });
   const extra = { status: 201, accessJwt: "test-only-token" };
   for (const fields of [assigned, extra]) {
     logEvent("info", "api.request", fields);
-    gateway.log("api.request", fields);
   }
   assert.deepEqual(lines, [
     JSON.stringify({ level: "info", event: "api.request", status: 200 }),
-    JSON.stringify({ level: "info", event: "api.request", status: 200 }),
-    JSON.stringify({ level: "info", event: "api.request", status: 201 }),
     JSON.stringify({ level: "info", event: "api.request", status: 201 }),
   ]);
 });
 
-await test("structured logs preserve request and container fields at both levels", (t) => {
+await test("logs omit nested objects and arrays from assigned, record and proxy fields", (t) => {
+  const lines: string[] = [];
+  t.mock.method(console, "log", (line: string) => {
+    lines.push(line);
+  });
+  const nested = { accessJwt: "test-only-token" };
+  const route = ["test-only-token"];
+  const assigned: LogFields = { status: 200 };
+  Object.assign(assigned, { bytes: nested, route });
+  const record: Record<string, unknown> = { status: 201, bytes: nested, route };
+  const proxy = new Proxy<LogFields>(
+    { status: 202, bytes: 1, route: "GET /api/projects" },
+    {
+      get(target, key) {
+        if (key === "bytes") return nested;
+        if (key === "route") return route;
+        return target.status;
+      },
+    },
+  );
+  for (const fields of [assigned, record, proxy]) logEvent("info", "api.request", fields);
+  assert.deepEqual(
+    lines,
+    [200, 201, 202].map((status) =>
+      JSON.stringify({ level: "info", event: "api.request", status }),
+    ),
+  );
+});
+
+await test("logs omit nonprimitive values without calling toJSON", (t) => {
+  const lines: string[] = [];
+  t.mock.method(console, "error", (line: string) => {
+    lines.push(line);
+  });
+  let conversions = 0;
+  const toJSON = () => {
+    conversions++;
+    return "test-only-token";
+  };
+  const values = [null, true, { toJSON }, Object.assign(() => undefined, { toJSON })];
+  for (const value of values) {
+    const fields: LogFields = { status: 500 };
+    Object.assign(fields, { bytes: value, route: value });
+    logEvent("error", "api.request", fields);
+  }
+  assert.deepEqual(
+    lines,
+    values.map(() => JSON.stringify({ level: "error", event: "api.request", status: 500 })),
+  );
+  assert.equal(conversions, 0);
+});
+
+await test("logs omit prototype names even when supplied as own keys", (t) => {
+  const lines: string[] = [];
+  t.mock.method(console, "log", (line: string) => {
+    lines.push(line);
+  });
+  const fields = Object.fromEntries<string | number>([
+    ["status", 200],
+    ["constructor", "test-only-token"],
+    ["__proto__", "test-only-token"],
+  ]);
+  logEvent("info", "api.request", fields);
+  assert.deepEqual(lines, [JSON.stringify({ level: "info", event: "api.request", status: 200 })]);
+});
+
+await test("structured logs preserve allowed fields at both levels", (t) => {
   const info: string[] = [];
   const errors: string[] = [];
   t.mock.method(console, "log", (line: string) => {
@@ -53,10 +113,7 @@ await test("structured logs preserve request and container fields at both levels
     traceId: "trace-1",
     error: describeError(new Error("network down")),
   });
-  const gateway: Pick<GatewayEnvironment, "log"> = {
-    log: (event, fields, level) => logEvent(level ?? "info", event, fields),
-  };
-  gateway.log("container.ready", { traceId: "trace-1", mode: "cold", ms: 5 });
+  logEvent("info", "container.ready", { traceId: "trace-1", mode: "cold", ms: 5 });
   assert.deepEqual(info, [
     JSON.stringify({
       level: "info",
