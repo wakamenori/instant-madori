@@ -1,0 +1,34 @@
+name: check
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  check:
+    # The self-hosted Mac runner (README: CI runner). GitHub-hosted runners are too small for this repo.
+    runs-on: [self-hosted, madori]
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # The upstream boundary check reads the recorded upstream commit from history.
+          fetch-depth: 0
+      # The checkout starts clean each run; keep only Rust and tool build outputs between runs.
+      - run: |
+          cache="$RUNNER_TOOL_CACHE/madori"
+          mkdir -p "$cache/target" "$cache/tools"
+          ln -s "$cache/target" target
+          ln -s "$cache/tools" .tools
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm setup
+      - id: mode
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || 'origin/main' }}
+        run: echo "flag=$(git diff --name-only "$BASE...HEAD" | node scripts/check/ci-mode.ts)" >> "$GITHUB_OUTPUT"
+      - run: pnpm check ${{ steps.mode.outputs.flag }}
+      # pnpm check autofixes; a diff means the pushed head was not checked as committed.
+      - run: git diff --exit-code
