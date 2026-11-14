@@ -119,20 +119,53 @@ for (const termination of ["exit", "signal"] as const) {
   });
 }
 
-await test("stop rejects EPERM while the child is still running", async (t) => {
-  const run = start(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
-    stdio: "ignore",
-  });
-  t.after(async () => {
-    run.child.kill("SIGKILL");
-    await run.finished;
-  });
-  await once(run.child, "spawn");
-  const error = Object.assign(new Error("kill EPERM"), { code: "EPERM" });
-  t.mock.method(process, "kill", () => {
-    throw error;
-  });
-  await assert.rejects(stop([run]), (actual: unknown) => actual === error);
-  assert.equal(run.child.exitCode, null);
-  assert.equal(run.child.signalCode, null);
-});
+await test(
+  "stop permits SIGTERM EPERM before Node reaps the exited child",
+  { skip: process.platform !== "darwin", timeout: 15_000 },
+  async (t) => {
+    const run = start("/usr/bin/true", [], { stdio: "ignore" });
+    t.after(async () => {
+      run.child.kill("SIGKILL");
+      await run.finished;
+    });
+    assert.ok(run.child.pid);
+    const group = -run.child.pid;
+    const deadline = Date.now() + 5_000;
+    let state: string;
+    do {
+      // Keep Node from reaping the child until stop() sends SIGTERM.
+      state = execFileSync("ps", ["-o", "stat=", "-p", String(run.child.pid)], {
+        encoding: "utf8",
+        timeout: 1_000,
+      }).trim();
+    } while (!state.startsWith("Z") && Date.now() < deadline);
+    assert.match(state, /^Z/);
+    assert.equal(run.child.exitCode, null);
+    assert.equal(run.child.signalCode, null);
+    assert.throws(() => process.kill(group, "SIGTERM"), { code: "EPERM" });
+    await stop([run]);
+    assert.deepEqual(await run.finished, { kind: "exit", code: 0, signal: null });
+  },
+);
+
+await test(
+  "stop rejects EPERM while the child is still running",
+  { timeout: 10_000 },
+  async (t) => {
+    const run = start(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+      stdio: "ignore",
+    });
+    t.after(async () => {
+      run.child.kill("SIGKILL");
+      await run.finished;
+    });
+    await once(run.child, "spawn");
+    const error = Object.assign(new Error("kill EPERM"), { code: "EPERM" });
+    t.mock.method(process, "kill", () => {
+      throw error;
+    });
+    await assert.rejects(stop([run]), (actual: unknown) => actual === error);
+    assert.equal(run.child.exitCode, null);
+    assert.equal(run.child.signalCode, null);
+  },
+);
