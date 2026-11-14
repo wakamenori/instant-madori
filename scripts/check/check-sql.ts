@@ -7,13 +7,15 @@ import { repositoryRoot } from "../shared/repository.ts";
 function writesRequests(sql: string): boolean {
   const tokens = Array.from(
     sql.matchAll(
-      /--[^\r\n]*|\/\*[\s\S]*?\*\/|'(?:''|[^'])*'|"(?:""|[^"])*"|`(?:``|[^`])*`|\[[^\]]*\]|[\w$]+|[^\s]/g,
+      /--[^\r\n]*|\/\*[\s\S]*?\*\/|'(?:''|[^'])*'|"(?:""|[^"])*"|`(?:``|[^`])*`|\[[^\]]*\]|[\w$\0]+|[^\s]/g,
     ),
     (match) => match[0].toLowerCase(),
   ).filter((token) => !token.startsWith("--") && !token.startsWith("/*"));
 
-  for (const [index, token] of tokens.entries()) {
+  for (const [index, raw] of tokens.entries()) {
+    const token = raw.replace(/^\0+/, "");
     let target = index + 1;
+    while (/^\0+$/.test(tokens[target] ?? "") && tokens[target + 1] !== ".") target++;
     if ((token === "insert" || token === "update") && tokens[target] === "or") target += 2;
     if (token === "insert" || token === "replace") {
       if (tokens[target] !== "into") continue;
@@ -71,7 +73,7 @@ export function checkSqlSource(path: string, source: string) {
         checkText(scanner.getTokenText(), start);
       }
       const sql = ts.isTemplateExpression(node)
-        ? node.head.text + node.templateSpans.map((span) => "_" + span.literal.text).join("")
+        ? node.head.text + node.templateSpans.map((span) => "\0" + span.literal.text).join("")
         : ts.isStringLiteralLike(node)
           ? node.text
           : undefined;
