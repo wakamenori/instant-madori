@@ -59,12 +59,13 @@ await test("Instruction acceptance on real D1", async (t) => {
     assert.equal(first.job.state, "queued");
     assert.equal(first.job.generation, 0);
     assert.equal(first.job.baseRevisionId, null);
-    assert.deepEqual(await acceptInstruction(deps, request), first);
+    assert.equal(first.acceptance, "applied");
+    assert.deepEqual(await acceptInstruction(deps, request), { ...first, acceptance: "replayed" });
     await db.raw
       .prepare("UPDATE jobs SET state = 'running', generation = 1 WHERE id = ?")
       .bind(first.job.id)
       .run();
-    assert.deepEqual(await acceptInstruction(deps, request), first);
+    assert.deepEqual(await acceptInstruction(deps, request), { ...first, acceptance: "replayed" });
     const record = await db.raw
       .prepare("SELECT result FROM requests WHERE owner_id = ? AND request_id = ?")
       .bind(ownerId, request.requestId)
@@ -114,6 +115,7 @@ await test("Instruction acceptance on real D1", async (t) => {
       }
       assert.deepEqual(await acceptInstruction(deps, request), {
         kind: "accepted",
+        acceptance: "replayed",
         ...applied.result,
       });
       assert.deepEqual(
@@ -191,7 +193,10 @@ await test("Instruction acceptance on real D1", async (t) => {
         const request = input(body);
         const result = await acceptInstruction(deps, request);
         assert.equal(result.kind, "accepted");
-        assert.deepEqual(await acceptInstruction(deps, request), result);
+        assert.deepEqual(await acceptInstruction(deps, request), {
+          ...result,
+          acceptance: "replayed",
+        });
         if (result.kind !== "accepted") throw new Error("Not accepted");
         assert.equal(
           await db.raw

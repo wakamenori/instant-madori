@@ -1,4 +1,4 @@
-import { revisionListQuerySchema } from "@madori/contracts";
+import { patternStateQuerySchema, revisionListQuerySchema } from "@madori/contracts";
 import type { PatternStateResponse, RevisionListResponse } from "@madori/contracts";
 import { getPatternState, getRevisionView, listRevisions } from "../services/revisions.ts";
 import { decodeRevisionCursor, encodeRevisionCursor } from "./cursor.ts";
@@ -11,6 +11,7 @@ export const revisionRoutes: Route[] = [
     method: "GET",
     path: "/api/patterns/:patternId/state",
     async handle(context) {
+      readQuery(context.url, patternStateQuerySchema);
       const outcome = await getPatternState(context.deps, {
         ownerId: context.user.id,
         patternId: param(context, "patternId"),
@@ -20,6 +21,7 @@ export const revisionRoutes: Route[] = [
           return Response.json({
             pattern: outcome.state.pattern,
             currentRevision: outcome.state.currentRevision,
+            queuedJobs: outcome.state.queuedJobs,
           } satisfies PatternStateResponse);
         case "not_found":
           throw new ApiFailure(outcome.kind);

@@ -1,3 +1,5 @@
+/// <reference lib="es2024.string" />
+
 export { displayContentType } from "./generated/display.ts";
 import { z } from "zod";
 
@@ -158,9 +160,49 @@ export const revisionSchema = z.object({
 
 export type Revision = z.infer<typeof revisionSchema>;
 
+function utf8Bytes(text: string): number {
+  let bytes = 0;
+  for (const character of text) {
+    const code = character.charCodeAt(0);
+    bytes += character.length === 2 ? 4 : code <= 0x7f ? 1 : code <= 0x7ff ? 2 : 3;
+  }
+  return bytes;
+}
+
+export const instructionBodySchema = z
+  .string()
+  .refine((body) => body.isWellFormed(), "must be well-formed Unicode")
+  .refine((body) => body.trim() !== "", "must not be blank")
+  .refine((body) => utf8Bytes(body) <= 16384, "must be at most 16384 UTF-8 bytes");
+
+export const acceptInstructionRequestSchema = z.strictObject({
+  requestId: requestIdSchema,
+  body: instructionBodySchema,
+});
+
+export type AcceptInstructionRequest = z.infer<typeof acceptInstructionRequestSchema>;
+
+/** Facts fixed at acceptance. Current job state is read from the pattern's state. */
+export const acceptedJobSchema = z.object({
+  jobId: idSchema,
+  messageId: idSchema,
+  number: z.int().positive(),
+});
+
+export type AcceptedJob = z.infer<typeof acceptedJobSchema>;
+
+export const acceptInstructionResponseSchema = z.object({ job: acceptedJobSchema });
+
+export type AcceptInstructionResponse = z.infer<typeof acceptInstructionResponseSchema>;
+
+export const patternStateQuerySchema = z.strictObject({});
+
+export type PatternStateQuery = z.infer<typeof patternStateQuerySchema>;
+
 export const patternStateResponseSchema = z.object({
   pattern: patternSchema,
   currentRevision: revisionSchema.nullable(),
+  queuedJobs: z.array(acceptedJobSchema),
 });
 
 export type PatternStateResponse = z.infer<typeof patternStateResponseSchema>;
