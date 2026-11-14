@@ -107,6 +107,10 @@ for (const source of [
   "const sql = `SELECT \\`${column}\\` FROM patterns; DELETE FROM requests WHERE \\`request_id\\` = ?`;",
   "const sql = `SELECT [${column}] FROM patterns; REPLACE INTO requests (result) VALUES ('{}')`;",
   "const sql = `INSERT INTO ${schema}.requests (result) VALUES ('{}')`;",
+  "const sql = `INSERT ${conflict} INTO requests (request_id, result) VALUES (?, '{}')`;",
+  "const sql = `UPDATE ${conflict} requests SET result = '{}' WHERE request_id = ?`;",
+  "const sql = `${prefix}INSERT INTO requests (request_id, result) VALUES (?, '{}')`;",
+  "const sql = `UPDATE ${schema}.requests SET result = '{}' WHERE request_id = ?`;",
 ]) {
   void test(`rejects request writes in templates and nested literals: ${source}`, () => {
     assert.equal(checkSqlSource(storagePath, source).length, 1);
@@ -128,6 +132,8 @@ for (const source of [
   'const sql = `SELECT "${column} DELETE FROM requests" FROM patterns`;',
   "const sql = `SELECT 1 /* ${description} DELETE FROM requests */`;",
   "const sql = `INSERT INTO requests${suffix} (result) VALUES ('{}')`;",
+  "const sql = `INSERT INTO ${a}requests (result) VALUES ('{}')`;",
+  "const sql = `INSERT INTO ${table} (result) VALUES ('{}')`;",
 ]) {
   void test(`allows quoted values, comments and dynamically named tables: ${source}`, () => {
     assert.deepEqual(checkSqlSource(storagePath, source), []);
