@@ -9,5 +9,5 @@
     "erasableSyntaxOnly": true
   },
   "include": ["**/*.ts"],
-  "exclude": ["../third_party", "../node_modules"]
+  "exclude": ["../third_party", "../node_modules", "check/r2-create-only"]
 }

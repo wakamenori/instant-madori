@@ -91,6 +91,7 @@ async function main() {
       "apps/worker/tests",
       "apps/worker/tests/rpc",
       "scripts",
+      "scripts/check/r2-create-only",
     ]) {
       await pnpm(`TypeScript types: ${project}`, "exec", "tsc", "-p", `${project}/tsconfig.json`);
     }

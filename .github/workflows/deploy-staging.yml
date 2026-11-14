@@ -50,3 +50,8 @@ jobs:
           STAGING_ACCESS_CLIENT_SECRET="$(sed -n 's/^STAGING_ACCESS_CLIENT_SECRET=//p' "$MADORI_ENV_FILE")"
           export STAGING_ACCESS_CLIENT_ID STAGING_ACCESS_CLIENT_SECRET
           node scripts/check/staging-smoke.ts
+      - name: Check R2 create-only writes on Cloudflare
+        run: |
+          CLOUDFLARE_API_TOKEN="$(sed -n 's/^CLOUDFLARE_API_TOKEN=//p' "$MADORI_ENV_FILE")"
+          export CLOUDFLARE_API_TOKEN
+          node scripts/check/r2-create-only/main.ts
