@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { URL, fileURLToPath } from "node:url";
-import { getPlatformProxy, unstable_splitSqlQuery } from "wrangler";
+import { unstable_splitSqlQuery } from "wrangler";
+import { getTestPlatformProxy } from "./platform-proxy.ts";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { accessAssertionHeader } from "@madori/contracts";
 import { verifyAccessToken } from "../../src/api/access.ts";
@@ -13,7 +14,7 @@ export const jobMigration = new URL("../../migrations/0003_jobs_messages.sql", i
 export const now = "2026-11-15T00:00:00.000Z";
 
 export async function openJobDatabase() {
-  const proxy = await getPlatformProxy<Pick<Env, "DB" | "BLOBS">>({
+  const proxy = await getTestPlatformProxy<Pick<Env, "DB" | "BLOBS">>({
     configPath: fileURLToPath(new URL("../../wrangler.jsonc", import.meta.url)),
     persist: false,
     remoteBindings: false,

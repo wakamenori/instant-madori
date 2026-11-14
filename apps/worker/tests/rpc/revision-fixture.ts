@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { URL, fileURLToPath } from "node:url";
 import { join } from "node:path";
 import process from "node:process";
-import { getPlatformProxy } from "wrangler";
+import { getTestPlatformProxy } from "./platform-proxy.ts";
 import { z } from "zod";
 import { requestKey } from "../../src/services/requests.ts";
 import { commitRevision } from "../../src/services/revisions.ts";
@@ -20,7 +20,7 @@ import { StorageCorruption } from "../../src/storage/rows.ts";
 const state = z.string().min(1).parse(process.argv[2]);
 // getMiniflarePersistRoot takes a literal path; dev appends v3 to --persist-to.
 // The HTTP harness has stopped its Worker before launching this process.
-const proxy = await getPlatformProxy<Pick<Env, "DB" | "BLOBS">>({
+const proxy = await getTestPlatformProxy<Pick<Env, "DB" | "BLOBS">>({
   configPath: fileURLToPath(new URL("../../wrangler.jsonc", import.meta.url)),
   persist: { path: join(state, "v3") },
   remoteBindings: false,

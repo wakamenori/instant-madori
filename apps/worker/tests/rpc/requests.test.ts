@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFile } from "node:fs/promises";
 import { URL, fileURLToPath } from "node:url";
-import { getPlatformProxy } from "wrangler";
+import { getTestPlatformProxy } from "./platform-proxy.ts";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { z } from "zod";
 import { accessAssertionHeader } from "@madori/contracts";
@@ -16,7 +16,7 @@ import { createOnceStatements, updateOnceStatements, runOnce } from "../../src/s
 import type { OnceBatch, RequestKey } from "../../src/storage/requests.ts";
 
 void test("once-only batches preserve their private protocol on real D1", async (t) => {
-  const proxy = await getPlatformProxy<Pick<Env, "DB">>({
+  const proxy = await getTestPlatformProxy<Pick<Env, "DB">>({
     configPath: fileURLToPath(new URL("../../wrangler.jsonc", import.meta.url)),
     persist: false,
     remoteBindings: false,

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFile } from "node:fs/promises";
 import { URL, fileURLToPath } from "node:url";
-import { getPlatformProxy } from "wrangler";
+import { getTestPlatformProxy } from "./platform-proxy.ts";
 import { z } from "zod";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { accessAssertionHeader } from "@madori/contracts";
@@ -14,7 +14,7 @@ import { r2 } from "../../src/storage/r2.ts";
 import { StorageCorruption } from "../../src/storage/rows.ts";
 
 void test("storage adapters validate real D1 results and reject R2 overwrites", async () => {
-  const proxy = await getPlatformProxy<Pick<Env, "DB" | "BLOBS">>({
+  const proxy = await getTestPlatformProxy<Pick<Env, "DB" | "BLOBS">>({
     configPath: fileURLToPath(new URL("../../wrangler.jsonc", import.meta.url)),
     persist: false,
     remoteBindings: false,
@@ -96,7 +96,7 @@ void test("storage adapters validate real D1 results and reject R2 overwrites", 
 });
 
 void test("owners require frozen verified identities and matching untampered D1 results", async () => {
-  const proxy = await getPlatformProxy<Pick<Env, "DB">>({
+  const proxy = await getTestPlatformProxy<Pick<Env, "DB">>({
     configPath: fileURLToPath(new URL("../../wrangler.jsonc", import.meta.url)),
     persist: false,
     remoteBindings: false,
