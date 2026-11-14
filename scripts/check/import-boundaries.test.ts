@@ -229,6 +229,15 @@ const syntaxCases: Record<string, BoundaryCases> = {
     ],
     allowed: ["const identity: VerifiedIdentity = verified;"],
   },
+  "job-execution-assertions": {
+    rejected: [
+      "const right = value as JobExecutionRight;",
+      "const right = value as unknown as JobExecutionRight;",
+      "const right = value as jobs.JobExecutionRight;",
+      "const right = <JobExecutionRight>value;",
+    ],
+    allowed: ["const right: JobExecutionRight = claimed.right;"],
+  },
   "never-assertions": {
     rejected: ["const id: OwnerId = value as never;", "const id: OwnerId = <never>value;"],
     allowed: ["const unreachable: never = value;", "const checked = value satisfies never;"],

@@ -6,7 +6,12 @@ import process from "node:process";
 import { getTestPlatformProxy } from "./platform-proxy.ts";
 import { z } from "zod";
 import { requestKey } from "../../src/services/requests.ts";
-import { commitRevision } from "../../src/services/revisions.ts";
+import {
+  acceptInstruction,
+  claimNextJob,
+  saveJobSnapshot,
+  completeJob,
+} from "../../src/services/jobs.ts";
 import type { Runtime } from "../../src/services/deps.ts";
 import { createStore } from "../../src/storage/store.ts";
 import { d1 } from "../../src/storage/d1.ts";
@@ -76,7 +81,6 @@ try {
       z.object({
         kind: z.literal("commit"),
         ownerId: signedInOwner,
-        otherId: signedInOwner,
         patternId: z.uuid(),
       }),
       z.object({
@@ -181,54 +185,42 @@ try {
       newTraceId: () => crypto.randomUUID(),
     };
     const deps = { store, runtime };
-    const commit = (baseRevisionId: string | null, ownerId = input.ownerId, name = "案") =>
-      commitRevision(deps, { ownerId, patternId: input.patternId, baseRevisionId, name, display });
-    const count = async (table: "snapshots" | "revisions") =>
-      db.prepare(`SELECT count(*) AS n FROM ${table}`).first("n");
-    const first = await commitRevision(deps, {
-      ownerId: input.ownerId,
-      patternId: input.patternId,
-      baseRevisionId: null,
-      name: "初案",
-      display: firstDisplay,
-    });
-    assert.equal(first.kind, "committed");
-    if (first.kind !== "committed") throw new Error("No first revision");
+    const commit = async (bytes = display, name = "案") => {
+      const accepted = await acceptInstruction(deps, {
+        ownerId: input.ownerId,
+        requestId: crypto.randomUUID(),
+        patternId: input.patternId,
+        body: name,
+      });
+      assert.equal(accepted.kind, "accepted");
+      const claimed = await claimNextJob(deps, { patternId: input.patternId });
+      assert.equal(claimed.kind, "claimed");
+      if (claimed.kind !== "claimed") throw new Error("No execution right");
+      const saved = await saveJobSnapshot(deps, { right: claimed.right, display: bytes });
+      assert.equal(saved.kind, "saved");
+      if (saved.kind !== "saved") throw new Error("No snapshot");
+      const result = await completeJob(deps, {
+        right: claimed.right,
+        snapshot: saved.snapshot,
+        name,
+      });
+      assert.equal(result.kind, "committed");
+      if (result.kind !== "committed") throw new Error("No revision");
+      return { revision: result.revision, right: claimed.right };
+    };
+    const first = await commit(firstDisplay, "初案");
     assert.equal(first.revision.number, 1);
     assert.equal(first.revision.baseRevisionId, null);
-    const second = await commit(first.revision.id);
-    assert.equal(second.kind, "committed");
-    if (second.kind !== "committed") throw new Error("No second revision");
+    const second = await commit();
     assert.equal(second.revision.number, 2);
     assert.equal(second.revision.baseRevisionId, first.revision.id);
-    const before = [await count("snapshots"), await count("revisions")];
-    assert.deepEqual(await commit(first.revision.id), { kind: "base_mismatch" });
-    assert.deepEqual(await commit(null), { kind: "base_mismatch" });
-    assert.deepEqual(await commit(second.revision.id, input.otherId), { kind: "not_found" });
-    assert.deepEqual([await count("snapshots"), await count("revisions")], before);
-    const missing = await commitRevision(deps, {
-      ownerId: input.ownerId,
-      patternId: crypto.randomUUID(),
-      baseRevisionId: null,
-      name: "案",
-      display,
-    });
-    assert.deepEqual(missing, { kind: "not_found" });
-    const racers = await Promise.all([commit(second.revision.id), commit(second.revision.id)]);
-    assert.equal(racers.filter((r) => r.kind === "committed").length, 1);
-    assert.equal(racers.filter((r) => r.kind === "base_mismatch").length, 1);
-    assert.equal(await count("snapshots"), 3);
-    assert.equal(await count("revisions"), 3);
-    const winner = racers.find((r) => r.kind === "committed");
-    assert(winner?.kind === "committed");
-    const revisions = [first.revision, second.revision, winner.revision];
-    assert.equal(winner.revision.number, 3);
-    let latest = winner.revision;
+    const third = await commit();
+    assert.equal(third.revision.baseRevisionId, second.revision.id);
+    const revisions = [first.revision, second.revision, third.revision];
+    let latest = third.revision;
     while (latest.number < 52) {
-      // Stored untrimmed, this name would be 101 characters and fail the CHECK constraint.
       const name = latest.number === 51 ? ` ${"a".repeat(100)}` : "案";
-      const result = await commit(latest.id, input.ownerId, name);
-      assert(result.kind === "committed");
+      const result = await commit(display, name);
       if (latest.number === 51) assert.equal(result.revision.name, "a".repeat(100));
       latest = result.revision;
       revisions.push(latest);
@@ -245,9 +237,8 @@ try {
     assert(originalDisplay);
     const originalBytes = await originalDisplay.arrayBuffer();
     await assert.rejects(
-      store.snapshots.write({
+      store.snapshots.write(first.right, {
         id: snapshot.id,
-        ownerId: input.ownerId,
         now: runtime.now(),
         display: new Uint8Array([1, 2]),
       }),
@@ -256,59 +247,6 @@ try {
     const unchanged = await bucket.get(originalDisplay.key);
     assert(unchanged);
     assert.deepEqual(await unchanged.arrayBuffer(), originalBytes);
-    const counts = [await count("snapshots"), await count("revisions")];
-    for (const name of ["", " ", "\u200b", "a\u0007"]) {
-      assert.deepEqual(await commit(latest.id, input.ownerId, name), { kind: "invalid_name" });
-    }
-    assert.deepEqual([await count("snapshots"), await count("revisions")], counts);
-    const fresh = () =>
-      store.snapshots.write({
-        id: crypto.randomUUID(),
-        ownerId: input.ownerId,
-        now: runtime.now(),
-        display,
-      });
-    // A failing revision insert must also roll back its preceding snapshot insert.
-    await assert.rejects(
-      store.revisions.commit({
-        id: crypto.randomUUID(),
-        patternId: input.patternId,
-        name: "",
-        baseRevisionId: latest.id,
-        snapshot: await fresh(),
-      }),
-      /CHECK constraint failed/,
-    );
-    assert.deepEqual([await count("snapshots"), await count("revisions")], counts);
-    const foreignSnapshot = await store.snapshots.write({
-      id: crypto.randomUUID(),
-      ownerId: input.otherId,
-      now: runtime.now(),
-      display,
-    });
-    assert.deepEqual(
-      await store.revisions.commit({
-        id: crypto.randomUUID(),
-        patternId: input.patternId,
-        name: "案",
-        baseRevisionId: latest.id,
-        snapshot: foreignSnapshot,
-      }),
-      { kind: "not_committed" },
-    );
-    assert.deepEqual([await count("snapshots"), await count("revisions")], counts);
-    // An already stored snapshot skips the snapshot insert; the base must still hold.
-    assert.deepEqual(
-      await store.revisions.commit({
-        id: crypto.randomUUID(),
-        patternId: input.patternId,
-        name: "案",
-        baseRevisionId: first.revision.id,
-        snapshot: { ...snapshot, ownerId: input.ownerId },
-      }),
-      { kind: "not_committed" },
-    );
-    assert.deepEqual([await count("snapshots"), await count("revisions")], counts);
     console.log(JSON.stringify({ revisions }));
   }
 } finally {

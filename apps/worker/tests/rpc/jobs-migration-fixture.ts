@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import {
+  acceptInstruction,
+  claimNextJob,
+  saveJobSnapshot,
+  completeJob,
+} from "../../src/services/jobs.ts";
 import { openJobDatabase, jobMigration, now } from "./jobs-support.ts";
 
 const db = await openJobDatabase();
@@ -23,23 +29,26 @@ try {
   if (created.kind !== "applied") throw new Error("No pattern");
   const patternId = created.result.pattern.id;
   async function commit(baseRevisionId: string | null) {
-    const result = await db.store.revisions.commit({
-      id: crypto.randomUUID(),
-      patternId,
-      name: "R",
-      baseRevisionId,
-      snapshot: {
-        id: crypto.randomUUID(),
-        ownerId,
-        formatVersion: 1,
-        manifestKey: crypto.randomUUID(),
-        manifestSha256: "a".repeat(64),
-        createdAt: now,
-      },
-    });
-    assert.equal(result.kind, "committed");
-    if (result.kind !== "committed") throw new Error("No revision");
-    return result.revision;
+    const id = crypto.randomUUID();
+    const snapshotId = crypto.randomUUID();
+    await db.raw.batch([
+      db.raw
+        .prepare(
+          `INSERT INTO snapshots (id, owner_id, format_version, manifest_key, manifest_sha256, created_at)
+        VALUES (?, ?, 1, ?, ?, ?)`,
+        )
+        .bind(snapshotId, ownerId, crypto.randomUUID(), "a".repeat(64), now),
+      db.raw
+        .prepare(
+          `INSERT INTO revisions (id, pattern_id, owner_id, number, name, snapshot_id, base_revision_id, created_at)
+        SELECT ?, ?, ?, coalesce(max(number), 0) + 1, 'R', ?, ?, ? FROM revisions WHERE pattern_id = ?`,
+        )
+        .bind(id, patternId, ownerId, snapshotId, baseRevisionId, now, patternId),
+    ]);
+    const history = await db.store.revisions.list({ ownerId, patternId, after: null, limit: 1 });
+    const revision = history?.revisions[0];
+    assert(revision);
+    return revision;
   }
   const r1 = await commit(null);
   const r2 = await commit(r1.id);
@@ -87,7 +96,25 @@ try {
     })),
   );
   assert.deepEqual((await db.raw.prepare("PRAGMA foreign_key_check").all()).results, []);
-  const r5 = await commit(self);
+  const deps = { store: db.store, runtime: db.runtime };
+  const accepted = await acceptInstruction(deps, {
+    ownerId,
+    patternId,
+    requestId: crypto.randomUUID(),
+    body: "R5",
+  });
+  assert.equal(accepted.kind, "accepted");
+  const claimed = await claimNextJob(deps, { patternId });
+  assert(claimed.kind === "claimed");
+  const saved = await saveJobSnapshot(deps, { right: claimed.right, display: new Uint8Array([1]) });
+  assert(saved.kind === "saved");
+  const completed = await completeJob(deps, {
+    right: claimed.right,
+    snapshot: saved.snapshot,
+    name: "R5",
+  });
+  assert(completed.kind === "committed");
+  const r5 = completed.revision;
   assert.equal(r5.number, 5);
   assert.equal(r5.baseRevisionId, self);
   const state = await db.store.revisions.state({ ownerId, patternId });
@@ -98,7 +125,7 @@ try {
     [r5.id, self, r3.id, r2.id, r1.id],
   );
   assert.deepEqual((await db.raw.prepare("PRAGMA foreign_key_check").all()).results, []);
-  console.log("Populated migration, rollback, and unchanged Worker commit/read passed");
+  console.log("Populated migration, rollback, and job-based Worker commit/read passed");
 } finally {
   await db.dispose();
 }

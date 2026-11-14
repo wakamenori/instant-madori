@@ -50,7 +50,15 @@ export async function openJobDatabase() {
       );
       return (await resolveUser({ store, runtime }, identity)).id;
     }
-    return { raw, store, runtime, apply, owner, dispose: () => proxy.dispose() };
+    return {
+      raw,
+      bucket: proxy.env.BLOBS,
+      store,
+      runtime,
+      apply,
+      owner,
+      dispose: () => proxy.dispose(),
+    };
   } catch (error) {
     await proxy.dispose();
     throw error;
