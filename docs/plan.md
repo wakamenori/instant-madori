@@ -276,7 +276,7 @@ Workerの依存は `services/deps.ts` の `serviceDeps(env, runtime)` で構築�
 
 内部ルートは `geometry/` の `callGeometry` で呼び、成功のバイナリまたはJSON、エラー本文、ストリームのサイズ上限と中断を共通処理する。ルートとメソッドは生成された定義を使い、タイムアウトは同じモジュールの表で管理する。HTTPへのエラー変換とログ項目は `api/geometry.ts` が受け持つ。
 
-Workerの内部は、`api/` から `services/` を呼び、`services/` から保存用の `storage/` または形状処理用の `geometry/` を呼ぶ。
+Workerの内部は、`api/` から `services/` を呼び、`services/` から保存用の `storage/` または形状処理用の `geometry/` を呼ぶ。`objects/` は `services/` だけを呼び、`storage/` と `geometry/` は他の層をimportしない。`api/` から `geometry/` への型だけのimportを例外として許可する。許可先は `scripts/check/boundaries.ts` のWorker層の表で管理し、同じ層の内部とこの例外を除いて、表にない層間importを拒否する。`apps/worker/src/` 直下にディレクトリを追加するときは、この表にも層を宣言する。直下のファイルは層に含めない。`storage/` はHTTPの `Request`・`Response`・`fetch`・`Headers` を使わず、API応答の型・スキーマも使わない。
 
 | 層          | 受け持つこと                                                                                                                                                                                                                    | 持ち込まないもの       |
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------- |
@@ -290,9 +290,13 @@ Workerの内部は、`api/` から `services/` を呼び、`services/` から保
 
 DBの行は、テーブルごとに一つのSQLの `json_object` で読み、`storage/` で共有スキーマにより検証してから返す。型引数による決めつけで行を扱わない。業務上の結果（見つからない、版の競合など）は例外でなく判別可能な結果として返し、`api/` がエラーコードへ対応付ける。予期しない例外だけを500とし、本文を含めずに記録する。
 
+Webのコードは開発用の `scripts/` をimportしない。Viteの設定だけは、ローカルの認証プロキシに使う `scripts/dev/` をimportできる。WebからのWasmバインディングの読込みは `apps/web/src/viewer/wasm.ts` に集め、同じ `viewer/` 直下の `*.test.ts` だけはバインディングを直接importできる。`apps/geometry` にはSolidCraftの既存UIとegui・eframe・winitを含めない。
+
+TypeScriptのアプリと共有定義では、依存を指定するパスに、先頭の `/`（絶対パス）、`./../` や途中の `/./`、相殺される階層、連続する `/`、バックスラッシュを含めずに書き、動的importの参照先は文字列リテラルに限定する。`import.meta.glob` と `new URL(..., import.meta.url)` による読込みは禁止し、テスト（`*.test.*` と `tests/` 内のファイル）だけは、フィクスチャやWasmを読むために後者を許可する。型の再exportは `export type` 宣言で書く。テスト以外のファイルは `*.test.*` と `tests/` 内のファイルをimportしない。
+
 `apps/` は起動・デプロイするもの、`crates/` はRustの機能をまとめたモジュール、`packages/` はJS/TS側から共有する定義を置く。`apps/geometry` は `crates/modeling` を呼ぶ入口とし、住宅の計算やCADとの対応をHTTP処理に散らさない。
 
-`crates/housing` は画面・HTTP・Cloudflareへ依存させない。`crates/modeling` が住宅モデルとSolidCraftのengine・doc・kernelを利用し、`crates/viewer` はgeom・render・gpuを利用する。ビューアには編集エンジンや既存のegui UIを含めず、依存を持たない `crates/display` の表示データで接続する。`crates/modeling` が符号化し、`crates/viewer` が復号する。`crates/geometry-api` は形状処理の内部APIを定義し、TypeScriptの定義を `packages/contracts/src/generated/geometry-internal.ts` へ生成する。公開する表示メディア型は同じ生成処理で `packages/contracts/src/generated/display.ts` に出し、`@madori/contracts` から公開する。Webは内部API定義をimportしない。
+`crates/housing` は画面・HTTP・Cloudflareへ依存させない。`crates/modeling` が住宅モデルとSolidCraftのengine・doc・kernelを利用する。評価キャッシュの誤った再利用を防ぐ `external-workspace` featureを有効にするため、modelingはsolidcraft-ioにも直接依存する。`crates/viewer` はgeom・render・gpuを利用する。ビューアには編集エンジンや既存のegui UIを含めず、依存を持たない `crates/display` の表示データで接続する。`crates/modeling` が符号化し、`crates/viewer` が復号する。`crates/geometry-api` は形状処理の内部APIを定義し、TypeScriptの定義を `packages/contracts/src/generated/geometry-internal.ts` へ生成する。公開する表示メディア型は同じ生成処理で `packages/contracts/src/generated/display.ts` に出し、`@madori/contracts` から公開する。WebとViteの設定は内部API定義をimportせず、`packages/contracts` への相対パスでの参照も使わず、公開した `@madori/contracts` から参照する。
 
 内部API本文は `crates/geometry-api` のRust型にschemarsを適用し、インライン化したJSON Schemaからjson-schema-to-zodでZod検証とTypeScript型を生成する。`pnpm generate:geometry` で定数と本文を一緒に更新し、RustとNodeのテストが生成結果のずれを検出する。再帰型と参照が残る型は生成時に拒否する。結果の共用体は `kind` を判別子とする。固定幅整数には範囲を付け、JavaScriptで正確に表せない64/128ビット整数は文字列で運ぶ。ポインター幅に依存する整数も生成時に拒否し、通信には固定幅の型を選ぶ。Optionは `skip_serializing_if = "Option::is_none"` でNoneを省略し、受信時は省略とnullを許す。各ルートに本文型のスキーマ生成関数を登録し、要求・応答のスロットから方向を導出する。エラー本文はルートごとに登録せず、プロトコル共通のスキーマ・メディア型・本文上限を定義し、Rustのエラー応答とWorkerの検証で使う。同名の本文を異なる契約で登録すると生成を停止する。要求はDeserialize契約で生成し、オブジェクトの未知フィールド拒否を生成時に検査する。応答はSerialize契約で生成し、共有型に指定された未知フィールド拒否を応答スキーマから再帰的に除き、追加フィールドを許容する。ルートにはHTTPメソッドと要求・応答本文の形式（なし、JSONのスキーマと本文上限、バイナリのメディア型と本文上限）を登録し、Workerの受信方針をそこから組み立てる。
 
@@ -576,6 +580,20 @@ Linux Container上のSolidCraftの動作、必要メモリと起動時間、WebG
 | 4   | R2への保存と案（revision）、案と履歴のD1の構造                                     | 完了          |
 | 5   | 一パターン一編集、ジョブの開始・停止・復帰、条件付き確定、完了条件にある障害の試験 | 未着手        |
 
+単位4の範囲は次のとおり合意した（2026-11-14）。
+
+- 案のmanifestは版1とし、表示データだけを結び付ける（4.3）。住宅データは6.2で加える。
+- 案を確定する操作（R2への保存とD1の条件付き追加）は、単位4ではテストからだけ呼ぶ。実際の利用者の操作で案を作る経路は、単位5のジョブで初めてつなぐ。そのため `GET /api/sample/display` は残す。
+- 案を読む公開API（パターンの状態、案の一覧、案の表示データ）を追加し、テストで作った案で検査する。
+- 会話の区切りの列はmessagesのテーブルと一緒に単位5で、復帰元の列は復帰の操作と一緒に6.6で加える。同じjob IDからの二重追加を防ぐ一意制約も単位5で加える。
+- R2への書込みはWorkerが行う。stagingのR2バケットの作成は、AGENTS.mdのとおりユーザーの許可を得て行う。
+
+単位4の実装では、`snapshots` が所有者、manifestのキー・SHA-256、形式の版を保持し、`revisions` がパターン内の番号、名前、編集元、snapshotへの参照を保持する。形式の版は、読み書きできる版1だけをDBのCHECK制約で許可する。6.2で版を増やす際に読込処理と制約を一緒に更新する。所有者と親の一致、および編集元が同じパターンに属することを複合外部キーで保証する。
+
+表示データの応答には、閲覧対象の案IDを `x-revision-id` ヘッダーで付ける。案の一覧は履歴番号の降順に50件ずつ返し、続きのカーソルには最後の番号を符号化する。履歴の順序を確定する番号を使うため、作成時刻が同じ場合や実行元の時計が前後した場合も、現在の案と一覧の先頭は一致する。
+
+ローカルの保存テストでは、HTTPテスト用Workerを一時停止し、同じ永続化先を指定したWranglerの `getPlatformProxy` で実際のD1・R2に対してサービスを実行する。proxyを終了してからWorkerを再開し、保存済みの内容を公開APIから読む。同じSQLiteファイルを二つのworkerdが同時に開かないようにする。Workerの型とNodeの型の衝突を避けるため、サービスを呼ぶfixtureは既存の `tests/rpc` の型検査対象に置き、Node側のHTTPテストから子プロセスとして実行する。
+
 単位5では、単位3から持ち越した次の二つも扱う。一つは、Containerを休止時間どおりに止めることである。接続用DOが最後の操作の時刻を記録し、DOのアラームで休止時間の経過を確かめて、自分でContainerを止める（[`@cloudflare/containers`](https://github.com/cloudflare/containers) の `sleepAfter` と同じ考え方。2026-11-14にソースの `src/lib/container.ts` を読み、最後の操作の時刻を更新し、アラームで期限切れを確かめて止める実装であることを確かめた）。Cloudflare側の休止の仕組みは、停止の時刻を決められず、仕組みも確かめられていないため使わない。もう一つは、同時に動かすContainerの上限を決めることである。
 
 単位3で、設定分離とデプロイ手順のうち、stagingの分を実際の環境で確かめた。本番の設定とデプロイ手順は、まだ作っておらず、どの単位で用意するかも決めていない。5.1のとおり本番はR2・DO・Workflow・Containerイメージを一組の版としてデプロイするため、単位4と単位5の内容が固まった時点で決める。
@@ -609,6 +627,27 @@ Linux Container上のSolidCraftの動作、必要メモリと起動時間、WebG
 - `routeTimeouts`（health 2秒、sampleDisplay 30秒）は変えない。readinessの期限（60秒）も変えない。新しいイメージの最初の起動（38.2秒）まで余裕は約22秒なので、6.2でイメージを小さくする方法を検討する。期限を延ばすと、本当に起動できないときに利用者が失敗を知るまでの待ち時間が延びる。
 - `GEOMETRY_IDLE_TIMEOUT_MS` は10分のままにする。再デプロイを挟まなかった各1回では、休止時間を10分にしても60秒にしても、Containerは起動から約16分で止まった。接続用DOが待ち続ける `container.monitor()` がDOの退去を最長15分防ぐことが原因と推測しているが、10分の回の停止時刻はCloudflareの文書の説明だけでは説明できない。DOがメモリから退去した時刻がログに出ないため、原因は確かめられない。確かめるには、退去の時刻を記録し、休止時間を15分より長くした回と比べる。休止時間どおりに止める方法は、上の単位5の注記のとおりDOのアラームで止める方式に決めた。実装は単位5で行う。
 - 同時に動かすContainerの上限は、複数のDOがContainerを使う経路ができる単位5で決める。
+
+#### 単位5の前に行う整備
+
+単位4のレビューで、層や保存の規則が文章にしかなく、守られているかをレビューでしか確かめられないことが分かった。単位5ではジョブ・DO・Workflowが保存の操作を多く使うため、その前に次の整備を行う（2026-11-14に合意）。番号は順序を表し、2は1と並行して進めてよい。
+
+1. データ操作の作り直し（独立したPR）。設計案を出して合意してから実装する。
+   - `services/` にD1・R2のバインディングを渡さず、`storage/` が作る名前付きの操作だけを渡す。今は `ServiceDeps` が `D1Database` と `R2Bucket` を持ち、`services/` が直接使わないのは慣習による。
+   - `storage/` の中で、バインディングに触れる部品を一つにまとめる。行の読取はスキーマを必須にし、R2の書込みは上書きを拒むものだけにし、冪等な書込みは今の `runOnce` を使う。型引数による行の決めつけとR2の上書きを、書けない形にする。
+   - 所有者のIDを、認証からしか作れない型にする。SQLに `owner_id` の条件を書くことは型で強制できないため、所有権のテストとレビューで確かめる。
+   - 依存の境界の表（`scripts/check/boundaries.ts`）から不要になった行を消し、バインディングを参照できるのは基盤の部品だけとする行を加える。
+2. 機械による検査の追加（まとめて一つのPR）。
+   - mainに入ったマイグレーションのファイルを変更しない。stagingのD1には `0001` を適用済みである。
+   - SQLに `changes()` を書かない（4.2）。
+   - 文書に、AGENTS.mdで使わないと決めた語を書かない。
+   - ログに入れてよいキーを型で固定する。今の `LogFields` は任意のキーを受け付け、本文を入れない決まりはコメントにしかない。
+3. 依存の境界の検査を、importの文字列ではなく、TypeScriptのモジュール解決で求めた参照先のファイルで判定する方式に切り替える（1の後）。文字列の照合では書き方の揺れ（`//`、`\`、大文字小文字、パッケージ名）による抜け道と誤検出が続いたためである。Web内に `worker` という名前のフォルダーを作ると `../worker` を誤って拒否する問題も、ここで解消する。層に属さないファイルを経由した再exportと、動的importの参照先を文字列以外で書く形は、この方式でも見つけられないため、READMEに書いた限界と構文の禁止を残す。
+4. AGENTS.mdのレビューの節に、層と規則への適合を、具体的な失敗がなくても指摘する観点を加える。1か2のPRに含める。
+
+単位4から単位5へ持ち越すもの：同じjob IDからの二重の確定を防ぐ一意制約と、確定をやり直したときに二重に書かないこと、会話の区切りの列。stagingのR2バケットの作成（AGENTS.mdのとおりユーザーの許可を得る）と、本番のR2で上書きを拒む書込みが効くことの確認（ローカルのminiflareでは確かめたが、実際のR2はバケットがないため確かめられない）。
+
+5.4の回収で扱うもの：確定しなかった案のR2オブジェクト、回収のための `revisions (snapshot_id, owner_id)` の索引。
 
 ### 6.2 AIで平屋を生成・変更・保存する一往復
 
