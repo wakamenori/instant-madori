@@ -1,0 +1,2 @@
+{"level":"info","event":"container.idle_stopped","ms":60478}
+{"event":"container.idle_verified","idleMs":60478,"observedMs":62004.306249999994,"containerId":"23c2b9d9e80e88d35be2483c9fe75fd22ef1f6253cf7dad37861308b278f75a9","nextStart":"cold"}

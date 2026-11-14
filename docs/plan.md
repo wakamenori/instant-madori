@@ -522,7 +522,9 @@ stagingの計測から、次の構成と値を使う。数値と手順は[検証
 
 起動確認が終わってから処理を渡す。長い処理ではコンテナの生存時間を明示的に管理する。ブラウザ、Workflow、ContainerのHTTP接続が切れたことだけを、ジョブの完了や取消の証拠にしない。
 
-Containerを止める時刻は、接続用DOが決める。DOは最後の操作の時刻をストレージに保存し、アラームで休止時間の経過を確かめて、`destroy()` でContainerを止める。考え方は[`@cloudflare/containers`](https://github.com/cloudflare/containers)の `sleepAfter` と同じである。`setInactivityTimeout` には、休止時間以上の値を渡し続ける。この値は、DOが非アクティブになった後にContainerが動き続ける時間であり、設定しないと、CloudflareはDOが非アクティブになった直後にContainerを止める（[Container API](https://developers.cloudflare.com/durable-objects/api/container/)）。休止時間以上にしておくと、Cloudflare側がアラームより先にContainerを止めない。
+Containerを止める時刻は、接続用DOが決める。DOは要求の開始時と終了時に最後の操作の時刻をストレージに保存する。操作には起動待ちと応答本文の読取り・検証を含め、失敗した操作も終了時刻を記録する。readinessの確認、アラーム、DOの再起動は操作に数えない。アラームは最後の操作の時刻に休止時間を足した期限に置く。期限前なら最新の期限に置き直し、操作中なら現在時刻から休止時間後に置き直す。最後の操作の完了で再び期限を更新する。操作が無く期限を過ぎていれば、`destroy()` でContainerを止める。成功後に、次の起動を待たせたまま開始の記録・操作時刻・アラームを消し、`container.idle_stopped` の `ms` に最後の操作からの時間を出す。停止済みのアラームの再配信は新しい停止を起こさない。停止に失敗したら記録を残して `container.destroy_failed` を出し、1秒から倍増し休止時間を上限とする間隔で自分でアラームを置き直す。実行環境の回数に限りがあるアラーム再試行だけには頼らない。
+
+DOが再起動しても、動いているContainerの保存済みの期限を戻し、操作時刻を更新しない。時刻が無い・不正・未来なら現在時刻を保存して期限を作る。止まっているContainerの記録とアラームは片付ける。`setInactivityTimeout` は起動時とDOの再起動時に休止時間 + 60,000 msで設定する。この値は、DOが非アクティブになった後にContainerが動き続ける時間である（[Container API](https://developers.cloudflare.com/containers/api/durable-object-container/)）。アラームが新しいDOを起こす場合でも実行環境に先に止められないよう、60秒の余裕を持たせる。実行環境の上限6時間に収まるよう、休止時間は60,000〜21,540,000 msを設定の境界で受け付ける。
 
 停止の時刻を接続用DOが決めるのは、Cloudflare側の仕組みだけでは、Containerが休止時間どおりに止まらなかったためである（[検証3の休止後の停止](verification/verification-03.md#休止後の停止)）。
 
