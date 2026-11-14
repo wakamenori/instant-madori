@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { accessAssertionHeader, meResponseSchema } from "@madori/contracts";
+import { importJWK, SignJWT } from "jose";
 import { createAccessKey, signAccessToken } from "../../../scripts/dev/local-access.ts";
 import {
   newUser,
@@ -23,6 +24,22 @@ await test("Access authentication", async (t) => {
 
   await t.test("requests without an Access token are rejected", async () => {
     assert.equal((await worker.call("/api/me")).status, 401);
+  });
+
+  await t.test("service tokens remain forbidden without verifier configuration", async () => {
+    const token = await new SignJWT({ common_name: "verifier-client.access" })
+      .setProtectedHeader({ alg: "RS256", kid: worker.key.privateJwk.kid ?? "" })
+      .setIssuer(worker.key.issuer)
+      .setAudience(worker.key.audience)
+      .setSubject("")
+      .setIssuedAt()
+      .setExpirationTime("5m")
+      .sign(await importJWK(worker.key.privateJwk, "RS256"));
+    const response = await worker.call("/api/me", {
+      headers: { [accessAssertionHeader]: token },
+    });
+    assert.equal(response.status, 403);
+    assert.deepEqual(await response.json(), { error: "forbidden" });
   });
 
   await t.test(

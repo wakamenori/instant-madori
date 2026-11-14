@@ -14,7 +14,14 @@ import { ApiFailure } from "./http.ts";
 
 // Access has already verified the address; checking its syntax again would only lock out
 // valid addresses (e.g. internationalized domains) that a stricter pattern rejects.
-const claimsSchema = z.object({ sub: z.string().min(1), email: z.string().min(1) });
+const claimsSchema = z.union([
+  z.object({
+    sub: z.string().min(1),
+    email: z.string().min(1),
+    common_name: z.never().optional(),
+  }),
+  z.object({ sub: z.literal(""), common_name: z.string().min(1) }),
+]);
 
 /**
  * jose errors that mean the token itself is bad (401). Every other error, including a plain
@@ -87,9 +94,16 @@ export async function verifyAccessToken(
     if (isTokenError(error)) throw new ApiFailure("unauthenticated");
     throw error;
   }
-  // Service tokens have no email; the app is for invited people only.
   const claims = claimsSchema.safeParse(payload);
   if (!claims.success) throw new ApiFailure("forbidden");
+  if (claims.data.common_name !== undefined) {
+    if (claims.data.common_name !== access.verifierClientId) throw new ApiFailure("forbidden");
+    return {
+      issuer: access.issuer,
+      subject: "staging:verifier",
+      email: "verifier@staging.invalid",
+    } as VerifiedIdentity;
+  }
   return {
     issuer: access.issuer,
     subject: claims.data.sub,
