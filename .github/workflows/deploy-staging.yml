@@ -42,11 +42,19 @@ jobs:
           mkdir -p "$DOCKER_CONFIG"
           for entry in contexts cli-plugins buildx; do ln -sfn "$HOME/.docker/$entry" "$DOCKER_CONFIG/$entry"; done
           jq '{currentContext, auths: {"placeholder.invalid": {}}}' "$HOME/.docker/config.json" > "$DOCKER_CONFIG/config.json"
+          STAGING_ACCESS_CLIENT_ID="$(sed -n 's/^STAGING_ACCESS_CLIENT_ID=//p' "$MADORI_ENV_FILE")"
+          if [ -z "$(printf '%s' "$STAGING_ACCESS_CLIENT_ID" | tr -d '[:space:]')" ]; then
+            echo "STAGING_ACCESS_CLIENT_ID must not be empty" >&2
+            exit 1
+          fi
+          printf '::add-mask::%s\n' "$STAGING_ACCESS_CLIENT_ID"
           pnpm exec wrangler d1 migrations apply DB --remote --env staging
-          pnpm exec wrangler deploy --env staging
+          pnpm exec wrangler deploy --env staging --var "ACCESS_VERIFIER_CLIENT_ID:$STAGING_ACCESS_CLIENT_ID"
       - name: Smoke test through Access
         run: |
           STAGING_ACCESS_CLIENT_ID="$(sed -n 's/^STAGING_ACCESS_CLIENT_ID=//p' "$MADORI_ENV_FILE")"
           STAGING_ACCESS_CLIENT_SECRET="$(sed -n 's/^STAGING_ACCESS_CLIENT_SECRET=//p' "$MADORI_ENV_FILE")"
+          printf '::add-mask::%s\n' "$STAGING_ACCESS_CLIENT_ID"
+          printf '::add-mask::%s\n' "$STAGING_ACCESS_CLIENT_SECRET"
           export STAGING_ACCESS_CLIENT_ID STAGING_ACCESS_CLIENT_SECRET
           node scripts/check/staging-smoke.ts
