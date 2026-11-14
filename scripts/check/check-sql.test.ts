@@ -100,10 +100,37 @@ for (const source of [
   "const sql = `SELECT ${column}; DELETE FROM requests`;",
   'const sql = `SELECT ${fn({ value: "INSERT INTO requests DEFAULT VALUES" })}`;',
   "const sql = `SELECT ${`DELETE FROM requests`}`;",
+  "const sql = `WITH v AS (SELECT '${plantedTable}' AS s) INSERT INTO requests (request_id, result) SELECT s, '{}' FROM v`;",
+  "const sql = `UPDATE patterns SET name = '${plantedTable}' WHERE id = ?;\nINSERT INTO requests (request_id, result) VALUES (?, '{}')`;",
+  'const sql = `SELECT "${column}" FROM patterns; DELETE FROM requests WHERE "request_id" = ?`;',
+  "const sql = `CREATE TRIGGER record_request AFTER UPDATE ON patterns WHEN new.state = '${s}' BEGIN INSERT INTO requests (request_id, result) VALUES (?, '{}'); END`;",
+  "const sql = `SELECT \\`${column}\\` FROM patterns; DELETE FROM requests WHERE \\`request_id\\` = ?`;",
+  "const sql = `SELECT [${column}] FROM patterns; REPLACE INTO requests (result) VALUES ('{}')`;",
+  "const sql = `INSERT INTO ${schema}.requests (result) VALUES ('{}')`;",
 ]) {
-  void test(`rejects request writes in template fragments and nested literals: ${source}`, () => {
+  void test(`rejects request writes in templates and nested literals: ${source}`, () => {
     assert.equal(checkSqlSource(storagePath, source).length, 1);
     assert.deepEqual(checkSqlSource(requestsPath, source), []);
+  });
+}
+
+void test("reports the whole template's location after a quoted interpolation", () => {
+  const source =
+    "const sql =\n  `SELECT '${name}';\n   INSERT INTO requests (result) VALUES ('{}')`;";
+  assert.deepEqual(checkSqlSource(storagePath, source), [
+    `${storagePath}:2:3: writes to requests are only allowed in ${requestsPath}.`,
+  ]);
+});
+
+for (const source of [
+  "const sql = `SELECT '${name}' FROM requests`;",
+  "const sql = `SELECT '${name} INSERT INTO requests'`;",
+  'const sql = `SELECT "${column} DELETE FROM requests" FROM patterns`;',
+  "const sql = `SELECT 1 /* ${description} DELETE FROM requests */`;",
+  "const sql = `INSERT INTO requests${suffix} (result) VALUES ('{}')`;",
+]) {
+  void test(`allows quoted values, comments and dynamically named tables: ${source}`, () => {
+    assert.deepEqual(checkSqlSource(storagePath, source), []);
   });
 }
 
