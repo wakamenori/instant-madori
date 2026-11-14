@@ -5,7 +5,7 @@ export function r2(bucket: R2Bucket) {
         onlyIf: { etagDoesNotMatch: "*" },
         httpMetadata: { contentType },
       });
-      if (stored === null) throw new Error("Snapshot object already exists");
+      if (stored === null) throw new Error(`R2 object ${key} already exists`);
     },
     async read(key: string) {
       const object = await bucket.get(key);

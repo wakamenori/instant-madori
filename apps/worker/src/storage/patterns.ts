@@ -101,7 +101,7 @@ export async function getPattern(
   db: D1,
   scope: { ownerId: OwnerId; patternId: string },
 ): Promise<Pattern | null> {
-  const json = await db.first(
+  return db.first(
     jsonRows(
       {
         sql: `SELECT ${patternJson("t")} AS json FROM patterns t WHERE t.owner_id = ? AND t.id = ?`,
@@ -111,7 +111,6 @@ export async function getPattern(
       "pattern",
     ),
   );
-  return json;
 }
 
 /** Adds a pattern once per request. `not_applied` means the project is missing or foreign. */

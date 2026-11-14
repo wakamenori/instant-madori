@@ -29,10 +29,7 @@ export async function upsertAccessUser(db: D1, input: AccessUserInput): Promise<
       "user",
     ),
   );
-  if (existing !== null) {
-    const user = existing;
-    if (user.email === input.email) return user;
-  }
+  if (existing?.email === input.email) return existing;
   const written = await db.first(
     jsonRows(
       {

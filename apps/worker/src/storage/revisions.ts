@@ -161,7 +161,7 @@ export async function getRevisionSnapshot(
   db: D1,
   scope: { ownerId: OwnerId; revisionId: string },
 ): Promise<Snapshot | null> {
-  const json = await db.first(
+  return db.first(
     jsonRows(
       {
         sql: `SELECT ${snapshotJson("s")} AS json
@@ -173,5 +173,4 @@ export async function getRevisionSnapshot(
       "snapshot",
     ),
   );
-  return json;
 }

@@ -70,7 +70,7 @@ export async function getProject(
   db: D1,
   scope: { ownerId: OwnerId; projectId: string },
 ): Promise<Project | null> {
-  const json = await db.first(
+  return db.first(
     jsonRows(
       {
         sql: `SELECT ${projectJson("t")} AS json FROM projects t WHERE t.owner_id = ? AND t.id = ?`,
@@ -80,7 +80,6 @@ export async function getProject(
       "project",
     ),
   );
-  return json;
 }
 
 const createdProjectSchema = z.object({ project: projectSchema, pattern: patternSchema });
