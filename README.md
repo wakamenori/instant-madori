@@ -27,12 +27,12 @@ mise exec -- pnpm dev
 
 このWorkerのローカルセッション（`pnpm dev`、`pnpm check --full`、別worktreeでの実行を含む）の同時起動はサポートしません。MiniflareはWorker名とContainerクラス名から同じ名前を作るため、終了処理に関係なく衝突し、重複して起動すると他セッションの新しいContainerを終了処理で削除することもあります。クラッシュ後に残ったContainerは次回起動時のIDとして保存されるため、自動削除しません。残りを削除する場合は、このWorkerの全ローカルセッションを停止してから `docker ps -a --no-trunc --format '{{.ID}} {{.Names}}'` で一覧を確認し、このWorker・Containerクラスに属する残りのIDを選んで `docker rm --force <ID>...` を実行します。
 
-| URL                   | 内容                                                                  |
-| --------------------- | --------------------------------------------------------------------- |
-| http://127.0.0.1:5173 | Reactの開発画面。サンプルをWebGPUで描画する設計（ブラウザ確認は別途） |
-| http://127.0.0.1:8787 | ローカルWorkerとビルド済み静的ファイル。`/api/health`で応答確認       |
+| URL                   | 内容                                                            |
+| --------------------- | --------------------------------------------------------------- |
+| http://127.0.0.1:5173 | Reactの開発画面。サンプルをWebGPUで描画する                     |
+| http://127.0.0.1:8787 | ローカルWorkerとビルド済み静的ファイル。`/api/health`で応答確認 |
 
-サンプルは床と3枚の壁、奥壁の開口で構成します。画面はドラッグで回転、スクロールで拡大・縮小する設計です。実際のWebGPU描画と操作は、WebGPU対応ブラウザで別途確認します。Worker → Durable Object → Containerを通してSolidCraftで生成し、Wasmビューアへ表示データを渡します。WebGPUを利用できるブラウザが必要です。初回のamd64イメージのビルドには数分かかります。
+サンプルは床と3枚の壁、奥壁の開口で構成します。画面はドラッグでの回転と、スクロールでの拡大・縮小に対応します。ブラウザで確かめた範囲は、[実装計画](docs/plan.md)の6.1bにあります。Worker → Durable Object → Containerを通してSolidCraftで生成し、Wasmビューアへ表示データを渡します。WebGPUを利用できるブラウザが必要です。初回のamd64イメージのビルドには数分かかります。
 
 Rustサービスだけを反復する場合は `MADORI_INTERNAL_TOKEN=local cargo run -p madori-geometry` で起動します。`http://127.0.0.1:3001/healthz` は認証不要、`/v1/sample/display` は `authorization: Bearer local` が必要です。このプロセスをWorkerが呼ぶことはありません。
 
