@@ -32,6 +32,7 @@ const envSchema = z
     ACCESS_AUD: z.string().min(1),
     /** Local development only: the public JWKS of the generated development key. */
     ACCESS_JWKS: z.string().min(1).optional(),
+    ACCESS_VERIFIER_CLIENT_ID: z.string().trim().min(1).optional(),
   })
   .transform((env, context) => {
     const localIssuer = new URL(env.ACCESS_TEAM_DOMAIN).hostname.endsWith(localIssuerSuffix);
@@ -40,6 +41,14 @@ const envSchema = z
       context.addIssue({
         code: "custom",
         message: "local keys require ENVIRONMENT=local, an .invalid issuer and ACCESS_JWKS",
+      });
+      return z.NEVER;
+    }
+    if (env.ACCESS_VERIFIER_CLIENT_ID !== undefined && env.ENVIRONMENT !== "staging") {
+      context.addIssue({
+        code: "custom",
+        path: ["ACCESS_VERIFIER_CLIENT_ID"],
+        message: "the verifier service token requires ENVIRONMENT=staging",
       });
       return z.NEVER;
     }
@@ -54,7 +63,14 @@ const envSchema = z
     }
     return {
       appOrigins: new Set(env.APP_ORIGINS),
-      access: { issuer: env.ACCESS_TEAM_DOMAIN, audience: env.ACCESS_AUD, keys },
+      access: {
+        issuer: env.ACCESS_TEAM_DOMAIN,
+        audience: env.ACCESS_AUD,
+        keys,
+        ...(env.ACCESS_VERIFIER_CLIENT_ID === undefined
+          ? {}
+          : { verifierClientId: env.ACCESS_VERIFIER_CLIENT_ID }),
+      },
     };
   });
 

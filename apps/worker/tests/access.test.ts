@@ -83,7 +83,11 @@ await test("Remote Access keys", async (t) => {
 });
 
 /** Signs a token by hand, so tests can send headers that jose refuses to produce. */
-async function signRaw(key: AccessKey, header: Record<string, unknown>) {
+async function signRaw(
+  key: AccessKey,
+  header: Record<string, unknown>,
+  claims: Record<string, unknown> = {},
+) {
   const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
   const now = Math.floor(Date.now() / 1000);
   const input = `${encode({ alg: "RS256", kid: key.privateJwk.kid, ...header })}.${encode({
@@ -93,6 +97,7 @@ async function signRaw(key: AccessKey, header: Record<string, unknown>) {
     email: user.email,
     iat: now,
     exp: now + 300,
+    ...claims,
   })}`;
   const privateKey = await crypto.subtle.importKey(
     "jwk",
@@ -156,5 +161,89 @@ await test("Token shape", async (t) => {
       verifyToken(await signRaw(key, { crit: ["x-unknown"], "x-unknown": 1 })),
       (error) => error instanceof ApiFailure && error.code === "unauthenticated",
     );
+  });
+});
+
+await test("Verifier service tokens", async (t) => {
+  const key = await createAccessKey("https://access.test.invalid", "verifier-test");
+  const access: AccessConfig = {
+    issuer: key.issuer,
+    audience: key.audience,
+    keys: {
+      kind: "local",
+      jwks: { keys: [{ ...key.publicJwk, kty: "RSA" }] },
+      source: JSON.stringify(key.publicJwk),
+    },
+  };
+  const clientId = "verifier-client.access";
+  const serviceClaims = { sub: "", common_name: clientId, email: undefined };
+  const verifyClaims = async (claims: Record<string, unknown>, config: AccessConfig = access) =>
+    verifyAccessToken(
+      new Request("https://app.test/api/me", {
+        headers: { [accessAssertionHeader]: await signRaw(key, {}, claims) },
+      }),
+      config,
+    );
+  const enabled = { ...access, verifierClientId: clientId };
+
+  await t.test("the configured service token maps to a fixed verifier identity", async () => {
+    const identity = await verifyClaims(serviceClaims, enabled);
+    assert.deepEqual(identity, {
+      issuer: key.issuer,
+      subject: "staging:verifier",
+      email: "verifier@staging.invalid",
+    });
+    const replacement = "replacement-client.access";
+    assert.deepEqual(
+      await verifyClaims(
+        { ...serviceClaims, common_name: replacement },
+        { ...access, verifierClientId: replacement },
+      ),
+      identity,
+      "rotating the configured Client ID preserves the verifier identity",
+    );
+  });
+
+  for (const [label, claims, config] of [
+    ["an unconfigured service token", serviceClaims, access],
+    ["a different Client ID", { ...serviceClaims, common_name: "other.access" }, enabled],
+    ["a nonempty subject", { ...serviceClaims, sub: user.subject }, enabled],
+    [
+      "a service token with user claims",
+      { ...serviceClaims, sub: user.subject, email: user.email },
+      enabled,
+    ],
+    ["no Client ID", { ...serviceClaims, common_name: undefined }, enabled],
+    ["an empty Client ID", { ...serviceClaims, common_name: "" }, enabled],
+  ] satisfies [string, Record<string, unknown>, AccessConfig][]) {
+    await t.test(`${label} is forbidden (403)`, async () => {
+      await assert.rejects(
+        verifyClaims(claims, config),
+        (error) => error instanceof ApiFailure && error.code === "forbidden",
+      );
+    });
+  }
+
+  for (const [label, claims] of [
+    ["expired", { exp: Math.floor(Date.now() / 1000) - 60 }],
+    ["wrong issuer", { iss: "https://other.invalid" }],
+    ["wrong audience", { aud: "other-app" }],
+    ["missing subject", { sub: undefined }],
+    ["missing expiry", { exp: undefined }],
+  ] satisfies [string, Record<string, unknown>][]) {
+    await t.test(`${label} service tokens remain unauthenticated (401)`, async () => {
+      await assert.rejects(
+        verifyClaims({ ...serviceClaims, ...claims }, enabled),
+        (error) => error instanceof ApiFailure && error.code === "unauthenticated",
+      );
+    });
+  }
+
+  await t.test("a configured verifier does not change invited users", async () => {
+    assert.deepEqual(await verifyClaims({}, enabled), {
+      issuer: key.issuer,
+      subject: user.subject,
+      email: user.email,
+    });
   });
 });
