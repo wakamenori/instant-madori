@@ -25,6 +25,8 @@
     },
   ],
 
+  "r2_buckets": [{ "binding": "BLOBS", "bucket_name": "instant-madori-local" }],
+
   "containers": [
     {
       "class_name": "GeometryContainer",
@@ -82,6 +84,7 @@
           "migrations_dir": "migrations",
         },
       ],
+      "r2_buckets": [{ "binding": "BLOBS", "bucket_name": "instant-madori-staging" }],
       "containers": [
         {
           "class_name": "GeometryContainer",

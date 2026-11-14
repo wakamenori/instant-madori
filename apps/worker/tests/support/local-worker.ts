@@ -69,6 +69,7 @@ export interface LocalWorker {
   navigate(path: string): Promise<{ status: number; contentType: string; body: string }>;
   /** Calls the API as the web app would. */
   call(path: string, options?: ApiCall): Promise<Response>;
+  withPausedWorker<T>(action: (state: string) => Promise<T>): Promise<T>;
   stop(): Promise<void>;
 }
 
@@ -222,6 +223,8 @@ export async function startLocalWorker({
   // structured line is parsed once, as it arrives.
   const entries: Record<string, unknown>[] = [];
   let worker: CapturedProcess | undefined;
+  let resumeWorker: (() => Promise<void>) | undefined;
+  const state = join(directory, "state");
   let before: ReturnType<typeof snapshotWorkerContainers> | undefined;
 
   /** The one teardown, for a failed start and for `stop()` alike. Safe to call again. */
@@ -246,7 +249,6 @@ export async function startLocalWorker({
     const port = await freePort();
     origin = `http://127.0.0.1:${port}`;
     key = await createAccessKey("https://access.test.invalid", "instant-madori-test");
-    const state = join(directory, "state");
     const assets = join(directory, "assets");
     const envFile = join(directory, "worker.env");
     await writeFile(
@@ -261,37 +263,40 @@ export async function startLocalWorker({
     await migrate(state);
 
     before = containers ? snapshotWorkerContainers() : undefined;
-    const started = startWrangler(
-      [
-        "dev",
-        "--local",
-        `--enable-containers=${containers}`,
-        "--ip",
-        "127.0.0.1",
-        "--port",
-        String(port),
-        "--inspector-port",
-        "0",
-        "--persist-to",
-        state,
-        "--env-file",
-        envFile,
-        // API tests do not need the built web app; serve a stand-in SPA entry instead.
-        "--assets",
-        assets,
-        "--show-interactive-dev-session=false",
-        // "log" includes the Worker's own console.log lines, which tests read through logLine().
-        "--log-level",
-        "log",
-      ],
-      (line) => {
-        if (containers) console.info(line);
-        const entry = parseLogEntry(line);
-        if (entry) entries.push(entry);
-      },
-    );
-    worker = started;
-    await ready(`${origin}/api/health`, started.process, readyTimeoutMs);
+    resumeWorker = async () => {
+      const started = startWrangler(
+        [
+          "dev",
+          "--local",
+          `--enable-containers=${containers}`,
+          "--ip",
+          "127.0.0.1",
+          "--port",
+          String(port),
+          "--inspector-port",
+          "0",
+          "--persist-to",
+          state,
+          "--env-file",
+          envFile,
+          // API tests do not need the built web app; serve a stand-in SPA entry instead.
+          "--assets",
+          assets,
+          "--show-interactive-dev-session=false",
+          // "log" includes the Worker's own console.log lines, which tests read through logLine().
+          "--log-level",
+          "log",
+        ],
+        (line) => {
+          if (containers) console.info(line);
+          const entry = parseLogEntry(line);
+          if (entry) entries.push(entry);
+        },
+      );
+      worker = started;
+      await ready(`${origin}/api/health`, started.process, readyTimeoutMs);
+    };
+    await resumeWorker();
   } catch (error) {
     // The Worker's output goes into the error, built after cleanup has read its last lines.
     // The reason leads, so a hang and a crash are told apart without reading the output.
@@ -303,8 +308,6 @@ export async function startLocalWorker({
       });
     }, dispose);
   }
-  const lines = worker.lines;
-
   return {
     origin,
     key,
@@ -324,7 +327,7 @@ export async function startLocalWorker({
       const found = find();
       if (found) return found;
       throw new Error(
-        `No ${event} log line for trace ${traceId}. Last Worker output:\n${outputTail(lines)}`,
+        `No ${event} log line for trace ${traceId}. Last Worker output:\n${outputTail(worker?.lines ?? [])}`,
       );
     },
     navigate(path) {
@@ -367,6 +370,15 @@ export async function startLocalWorker({
         headers: { ...headers, ...options.headers },
         ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
       });
+    },
+    async withPausedWorker(action) {
+      if (!resumeWorker) throw new Error("Worker cannot resume");
+      await worker?.dispose();
+      try {
+        return await action(state);
+      } finally {
+        await resumeWorker();
+      }
     },
     logEntries: () => entries,
     stop: dispose,

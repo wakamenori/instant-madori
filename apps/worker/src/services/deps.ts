@@ -18,6 +18,7 @@ export interface Runtime {
 
 export interface ServiceDeps {
   db: D1Database;
+  bucket: R2Bucket;
   geometry: (key: GeometryInstance) => GeometryApi;
   runtime: Runtime;
 }
@@ -28,6 +29,14 @@ export const systemRuntime: Runtime = {
   newTraceId: () => crypto.randomUUID(),
 };
 
-export function serviceDeps(env: Pick<Env, "DB" | "GEOMETRY">, runtime: Runtime): ServiceDeps {
-  return { db: env.DB, runtime, geometry: geometryClient((name) => env.GEOMETRY.getByName(name)) };
+export function serviceDeps(
+  env: Pick<Env, "DB" | "BLOBS" | "GEOMETRY">,
+  runtime: Runtime,
+): ServiceDeps {
+  return {
+    db: env.DB,
+    bucket: env.BLOBS,
+    runtime,
+    geometry: geometryClient((name) => env.GEOMETRY.getByName(name)),
+  };
 }

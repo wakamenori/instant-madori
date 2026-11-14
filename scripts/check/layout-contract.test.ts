@@ -9,6 +9,7 @@ const bindings = {
   durable_objects: { bindings: [{ name: "GEOMETRY", class_name: "GeometryContainer" }] },
   containers: [{ class_name: "GeometryContainer" }],
   exports: { GeometryContainer: {} },
+  r2_buckets: [{ binding: "BLOBS" }],
   d1_databases: [{ binding: "DB" }],
   vars: { A: "a" },
 };
@@ -44,7 +45,7 @@ void test("container e2e cases must share the supported Docker boot file", () =>
 });
 
 void test("new top-level binding categories require an explicit checker policy", () => {
-  for (const key of ["r2_buckets", "workflows", "kv_namespaces", "services", "future_binding"]) {
+  for (const key of ["workflows", "kv_namespaces", "services", "future_binding"]) {
     assert.throws(
       () => assertStagingBindings({ ...bindings, [key]: [], env: { staging: bindings } }),
       /Unrecognized|unrecognized/,
@@ -53,7 +54,7 @@ void test("new top-level binding categories require an explicit checker policy",
 });
 
 void test("staging-only binding categories require an explicit checker policy", () => {
-  for (const key of ["r2_buckets", "workflows", "kv_namespaces", "services", "future_binding"]) {
+  for (const key of ["workflows", "kv_namespaces", "services", "future_binding"]) {
     assert.throws(
       () => assertStagingBindings({ ...bindings, env: { staging: { ...bindings, [key]: [] } } }),
       /Unrecognized|unrecognized/,

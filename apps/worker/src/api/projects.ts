@@ -9,7 +9,7 @@ import type {
   ProjectResponse,
 } from "@madori/contracts";
 import { createProject, listProjects, renameProject } from "../services/projects.ts";
-import { decodeCursor, encodeCursor } from "./cursor.ts";
+import { decodeProjectCursor, encodeProjectCursor } from "./cursor.ts";
 import { ApiFailure, readJsonBody, readQuery } from "./http.ts";
 import { param } from "./router.ts";
 import type { Route } from "./router.ts";
@@ -22,11 +22,11 @@ export const projectRoutes: Route[] = [
       const query = readQuery(url, projectListQuerySchema);
       const page = await listProjects(deps, {
         ownerId: user.id,
-        after: query.cursor === undefined ? null : decodeCursor(query.cursor),
+        after: query.cursor === undefined ? null : decodeProjectCursor(query.cursor),
       });
       return Response.json({
         projects: page.projects,
-        nextCursor: page.next && encodeCursor(page.next),
+        nextCursor: page.next && encodeProjectCursor(page.next),
       } satisfies ProjectListResponse);
     },
   },

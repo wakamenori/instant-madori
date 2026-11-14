@@ -11,9 +11,16 @@ import { meRoutes } from "./me.ts";
 import { patternRoutes } from "./patterns.ts";
 import { projectRoutes } from "./projects.ts";
 import { matchRoute } from "./router.ts";
+import { revisionRoutes } from "./revisions.ts";
 import { sampleRoutes } from "./sample.ts";
 
-const routes = [...meRoutes, ...projectRoutes, ...patternRoutes, ...sampleRoutes];
+const routes = [
+  ...meRoutes,
+  ...projectRoutes,
+  ...patternRoutes,
+  ...sampleRoutes,
+  ...revisionRoutes,
+];
 
 /** A Cloudflare Ray ID: 16 hex digits and a data-center code, e.g. `230b030023ae2822-SJC`. */
 const rayIdPattern = /^[0-9a-f]{16}-[A-Z]{3}$/;
