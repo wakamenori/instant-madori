@@ -34,12 +34,14 @@ jobs:
         run: |
           CLOUDFLARE_API_TOKEN="$(sed -n 's/^CLOUDFLARE_API_TOKEN=//p' "$MADORI_ENV_FILE")"
           export CLOUDFLARE_API_TOKEN
-          # The launchd runner cannot use the macOS keychain, so registry login must not go
-          # through Docker Desktop's credsStore. RUNNER_TEMP is emptied at the end of the job.
+          # The launchd runner cannot use the macOS keychain, so registry login must store its
+          # credentials in this job's config file. Docker picks the keychain helper by itself when
+          # a config holds no credsStore and no auths, so the config starts with a placeholder auth.
+          # RUNNER_TEMP is emptied at the end of the job.
           export DOCKER_CONFIG="$RUNNER_TEMP/docker"
           mkdir -p "$DOCKER_CONFIG"
           for entry in contexts cli-plugins buildx; do ln -sfn "$HOME/.docker/$entry" "$DOCKER_CONFIG/$entry"; done
-          jq '{currentContext}' "$HOME/.docker/config.json" > "$DOCKER_CONFIG/config.json"
+          jq '{currentContext, auths: {"placeholder.invalid": {}}}' "$HOME/.docker/config.json" > "$DOCKER_CONFIG/config.json"
           pnpm exec wrangler d1 migrations apply DB --remote --env staging
           pnpm exec wrangler deploy --env staging
       - name: Smoke test through Access
