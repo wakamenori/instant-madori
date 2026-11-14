@@ -500,6 +500,8 @@ SolidCraft一式を保持することと、通常のビルド・テスト対象�
 
 サービスの依存解決はルートのCargo.lockとpnpm-lock.yamlで固定する。Cargoのプロファイル・依存パッチは利用側ルートで必要な設定を管理し、SolidCraft側の設定が自動で引き継がれるとは仮定しない。キャッシュを利用する場合は、識別値に実際の依存解決とビルド条件を反映する。誤った再利用を避けるため、サービスから使うSolidCraftの評価キャッシュを無効にする。
 
+配信するWasmはreleaseプロファイルでビルドする。`pnpm setup`・`pnpm dev`・`pnpm build`・`pnpm check --full` は同じ生成スクリプトを使い、開発・検査・配信のWasmをそろえる。スクリプト内の一つのプロファイル値からCargoの `--profile` とwasm-bindgenの入力先を導き、`target/wasm32-unknown-unknown/release/` の出力からバインディングを生成する。プロファイルと入力先をログへ出す。初回はdebugよりコンパイルに時間がかかり、再ビルドでは依存のキャッシュを再利用する。RustのテストとClippyはdebugのままにする。通常・軽い検査は生成済みの型定義を使い、全体検査はreleaseのWasmを再生成して、ローカル配信と実Containerの接続を確かめる。
+
 開発では `pnpm dev` がWeb画面、Worker・D1、Wasmと、`wrangler dev` 経由のDocker Containerを接続する。画面だけを扱うときは `MADORI_DEV_CONTAINERS=0` でContainerを無効にする。`pnpm check --full` はDockerイメージをビルドし、実Containerとの接続も検査する。Dockerはビルドプラットフォーム上のRustからLinux amd64向けにコンパイルし、Cargoのキャッシュを再利用する。テスト用と本番用の認証設定・DB・R2・秘密情報は分離する。
 
 招待した利用者が使い始めるまでは、stagingだけを環境とし、本番の環境は作らない。本番の環境（設定、Accessアプリ、D1、R2、デプロイ手順）は、招待の前に6.6で用意する。本番はWorkerと静的ファイル、D1マイグレーション、R2、DO・Workflow、Containerイメージを一組の版としてデプロイする。RustはContainerの対象であるLinux向けにビルドし、Wasmは別の成果物として作る。形状処理のメモリと起動時間を測り、Containerのサイズ・同時実行数・休止条件を選ぶ。

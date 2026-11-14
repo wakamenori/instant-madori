@@ -21,7 +21,7 @@ mise exec -- pnpm dev
 
 以降の`pnpm`コマンドも、miseを有効にしたシェルで実行します。シェルにmiseを設定していなければ、上記のように`mise exec --`を前置してください。
 
-初回はRust・Wasmと依存ライブラリをビルドします。`pnpm setup`はツールの準備、Wasmバインディング・Worker型の生成、コミット時の検査フックの登録を行います。wasm-bindgen CLIはライブラリと同じ版を、このリポジトリの`.tools/`へインストールします。依存のインストールだけではGitフックを変更しません。
+初回はRust・Wasmと依存ライブラリをビルドします。`pnpm setup`はツールの準備、releaseのWasmバインディング・Worker型の生成、コミット時の検査フックの登録を行います。wasm-bindgen CLIはライブラリと同じ版を、このリポジトリの`.tools/`へインストールします。依存のインストールだけではGitフックを変更しません。
 
 `pnpm dev`は、ローカルのD1へマイグレーションを適用してから次のプロセスを起動し、Ctrl-Cでまとめて終了します。ContainerとプロキシはWranglerが終了時に削除します。終了処理の失敗は報告し、起動・実行結果と終了コードを維持します。
 
@@ -46,13 +46,13 @@ Viteのプロキシ（5173番）経由のAPI要求には、開発者として署
 
 検査の入口は `pnpm check` にまとめています。すべてのモードで最初にPrettier・rustfmt・ESLintの自動修正を行い、RustもClippyが自動適用できる修正を行ってから再整形・再検査します。修正できない問題が残れば失敗して後続処理を止めます。作業ツリーを書き換えるので、完了後に差分を確認してから必要な変更をステージしてください。コマンドはGitのステージ内容を変更しません。
 
-| コマンド            | 用途                                                                                                                                          |
-| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pnpm check --fast` | 自動修正、TypeScriptの型付きlint・型確認、Rustのnative/Wasm Clippy、未使用コード・依存、Dockerfile、upstream境界、SQL接続状態、秘密情報を検査 |
-| `pnpm check`        | 通常の作業確認。軽い検査にTypeScriptとRustのテストを追加                                                                                      |
-| `pnpm check --full` | 全体確認。Wasmの再生成、Web・Worker・Rustのビルド、ローカル接続テスト、依存のライセンス・取得元・脆弱性監査も実行。Dockerとネットワークが必要 |
-| `pnpm dev`          | Web・WorkerとDockerの形状処理Containerを起動                                                                                                  |
-| `pnpm build`        | Wasm・Web・Worker・ネイティブRustの成果物だけをビルド                                                                                         |
+| コマンド            | 用途                                                                                                                                                   |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `pnpm check --fast` | 自動修正、TypeScriptの型付きlint・型確認、Rustのnative/Wasm Clippy、未使用コード・依存、Dockerfile、upstream境界、SQL接続状態、秘密情報を検査          |
+| `pnpm check`        | 通常の作業確認。軽い検査にTypeScriptとRustのテストを追加                                                                                               |
+| `pnpm check --full` | 全体確認。releaseのWasmの再生成、Web・Worker・Rustのビルド、ローカル接続テスト、依存のライセンス・取得元・脆弱性監査も実行。Dockerとネットワークが必要 |
+| `pnpm dev`          | Web・WorkerとDockerの形状処理Containerを起動                                                                                                           |
+| `pnpm build`        | releaseのWasm・Web・Worker・ネイティブRustの成果物だけをビルド                                                                                         |
 
 補助スクリプトは `scripts/check/`・`scripts/dev/`・`scripts/generate/`・`scripts/build/`・`scripts/upstream/` に目的別に置き、複数の目的で使う部品は `scripts/shared/` に置きます。テストは対象ファイルと同じフォルダーに置きます。
 
@@ -60,7 +60,9 @@ Viteのプロキシ（5173番）経由のAPI要求には、開発者として署
 
 `--fast` はテスト実行・アプリのビルド・ネットワーク監査を省きます。Rustの型付き検査自体には依存のコンパイルが必要で、初回は時間がかかります。繰り返し実行ではCargoのキャッシュを再利用し、変更されたクレートを検査します。検査ごとの所要時間を出力します。
 
-`pnpm setup` で生成したWasmの型定義を通常・軽いモードで使います。初期生成がなければ準備手順を示して停止します。Wasmの公開API・依存・ビルド設定・upstreamを変更した場合は `--full` を実行してください。全体モードではWasmを再生成してからTypeScriptを検査し、実際に生成したWasmも接続テストで確認します。
+`pnpm setup`・`pnpm dev`・`pnpm build`・`pnpm check --full` は、同じスクリプトでWasmをreleaseビルドします。Cargoのプロファイルとwasm-bindgenの入力先は一つの値から決め、`target/wasm32-unknown-unknown/release/madori_viewer.wasm` からバインディングを生成します。開発・検査・配信で同じWasmを使います。依存を含む初回のWasmコンパイルは、手元の単発の参考値でdebugが19秒、releaseが31秒でした。初回は長くなりますが、再ビルドでは依存のキャッシュを再利用します。RustのテストとClippyはdebugのままです。
+
+`pnpm setup` で生成したWasmの型定義を通常・軽いモードで使います。初期生成がなければ準備手順を示して停止します。Wasmの公開API・依存・ビルド設定・upstreamを変更した場合は `--full` を実行してください。全体モードではreleaseのWasmを再生成してからTypeScriptを検査し、配信用のWasmもローカル配信と実Containerの接続テストで確認します。
 
 TypeScriptのテストはNode.js標準のtest runnerを使います。HTTP経由のWorker APIテストは、テストファイルごとに一時的なD1へ実際のマイグレーションを適用し、`wrangler dev` でworkerd上のWorkerを起動して、HTTPで検査します。署名にはテスト用の鍵を使い、Cloudflareのアカウントは不要です。`apps/*/{src,tests}/**/*.test.ts`、`packages/*/{src,tests}/**/*.test.ts`、`scripts/**/*.test.ts` が対象です。現在は、WorkerのAPI（認証、所有権、冪等性、版の競合、ページング、サンプル取得、案の確定・読取とR2の内容の照合）、Containerの起動・引継ぎ・障害復帰、内部プロトコル、WebのAPIエラーとビューアの初期化・解放、操作量、アクセシビリティの静的マークアップ、スキーマ・生成契約・環境別バインディングを確認するテストがあります。Rustでは表示形式の固定フィクスチャ・破損入力・大量入力、配置済み形状の書出し、内部API認証、シーン変換とカメラを検査します。Node.jsの型だけを使うテストには専用のtsconfigを用意し、Worker本体の実行環境の型から分けています。RPCとサービスの単体テストはWorkerの型も必要なため、Node用のテストからtsconfigを分けています。これらの単体テスト自体はNodeで動き、workerdやContainerを起動しません。例外として、`tests/rpc/revision-fixture.ts` は単体テストではなく、案の保存のHTTPテストから子プロセスとして起動され、`getPlatformProxy` 経由のworkerdでローカルのD1・R2に対してサービスを実行します。HTTPテストはその間Workerを一時停止し、fixtureは同じ永続化先を指定します。fixtureがproxyを終了してからWorkerを再開し、保存した内容を公開APIから読みます。同じSQLiteファイルを二つのworkerdが同時に開かないためです。静的マークアップとDOM/GPUの代替オブジェクトによる検査は、ブラウザでの実描画を確かめるものではありません。
 
