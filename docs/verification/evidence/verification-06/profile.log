@@ -1,0 +1,26 @@
+run 0 outline rebuild
+create 92.888875 change 86.130959
+run 0 outline parameter
+create 84.34216699999999 change 52.310333
+run 0 union rebuild
+create 255.911875 change 256.602667
+run 0 union parameter
+create 253.53599999999997 change 236.319042
+        3.49 real         3.24 user         0.14 sys
+            94650368  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+                4338  page reclaims
+                1670  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                   0  voluntary context switches
+                2082  involuntary context switches
+         59209335308  instructions retired
+         13094331011  cycles elapsed
+            58720856  peak memory footprint
