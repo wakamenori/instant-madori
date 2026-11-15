@@ -45,7 +45,7 @@ await test("Immutable revisions through local D1, R2 and public HTTP", async (t)
     return meResponseSchema.parse(await response.json()).user.id;
   };
   const ownerId = await identify(owner);
-  const otherId = await identify(other);
+  await identify(other);
   const created = await worker.call("/api/projects", {
     method: "POST",
     as: owner,
@@ -72,7 +72,7 @@ await test("Immutable revisions through local D1, R2 and public HTTP", async (t)
   });
   const { revisions } = revisionListResponseSchema
     .omit({ nextCursor: true })
-    .parse(await fixture(worker, { kind: "commit", ownerId, otherId, patternId: pattern.id }));
+    .parse(await fixture(worker, { kind: "commit", ownerId, patternId: pattern.id }));
   await t.test("once-only storage operations apply first and replay on a resend", async () => {
     assert.deepEqual(await fixture(worker, { kind: "once", ownerId }), { ok: true });
   });

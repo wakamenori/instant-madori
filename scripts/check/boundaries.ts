@@ -256,6 +256,19 @@ export const typescriptBoundaries: TypeScriptBoundary[] = [
     appliesToTests: true,
   },
   {
+    id: "job-execution-assertions",
+    from: allScopes.filter((scope) => scope.startsWith("worker-")),
+    kind: "syntax",
+    selectors: [
+      "TSAsExpression > TSTypeReference.typeAnnotation:matches([typeName.name='JobExecutionRight'], [typeName.right.name='JobExecutionRight'])",
+      "TSTypeAssertion > TSTypeReference.typeAnnotation:matches([typeName.name='JobExecutionRight'], [typeName.right.name='JobExecutionRight'])",
+    ],
+    reason: "docs/plan.md §4.6 execution rights require a verified job row",
+    message:
+      "Obtain JobExecutionRight by claiming or restoring a job instead of a direct assertion.",
+    appliesToTests: true,
+  },
+  {
     id: "never-assertions",
     from: allScopes.filter((scope) => scope.startsWith("worker-")),
     kind: "syntax",

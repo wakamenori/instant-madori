@@ -5,6 +5,7 @@ import * as patterns from "./patterns.ts";
 import * as revisions from "./revisions.ts";
 import * as snapshots from "./snapshots.ts";
 import * as jobs from "./jobs.ts";
+import * as execution from "./job-execution.ts";
 import { upsertAccessUser } from "./users.ts";
 
 export function createStore(db: D1, bucket: R2) {
@@ -13,6 +14,20 @@ export function createStore(db: D1, bucket: R2) {
       upsertAccess: (input: Parameters<typeof upsertAccessUser>[1]) => upsertAccessUser(db, input),
     },
     jobs: {
+      claim: (input: Parameters<typeof execution.claimNextJob>[1]) =>
+        execution.claimNextJob(db, input),
+      restore: (reference: Parameters<typeof execution.readCurrentJobExecution>[1]) =>
+        execution.readCurrentJobExecution(db, reference),
+      activeReference: (input: Parameters<typeof execution.readActiveJobReference>[1]) =>
+        execution.readActiveJobReference(db, input),
+      check: (right: Parameters<typeof jobs.checkJobExecution>[1]) =>
+        jobs.checkJobExecution(db, right),
+      complete: (
+        right: Parameters<typeof jobs.completeJob>[2],
+        input: Parameters<typeof jobs.completeJob>[3],
+      ) => jobs.completeJob(db, bucket, right, input),
+      fail: (right: Parameters<typeof jobs.recordJobFailure>[1], now: string) =>
+        jobs.recordJobFailure(db, right, now),
       acceptOnce: (
         key: Parameters<typeof jobs.acceptInstructionOnce>[1],
         input: Parameters<typeof jobs.acceptInstructionOnce>[2],
@@ -45,8 +60,6 @@ export function createStore(db: D1, bucket: R2) {
       ) => patterns.renamePatternOnce(db, key, input),
     },
     revisions: {
-      commit: (input: Parameters<typeof revisions.commitRevision>[1]) =>
-        revisions.commitRevision(db, input),
       state: (scope: Parameters<typeof revisions.getPatternState>[1]) =>
         revisions.getPatternState(db, scope),
       list: (query: Parameters<typeof revisions.listRevisions>[1]) =>
@@ -55,8 +68,10 @@ export function createStore(db: D1, bucket: R2) {
         revisions.getRevisionSnapshot(db, scope),
     },
     snapshots: {
-      write: (input: Parameters<typeof snapshots.writeSnapshot>[1]) =>
-        snapshots.writeSnapshot(bucket, input),
+      write: (
+        right: Parameters<typeof snapshots.writeSnapshot>[1],
+        input: Parameters<typeof snapshots.writeSnapshot>[2],
+      ) => snapshots.writeSnapshot(bucket, right, input),
       display: (snapshot: Parameters<typeof snapshots.readSnapshotDisplay>[1]) =>
         snapshots.readSnapshotDisplay(bucket, snapshot),
     },

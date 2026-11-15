@@ -1,4 +1,5 @@
-import type { OwnerId } from "../owner.ts";
+import { readJobExecutionRight } from "./job-execution.ts";
+import type { JobExecutionRight } from "./job-execution.ts";
 import type { R2 } from "./r2.ts";
 import { displayContentType } from "@madori/contracts";
 import { z } from "zod";
@@ -43,31 +44,57 @@ async function sha256(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
 
 export async function writeSnapshot(
   bucket: R2,
-  input: { id: string; ownerId: OwnerId; now: string; display: Uint8Array<ArrayBuffer> },
-): Promise<Snapshot & { ownerId: OwnerId }> {
-  const prefix = snapshotPrefix(input.ownerId, input.id);
+  right: JobExecutionRight,
+  input: { id: string; now: string; display: Uint8Array<ArrayBuffer> },
+): Promise<Snapshot> {
+  const { ownerId, jobId, generation } = readJobExecutionRight(right);
+  const { id, now } = input;
+  const display = input.display.slice();
+  const prefix = snapshotPrefix(ownerId, id);
   const displayKey = `${prefix}display.mdsp`;
   const manifest = manifestSchema.parse({
     formatVersion: 1,
     display: {
       key: displayKey,
       mediaType: displayContentType,
-      bytes: input.display.byteLength,
-      sha256: await sha256(input.display),
+      bytes: display.byteLength,
+      sha256: await sha256(display),
     },
   });
-  await bucket.putNew(displayKey, input.display, displayContentType);
+  await bucket.putNew(displayKey, display, displayContentType);
   const manifestBytes = new Uint8Array(new TextEncoder().encode(JSON.stringify(manifest)));
   const manifestKey = `${prefix}manifest.json`;
-  await bucket.putNew(manifestKey, manifestBytes, "application/json");
+  const manifestSha256 = await sha256(manifestBytes);
+  await bucket.putNew(manifestKey, manifestBytes, "application/json", {
+    customMetadata: { jobId, generation: String(generation) },
+    sha256: manifestSha256,
+  });
   return {
-    id: input.id,
-    ownerId: input.ownerId,
+    id,
+    ownerId,
     formatVersion: 1,
     manifestKey,
-    manifestSha256: await sha256(manifestBytes),
-    createdAt: input.now,
+    manifestSha256,
+    createdAt: now,
   };
+}
+
+export async function verifyJobSnapshot(bucket: R2, right: JobExecutionRight, input: Snapshot) {
+  const { ownerId, jobId, generation } = readJobExecutionRight(right);
+  const parsed = snapshotSchema.safeParse(input);
+  if (!parsed.success) return null;
+  const snapshot = parsed.data;
+  const key = `${snapshotPrefix(ownerId, snapshot.id)}manifest.json`;
+  if (snapshot.ownerId !== ownerId || snapshot.manifestKey !== key) return null;
+  const object = await bucket.head(key);
+  if (
+    object === null ||
+    object.customMetadata.jobId !== jobId ||
+    object.customMetadata.generation !== String(generation) ||
+    object.sha256 !== snapshot.manifestSha256
+  )
+    return null;
+  return snapshot;
 }
 
 export async function readSnapshotDisplay(bucket: R2, snapshot: Snapshot) {

@@ -65,7 +65,7 @@ void test("Storage types reject unverified identities, duplicate owners and forg
     const identity: VerifiedIdentity = { issuer: "issuer", subject: "subject", email: "email" };
     void store.patterns.get({ ownerId: patternId, patternId });
     void store.projects.renameOnce(key, { ownerId, projectId: patternId, expectedVersion: 1, name: "renamed", now: "now" });
-    void store.revisions.commit({ ownerId });
+    void store.jobs.check(ownerId);
     void store.db;
     void database.first<{ name: string }>({ sql: "SELECT 1", bindings: [] });
     void database.all(rows<z.ZodType<{ name: string }>>({ sql: "SELECT 1", bindings: [] }, z.unknown(), "row"));
@@ -82,7 +82,7 @@ void test("Storage types reject unverified identities, duplicate owners and forg
       [2741, 14],
       [2322, 15],
       [2353, 16],
-      [2353, 17],
+      [2345, 17],
       [2339, 18],
       [2345, 19],
       [2379, 20],
@@ -96,6 +96,25 @@ void test("Storage types reject unverified identities, duplicate owners and forg
     declare const identity: VerifiedIdentity;
     declare const resolved: Awaited<ReturnType<Store["users"]["upsertAccess"]>>;
   `;
+  const missingRights = diagnostics(`
+    void store.jobs.check(ownerId);
+    void store.jobs.check({ reference: { patternId, jobId: patternId, generation: 1 } });
+  `);
+  assert.equal(missingRights.length, 2);
+  for (const diagnostic of missingRights) {
+    assert.equal(diagnostic.code, 2345);
+    const message = ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n");
+    assert.match(message, /JobExecutionRight/);
+    assert.match(message, /#scope/);
+  }
+  assert.deepEqual(
+    diagnostics(`
+    import type { JobExecutionRight } from "../../src/storage/job-execution.ts";
+    declare const right: JobExecutionRight;
+    void store.jobs.check(right);
+  `),
+    [],
+  );
   const valid = `
     async function resolve() {
       const result = await store.users.upsertAccess({ identity, newId: patternId, now: "now" });
