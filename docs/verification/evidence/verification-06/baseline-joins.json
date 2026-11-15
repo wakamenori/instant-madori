@@ -1,0 +1,56 @@
+[
+  {
+    "error": 0.0,
+    "expected": 1920000000.0,
+    "featureErrors": 0,
+    "join": "corner90",
+    "method": "outline",
+    "tolerance": 100,
+    "volume": 1920000000.0
+  },
+  {
+    "error": 7.152557373046875e-7,
+    "expected": 1896000000.0,
+    "featureErrors": 0,
+    "join": "corner90",
+    "method": "union",
+    "tolerance": 100,
+    "volume": 1896000000.0000007
+  },
+  {
+    "error": -4.76837158203125e-7,
+    "expected": 1920000000.0,
+    "featureErrors": 0,
+    "join": "corner45",
+    "method": "outline",
+    "tolerance": 100,
+    "volume": 1919999999.9999995
+  },
+  {
+    "error": -1.6689300537109375e-6,
+    "expected": 1910058874.5030458,
+    "featureErrors": 0,
+    "join": "corner45",
+    "method": "union",
+    "tolerance": 100,
+    "volume": 1910058874.5030441
+  },
+  {
+    "error": 4.76837158203125e-7,
+    "expected": 2467200000.0,
+    "featureErrors": 0,
+    "join": "T",
+    "method": "outline",
+    "tolerance": 100,
+    "volume": 2467200000.0000005
+  },
+  {
+    "error": 4.76837158203125e-7,
+    "expected": 2467200000.0,
+    "featureErrors": 0,
+    "join": "T",
+    "method": "union",
+    "tolerance": 100,
+    "volume": 2467200000.0000005
+  }
+]

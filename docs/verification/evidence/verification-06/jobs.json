@@ -1,0 +1,218 @@
+[
+  {
+    "furniture": 0,
+    "keptParamTotal": {
+      "max": 170.935833,
+      "median": 169.573083,
+      "min": 167.74066600000003,
+      "n": 5,
+      "samples": [
+        170.935833,
+        169.573083,
+        167.937166,
+        167.74066600000003,
+        170.48846
+      ]
+    },
+    "keptRegenTotal": {
+      "max": 262.91595700000005,
+      "median": 255.05437499999996,
+      "min": 249.89570800000004,
+      "n": 5,
+      "samples": [
+        262.91595700000005,
+        249.89570800000004,
+        250.12395899999999,
+        255.05437499999996,
+        255.131916
+      ]
+    },
+    "perBatch": [
+      {
+        "batch": "b1 create",
+        "keptParamMedian": 58.532624999999996,
+        "keptRegenMedian": 57.942542,
+        "statelessInputBytes": 1077,
+        "statelessMedian": 57.2195,
+        "statelessOutputBytes": 61471
+      },
+      {
+        "batch": "b2 move wall",
+        "keptParamMedian": 44.803208,
+        "keptRegenMedian": 58.151042,
+        "statelessInputBytes": 1077,
+        "statelessMedian": 57.355999999999995,
+        "statelessOutputBytes": 61471
+      },
+      {
+        "batch": "b3 recolor",
+        "keptParamMedian": 0.111709,
+        "keptRegenMedian": 0.100792,
+        "statelessInputBytes": 1146,
+        "statelessMedian": 57.335167,
+        "statelessOutputBytes": 61470
+      },
+      {
+        "batch": "b4 add door",
+        "keptParamMedian": 7.131959,
+        "keptRegenMedian": 65.337041,
+        "statelessInputBytes": 1189,
+        "statelessMedian": 65.162542,
+        "statelessOutputBytes": 63111
+      },
+      {
+        "batch": "b5 display only",
+        "keptParamMedian": 0.0485,
+        "keptRegenMedian": 0.049542,
+        "statelessInputBytes": 1189,
+        "statelessMedian": 64.245792,
+        "statelessOutputBytes": 63111
+      },
+      {
+        "batch": "b6 move wall",
+        "keptParamMedian": 51.379,
+        "keptRegenMedian": 64.08,
+        "statelessInputBytes": 1189,
+        "statelessMedian": 63.982833,
+        "statelessOutputBytes": 63111
+      },
+      {
+        "batch": "b7 recolor exterior",
+        "keptParamMedian": 0.132333,
+        "keptRegenMedian": 0.10387500000000001,
+        "statelessInputBytes": 1255,
+        "statelessMedian": 64.705,
+        "statelessOutputBytes": 63431
+      },
+      {
+        "batch": "b8 validate+save",
+        "keptParamMedian": 7.2615,
+        "keptRegenMedian": 7.179958,
+        "statelessInputBytes": 1255,
+        "statelessMedian": 71.323541,
+        "statelessOutputBytes": 63431
+      }
+    ],
+    "statelessTotal": {
+      "max": 510.090332,
+      "median": 504.53121000000004,
+      "min": 496.88525000000004,
+      "n": 5,
+      "samples": [
+        506.564043,
+        496.88525000000004,
+        500.86354100000005,
+        504.53121000000004,
+        510.090332
+      ]
+    }
+  },
+  {
+    "furniture": 10,
+    "keptParamTotal": {
+      "max": 619.052915,
+      "median": 615.3791679999999,
+      "min": 605.849749,
+      "n": 5,
+      "samples": [
+        618.347583,
+        615.3791679999999,
+        610.627374,
+        619.052915,
+        605.849749
+      ]
+    },
+    "keptRegenTotal": {
+      "max": 904.0195429999999,
+      "median": 878.6001669999999,
+      "min": 869.196751,
+      "n": 5,
+      "samples": [
+        904.0195429999999,
+        870.6239589999999,
+        869.196751,
+        879.4285840000001,
+        878.6001669999999
+      ]
+    },
+    "perBatch": [
+      {
+        "batch": "b1 create",
+        "keptParamMedian": 209.120458,
+        "keptRegenMedian": 207.50533299999998,
+        "statelessInputBytes": 1077,
+        "statelessMedian": 207.847667,
+        "statelessOutputBytes": 213201
+      },
+      {
+        "batch": "b2 move wall",
+        "keptParamMedian": 179.485625,
+        "keptRegenMedian": 208.131833,
+        "statelessInputBytes": 1077,
+        "statelessMedian": 209.85225,
+        "statelessOutputBytes": 213201
+      },
+      {
+        "batch": "b3 recolor",
+        "keptParamMedian": 0.3595,
+        "keptRegenMedian": 0.32375,
+        "statelessInputBytes": 1146,
+        "statelessMedian": 207.65045800000001,
+        "statelessOutputBytes": 213200
+      },
+      {
+        "batch": "b4 add door",
+        "keptParamMedian": 7.8524579999999995,
+        "keptRegenMedian": 215.417167,
+        "statelessInputBytes": 1189,
+        "statelessMedian": 215.838208,
+        "statelessOutputBytes": 214844
+      },
+      {
+        "batch": "b5 display only",
+        "keptParamMedian": 0.20625,
+        "keptRegenMedian": 0.206042,
+        "statelessInputBytes": 1189,
+        "statelessMedian": 215.19387500000002,
+        "statelessOutputBytes": 214844
+      },
+      {
+        "batch": "b6 move wall",
+        "keptParamMedian": 188.361875,
+        "keptRegenMedian": 214.317667,
+        "statelessInputBytes": 1189,
+        "statelessMedian": 218.496,
+        "statelessOutputBytes": 214844
+      },
+      {
+        "batch": "b7 recolor exterior",
+        "keptParamMedian": 0.373792,
+        "keptRegenMedian": 0.355875,
+        "statelessInputBytes": 1255,
+        "statelessMedian": 215.331208,
+        "statelessOutputBytes": 215164
+      },
+      {
+        "batch": "b8 validate+save",
+        "keptParamMedian": 28.962374999999998,
+        "keptRegenMedian": 28.744833,
+        "statelessInputBytes": 1255,
+        "statelessMedian": 242.63316700000001,
+        "statelessOutputBytes": 215164
+      }
+    ],
+    "statelessTotal": {
+      "max": 1741.825457,
+      "median": 1732.960876,
+      "min": 1713.9116669999999,
+      "n": 5,
+      "samples": [
+        1741.825457,
+        1713.9116669999999,
+        1730.003625,
+        1732.960876,
+        1733.586959
+      ]
+    }
+  }
+]
