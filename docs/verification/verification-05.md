@@ -7,11 +7,9 @@
 - 対象はstagingのWorker `instant-madori-staging` である。#42 は、PR #267 のマージコミット `82c911e9c682a9d01c29fcf3137c26690ef5d482` で入った。測定したのは、そのあとのマージコミット `bbd8460920d8fb19334b3004d8424dd400f9bb44` の `deploy-staging`（run 43652651038）が成功した後の版である。
 - 休止時間は、`apps/worker/wrangler.jsonc` のstagingの `GEOMETRY_IDLE_TIMEOUT_MS` で 600,000 ms とした。
 - 検証用の利用者（#34 のAccessのサービストークン）として、`GET /api/sample/display` を一度だけ送った。その後はstagingへ要求を送っていない。
-- この要求の前の、stagingへの要求は二回ある。
-  - デプロイの疎通の確認（23:26:19Z）。最後の要求の `GET /api/sample/display` で、Containerを使う。
-  - #36 の確認（23:27:13Z）。`POST /api/patterns/:patternId/messages` と `GET /api/patterns/:patternId/state` の二つで、Containerを使わない。
-
-  証拠には、この三つの要求を残した。
+- この要求の前に、stagingで二つの確認を行った。証拠には、そのうち次の三つの要求を残した。
+  - デプロイの疎通の確認（23:26:19Z）の最後の要求 `GET /api/sample/display`。Containerを使う。
+  - #36 の確認（23:27:13Z）の `POST /api/patterns/:patternId/messages` と `GET /api/patterns/:patternId/state`。Containerを使わない。
 - 観測には、Workers Logsの検索（Workers Observabilityのクエリ API、`$metadata.service = instant-madori-staging`）を使った。
 
 ## 結果
