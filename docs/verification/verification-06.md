@@ -45,7 +45,7 @@ r4/r5側の `v1-r1` に色を付ける変異は `wrongBodyPaint.ok=false`、部�
 
 全再生成を採る。住宅データと外観の役割を正とすれば、壁の追加・削除・分割でCADの依存関係と孤立した色指定を差分同期する仕組みを減らせる。反対役と指揮役の再実行では、保持Sessionで壁を消す際、開口の切欠きも同時に消さないと評価に失敗し、削除した壁の色も孤立して残った。パラメータ更新による壁移動は27フィーチャー中16を再評価し、変更箇所だけの更新にはならなかった。
 
-これは全再生成の速度優位を示す判断ではない。初回の壁移動の時間は範囲が重なり、固定の短縮率は主張しない。反対役が試したドア追加・壁追加では保持Sessionが25〜47倍速かった。住宅操作と一括の種類ごとに費用が違うため、壁移動だけで方式全体の速さを決めない。
+これは全再生成の速度優位を示す判断ではない。初回の壁移動の時間は範囲が重なり、固定の短縮率は主張しない。反対役が試したドア追加・壁追加では、表示データの書き出しを含め、保持Sessionが6室の家で8〜19倍、24室の大きい家で25〜47倍速かった。住宅操作と一括の種類ごとに費用が違うため、壁移動だけで方式全体の速さを決めない。
 
 指揮役の再実行では、6室5操作のプレビュー込みで保持84 ms、全再生成394 ms、キャッシュ引継ぎ176 msだった。反対役の24室21操作では保持0.43〜0.54秒、全再生成8.4〜10.2秒、キャッシュ引継ぎ0.93〜3.9秒だった。新しい要素を最後に足す順序なら0.93秒だった。これらは独立の反対役の観測であり、次の担当側の追加計測とは区別する。
 
@@ -68,6 +68,8 @@ SolidCraftの[Model.cache](../../third_party/solidcraft/crates/doc/src/eval.rs)�
 
 最初の[角90度・45度・Tの比較](evidence/verification-06/baseline-joins.json)は両方式で評価エラー0、体積誤差0.000002 mm³未満だった。長さ2,000・厚さ200・高さ2,400の2壁の留めの期待値は2×2,000×200×2,400=1,920,000,000 mm³。Tは(4,000×200+1,900×120)×2,400=2,467,200,000 mm³。中心線端で突き付けた箱の和は留めと異なり、45度では外側が9,941,125.497 mm³欠ける。箱和の期待値は `(2Lt-(t/2)^2 tan(θ/2))H` として別に計算した。箱和が斜め接合に使えないという証拠ではなく、延長・クリップまで含む別実装は比較していない。
 
+この試作の箱の和は採らない。すべての壁が一つのボディになり、壁と面の役割の対応を別に作る必要がある。6室の初期作成の中央値は輪郭62.215 msに対して箱和239.057 msで、約3.8倍遅かった。また、試した45度の突き付けでは材料が欠けた。これらは今回の組み立て方の比較であり、箱の延長・クリップで留めを作る別実装を否定するものではない。
+
 採用する輪郭方式も、無条件に側面の交点を使うだけでは破綻した。[追加接合の全結果](evidence/verification-06/decided-joins.json)には、以前の規則の結果と、決めた規則での作成または拒否を並べた。
 
 | ケース | 以前の規則 | 決めた規則の結果 |
@@ -77,7 +79,7 @@ SolidCraftの[Model.cache](../../third_party/solidcraft/crates/doc/src/eval.rs)�
 | 厚さ違い、ずれ2・3・5度 | この長さでは正しい | 3度以内は二等分線、5度は向かい合う側面の交点。いずれも誤差0.000001未満 |
 | 内角15度、壁長2,000 | 正しい | 成功。体積1,920,000,000 mm³ |
 | 内角15度、壁長700 | 閉じたまま自己交差し、2,242,872 mm³過大 | 留めに必要な約759.6 mmを下回るため生成前に拒否 |
-| 外側面をそろえるための40 mmの接続壁 | zero-length line、すき間 | 短い接続壁を拒否し、境界の側面オフセット200/0・120/0で表すと成功 |
+| 外側面をそろえるための40 mmの接続壁 | 接続壁が三角形に退化。和は1ボディ・すき間なしで、体積が11,520,000 mm³過大 | 短い接続壁を拒否し、境界の側面オフセット200/0・120/0で表すと成功 |
 | Y字30度、厚さ120と200 | 通し壁がなく規則未定義 | 隣接する向かい合う側面の交点で生成。いずれも体積誤差0.000001未満 |
 | 扇形、3壁の間が30度 | 規則未定義 | 同じ隣接面の規則で生成、体積誤差0.000001未満 |
 | 両側に50 mmずれて付いたT | 隣接面の規則だけなら480,000 mm³の重なり | 通し壁を優先し、合計体積と和の体積が一致 |
@@ -135,7 +137,7 @@ Sessionを入力snapshotの内容をキーにしたキャッシュとして要�
 
 ## 再実行と証拠
 
-試作はマージしない。ソースはこの作業worktreeのGit追跡外の `.audit/issue69/shape69-final.rs` と `.audit/issue69/requests-reference.rs` に残す。別checkoutで再現するときは、このworktreeからソースもコピーする。反対役の元scratchpadは読取りだけにし、修正したのは自分のコピーである。新しいcheckoutでは先にREADMEの固定ツールで `pnpm install --frozen-lockfile` と `pnpm setup` を行う。
+試作はマージしない。ソースはこの作業worktreeのGit追跡外の `.audit/issue69/shape69-final.rs` と `.audit/issue69/requests-reference.rs` に残す。別checkoutで再現するときは、このworktreeからソースもコピーする。反対役の元scratchpadは読取りだけにした。`shape69-final.rs` は反対役の試作をコピーして修正したものを含む。`requests-reference.rs` は反対役の `adv69jb.rs` とバイト単位で同じで、修正していない。新しいcheckoutでは先にREADMEの固定ツールで `pnpm install --frozen-lockfile` と `pnpm setup` を行う。
 
 ```sh
 mkdir -p crates/modeling/examples
@@ -148,7 +150,17 @@ target/release/examples/shape69 batch 6 4 1 1 21 5 0
 target/release/examples/shape69 batch 6 4 1 1 21 5 1
 ```
 
-最初の56試行を再現するときは `.audit/issue69/shape69-baseline.rs` を同じexampleへ置いてビルドし、`target/release/examples/shape69 .audit/issue69/rerun 7` を実行する。基準の外観検査は前述のとおり弱いため、追加検証を省かない。要求費用の参照試作は `requests-reference.rs` をexampleへ置き、同じrelease設定でビルドして `api <出力先> 5` を実行する。
+最初の56試行を再現するときは `.audit/issue69/shape69-baseline.rs` を同じexampleへ置いてビルドし、`target/release/examples/shape69 .audit/issue69/rerun 7` を実行する。基準の外観検査は前述のとおり弱いため、追加検証を省かない。要求費用とジョブ費用の参照試作は、次の手順で再実行する。
+
+```sh
+export CARGO_INCREMENTAL=0
+command cp -f .audit/issue69/requests-reference.rs crates/modeling/examples/shape69.rs
+mise exec -- cargo build --locked --release -p madori-modeling --example shape69 -j 4
+target/release/examples/shape69 api .audit/issue69/rerun-requests 5
+target/release/examples/shape69 job .audit/issue69/rerun-jobs 5
+```
+
+出力ファイルは、それぞれ `rerun-requests/api.json` と `rerun-jobs/job.json` である。記録の証拠へコピーする際に `requests.json` と `jobs.json` に改名した。
 
 関連する観測は `python3 docs/verification/evidence/verification-06/verify.py` で再照合する。試作ソースのハッシュは[source-hashes.txt](evidence/verification-06/source-hashes.txt)に残した。プロダクトの検査は `CARGO_INCREMENTAL=0 mise exec -- pnpm check` を使う。
 
