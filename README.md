@@ -27,6 +27,12 @@ mise exec -- pnpm dev
 
 Containerを使うローカルセッション（実Containerテスト、別worktreeやself-hosted runnerでの `pnpm check --full`）は同時に起動できます。Miniflareがセッションごとに異なるIDをContainerの名前（`workerd-<ID>-instant-madori-GeometryContainer-...`）に付けるためです。`pnpm dev` だけは8787番と5173番のポートを固定しているので、同時に一つしか起動できません。クラッシュしたセッションのContainerは残ることがあります。`docker ps -a --format '{{.ID}} {{.Names}}'` で `workerd-` で始まる名前を確かめ、動いているセッションがないときに `docker rm --force <ID>...` で削除します。
 
+`pnpm check --full` は最後に、接続先のローカルDocker Engineの未使用ビルドキャッシュを回収します。Cargoのregistry・git・targetを含む `exec.cachemount` は合計8 GiBまで残します。それとは別に、`regular` と `frontend` は最近使った記録から合計4 GiBまで残します。形状サービスの一組の層は、Rustの基底層・aptのRUN・COPY・CargoのRUN・frontendを合わせて約3.30 GBでした。4 GiBの枠でこの一組と更新時の余裕を残し、毎回のRustイメージの再取得とaptの実行を避けます。時間の範囲ではビルドが集中した際の容量を制限できないため、容量で制限します。
+
+各枠を超えた場合は最終使用時刻が古い未使用記録から丸ごと消し、`source.local`・`source.git.checkout`・`internal` の未使用記録はすべて消します。使用中の記録と未知の種類は残し、未知の種類は一行で報告します。Dockerは使用中のcache mountを0バイトと報告するため、その実容量は上限の計算に含められません。使用が終わった後や別のビルドで増えた後は、実容量が上限を超えることがあります。回収後の報告値も、使用中のmountの実容量を保証しません。イメージ・Container・ボリュームは回収しません。Unixソケットで接続するローカルDockerを対象とし、独立したbuildx builderは対象にしません。
+
+手で確かめる場合は `pnpm docker:prune-build-cache --dry-run` で保持・削除候補と容量を表示し、`pnpm docker:prune-build-cache` で回収します。上限を変える場合は `--mount-limit-bytes 8589934592 --layer-limit-bytes 4294967296` のようにバイト数を指定します。このオプションはその実行だけに適用します。
+
 | URL                   | 内容                                                            |
 | --------------------- | --------------------------------------------------------------- |
 | http://127.0.0.1:5173 | Reactの開発画面。サンプルをWebGPUで描画する                     |
@@ -113,6 +119,8 @@ Dependabotはnpm・Cargoの更新提案用に残し、upstream本体はsubtree�
 PRごとに `.github/workflows/check.yml` が、開発用Macのself-hosted runner（ラベル `madori`）で `pnpm setup` と `pnpm check` を実行します。変更したファイルから `scripts/check/ci-mode.ts` が `--full` を付けるかを決めます。最後に、自動修正で差分が出ていないことを確かめます。GitHubのrunnerは使いません。無料プランのprivateリポジトリでは2コア・ディスクの空き13 GBで、`--full` がディスク不足で失敗し、無料枠も足りないためです。
 
 checkoutは毎回clone直後と同じ状態から始めます。Rustの `target/` と `.tools/` だけは、`$RUNNER_TOOL_CACHE/madori` へのシンボリックリンクで実行の間に再利用します。runnerの `--full` は、手元の `pnpm dev` や `pnpm check --full` と同時に動いても衝突しません。
+
+runnerでも `--full` の最後に、手元と同じ規則でDockerのビルドキャッシュを回収します。cache mountは合計8 GiBまで、最近使ったregularとfrontendは別枠で合計4 GiBまで残します。使用中の記録はBuildKitが保持するため、並行するビルドの記録は消しません。使用中のcache mountの0バイトという報告値では実容量を把握できません。runnerの `target/` と `.tools/` はこの回収の対象にしません。
 
 このリポジトリではブランチ保護を使えないため、検査の成功はマージの条件として強制されません。マージの前に、PRの最新のheadで `check` が成功していることを確かめます。
 
