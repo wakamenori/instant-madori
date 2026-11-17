@@ -91,7 +91,7 @@ git rev-parse HEAD
 
 - 画面は T3 のプレビューで操作する。`preview_open` に `target: { kind: "environment-port", port: 5173 }`、`open: false`、`reuseExistingTab: false` を渡し、返った `tabId` だけを操作する。このプレビューの Chromium は WebGPU を使える。
 - 要素の ref は、`save` を付けない `preview_snapshot` の `accessibilityTree` から取る。新しい snapshot を撮ると、`save: true` でも前の ref は無効になる。操作の直前に ref を取り直す。
-- API は 5173 番のプロキシへ `curl` で送る。プロキシが、開発者として署名したトークンを付ける。8787 番へ直接送ると、`/api/health` のほかは 401 になる。
+- API は 5173 番のプロキシへ `curl` で送る。プロキシが、開発者として署名したトークンを付ける。8787 番へ直接送ると、認証が要る経路は 401 になる。`/api/health` は認証なしで応答し、未知の経路は 404、許していないメソッドは 405 になる。
 - GET 以外の要求には `origin: http://127.0.0.1:5173` を付ける。付けないと、CSRF の防御で `403 forbidden` になる。
 - 書き込みを伴う要求の `requestId` は `uuidgen` で作る。
 - 別の利用者として試すときは、片付けてから `MADORI_DEV_EMAIL=other@example.com` を付けて起動し直す。同じ worktree なら、ローカルの D1 の中身は残る。
@@ -122,7 +122,7 @@ Wrangler は終了時に形状の Container を消すが、この回の `-proxy`
 
 ## マージの後に staging を確かめる
 
-staging へは、main へのマージでしかデプロイしない（README「stagingへデプロイする」）。まずデプロイの実行を確かめる。
+main へマージすると、staging へ自動でデプロイされる。ブランチを試すときに workflow を手で実行する方法は、README「stagingへデプロイする」にある。マージの後は、まずデプロイの実行を確かめる。
 
 ```sh
 gh run list --workflow deploy-staging.yml --commit "$MERGE_SHA" --json status,conclusion,url

@@ -55,7 +55,7 @@ Preconditions:
   })()
   ```
 
-- **失敗を見る。** 片付けてから `MADORI_DEV_CONTAINERS=0` を付けて起動し直す。`/api/sample/display` が `503` と `{"error":"service_unavailable"}` を返す。ページを開き、描画を待つ手順を実行すると、`alert` が `形状サービスを利用できません。しばらくしてから再試行してください。 再試行` になる。撮って `failure.png` に写す。
+- **失敗を見る。** 片付けてから `MADORI_DEV_CONTAINERS=0` を付けて起動し直す。`/api/sample/display` が `503` と `{"error":"service_unavailable"}` を返す。ページを開き、描画を待つ手順を実行すると、`alert` が `形状サービスを利用できません。しばらくしてから再試行してください。 再試行` になる。警告はキャンバスの下にあり、そのままでは画面の外なので、`preview_evaluate` で `document.querySelector('[role="alert"]').scrollIntoView({ block: "center" })` を実行してから撮り、`failure.png` に写す。
 
 ## Gotchas
 
