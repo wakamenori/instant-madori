@@ -13,7 +13,7 @@ pstack の poteto-mode に従い、Issue に合う playbook で進める。多�
 
 1. T3 が origin/main から作った、自分の worktree で作業する。ほかのブランチや Issue に触らない。
 2. [verify-madori](../verify-madori/SKILL.md) の「準備」のとおりに準備する。ディスクが足りずにビルドが失敗したら、worktree の外を消さずに指揮役に報告する。
-3. Issue と、それが指す plan.md の節を読む（`gh issue view <番号>`）。依存の欄の Issue がすべて閉じているか確かめる。開いていれば、指揮役に報告して止まる。
+3. Issue をコメントまで読み（`gh issue view <番号> --comments`）、それが指す plan.md の節を読む。依存の欄の Issue がすべて閉じているか確かめる。開いていれば、指揮役に報告して止まる。
 
 ## 設計を決める
 
@@ -40,7 +40,7 @@ Issue の範囲に「PRで決めること」があれば、コードを書く前
 - 範囲の外で見つけた問題は、PR に入れない。根拠と一緒に報告に書く。
 - コミットは英語の Conventional Commits にする。PR は poteto-mode の Opening a PR のとおりに日本語で書き、本文に `Closes #<番号>` を入れる。
 - PR を作ったら、このスレッドに紐付けて `watch_pull_request` で見張る。`check` が失敗したら、直して push する。
-- staging へブランチをデプロイするのは、Issue の終わった証拠が求めるときだけにする。staging は一つしかない。
+- staging へブランチを自分でデプロイしない。終わった証拠がマージの前の staging での確認を求めるときは、指揮役に頼む。
 
 ## 指揮役に報告する
 
