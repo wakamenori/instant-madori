@@ -136,6 +136,8 @@ pnpmは厳密なpeer dependency検査と、公開後24時間未満のパッケ�
 
 一時的な依存上書きには理由を残します。現在のminimatchの上書きは[GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249)への対応です。ESLint/typescript-eslint側が修正版を採用したら取り除きます。
 
+JavaScriptの脆弱性監査は、picomatchの[GHSA-fc5q-39xc-vjpf](https://github.com/advisories/GHSA-fc5q-39xc-vjpf)だけを一時的に無視します。修正版がまだ無く、picomatchは開発用の依存（knip・tinyglobby・vite）だけに入るためです。修正版が `minimumReleaseAge` の24時間を過ぎたら、`pnpm-workspace.yaml` の `auditConfig` から外します。
+
 Miniflareのsharp依存は、LGPLのlibvipsを含むため除外しています。現在使うWorker・静的配信には不要ですが、Cloudflare Imagesバインディングと`cf.image`のローカル画像変換は使えません。画像添付・R2への保存とは別の機能です。この機能を追加するときはライセンス方針と実行方法を再検討してください。
 
 ## 配置と依存関係

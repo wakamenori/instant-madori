@@ -12,6 +12,11 @@ allowBuilds:
 verifyDepsBeforeRun: error
 strictPeerDependencies: true
 minimumReleaseAge: 1440
+auditConfig:
+  ignoreGhsas:
+    # picomatch ReDoS has no fixed release, and picomatch is only a dev dependency
+    # (knip, tinyglobby, vite). Remove once a fix is past minimumReleaseAge (#283).
+    - GHSA-fc5q-39xc-vjpf
 # GHSA-g3hv-75wg-m249: remove once ESLint/typescript-eslint require a fixed release.
 # Their current Minimatch/match calls do not use the APIs removed in v11.
 overrides:
