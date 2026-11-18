@@ -16,7 +16,7 @@ dist/
 *~
 __pycache__/
 /.claude/worktrees/
-# Issue drafts before they become GitHub issues (README: 作業の管理)
+# Issue drafts before they become GitHub issues (.claude/skills/madori-coordinator)
 /.issues/
 
 # Local development keys (scripts/dev/local-access.ts)
