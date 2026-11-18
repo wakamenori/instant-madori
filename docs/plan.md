@@ -1,6 +1,6 @@
 # 住宅相談サービス 実装計画
 
-更新日：2026-11-15
+更新日：2026-11-18
 
 初回提供までの仕様と設計、実装の段階と各段階の完了条件をまとめる。作業の単位と進み具合はGitHubのmilestoneとIssueで管理し、この文書には書かない。生成品質・性能・一般の住宅への対応は、各段階で確認・改善する。合意した要件に加え、API、モジュール名、保存形式などは実装に向けた初期設計を記す。
 
@@ -551,7 +551,7 @@ Containerの内部APIは、入力スナップショットと操作の一括を�
 
 SolidCraft一式を保持することと、通常のビルド・テスト対象に全アプリを含めることは分ける。自作workspaceへ取り込み領域の全クレートが自動参加しないよう設定し、サービス側のビルドでは必要な依存先だけを使う。
 
-開発ツールの版を固定し、検査はローカルの `pnpm check` にまとめる。先にPrettier・rustfmt・ESLint・Clippyで自動修正できるものを直し、型付きlint・型確認・未使用検査・秘密情報・テストを実行する。RustはnativeとWasmを検査する。作業中の `--fast` はテスト実行とアプリのビルドを省き、`--full` はWasmの再生成、全ビルド、接続確認、JS/Rustのライセンス・取得元・脆弱性監査まで行う。初回以外はビルドキャッシュを再利用し、各工程の時間を表示する。PRでは同じ `pnpm check` を、開発用Macのself-hosted runnerでGitHub Actionsから実行し、変更したパスから `--full` が要るかを決める。GitHubのrunnerは、2コア・ディスクの空き13 GBで `--full` が通らず、無料枠も足りないため使わない。コミット前フックはステージ対象ファイルの整形・lintとステージ済み差分の秘密情報を検査し、作業ツリーやステージ内容を書き換えない。具体的なコマンドと検査範囲は[README](../README.md)にまとめる。
+開発ツールの版を固定し、検査はローカルの `pnpm check` にまとめる。先にPrettier・rustfmt・ESLint・Clippyで自動修正できるものを直し、型付きlint・型確認・未使用検査・秘密情報・テストを実行する。RustはnativeとWasmを検査する。作業中の `--fast` はテスト実行とアプリのビルドを省き、`--full` はWasmの再生成、全ビルド、接続確認、JS/Rustのライセンス・取得元・脆弱性監査まで行う。初回以外はビルドキャッシュを再利用し、各工程の時間を表示する。コミット前フックはステージ対象ファイルの整形・lintとステージ済み差分の秘密情報を検査し、作業ツリーやステージ内容を書き換えない。具体的なコマンド、検査範囲、PRでの検査は[README](../README.md)にまとめる。
 
 サービスの依存解決はルートのCargo.lockとpnpm-lock.yamlで固定する。Cargoのプロファイル・依存パッチは利用側ルートで必要な設定を管理し、SolidCraft側の設定が自動で引き継がれるとは仮定しない。キャッシュを利用する場合は、識別値に実際の依存解決とビルド条件を反映する。誤った再利用を避けるため、サービスから使うSolidCraftの評価キャッシュを無効にする。
 
@@ -563,9 +563,9 @@ SolidCraft一式を保持することと、通常のビルド・テスト対象�
 
 招待した利用者が使い始めるまでは、stagingだけを環境とし、本番の環境は作らない。本番の環境（設定、Accessアプリ、D1、R2、デプロイ手順）は、招待の前に6.6で用意する。本番はWorkerと静的ファイル、D1マイグレーション、R2、DO・Workflow、Containerイメージを一組の版としてデプロイする。RustはContainerの対象であるLinux向けにビルドし、Wasmは別の成果物として作る。形状処理のメモリと起動時間を測り、Containerのサイズ・同時実行数・休止条件を選ぶ。
 
-stagingはworkers.devのホスト名で公開し、Worker宛先のAccessアプリで守る（preview URLは無効）。mainへのpushまたは `gh workflow run deploy-staging.yml --ref <ブランチまたはmain>` で、self-hosted runnerが `pnpm check --full`、D1のマイグレーション、デプロイ、Accessのservice tokenを使った疎通の確認を順に行う。マイグレーションはデプロイの前に適用するため、動いている前の版のWorkerと両立する形で書く。初回のWorker作成を除き、再デプロイはこのworkflowだけを使う。試験用ブランチも同じ順に実行し、そのマイグレーションはmainに入る前にstagingのD1へ適用される。手順の順序はREADMEに従う。Accessアプリとstaging用のD1を作成し、`apps/worker/wrangler.jsonc` の `env.staging` にDB ID、Accessの発行元とaudience、画面のOriginを設定する。初期値の `.invalid` 発行元はローカル以外で拒否する。インスタンスの種類と休止時間は環境別の変数で指定する。Workers Logsを有効にし、Container内の標準出力もそこへ集める。接続用DOが出す `container.ready` ログの `mode: cold` で起動時間、Rustの要求ログの `vmHwmKib` でLinux上のメモリ最大値を読む。
+stagingはworkers.devのホスト名で公開し、Worker宛先のAccessアプリで守る（preview URLは無効）。マイグレーションはデプロイの前に適用するため、動いている前の版のWorkerと両立する形で書く。デプロイの流れ、試験用ブランチのデプロイ、最初に環境を作る手順は、README「stagingへデプロイする」にまとめる。初期値の `.invalid` 発行元はローカル以外で拒否する。インスタンスの種類と休止時間は環境別の変数で指定する。Workers Logsを有効にし、Container内の標準出力もそこへ集める。接続用DOが出す `container.ready` ログの `mode: cold` で起動時間、Rustの要求ログの `vmHwmKib` でLinux上のメモリ最大値を読む。
 
-デプロイでは、runnerの `MADORI_ENV_FILE` にある `STAGING_ACCESS_CLIENT_ID` をログでマスクしてから、`--var` で `ACCESS_VERIFIER_CLIENT_ID` に渡す。値が空または空白だけならデプロイ前に失敗させ、Client IDはリポジトリに保存しない。疎通確認ではservice tokenを4.4の検証用ユーザーとして使う。token無しの302、healthの200、検証用メールアドレスを返すmeの200、案件の作成・再送・名前の変更・一覧の読取、存在しない案件の404、Containerを経由するサンプル表示データの200とメディア型を確かめる。変更要求にはstagingのOriginを付ける。案件の作成には固定のrequest IDを使い、一つの案件と最初のパターンを再利用する。名前の変更は一覧から読んだ現在のversionを送り、versionが一つ増えて再読取に反映されることを確かめる。二回目以降に増えるのは確認ごとのrequestsの一行だけで、R2には書かない。要求の期限はreadinessの60秒と表示処理の30秒に通信の余裕を加えた120秒とする。手元からも同じスクリプトを実行し、資格情報は出力しない。
+疎通の確認では、Accessのservice tokenを4.4の検証用ユーザーとして使う。確かめる項目、Client IDの渡し方、要求の期限は、README「stagingへデプロイする」にまとめる。
 
 デプロイ・疎通・R2の確認が成功した後、`scripts/deploy/registry-retention.ts --apply` でstagingのContainerイメージを回収する。新しい順に10のWorkerの版と、今のデプロイに含まれるすべての版が指すダイジェストのタグを残す。タグの新しさでは判断せず、古い版だけが指すダイジェストのタグを消す。同じダイジェストを持つ別名のタグもすべて残す。どの版からも指されていないタグは、デプロイ途中のタグと区別できないため、消さずに別にログへ出す。
 

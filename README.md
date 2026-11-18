@@ -60,7 +60,7 @@ Viteのプロキシ（5173番）経由のAPI要求には、開発者として署
 | `pnpm dev`          | Web・WorkerとDockerの形状処理Containerを起動                                                                                                           |
 | `pnpm build`        | releaseのWasm・Web・Worker・ネイティブRustの成果物だけをビルド                                                                                         |
 
-補助スクリプトは `scripts/check/`・`scripts/dev/`・`scripts/generate/`・`scripts/build/`・`scripts/upstream/` に目的別に置き、複数の目的で使う部品は `scripts/shared/` に置きます。テストは対象ファイルと同じフォルダーに置きます。
+補助スクリプトは `scripts/check/`・`scripts/dev/`・`scripts/generate/`・`scripts/build/`・`scripts/upstream/`・`scripts/deploy/` に目的別に置き、複数の目的で使う部品は `scripts/shared/` に置きます。テストは対象ファイルと同じフォルダーに置きます。
 
 初期設定は `pnpm setup`、引数の確認は `pnpm check --help`。upstreamの取得・取り込みには後述の `pnpm upstream:check` / `pnpm upstream:update` を使います。個別ツールを順に手動実行する必要はありません。
 
@@ -140,20 +140,20 @@ Miniflareのsharp依存は、LGPLのlibvipsを含むため除外しています�
 
 ## 配置と依存関係
 
-| 場所                     | 担当                                                                         |
-| ------------------------ | ---------------------------------------------------------------------------- |
-| `apps/web`               | React・TypeScriptの画面                                                      |
-| `apps/worker`            | Cloudflare WorkersのAPI・静的配信                                            |
-| `apps/geometry`          | ネイティブRustのHTTP入口、Container用Dockerfile                              |
-| `crates/display`         | 依存を持たない表示データの型と版付きバイナリ形式                             |
-| `crates/geometry-api`    | 内部API契約とTypeScript定義の生成                                            |
-| `crates/housing`         | 住宅データと整合性。環境整備時点ではモジュールの入口のみ                     |
-| `crates/modeling`        | 住宅操作とSolidCraftの接続                                                   |
-| `crates/viewer`          | SolidCraftのgeom・render・gpuを使うWasm                                      |
-| `packages/contracts`     | WebとWorkerで共有するスキーマ。住宅の通信型はRust実装時に生成を追加          |
-| `third_party/solidcraft` | upstream一式。専用のCargo workspaceとして保持                                |
-| `docs`                   | 実装計画、過去の判断・検証記録                                               |
-| `scripts`                | ビルド・起動・検査・upstream更新のTypeScriptスクリプト。Node.js 26で直接実行 |
+| 場所                     | 担当                                                                                   |
+| ------------------------ | -------------------------------------------------------------------------------------- |
+| `apps/web`               | React・TypeScriptの画面                                                                |
+| `apps/worker`            | Cloudflare WorkersのAPI・静的配信                                                      |
+| `apps/geometry`          | ネイティブRustのHTTP入口、Container用Dockerfile                                        |
+| `crates/display`         | 依存を持たない表示データの型と版付きバイナリ形式                                       |
+| `crates/geometry-api`    | 内部API契約とTypeScript定義の生成                                                      |
+| `crates/housing`         | 住宅データと整合性。環境整備時点ではモジュールの入口のみ                               |
+| `crates/modeling`        | 住宅操作とSolidCraftの接続                                                             |
+| `crates/viewer`          | SolidCraftのgeom・render・gpuを使うWasm                                                |
+| `packages/contracts`     | WebとWorkerで共有するスキーマ。住宅の通信型はRust実装時に生成を追加                    |
+| `third_party/solidcraft` | upstream一式。専用のCargo workspaceとして保持                                          |
+| `docs`                   | 実装計画、過去の判断・検証記録                                                         |
+| `scripts`                | ビルド・起動・検査・upstream更新・デプロイのTypeScriptスクリプト。Node.js 26で直接実行 |
 
 ルートのCargo.lockとpnpm-lock.yamlがサービスの依存関係を固定します。SolidCraftの未使用アプリは通常のビルド対象に含めません。
 
@@ -167,7 +167,7 @@ SolidCraftの元のREADME・資料・ライセンスは取り込み領域に保�
 
 mainへのpushで、`.github/workflows/deploy-staging.yml` がself-hosted runnerでstagingへデプロイします。`pnpm check --full`、D1のマイグレーションの適用、`wrangler deploy --env staging` の順に進め、その後 `scripts/check/staging-smoke.ts` で、Accessを通した疎通を確かめます。デプロイは途中で止めず、後から来たpushは前のデプロイが終わってから最新のmainをデプロイします。マイグレーションはデプロイの前に適用するため、動いている前の版のWorkerと両立する形で書きます。mainに入ったマイグレーションは変更せず、修正は番号の大きいファイルを追加します。`pnpm check` の全モードがこの不変条件を検査し、デプロイ時は一つ前のmainと比較します。
 
-疎通の確認では、Accessのservice tokenを、固定の検証用ユーザー（subjectは `staging:verifier`、メールアドレスは `verifier@staging.invalid`）として使います。token無しの302、`/api/health` の200、`/api/me` の200と検証用メールアドレスを確かめます。案件を固定のrequest IDで作成・再送し、一覧から現在のversionを読んで名前を変更します。versionが一つ増え、読み直した一覧に変更が反映されること、存在しない案件のパターン一覧が404 `not_found` になること、`/api/sample/display` が表示データを返すことも確かめます。Containerの起動を待てるよう、要求の期限は120秒です。検証用の案件と最初のパターンは一つに保ち、二回目以降は確認ごとに `requests` の行だけが一つ増えます。R2には書き込みません。
+疎通の確認では、Accessのservice tokenを、固定の検証用ユーザー（subjectは `staging:verifier`、メールアドレスは `verifier@staging.invalid`）として使います。token無しの302、`/api/health` の200、`/api/me` の200と検証用メールアドレスを確かめます。案件を固定のrequest IDで作成・再送し、一覧から現在のversionを読んで名前を変更します。versionが一つ増え、読み直した一覧に変更が反映されること、存在しない案件のパターン一覧が404 `not_found` になること、`/api/sample/display` が表示データを返すことも確かめます。要求の期限は、Containerのreadinessの60秒と表示処理の30秒に、通信の余裕を加えた120秒です。検証用の案件と最初のパターンは一つに保ち、二回目以降は確認ごとに `requests` の行だけが一つ増えます。R2には書き込みません。
 
 runnerは、`MADORI_ENV_FILE` が指す `.env` から、マイグレーションには `CLOUDFLARE_API_TOKEN`、デプロイには加えて `STAGING_ACCESS_CLIENT_ID`、疎通確認には `STAGING_ACCESS_CLIENT_ID` と `STAGING_ACCESS_CLIENT_SECRET` を読みます。Client IDはログにマスクしてから、デプロイの `--var ACCESS_VERIFIER_CLIENT_ID:<Client ID>` でWorkerへ渡します。空の値や空白だけならデプロイ前に失敗します。Client IDはリポジトリに保存しません。service tokenはAccessアプリの `non_identity` のポリシーで許可し、期限は1年です。
 
