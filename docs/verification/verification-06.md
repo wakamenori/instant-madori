@@ -137,30 +137,32 @@ Sessionを入力snapshotの内容をキーにしたキャッシュとして要�
 
 ## 再実行と証拠
 
-試作はマージしない。ソースはこの作業worktreeのGit追跡外の `.audit/issue69/shape69-final.rs` と `.audit/issue69/requests-reference.rs` に残す。別checkoutで再現するときは、このworktreeからソースもコピーする。反対役の元scratchpadは読取りだけにした。`shape69-final.rs` は反対役の試作をコピーして修正したものを含む。`requests-reference.rs` は反対役の `adv69jb.rs` とバイト単位で同じで、修正していない。新しいcheckoutでは先にREADMEの固定ツールで `pnpm install --frozen-lockfile` と `pnpm setup` を行う。
+試作はクレートにマージしない。ソースは記録の証拠として、[shape69-final.rs](evidence/verification-06/shape69-final.rs)、[requests-reference.rs](evidence/verification-06/requests-reference.rs)、[shape69-baseline.rs](evidence/verification-06/shape69-baseline.rs) に置く。出力はチェックアウトの外の `$OUT` に書く。反対役の元scratchpadは読取りだけにした。`shape69-final.rs` は反対役の試作をコピーして修正したものを含む。`requests-reference.rs` は反対役の `adv69jb.rs` とバイト単位で同じで、修正していない。新しいcheckoutでは先にREADMEの固定ツールで `pnpm install --frozen-lockfile` と `pnpm setup` を行う。
 
 ```sh
 mkdir -p crates/modeling/examples
 export CARGO_INCREMENTAL=0
-command cp -f .audit/issue69/shape69-final.rs crates/modeling/examples/shape69.rs
+OUT="${TMPDIR:-/tmp}/shape69"
+command cp -f docs/verification/evidence/verification-06/shape69-final.rs crates/modeling/examples/shape69.rs
 mise exec -- cargo build --locked --release -p madori-modeling --example shape69 -j 4
-target/release/examples/shape69 decided .audit/issue69/rerun-decided
+target/release/examples/shape69 decided "$OUT/rerun-decided"
 target/release/examples/shape69 batch 3 2 1 3 5 5 1
 target/release/examples/shape69 batch 6 4 1 1 21 5 0
 target/release/examples/shape69 batch 6 4 1 1 21 5 1
 ```
 
-最初の56試行を再現するときは `.audit/issue69/shape69-baseline.rs` を同じexampleへ置いてビルドし、`target/release/examples/shape69 .audit/issue69/rerun 7` を実行する。基準の外観検査は前述のとおり弱いため、追加検証を省かない。要求費用とジョブ費用の参照試作は、次の手順で再実行する。
+最初の56試行を再現するときは `docs/verification/evidence/verification-06/shape69-baseline.rs` を同じexampleへ置いてビルドし、`target/release/examples/shape69 "$OUT/rerun" 7` を実行する。基準の外観検査は前述のとおり弱いため、追加検証を省かない。要求費用とジョブ費用の参照試作は、次の手順で再実行する。
 
 ```sh
 export CARGO_INCREMENTAL=0
-command cp -f .audit/issue69/requests-reference.rs crates/modeling/examples/shape69.rs
+OUT="${TMPDIR:-/tmp}/shape69"
+command cp -f docs/verification/evidence/verification-06/requests-reference.rs crates/modeling/examples/shape69.rs
 mise exec -- cargo build --locked --release -p madori-modeling --example shape69 -j 4
-target/release/examples/shape69 api .audit/issue69/rerun-requests 5
-target/release/examples/shape69 job .audit/issue69/rerun-jobs 5
+target/release/examples/shape69 api "$OUT/rerun-requests" 5
+target/release/examples/shape69 job "$OUT/rerun-jobs" 5
 ```
 
-出力ファイルは、それぞれ `rerun-requests/api.json` と `rerun-jobs/job.json` である。記録の証拠へコピーする際に `requests.json` と `jobs.json` に改名した。
+出力ファイルは、それぞれ `$OUT/rerun-requests/api.json` と `$OUT/rerun-jobs/job.json` である。記録の証拠へコピーする際に `requests.json` と `jobs.json` に改名した。
 
 関連する観測は `python3 docs/verification/evidence/verification-06/verify.py` で再照合する。試作ソースのハッシュは[source-hashes.txt](evidence/verification-06/source-hashes.txt)に残した。プロダクトの検査は `CARGO_INCREMENTAL=0 mise exec -- pnpm check` を使う。
 
