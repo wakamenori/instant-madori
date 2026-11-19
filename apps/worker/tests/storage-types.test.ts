@@ -141,6 +141,8 @@ void test("Storage types reject unverified identities, duplicate owners and forg
     authenticatedUser({ ...identity, subject: "x" }, resolved);
     store.users.upsertAccess({ identity: { ...identity, subject: "x" }, newId: patternId, now: "now" });
     new IdentityClass(identity);
+    import { ResolvedAccessUser as ResolvedClass } from "../../src/storage/users.ts";
+    new ResolvedClass(identity, user);
   `;
   for (const path of [
     fixtureFile,
@@ -149,7 +151,7 @@ void test("Storage types reject unverified identities, duplicate owners and forg
     assert.deepEqual(diagnostics(imports + valid, path), []);
     assert.deepEqual(
       diagnostics(imports + invalid, path).map((diagnostic) => diagnostic.code),
-      [2554, 2554, 2345, 2345, 2345, 2353, 2345, 2540, 2345, 2739, 2673],
+      [2554, 2554, 2345, 2345, 2345, 2353, 2345, 2540, 2345, 2739, 2673, 1485, 2673, 1362],
     );
   }
   const batchImports = `
