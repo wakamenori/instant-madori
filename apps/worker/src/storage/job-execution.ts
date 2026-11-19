@@ -75,17 +75,18 @@ class JobExecutionRight {
         'revision', CASE WHEN r.id IS NULL THEN NULL ELSE ${revisionJson("r")} END) AS json
         FROM jobs j LEFT JOIN revisions r ON r.job_id = j.id AND r.pattern_id = j.pattern_id
         WHERE j.id = ? AND j.pattern_id = ? AND j.generation = ?
-          AND j.state IN ('running', 'completed')`,
+          AND j.state IN ('running', 'completed', 'cancelled')`,
           bindings: [jobId, patternId, generation],
         },
         executionSchema.extend({
-          state: z.enum(["running", "completed"]),
+          state: z.enum(["running", "completed", "cancelled"]),
           revision: revisionSchema.nullable(),
         }),
         "current job execution",
       ),
     );
     if (row === null) return { kind: "invalid" as const };
+    if (row.state === "cancelled") return { kind: "cancelled" as const };
     if (row.state === "completed") {
       if (row.revision === null) return { kind: "invalid" as const };
       return { kind: "committed" as const, revision: row.revision };

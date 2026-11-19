@@ -1,16 +1,21 @@
-import { activeJobStates, jobStateSchema } from "./job-states.ts";
+import {
+  activeJobStates,
+  jobStateSchema,
+  stoppableJobStates,
+  finishedJobStates,
+} from "./job-states.ts";
 import { z } from "zod";
 import { foundSchema, jsonRows, rows, write } from "./d1.ts";
 import type { D1 } from "./d1.ts";
-import { revisionSchema } from "@madori/contracts";
+import { revisionSchema, cancelledJobSchema, finishedJobSchema } from "@madori/contracts";
 import { readJobExecutionRight } from "./job-execution.ts";
 import type { JobExecutionRight } from "./job-execution.ts";
-import { revisionJson } from "./revisions.ts";
+import { revisionJson, finishedJobJson } from "./revisions.ts";
 import { verifyJobSnapshot } from "./snapshots.ts";
 import type { Snapshot } from "./snapshots.ts";
 import type { R2 } from "./r2.ts";
 import { messageJson, messageSchema } from "./messages.ts";
-import { createOnceStatements, runOnce } from "./requests.ts";
+import { createOnceStatements, updateOnceStatements, runOnce } from "./requests.ts";
 import type { RequestKey } from "./requests.ts";
 
 const jobSchema = z.object({
@@ -184,4 +189,45 @@ export async function recordJobFailure(db: D1, right: JobExecutionRight, now: st
     ),
   );
   return { kind: result === null ? ("not_recorded" as const) : ("recorded" as const) };
+}
+
+const stopResultSchema = z.discriminatedUnion("outcome", [
+  z.object({ outcome: z.literal("stopped"), patternId: z.uuid(), job: cancelledJobSchema }),
+  z.object({ outcome: z.literal("already_finished"), patternId: z.uuid(), job: finishedJobSchema }),
+]);
+export type JobStop =
+  | { kind: "applied" | "replayed"; result: z.infer<typeof stopResultSchema> }
+  | { kind: "not_found" }
+  | { kind: "request_id_reused" };
+
+export async function stopJobOnce(
+  db: D1,
+  key: RequestKey,
+  input: { jobId: string; now: string },
+): Promise<JobStop> {
+  const batch = updateOnceStatements(key, input.now, {
+    table: "jobs",
+    set: {
+      sql: `state = CASE WHEN state IN (${stoppableJobStates}) THEN 'cancelled' ELSE state END,
+        updated_at = CASE WHEN state IN (${stoppableJobStates}) THEN ? ELSE updated_at END`,
+      bindings: [input.now],
+    },
+    where: {
+      sql: `id = ? AND owner_id = ? AND state IN (${stoppableJobStates}, ${finishedJobStates})`,
+      bindings: [input.jobId, key.ownerId],
+    },
+    result: {
+      sql: `SELECT json_object('outcome', CASE WHEN j.state IN (${stoppableJobStates})
+          THEN 'stopped' ELSE 'already_finished' END,
+        'patternId', j.pattern_id, 'job', ${finishedJobJson("j", "m", "r", {
+          state: `CASE WHEN j.state IN (${stoppableJobStates}) THEN 'cancelled' ELSE j.state END`,
+        })})
+        FROM jobs j JOIN messages m ON m.id = j.message_id AND m.pattern_id = j.pattern_id
+        LEFT JOIN revisions r ON r.job_id = j.id AND r.pattern_id = j.pattern_id
+        WHERE j.id = ? AND j.owner_id = ?`,
+      bindings: [input.jobId, key.ownerId],
+    },
+  });
+  const once = await runOnce(db, stopResultSchema, batch);
+  return once.kind === "not_applied" ? { kind: "not_found" } : once;
 }

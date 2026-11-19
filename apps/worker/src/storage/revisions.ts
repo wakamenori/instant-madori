@@ -14,6 +14,12 @@ export function revisionJson(t: string) {
     'baseRevisionId', ${t}.base_revision_id, 'createdAt', ${t}.created_at)`;
 }
 
+export function finishedJobJson(j: string, m: string, r: string, fields: { state?: string } = {}) {
+  return `json_object('jobId', ${j}.id, 'messageId', ${m}.id, 'number', ${m}.number,
+    'state', ${fields.state ?? `${j}.state`},
+    'revision', CASE WHEN ${r}.id IS NULL THEN NULL ELSE ${revisionJson(r)} END)`;
+}
+
 export interface PatternState {
   pattern: Pattern;
   /** The revision with the greatest number, or null before the first commit. */

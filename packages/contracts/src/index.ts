@@ -191,6 +191,23 @@ export const acceptedJobSchema = z.object({
 
 export type AcceptedJob = z.infer<typeof acceptedJobSchema>;
 
+export const cancelledJobSchema = acceptedJobSchema.extend({ state: z.literal("cancelled") });
+export const finishedJobSchema = z.discriminatedUnion("state", [
+  acceptedJobSchema.extend({ state: z.literal("completed"), revision: revisionSchema }),
+  cancelledJobSchema,
+  acceptedJobSchema.extend({ state: z.literal("failed") }),
+]);
+export type CancelledJob = z.infer<typeof cancelledJobSchema>;
+export type FinishedJob = z.infer<typeof finishedJobSchema>;
+
+export const stopJobRequestSchema = z.strictObject({ requestId: requestIdSchema });
+export type StopJobRequest = z.infer<typeof stopJobRequestSchema>;
+export const stopJobResponseSchema = z.discriminatedUnion("outcome", [
+  z.object({ outcome: z.literal("stopped"), job: cancelledJobSchema }),
+  z.object({ outcome: z.literal("already_finished"), job: finishedJobSchema }),
+]);
+export type StopJobResponse = z.infer<typeof stopJobResponseSchema>;
+
 export const acceptInstructionResponseSchema = z.object({ job: acceptedJobSchema });
 
 export type AcceptInstructionResponse = z.infer<typeof acceptInstructionResponseSchema>;

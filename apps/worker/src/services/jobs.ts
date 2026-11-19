@@ -198,7 +198,8 @@ async function current(
   job: JobExecutionReference,
 ): Promise<{ kind: "active"; right: JobExecutionRight } | Committed | NotCommitted> {
   const restored = await readCurrentJobExecution(deps, job);
-  if (restored.kind === "invalid") return { kind: "not_committed", reason: "execution_lost" };
+  if (restored.kind === "invalid" || restored.kind === "cancelled")
+    return { kind: "not_committed", reason: "execution_lost" };
   return restored.kind === "committed"
     ? { kind: "committed", revisionId: restored.revision.id }
     : { kind: "active", right: restored.right };
