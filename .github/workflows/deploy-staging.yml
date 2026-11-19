@@ -30,6 +30,8 @@ jobs:
       - run: pnpm setup
       # Merged heads can differ from every checked PR head, and --full builds the web assets.
       - run: pnpm check --full
+        env:
+          MADORI_MIGRATION_BASE: ${{ github.event.before }}
       # Credentials come from the runner's MADORI_ENV_FILE (README: PRの検査); read only what each step needs.
       - name: Migrate and deploy
         working-directory: apps/worker

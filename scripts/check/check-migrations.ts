@@ -14,7 +14,7 @@ function migrationNumber(path: string) {
   return BigInt(number);
 }
 
-function main() {
+function migrationBase() {
   const head = git("rev-parse", "HEAD").trim();
   let mainHead: string;
   try {
@@ -22,13 +22,27 @@ function main() {
   } catch {
     throw new Error("Migration check needs origin/main and full history. Fetch origin/main first.");
   }
+  const explicitBase = process.env["MADORI_MIGRATION_BASE"] ?? "";
+  // Manual runs have no base; branch-creation pushes use an all-zero object ID.
+  if (!/^0*$/.test(explicitBase)) {
+    try {
+      git("merge-base", "--is-ancestor", explicitBase, "HEAD");
+    } catch {
+      throw new Error(`MADORI_MIGRATION_BASE ${explicitBase} is not in the history of HEAD.`);
+    }
+    return { commit: explicitBase, source: "MADORI_MIGRATION_BASE" };
+  }
   const branch = git("branch", "--show-current").trim();
   const onMain = branch === "main" || (branch === "" && head === mainHead);
-  const base = onMain
-    ? git("rev-parse", "HEAD^1").trim()
-    : git("merge-base", "HEAD", mainHead).trim();
+  return onMain
+    ? { commit: git("rev-parse", "HEAD^1").trim(), source: "first parent of HEAD" }
+    : { commit: git("merge-base", "HEAD", mainHead).trim(), source: "merge base with origin/main" };
+}
+
+function main() {
+  const base = migrationBase();
   const baseline = new Set(
-    git("ls-tree", "-r", "--name-only", "-z", base, "--", migrationsPath)
+    git("ls-tree", "-r", "--name-only", "-z", base.commit, "--", migrationsPath)
       .split("\0")
       .filter(Boolean),
   );
@@ -44,7 +58,7 @@ function main() {
     "--no-renames",
     "--name-only",
     "-z",
-    base,
+    base.commit,
     "--",
     migrationsPath,
   )
@@ -68,7 +82,7 @@ function main() {
     }
   }
   if (violations.length > 0) throw new Error(violations.join("\n"));
-  console.log(`Migration immutability check passed (base ${base}).`);
+  console.log(`Migration immutability check passed (base ${base.commit}, ${base.source}).`);
 }
 
 try {
