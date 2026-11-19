@@ -1,3 +1,4 @@
+import { activeJobStates } from "./job-states.ts";
 import type { OwnerId } from "../owner.ts";
 import { foundSchema, jsonRows, rows } from "./d1.ts";
 import type { D1 } from "./d1.ts";
@@ -32,7 +33,7 @@ export const runningJobSql = `SELECT json_object('jobId', j.id, 'messageId', m.i
   'number', m.number) AS json
   FROM jobs j INDEXED BY jobs_one_active_per_pattern
   CROSS JOIN messages m ON m.id = j.message_id AND m.pattern_id = j.pattern_id
-  WHERE j.pattern_id = ? AND j.owner_id = ? AND j.state IN ('running', 'validating', 'committing')`;
+  WHERE j.pattern_id = ? AND j.owner_id = ? AND j.state IN (${activeJobStates})`;
 
 export async function getPatternState(
   db: D1,

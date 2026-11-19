@@ -1,3 +1,4 @@
+import { activeJobStates, jobStateSchema } from "./job-states.ts";
 import { z } from "zod";
 import { foundSchema, jsonRows, rows, write } from "./d1.ts";
 import type { D1 } from "./d1.ts";
@@ -16,17 +17,7 @@ const jobSchema = z.object({
   id: z.uuid(),
   patternId: z.uuid(),
   messageId: z.uuid(),
-  state: z.enum([
-    "queued",
-    "running",
-    "validating",
-    "committing",
-    "completed",
-    "awaiting_answer",
-    "cancelled",
-    "failed",
-    "limited",
-  ]),
+  state: jobStateSchema,
   generation: z.number().int().nonnegative(),
   baseRevisionId: z.uuid().nullable(),
   createdAt: z.iso.datetime(),
@@ -185,7 +176,7 @@ export async function recordJobFailure(db: D1, right: JobExecutionRight, now: st
       {
         sql: `UPDATE jobs SET state = 'failed', updated_at = ?
       WHERE id = ? AND pattern_id = ? AND generation = ? AND base_revision_id IS ? AND owner_id = ?
-        AND state IN ('running', 'validating', 'committing') RETURNING 1 AS found`,
+        AND state IN (${activeJobStates}) RETURNING 1 AS found`,
         bindings: [now, jobId, patternId, generation, baseRevisionId, ownerId],
       },
       foundSchema,
