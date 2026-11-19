@@ -382,9 +382,9 @@ WorkerはAccessのJWTの署名、発行元、対象アプリ、有効期限を�
 
 `staging` では、任意の設定 `ACCESS_VERIFIER_CLIENT_ID` がある場合だけ、`sub` が空文字列で `common_name` が設定したClient IDと一致するAccessのservice tokenを、一人の検証用ユーザーとして受け付ける。検証用subjectはAccessのUUIDと重ならない `staging:verifier`、表示用メールアドレスは `verifier@staging.invalid` に固定する。Client IDを更新しても発行元とsubjectの組は変わらず、同じ内部ユーザーになる。設定のない場合や一致しないservice tokenは403 `forbidden` にする。`staging` 以外にこの設定があれば、設定の誤りとして拒否する。
 
-検証済みの認証主体は、storageへ依存しない `identity.ts` の `VerifiedIdentity` で表し、生成時に凍結する。欄はreadonlyとし、直接代入や `Object.assign` による書き換えも実行時に拒否する。保存処理はこの証拠を要求し、同じ発行元とsubjectから検索・作成した利用者行を、非公開コンストラクタとprivate欄を持つ結果として返す。`authenticatedUser` は証拠とこの結果を要求し、保存層の関数がprivate欄の発行元とsubjectの一致を確認してから `OwnerId` を生成する。結果のオブジェクト上のプロパティやメソッドを上書きしても、private欄を読む処理は変わらない。このため所有者の生成関数のimport先は制限しない。普通の `User` や証拠なしの呼び出しは型で拒否し、別主体の証拠と保存結果の組み合わせは実行時に拒否する。
+検証済みの認証主体は、storageへ依存しない `identity.ts` の `VerifiedIdentity` で表す。これは発行元・subject・メールアドレスをprivate欄に持つ、非公開コンストラクタのクラスである。検証した値をこの型へキャストできるのは `api/access.ts` だけで、`freezeIdentity` がその値から凍結したインスタンスを作る。インスタンス、クラス、prototypeを凍結し、欄の直接代入や `Object.assign` による書き換えを実行時に拒否する。既存の証拠をspreadした値はprivate欄を持たないため、型で拒否する。保存処理はこの証拠を要求し、同じ発行元とsubjectから検索・作成した利用者行を、非公開コンストラクタとprivate欄を持つ結果として返す。`authenticatedUser` は証拠とこの結果を要求し、保存層の関数がprivate欄の発行元とsubjectの一致を確認してから `OwnerId` を生成する。結果のオブジェクト上のプロパティやメソッドを上書きしても、private欄を読む処理は変わらない。このため所有者の生成関数のimport先は制限しない。普通の `User` や証拠なしの呼び出しは型で拒否し、別主体の証拠と保存結果の組み合わせは実行時に拒否する。
 
-型へのキャスト、`resolved.constructor` を構築可能な型へキャストする偽造、嘘の型宣言、検証済みの証拠をspreadして別の欄へ置き換える操作までは型で防げない。ブランドへの直接キャストと `as never` は構文検査で拒否し、SQLの所有者条件と認証主体による検索は実際のD1を通すテストとレビューで確かめる。
+型へのキャスト、`resolved.constructor` を構築可能な型へキャストする偽造、嘘の型宣言までは型で防げない。ブランドへの直接キャストと `as never` は構文検査で拒否し、SQLの所有者条件と認証主体による検索は実際のD1を通すテストとレビューで確かめる。
 
 Accessで認証済みであることと、利用者が意図した変更であることは別である。変更を伴うAPIは、設定した画面のOrigin（本番は一つ、ローカルは開発サーバーの名前ごと）のいずれかと完全に一致する要求だけを受け付け、JSONのボディに限定する。
 
