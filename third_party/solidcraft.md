@@ -18,6 +18,26 @@ upstreamの更新は原則取り込む。住宅サービスの機能、データ
 
 移行元と取り込み元が同じコミットだと、初回の`git-subtree-mainline`と`git-subtree-split`が同一になり、後の`git subtree split`が失敗した。そのため、移行開始を示す空コミットを挟む形に今回の未公開コミットだけを組み直し、両者を区別した。組み直し前後で作業ツリーの一致を確認した。通常の`git subtree split --prefix=third_party/solidcraft`が成功し、切り出した履歴が採用済みupstreamを祖先に持つこと、差分が記録した2ファイルだけであることも確認済み。
 
+## 採用版とサービスで使う構成
+
+採用版は、2026-11-19のupstream main`7c0f565e915faf6235d95d8cbdc74f8efed07451`である。前の採用版`ae1d85e5d`から5,213コミットを、更新手順どおり`git subtree merge`で取り込んだ。競合は`crates/io/Cargo.toml`の`[features]`の1か所だけで、独自変更の`external-workspace`とupstreamの`dxf-legacy-baseline-tests`を両方残して解消した。マージしたツリーとupstreamとの差分は、記録した独自変更の2ファイルだけである。
+
+この版から、upstreamは形状のカーネルsolidcoreを`solidcore/`に同梱し、gitの依存として取得しない。描画は、カメラとシーンを持つ`crates/viewport`と、wgpuで描く`crates/viewport-gpu`に分かれた。サービスのビューアは、geom・viewport・viewport-gpuに直接依存する。geomがsolidcoreに依存するため、ビューアのCargoの依存グラフにはsolidcoreが入る。
+
+### pluginを使わない
+
+ルートの`Cargo.toml`は、`solidcraft-engine`の既定のfeatureを外す。既定の`plugins`は、craft-plugin-wasmとwasmtimeを依存に加える。サービスはpluginを実行しない。外すと、Containerの依存（x86_64 Linux）は416から357パッケージに減り、Cのコードをコンパイルする`cc`が依存から無くなる。modelingとgeometryのテストは、外したままで通る。`scripts/check/boundaries.ts`の`geometry-plugin-runtime`の行は、Containerの依存にwasmtimeかcraft-plugin-wasmが入ると失敗にする。pluginを使う機能を加えるときは、この行と計画4.2を一緒に変える。
+
+### 依存監査で無視する勧告
+
+`deny.toml`は、RUSTSEC-2023-0071（rsa）とRUSTSEC-2026-0387（crypto-bigint）を無視する。どちらもpgpからだけ来る。pgpは、`solidcraft-io`が公開鍵で署名を検証するために使う。2つの勧告は、秘密鍵の操作に関するものである。`[bans]`の`wrappers`は、pgpを`solidcraft-io`からだけ、rsaをpgpからだけ、crypto-bigintをpgpの楕円曲線のcrate（cx448とelliptic-curve）からだけ使えるように、経路を固定する。
+
+`pnpm check --full`は、cargo denyに`-D advisory-not-detected -D unused-wrapper`を付けて実行する。upstreamが依存を直して勧告が当たらなくなると、残った無視の指定と、使われなくなった`wrappers`の指定で検査が失敗する。そのときに、その指定を`deny.toml`から外す。
+
+### Containerのビルドに必要なメモリ
+
+Docker DesktopのVMには、12 GBのメモリを割り当てる。Dockerの中でのsolidcoreのreleaseビルドは、一つのrustcで最大3.99 GBを使った。8.32 GBのVMでは、このビルドがSIGKILLで止まった。
+
 ## 独自変更
 
 コミット`bebc1a443`で、`crates/io`に`external-workspace`機能を追加した。サービス側の依存指定で有効にすると、upstreamの評価キャッシュの識別値を`unknown`とし、そのキャッシュを信頼しない。
@@ -32,7 +52,7 @@ upstreamの更新は原則取り込む。住宅サービスの機能、データ
 2. `pnpm upstream:check`で最新のmainと差分を取得する。表示されたコミットを対象に、利用クレート・Cargo設定・保存形式・描画・資産参照への影響を確認する。
 3. `pnpm upstream:update <確認した40桁のSHA>`で取り込む。これはsubtreeのマージコミットを作る。競合したら独自変更の目的を保って解消し、マージを完了させる。
 4. `solidcraft.json`の採用コミットと独自変更ファイル一覧を確認する。自動マージが競合で止まった場合、採用コミットの更新は手動で行う。
-5. 依存関係が変わったらルートのCargo.lockを更新する。upstreamの`[patch]`・プロファイルも確認する。現在のegui-wgpu・winitパッチはサービスの依存経路に入らないため、親には設定していない。
+5. 依存関係が変わったらルートのCargo.lockを更新する。upstreamの`[patch]`・プロファイルも確認する。今のupstreamの`[patch.crates-io]`は、egui一式（`vendor/egui`）とwinitを差し替える。どちらもサービスの依存経路に入らないため、親には設定していない。
 6. `pnpm check --full`を実行する。住宅機能の実装後は、計画5.5の保存・再編集・見た目・ジョブ復帰の確認も実施する。通過した結果、採用コミット、必要な調整を記録してコミットする。
 
 問題が出た場合は、無関係な作業を巻き戻さず、更新用ブランチで修正・保留を判断する。公開ブランチの履歴を書き換えない。

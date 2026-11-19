@@ -195,7 +195,7 @@ AIが編集をまとめて案を提示するたびに履歴を一件追加する
 | 部分               | 採用する構成と役割                                                                                  |
 | ------------------ | --------------------------------------------------------------------------------------------------- |
 | Web画面            | React・TypeScript・Vite。Workers Static Assetsから配信する                                          |
-| 3Dビューア         | Rust/Wasm。SolidCraftのgeom・render・gpuを利用し、表示とカメラ操作を受け持つ                        |
+| 3Dビューア         | Rust/Wasm。SolidCraftのgeom・viewport・viewport-gpuを利用し、表示とカメラ操作を受け持つ             |
 | ログイン           | Cloudflare Access。招待したメールアドレスへの認証コード                                             |
 | 公開API            | WorkersのTypeScript。認証、所有権確認、入力検査、保存データの読取、処理の受付                       |
 | 管理データ         | D1。ユーザー、案件、パターン、会話、履歴、ジョブ、費用の記録                                        |
@@ -315,7 +315,7 @@ Workerの内部は、`api/` から `services/` を呼び、`services/` は外か
 
 DBの行は、テーブルごとに一つのSQLの `json_object` で読み、`storage/` で共有スキーマにより検証してから返す。型引数による決めつけで行を扱わない。業務上の結果（見つからない、版の競合など）は例外でなく判別可能な結果として返し、`api/` がエラーコードへ対応付ける。予期しない例外だけを500とし、本文を含めずに記録する。
 
-Webのコードは開発用の `scripts/` をimportしない。Viteの設定だけは、ローカルの認証プロキシに使う `scripts/dev/` をimportできる。WebからのWasmバインディングの読込みは `apps/web/src/viewer/wasm.ts` に集め、同じ `viewer/` 直下の `*.test.ts` だけはバインディングを直接importできる。`apps/geometry` にはSolidCraftの既存UIとegui・eframe・winitを含めない。
+Webのコードは開発用の `scripts/` をimportしない。Viteの設定だけは、ローカルの認証プロキシに使う `scripts/dev/` をimportできる。WebからのWasmバインディングの読込みは `apps/web/src/viewer/wasm.ts` に集め、同じ `viewer/` 直下の `*.test.ts` だけはバインディングを直接importできる。`apps/geometry` には、UIツールキット（egui系・eframe・winit）とGPUの描画（wgpu系）を含めない。UIの有無は、crateの名前ではなくツールキットのcrateで判定する。UIを持たない文言の目録 `solidcraft-ui-text` は、engineを通して含まれてよい。サービスはSolidCraftのpluginを実行しない。そのため、ルートの `solidcraft-engine` は既定のfeatureを外し、Containerにwasmtimeとcraft-plugin-wasmを含めない。
 
 TypeScriptのアプリと共有定義のimport境界は、TypeScriptのモジュール解決後の参照先ファイルで判定する。静的import、再export、文字列リテラルの動的import、import型、`import = require`、型の参照ディレクティブとモジュール拡張を対象にする。動的importの引数を囲む括弧は外し、参照先のqueryとfragmentは除いて解決する。解決できない参照は失敗にする。Node.jsの組込みと、対応するworkspaceが依存として宣言した外部パッケージだけは、解決できなくても許可する。workspaceのパッケージはこの例外に含めない。環境が宣言するambient moduleは、その宣言のファイルで判定する。相対パスの資産は実ファイルの存在を要求する。ファイルの同一性はsymlinkをたどり、OSの実パスで確かめる。大文字小文字を区別するファイルシステムでは、綴りの違う参照は未解決として拒否する。検査はESLintの自動修正と整形の後に実行し、pre-commitでもステージしたTypeScriptファイルを対象に実行する。
 
@@ -323,7 +323,7 @@ TypeScriptのアプリと共有定義のimport境界は、TypeScriptのモジュ
 
 `apps/` は起動・デプロイするもの、`crates/` はRustの機能をまとめたモジュール、`packages/` はJS/TS側から共有する定義を置く。`apps/geometry` は `crates/modeling` を呼ぶ入口とし、住宅の計算やCADとの対応をHTTP処理に散らさない。
 
-`crates/housing` は画面・HTTP・Cloudflareへ依存させない。`crates/modeling` が住宅モデルとSolidCraftのengine・doc・kernelを利用する。評価キャッシュの誤った再利用を防ぐ `external-workspace` featureを有効にするため、modelingはsolidcraft-ioにも直接依存する。`crates/viewer` はgeom・render・gpuを利用する。ビューアには編集エンジンや既存のegui UIを含めず、依存を持たない `crates/display` の表示データで接続する。`crates/modeling` が符号化し、`crates/viewer` が復号する。`crates/geometry-api` は形状処理の内部APIを定義し、TypeScriptの定義を `packages/contracts/src/generated/geometry-internal.ts` へ生成する。公開する表示メディア型は同じ生成処理で `packages/contracts/src/generated/display.ts` に出し、`@madori/contracts` から公開する。WebとViteの設定は内部API定義をimportせず、`packages/contracts` への相対パスでの参照も使わず、公開した `@madori/contracts` から参照する。公開入口への参照もパッケージ名に限るのは、宣言した依存を通すためである。相対パスに置き換えると、Knipがパッケージの依存宣言を未使用と判断して削除でき、pnpmの依存の図からWebとcontractsの関係が消えてしまう。
+`crates/housing` は画面・HTTP・Cloudflareへ依存させない。`crates/modeling` が住宅モデルとSolidCraftのengine・doc・kernelを利用する。評価キャッシュの誤った再利用を防ぐ `external-workspace` featureを有効にするため、modelingはsolidcraft-ioにも直接依存する。`crates/viewer` はgeom・viewport・viewport-gpuを利用し、wgpuで描く。`solidcraft-viewport-egui` は使わない。ビューアには編集エンジン（modeling・engine・doc・kernel・io）とUIツールキット（egui系・eframe・winit）を含めず、依存を持たない `crates/display` の表示データで接続する。`crates/modeling` が符号化し、`crates/viewer` が復号する。`crates/geometry-api` は形状処理の内部APIを定義し、TypeScriptの定義を `packages/contracts/src/generated/geometry-internal.ts` へ生成する。公開する表示メディア型は同じ生成処理で `packages/contracts/src/generated/display.ts` に出し、`@madori/contracts` から公開する。WebとViteの設定は内部API定義をimportせず、`packages/contracts` への相対パスでの参照も使わず、公開した `@madori/contracts` から参照する。公開入口への参照もパッケージ名に限るのは、宣言した依存を通すためである。相対パスに置き換えると、Knipがパッケージの依存宣言を未使用と判断して削除でき、pnpmの依存の図からWebとcontractsの関係が消えてしまう。
 
 内部API本文は `crates/geometry-api` のRust型にschemarsを適用し、インライン化したJSON Schemaからjson-schema-to-zodでZod検証とTypeScript型を生成する。`pnpm generate:geometry` で定数と本文を一緒に更新し、RustとNodeのテストが生成結果のずれを検出する。再帰型と参照が残る型は生成時に拒否する。結果の共用体は `kind` を判別子とする。固定幅整数には範囲を付け、JavaScriptで正確に表せない64/128ビット整数は文字列で運ぶ。ポインター幅に依存する整数も生成時に拒否し、通信には固定幅の型を選ぶ。Optionは `skip_serializing_if = "Option::is_none"` でNoneを省略し、受信時は省略とnullを許す。各ルートに本文型のスキーマ生成関数を登録し、要求・応答のスロットから方向を導出する。エラー本文はルートごとに登録せず、プロトコル共通のスキーマ・メディア型・本文上限を定義し、Rustのエラー応答とWorkerの検証で使う。同名の本文を異なる契約で登録すると生成を停止する。要求はDeserialize契約で生成し、オブジェクトの未知フィールド拒否を生成時に検査する。応答はSerialize契約で生成し、共有型に指定された未知フィールド拒否を応答スキーマから再帰的に除き、追加フィールドを許容する。ルートにはHTTPメソッドと要求・応答本文の形式（なし、JSONのスキーマと本文上限、バイナリのメディア型と本文上限）を登録し、Workerの受信方針をそこから組み立てる。
 

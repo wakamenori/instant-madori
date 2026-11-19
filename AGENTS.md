@@ -16,7 +16,7 @@
 - `crates/display` は依存を持たず、表示データの不変条件と版付きバイナリ形式を受け持つ。内部APIは `crates/geometry-api` を編集し、`packages/contracts/src/generated/` の内部API定数・JSON Schema・Zodと型はそこから `pnpm generate:geometry` で生成し、生成ファイルを手で編集しない。内部APIの各ボディはルートの要求・応答スロットから方向を導出する。要求はDeserialize契約で生成し、未知フィールド拒否を生成時に検査する。応答はSerialize契約で生成し、未知フィールド拒否をスキーマから再帰的に除いて追加フィールドを許容する。エラー本文のスキーマ・メディア型・上限は、全ルートが使うプロトコル共通の定数として定義する。
 - `crates/housing` は、HTTP、ブラウザ、Cloudflare、CADのいずれにも依存しない。`crates/modeling` は住宅データをSolidCraftにつなぐ。`crates/viewer` はSolidCraftの描画の層だけを使う。
 - 層・アプリ・クレートの間で依存してよい向きは、`scripts/check/boundaries.ts` の表で検査する。境界の規則を加える・変えるときは、計画の該当する規則とそれを検査する表の行を一緒に変更し、違反と許可の例をテストに加える。検査を通すことだけを目的に表の行を緩めない。
-- `third_party/solidcraft` には、upstreamのソース、資産、ライセンス、エージェント向けの指示をそのまま保持する。このコードを修正するときは、upstreamの技術上の制約に従う。一方、upstreamの「すべてRustで書く」「製品名の扱い」「文書は英語」「UI」に関するルールは、その外側にあるこのサービスには適用しない。upstreamへ貢献するための手順（着手の宣言、ドラフトPR、upstreamのCI一式）は、upstreamに貢献するときのものである。このリポジトリ内で組み込みのために行う修正では、その修正に関係する検査と、このファイルに書いたサービスの検査を使う。
+- `third_party/solidcraft` には、upstreamのソース、資産、ライセンス、エージェント向けの指示をそのまま保持する。このコードを修正するときは、upstreamの技術上の制約に従う。一方、upstreamの「すべてRustで書く」「製品名の扱い」「文書は英語」「UI」に関するルールは、その外側にあるこのサービスには適用しない。upstreamへ貢献するための手順（着手の宣言、ドラフトPR、upstreamのCI一式）は、upstreamに貢献するときのものである。このリポジトリ内で組み込みのために行う修正では、その修正に関係する検査と、このファイルに書いたサービスの検査を使う。`third_party/solidcraft/.agents/skills` の開発用skill（`.claude/skills` はそこへのリンク）も、upstreamへ貢献するためのものなので、このリポジトリでは使わない。Claude Codeは、`third_party/solidcraft/` のファイルを読むと、これらのskillを使える状態にする。
 - 使っていないupstreamの構成要素を削除しない。更新は[third_party/solidcraft.md](third_party/solidcraft.md)の手順どおりgit subtreeで行い、upstreamをリポジトリのルートへマージしない。
 - upstreamの更新は原則として取り込む。このサービスと両立するかを確認し、両立しない場合は、サービス側を合わせるか、その更新を保留する理由を具体的に記録する。upstreamの変更とサービスの変更は分けておく。
 - 第三者の著作権表示とライセンスを保持する。GPL、LGPL、AGPLの依存を追加しない。他の製品のコードや資産を写さない。
