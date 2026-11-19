@@ -112,6 +112,7 @@ async function main() {
     await script("Upstream boundary", "scripts/check/check-layout.ts");
     await script("Migration immutability", "scripts/check/check-migrations.ts");
     await script("SQL connection state", "scripts/check/check-sql.ts");
+    await script("Document paths", "scripts/check/check-doc-paths.ts");
     await script("Secret scan", "scripts/check/check-secrets.ts");
 
     const native = ["--workspace", "--all-targets"];

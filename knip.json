@@ -4,6 +4,7 @@
   "workspaces": {
     ".": {
       "entry": [
+        "scripts/check/check-doc-paths.ts",
         "scripts/check/check-layout.ts",
         "scripts/check/check-migrations.ts",
         "scripts/check/ci-mode.ts",
