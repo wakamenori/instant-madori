@@ -194,6 +194,10 @@ async function main() {
         "deny",
         "--locked",
         "check",
+        "-D",
+        "advisory-not-detected",
+        "-D",
+        "unused-wrapper",
       ]);
       await script("Prune Docker build cache", "scripts/dev/prune-build-cache.ts");
     }
