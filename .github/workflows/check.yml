@@ -17,6 +17,8 @@ jobs:
         with:
           # The upstream boundary check reads the recorded upstream commit from history.
           fetch-depth: 0
+          # The runner user owns the workspace; a safe.directory entry would land in the symlinked ~/.gitconfig.
+          set-safe-directory: false
       # The checkout starts clean each run; keep only Rust and tool build outputs between runs.
       - run: |
           cache="$RUNNER_TOOL_CACHE/madori"

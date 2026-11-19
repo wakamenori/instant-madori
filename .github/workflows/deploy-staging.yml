@@ -19,6 +19,8 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+          # The runner user owns the workspace; a safe.directory entry would land in the symlinked ~/.gitconfig.
+          set-safe-directory: false
       - run: |
           cache="$RUNNER_TOOL_CACHE/madori"
           mkdir -p "$cache/target" "$cache/tools"
