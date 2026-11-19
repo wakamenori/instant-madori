@@ -77,6 +77,7 @@ node .claude/skills/madori-coordinator/scripts/rank-ready.mjs
 - 検証役は、差分の大部分を書いた系統と別の系統のモデルにする。実装は Codex が書くので、普段は Claude Code の Opus にする。差分の大部分を Claude が書いた PR は、Codex に確かめさせる。Codex の立て方は pstack-models.md に従う。
 - `delegate_task` に `isolation: "worktree"` を付けて、指揮役のスレッドの子として立てる。指示は [verifier-brief.md](verifier-brief.md) の `{…}` を埋めて渡す。
 - 検証役のスレッドには PR を紐付けない。
+- 判定を PR に書いたら、検証役のスレッドを `t3_thread_organize`（`action: "settle"`）で settled にする。見回りの片付けは、settled でないスレッドの worktree を残すため。
 
 ## ブランチを staging で試す
 
@@ -117,7 +118,10 @@ T3 の定期タスクが、1時間ごとに `/madori-coordinator 見回り` を�
 
 1. メインのチェックアウトを `git pull --ff-only` で main に合わせる。
 2. `df -h /` で空きを確かめる。20 GiB を切っていたら、次を片付けてから進む。空きが戻るまで、新しいスレッドを立てない。
-   - `~/.t3/worktrees/instant-madori/` のうち、HEAD が main に入っていて、未コミットの変更が無い worktree
+   - `~/.t3/worktrees/instant-madori/` のうち、HEAD が main に入っていて、未コミットの変更が無い worktree。ただし、settled でないスレッドの worktree は残す。作ったばかりの担当の worktree も、HEAD が main に入っていて変更が無いため。
+     - settled でないスレッドは、`t3_thread_list` に `settled: false` を付けて最後のページまで出す。
+     - 各スレッドの worktree は、`t3_thread_read` が返す `thread.worktreePath` で調べる。`creationSource` が `provider` のスレッドは読まない。Claude Code や Codex が自分で立てた subagent で、親のスレッドと同じ `worktreePath` を返す。
+     - `t3_worktree_list` は使わない。検証役が PR の head を detached で取り出した worktree を返さない。
    - 使っていない Docker のイメージ（`docker image prune -a -f`）
 3. 担当ごとに、コミット、push、PR、`check` の動きを確かめる。報告の来た PR と、報告は無いが `check` の通った PR には、検証役を立てる。止まった担当は、新しい担当に入れ替える。
 4. 終わった検証役の判定を読み、「マージを決める」に進む。
