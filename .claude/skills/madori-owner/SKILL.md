@@ -39,6 +39,7 @@ Issue の範囲に「PRで決めること」があれば、コードを書く前
 
 - 範囲の外で見つけた問題は、PR に入れない。根拠と一緒に報告に書く。
 - コミットは英語の Conventional Commits にする。PR は poteto-mode の Opening a PR のとおりに日本語で書き、本文に `Closes #<番号>` を入れる。
+- PR と Issue に貼る画像は、AGENTS.md「Issue と PR の画像」のとおり `images` ブランチに上げる。PR のブランチにも main にも画像を commit しない。
 - PR を作ったら、このスレッドに紐付けて `watch_pull_request` で見張る。`check` が失敗したら、直して push する。
 - staging へブランチを自分でデプロイしない。終わった証拠がマージの前の staging での確認を求めるときは、指揮役に頼む。
 

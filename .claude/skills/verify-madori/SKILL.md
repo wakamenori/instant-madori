@@ -109,6 +109,7 @@ git rev-parse HEAD
 
 - 利用者の操作と、その結果の状態を両方残す。最後の画面だけでは足りない。
 - 画面は、操作の前後で `preview_snapshot` に `save: true` を付けて撮り、返った `screenshotPath` を `$EVIDENCE/<機能>/` に写す。変化は二枚の `shasum -a 256` の違いで示し、絵は Read で開いて目で確かめる。ページのスクロールでもハッシュは変わるので、絵を見ずに変化を報告しない。
+- Issue、PR、検証記録に画面を貼るときは、AGENTS.md「Issue と PR の画像」のとおり、`$EVIDENCE` の画像を `pnpm images:upload` で `images` に上げ、出力された Markdown を貼る。
 - API は、状態コードと応答本文をファイルに残す（`curl -sS -o "$EVIDENCE/<機能>/<手順>.json" -w '%{http_code}\n'`）。
 - 書き込みは、別の読み出し（一覧や状態）でもう一度確かめる。
 - テスト専用の入口や内部の関数ではなく、利用者が通る経路で確かめる。合成したイベントで確かめたものは、そう書く。

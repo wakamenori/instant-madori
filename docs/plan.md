@@ -329,7 +329,7 @@ TypeScriptのアプリと共有定義のimport境界は、TypeScriptのモジュ
 
 住宅データはRust側で定義し、通信に必要な型とスキーマを生成してJS/TS側へ渡す。WebとWorkerの共通の通信定義も `packages/contracts` で管理し、同じ型を両側で独立に手書きしない。
 
-ルートのREADME、AGENTS、開発設定は本サービス向けに整える。SolidCraft由来の資料と開発設定は取り込み領域に保持する。本計画書は `docs/plan.md`、検証記録と証拠は `docs/verification/` に置く。
+ルートのREADME、AGENTS、開発設定は本サービス向けに整える。SolidCraft由来の資料と開発設定は取り込み領域に保持する。本計画書は `docs/plan.md`、検証記録と、画像を除く証拠は `docs/verification/` に置く。Issue、PR、検証記録に貼る画像は、main と履歴を共有しない追記だけの `images` ブランチに置き、画像を加えた commit に固定したリンクで参照する。
 
 SolidCraftには、形状操作、フィーチャー評価、編集可能な設計データ、ボディ・面の外観、表示メッシュ、基礎的な描画を担当させる。住宅の意味、案件、指示単位の履歴、WebサービスのAI実行は利用側で作る。
 
