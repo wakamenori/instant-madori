@@ -66,7 +66,7 @@ Viteのプロキシ（5173番）経由のAPI要求には、開発者として署
 
 `--fast` はテスト実行・アプリのビルド・ネットワーク監査を省きます。Rustの型付き検査自体には依存のコンパイルが必要で、初回は時間がかかります。繰り返し実行ではCargoのキャッシュを再利用し、変更されたクレートを検査します。検査ごとの所要時間を出力します。
 
-`pnpm setup`・`pnpm dev`・`pnpm build`・`pnpm check --full` は、同じスクリプトでWasmをreleaseビルドします。Cargoのプロファイルとwasm-bindgenの入力先は一つの値から決め、`target/wasm32-unknown-unknown/release/madori_viewer.wasm` からバインディングを生成します。開発・検査・配信で同じWasmを使います。依存を含む初回のWasmコンパイルは、手元の単発の参考値でdebugが19秒、releaseが31秒でした。初回は長くなりますが、再ビルドでは依存のキャッシュを再利用します。RustのテストとClippyはdebugのままです。
+`pnpm setup`・`pnpm dev`・`pnpm build`・`pnpm check --full` は、同じスクリプトでWasmをreleaseビルドします。Cargoのプロファイルとwasm-bindgenの入力先は一つの値から決め、`target/wasm32-unknown-unknown/release/madori_viewer.wasm` からバインディングを生成します。開発・検査・配信で同じWasmを使います。依存を含む初回のWasmのreleaseビルドは、手元の単発の参考値で189秒でした（依存のキャッシュが無い状態、`.cargo/config.toml` の `jobs = 4`）。初回は長くなりますが、再ビルドでは依存のキャッシュを再利用します。RustのテストとClippyはdebugのままです。
 
 `pnpm setup` で生成したWasmの型定義を通常・軽いモードで使います。初期生成がなければ準備手順を示して停止します。Wasmの公開API・依存・ビルド設定・upstreamを変更した場合は `--full` を実行してください。全体モードではreleaseのWasmを再生成してからTypeScriptを検査し、配信用のWasmもローカル配信と実Containerの接続テストで確認します。
 
