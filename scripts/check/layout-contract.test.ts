@@ -84,3 +84,28 @@ void test("only the top level declares secrets", () => {
     /Unrecognized|unrecognized/,
   );
 });
+
+void test("Workflow exports pass when repeated in staging and fail when omitted there", () => {
+  const withWorkflow = {
+    ...bindings,
+    exports: { ...bindings.exports, JobWorkflow: { type: "workflow", name: "instant-madori-job" } },
+  };
+  assert.doesNotThrow(() =>
+    assertStagingBindings({
+      ...withWorkflow,
+      env: {
+        staging: {
+          ...withWorkflow,
+          exports: {
+            ...withWorkflow.exports,
+            JobWorkflow: { type: "workflow", name: "instant-madori-staging-job" },
+          },
+        },
+      },
+    }),
+  );
+  assert.throws(
+    () => assertStagingBindings({ ...withWorkflow, env: { staging: bindings } }),
+    /staging/,
+  );
+});
