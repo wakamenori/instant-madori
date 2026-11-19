@@ -242,6 +242,38 @@ void test("discovers nested SQL files and reports sorted root-relative diagnosti
   });
 });
 
+for (const { name, files, subfolder, checked, missing } of [
+  {
+    name: "only migrations exist",
+    files: { "apps/worker/migrations/0001_init.sql": "SELECT 1;" },
+    subfolder: "",
+    checked: 1,
+    missing: ["apps/worker/src/**/*.ts"],
+  },
+  {
+    name: "only Worker sources exist",
+    files: { "apps/worker/src/index.ts": 'const sql = "SELECT 1";' },
+    subfolder: "",
+    checked: 1,
+    missing: ["apps/worker/migrations/*.sql"],
+  },
+  {
+    name: "the root is the Worker subfolder",
+    files: cleanFiles,
+    subfolder: "apps/worker",
+    checked: 0,
+    missing: ["apps/worker/src/**/*.ts", "apps/worker/migrations/*.sql"],
+  },
+]) {
+  void test(`rejects missing target sets when ${name}`, async (t) => {
+    const root = join(sqlTree(t, files), subfolder);
+    assert.deepEqual(await checkSqlFiles(root), {
+      files: checked,
+      violations: missing.map((pattern) => `${pattern}: no files found under ${root}.`),
+    });
+  });
+}
+
 const sqlScript = fileURLToPath(new URL("./check-sql.ts", import.meta.url));
 
 void test("SQL CLI exits with failure and diagnostics for violating files", (t) => {
@@ -258,4 +290,16 @@ void test("SQL CLI exits successfully and reports the clean file count", (t) => 
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stderr, "");
   assert.equal(result.stdout, "SQL connection-state and request-write checks passed: 2 files.\n");
+});
+
+void test("SQL CLI fails when neither target set contains files", (t) => {
+  const root = sqlTree(t, {});
+  const result = spawnSync(process.execPath, [sqlScript, root], { encoding: "utf8" });
+  assert.equal(result.status, 1, result.stderr);
+  assert.equal(
+    result.stderr,
+    `apps/worker/src/**/*.ts: no files found under ${root}.\n` +
+      `apps/worker/migrations/*.sql: no files found under ${root}.\n`,
+  );
+  assert.equal(result.stdout, "");
 });

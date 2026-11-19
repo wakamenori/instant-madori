@@ -103,6 +103,7 @@ export async function checkSqlFiles(
     const paths: string[] = [];
     for await (const path of glob(pattern, { cwd: root })) paths.push(path);
     paths.sort();
+    if (paths.length === 0) violations.push(`${pattern}: no files found under ${root}.`);
     for (const path of paths) {
       violations.push(...checkSqlSource(path, await readFile(join(root, path), "utf8")));
       files++;
