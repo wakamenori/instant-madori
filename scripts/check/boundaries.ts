@@ -382,6 +382,18 @@ export const typescriptBoundaries: TypeScriptBoundary[] = [
 
 export const boundaryTestIgnores = [`**/*.test.${typescriptExtensions}`, "**/tests/**"];
 
+export const crateFamilies = {
+  uiToolkit: { pattern: /^(?:egui(?:[-_].*)?|eframe|winit)$/u, label: "UI toolkit" },
+  gpu: { pattern: /^wgpu(?:-.*)?$/u, label: "GPU" },
+  pluginRuntime: { pattern: /^(?:wasmtime(?:-.*)?|craft-plugin-wasm)$/u, label: "plugin runtime" },
+  editingEngine: {
+    pattern: /^(?:madori-modeling|solidcraft-(?:engine|doc|kernel|io))$/u,
+    label: "editing engine",
+  },
+} satisfies Record<string, { pattern: RegExp; label: string }>;
+
+export type CrateFamily = keyof typeof crateFamilies;
+
 type RustBoundary = {
   id: string;
   crate: string;
@@ -389,7 +401,7 @@ type RustBoundary = {
   message: string;
 } & (
   | { kind: "direct"; allowedDirectDeps: string[]; dependencyPrefix?: string }
-  | { kind: "graph"; forbiddenDeps: string }
+  | { kind: "graph"; forbidden: CrateFamily[] }
   | {
       kind: "features";
       target: string;
@@ -422,18 +434,25 @@ export const rustBoundaries: RustBoundary[] = [
     crate: "madori-viewer",
     kind: "direct",
     dependencyPrefix: "solidcraft-",
-    allowedDirectDeps: ["solidcraft-geom", "solidcraft-render", "solidcraft-gpu"],
-    reason: "docs/plan.md §4.2 viewer uses only SolidCraft geom, render and gpu",
-    message: "Viewer may directly use only SolidCraft geom, render and gpu.",
+    allowedDirectDeps: ["solidcraft-geom", "solidcraft-viewport", "solidcraft-viewport-gpu"],
+    reason: "docs/plan.md §4.2 viewer uses only SolidCraft geom, viewport and viewport-gpu",
+    message: "Viewer may directly use only SolidCraft geom, viewport and viewport-gpu.",
   },
   {
     id: "viewer-editing",
     crate: "madori-viewer",
     kind: "graph",
-    forbiddenDeps:
-      "^(?:madori-modeling|solidcraft-(?:engine|doc|kernel|ui.*)|egui(?:-.*)?|eframe|winit)$",
-    reason: "docs/plan.md §4.2 viewer must not include modeling, the editing engine or egui UI",
-    message: "Viewer must not include modeling, editing or egui crates.",
+    forbidden: ["editingEngine"],
+    reason: "docs/plan.md §4.2 viewer draws display data without the editing engine",
+    message: "Viewer must not include the editing engine.",
+  },
+  {
+    id: "viewer-ui-toolkit",
+    crate: "madori-viewer",
+    kind: "graph",
+    forbidden: ["uiToolkit"],
+    reason: "docs/plan.md §4.2 viewer draws with wgpu and contains no UI toolkit",
+    message: "Viewer must not include a UI toolkit.",
   },
   {
     id: "modeling-solidcraft",
@@ -461,12 +480,21 @@ export const rustBoundaries: RustBoundary[] = [
     message: "The HTTP entry point must use modeling instead of SolidCraft directly.",
   },
   {
-    id: "geometry-ui",
+    id: "geometry-ui-toolkit",
     crate: "madori-geometry",
     kind: "graph",
-    forbiddenDeps: "^(?:egui(?:-.*)?|eframe|winit|solidcraft-ui.*)$",
-    reason: "docs/plan.md §4.2 geometry is a Container service without upstream UI",
-    message: "The native geometry service must not include the upstream UI.",
+    forbidden: ["uiToolkit", "gpu"],
+    reason:
+      "docs/plan.md §4.2 geometry is a Container service without UI toolkits or GPU rendering",
+    message: "The native geometry service must not include a UI toolkit or GPU rendering.",
+  },
+  {
+    id: "geometry-plugin-runtime",
+    crate: "madori-geometry",
+    kind: "graph",
+    forbidden: ["pluginRuntime"],
+    reason: "docs/plan.md §4.2, §5.1 geometry does not execute plugins or include a plugin runtime",
+    message: "The native geometry service must not include a plugin runtime.",
   },
   {
     id: "geometry-cache-trust",
