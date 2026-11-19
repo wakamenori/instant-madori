@@ -38,7 +38,12 @@ function repository(t: TestContext) {
     git,
     write,
     commit,
-    check: () => spawnSync(process.execPath, [script], { cwd, encoding: "utf8" }),
+    check: (base?: string) =>
+      spawnSync(process.execPath, [script], {
+        cwd,
+        encoding: "utf8",
+        env: { ...process.env, MADORI_MIGRATION_BASE: base },
+      }),
   };
 }
 
@@ -165,6 +170,118 @@ void test("main uses its first parent for a non-merge commit too", (t) => {
   repo.git("update-ref", "refs/remotes/origin/main", "HEAD");
   const result = repo.check();
   assert.equal(result.status, 1);
+  assert.match(result.stderr, /already on main/);
+});
+
+void test("rejects an existing migration edited in an earlier commit of a direct push", (t) => {
+  const repo = repository(t);
+  repo.git("switch", "main");
+  const before = repo.git("rev-parse", "HEAD");
+  repo.write(existing, "SELECT 2;\n");
+  repo.commit();
+  repo.write("unrelated.txt");
+  repo.commit();
+  repo.git("update-ref", "refs/remotes/origin/main", "HEAD");
+  const result = repo.check(before);
+  assert.equal(result.status, 1, result.stderr);
+  assert.ok(result.stderr.includes(existing), result.stderr);
+  assert.match(result.stderr, /already on main/);
+});
+
+void test("rejects an existing migration edited before a fast-forward push to a back-merge", (t) => {
+  const repo = repository(t);
+  repo.write(existing, "SELECT 2;\n");
+  repo.commit();
+  repo.git("switch", "main");
+  repo.write("unrelated.txt");
+  repo.commit();
+  repo.git("update-ref", "refs/remotes/origin/main", "HEAD");
+  const before = repo.git("rev-parse", "HEAD");
+  repo.git("switch", "feature");
+  repo.git("merge", "--no-ff", "main", "-m", "back-merge main");
+  repo.git("switch", "main");
+  repo.git("merge", "--ff-only", "feature");
+  repo.git("update-ref", "refs/remotes/origin/main", "HEAD");
+  const result = repo.check(before);
+  assert.equal(result.status, 1, result.stderr);
+  assert.ok(result.stderr.includes(existing), result.stderr);
+  assert.match(result.stderr, /already on main/);
+});
+
+void test("allows a clean push and reports the explicit base and its source", (t) => {
+  const repo = repository(t);
+  repo.git("switch", "main");
+  const before = repo.git("rev-parse", "HEAD");
+  repo.write(`${migrationsPath}0003_new.sql`);
+  repo.commit();
+  repo.write(`${migrationsPath}0004_new.sql`);
+  repo.commit();
+  repo.git("update-ref", "refs/remotes/origin/main", "HEAD");
+  const result = repo.check(before);
+  assert.equal(result.status, 0, result.stderr);
+  assert.ok(result.stdout.includes(before), result.stdout);
+  assert.match(result.stdout, /MADORI_MIGRATION_BASE/);
+});
+
+for (const base of ["", "0000000000000000000000000000000000000000"]) {
+  void test(`falls back to the first parent for ${base === "" ? "an empty" : "an all-zero"} base`, (t) => {
+    const repo = repository(t);
+    repo.git("switch", "main");
+    repo.write(existing, "SELECT 2;\n");
+    repo.commit();
+    repo.git("update-ref", "refs/remotes/origin/main", "HEAD");
+    const result = repo.check(base);
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, /already on main/);
+  });
+}
+
+void test("rejects an explicit base that does not exist", (t) => {
+  const repo = repository(t);
+  const result = repo.check("ffffffffffffffffffffffffffffffffffffffff");
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(result.stderr, /not in the history of HEAD/);
+});
+
+void test("rejects an explicit base on a side branch outside the history of HEAD", (t) => {
+  const repo = repository(t);
+  repo.git("switch", "-c", "side");
+  repo.write("side.txt");
+  repo.commit();
+  const base = repo.git("rev-parse", "HEAD");
+  repo.git("switch", "main");
+  repo.write("main.txt");
+  repo.commit();
+  const result = repo.check(base);
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(result.stderr, /not in the history of HEAD/);
+});
+
+void test("a detached PR head protects migrations edited before its last commit", (t) => {
+  const repo = repository(t);
+  repo.write(existing, "SELECT 2;\n");
+  repo.commit();
+  repo.write(`${migrationsPath}0003_new.sql`);
+  repo.commit();
+  repo.git("switch", "--detach");
+  const result = repo.check();
+  assert.equal(result.status, 1, result.stderr);
+  assert.ok(result.stderr.includes(existing), result.stderr);
+  assert.match(result.stderr, /already on main/);
+});
+
+void test("local main ahead of origin/main protects migrations from HEAD's first parent", (t) => {
+  const repo = repository(t);
+  repo.git("switch", "main");
+  const path = `${migrationsPath}0003_new.sql`;
+  repo.write(path);
+  repo.commit();
+  repo.git("update-ref", "refs/remotes/origin/main", "HEAD");
+  repo.write(path, "SELECT 2;\n");
+  repo.commit();
+  const result = repo.check();
+  assert.equal(result.status, 1, result.stderr);
+  assert.ok(result.stderr.includes(path), result.stderr);
   assert.match(result.stderr, /already on main/);
 });
 
