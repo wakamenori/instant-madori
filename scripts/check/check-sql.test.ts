@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { test, type TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
-import { checkSqlSource } from "./check-sql.ts";
+import { checkSqlFiles, checkSqlSource } from "./check-sql.ts";
 
 for (const name of ["changes", "total_changes", "last_insert_rowid"]) {
   for (const source of [
@@ -201,4 +205,57 @@ void test("keeps the connection-state restriction inside requests.ts", () => {
   assert.deepEqual(checkSqlSource(requestsPath, 'const sql = "SELECT changes()";'), [
     `${requestsPath}:1:21: changes() depends on connection state; use row data instead.`,
   ]);
+});
+
+function sqlTree(t: TestContext, files: Record<string, string>) {
+  const root = mkdtempSync(join(tmpdir(), "madori-sql-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  for (const [path, content] of Object.entries(files)) {
+    mkdirSync(dirname(join(root, path)), { recursive: true });
+    writeFileSync(join(root, path), content);
+  }
+  return root;
+}
+
+const violatingFiles = {
+  "apps/worker/src/index.ts": 'const sql = "SELECT 1";',
+  "apps/worker/src/storage/requests.ts": 'const sql = "INSERT INTO requests DEFAULT VALUES";',
+  "apps/worker/src/storage/deep/nested.ts":
+    'const sql = "SELECT changes()";\nconst write = "INSERT INTO requests DEFAULT VALUES";',
+  "apps/worker/migrations/0001_init.sql": "SELECT last_insert_rowid();",
+};
+const expectedFileViolations = [
+  "apps/worker/src/storage/deep/nested.ts:1:21: changes() depends on connection state; use row data instead.",
+  "apps/worker/src/storage/deep/nested.ts:2:15: writes to requests are only allowed in apps/worker/src/storage/requests.ts.",
+  "apps/worker/migrations/0001_init.sql:1:8: last_insert_rowid() depends on connection state; use row data instead.",
+];
+const cleanFiles = {
+  "apps/worker/src/index.ts": 'const sql = "SELECT 1";',
+  "apps/worker/migrations/0001_init.sql": "CREATE TABLE example (id TEXT);",
+};
+
+void test("discovers nested SQL files and reports sorted root-relative diagnostics", async (t) => {
+  const root = sqlTree(t, violatingFiles);
+  assert.deepEqual(await checkSqlFiles(root), {
+    files: 4,
+    violations: expectedFileViolations,
+  });
+});
+
+const sqlScript = fileURLToPath(new URL("./check-sql.ts", import.meta.url));
+
+void test("SQL CLI exits with failure and diagnostics for violating files", (t) => {
+  const root = sqlTree(t, violatingFiles);
+  const result = spawnSync(process.execPath, [sqlScript, root], { encoding: "utf8" });
+  assert.equal(result.status, 1, result.stderr);
+  assert.equal(result.stderr, expectedFileViolations.join("\n") + "\n");
+  assert.equal(result.stdout, "");
+});
+
+void test("SQL CLI exits successfully and reports the clean file count", (t) => {
+  const root = sqlTree(t, cleanFiles);
+  const result = spawnSync(process.execPath, [sqlScript, root], { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stderr, "");
+  assert.equal(result.stdout, "SQL connection-state and request-write checks passed: 2 files.\n");
 });
