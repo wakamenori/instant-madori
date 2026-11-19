@@ -383,6 +383,8 @@ export const typescriptBoundaries: TypeScriptBoundary[] = [
 export const boundaryTestIgnores = [`**/*.test.${typescriptExtensions}`, "**/tests/**"];
 
 export const crateFamilies = {
+  // geom reaches the CAD kernel, so only the Wasm boundary may forbid its code.
+  cadKernel: { pattern: /^solidcore(?:-ops)?$/u, label: "CAD kernel" },
   uiToolkit: { pattern: /^(?:egui(?:[-_].*)?|eframe|winit)$/u, label: "UI toolkit" },
   gpu: { pattern: /^wgpu(?:-.*)?$/u, label: "GPU" },
   pluginRuntime: { pattern: /^(?:wasmtime(?:-.*)?|craft-plugin-wasm)$/u, label: "plugin runtime" },
@@ -393,6 +395,21 @@ export const crateFamilies = {
 } satisfies Record<string, { pattern: RegExp; label: string }>;
 
 type CrateFamily = keyof typeof crateFamilies;
+
+export const viewerWasmBoundary = {
+  id: "viewer-wasm-contents",
+  crate: "madori-viewer",
+  forbidden: ["cadKernel"],
+  reason:
+    "docs/plan.md §4.2 the delivered viewer contains no CAD kernel, editing engine or UI toolkit code",
+  message: "The viewer Wasm must not contain CAD kernel, editing engine or UI toolkit functions.",
+} satisfies {
+  id: string;
+  crate: string;
+  forbidden: CrateFamily[];
+  reason: BoundaryReason;
+  message: string;
+};
 
 type RustBoundary = {
   id: string;
