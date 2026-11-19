@@ -4,6 +4,13 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { setTimeout } from "node:timers/promises";
 import { test } from "node:test";
+import type { Revision } from "@madori/contracts";
+import {
+  acceptInstructionResponseSchema,
+  createProjectResponseSchema,
+  revisionListResponseSchema,
+} from "@madori/contracts";
+import { settleJobs } from "./support/settle-jobs.ts";
 import { geometryInternal } from "@madori/contracts/geometry-internal";
 import { startLocalWorker, newUser } from "./support/local-worker.ts";
 const docker = promisify(execFile);
@@ -26,7 +33,7 @@ async function runningContainers() {
 }
 void test(
   "real Linux container returns an artifact over Worker and DO RPC",
-  { timeout: 900_000 },
+  { timeout: 1_200_000 },
   async (t) => {
     const started = performance.now();
     const idleTimeoutMs = 60_000;
@@ -142,6 +149,58 @@ void test(
               nextStart: log["geometryStart"],
             }),
           );
+        },
+      );
+      await t.test(
+        "jobs commit immutable sample revisions through each pattern's Container",
+        async () => {
+          const created = await worker.call("/api/projects", {
+            method: "POST",
+            as: user,
+            body: { requestId: crypto.randomUUID() },
+          });
+          assert.equal(created.status, 201);
+          const { pattern } = createProjectResponseSchema.parse(await created.json());
+          const revisions: Revision[] = [];
+          for (let i = 0; i < 2; i++) {
+            const response = await worker.call(`/api/patterns/${pattern.id}/messages`, {
+              method: "POST",
+              as: user,
+              body: { requestId: crypto.randomUUID(), body: "サンプルを作って" },
+            });
+            assert.equal(response.status, 202);
+            const { job } = acceptInstructionResponseSchema.parse(await response.json());
+            const state = await settleJobs(worker, user, pattern.id, [job.jobId], 300_000);
+            const revision = state.currentRevision;
+            assert(revision);
+            assert.equal(revision.baseRevisionId, revisions[0]?.id ?? null);
+            const finished = await worker.logLine(job.jobId, "job.finished");
+            assert.equal(finished["outcome"], "committed");
+            assert.equal(finished["revisionId"], revision.id);
+            if (i === 0) {
+              await worker.logLine(job.jobId, "container.started");
+              await worker.logLine(job.jobId, "container.ready");
+            }
+            const view = await worker.call(`/api/revisions/${revision.id}/view`, { as: user });
+            assert.equal(view.status, 200);
+            const summary = viewer.describe_display(new Uint8Array(await view.arrayBuffer()));
+            assert.equal(summary.format_version, 1);
+            assert.equal(summary.bodies, 4);
+            assert.deepEqual(summary.elements, [
+              "sample:slab",
+              "sample:wall-north",
+              "sample:wall-west",
+              "sample:wall-east",
+            ]);
+            summary.free();
+            revisions.unshift(revision);
+          }
+          const history = await worker.call(`/api/patterns/${pattern.id}/revisions`, { as: user });
+          assert.equal(history.status, 200);
+          assert.deepEqual(revisionListResponseSchema.parse(await history.json()), {
+            revisions,
+            nextCursor: null,
+          });
         },
       );
     } finally {
