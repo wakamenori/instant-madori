@@ -117,7 +117,10 @@ T3 の定期タスクが、1時間ごとに `/madori-coordinator 見回り` を�
 
 1. メインのチェックアウトを `git pull --ff-only` で main に合わせる。
 2. `df -h /` で空きを確かめる。20 GiB を切っていたら、次を片付けてから進む。空きが戻るまで、新しいスレッドを立てない。
-   - `~/.t3/worktrees/instant-madori/` のうち、HEAD が main に入っていて、未コミットの変更が無い worktree
+   - `~/.t3/worktrees/instant-madori/` のうち、HEAD が main に入っていて、未コミットの変更が無い worktree。ただし、settled でないスレッドの worktree は残す。作ったばかりの担当の worktree も、HEAD が main に入っていて変更が無いため。
+     - settled でないスレッドは、`t3_thread_list` に `settled: false` を付けて最後のページまで出す。
+     - 各スレッドの worktree は、`t3_thread_read` が返す `thread.worktreePath` で調べる。`creationSource` が `provider` のスレッドは読まない。Claude Code や Codex が自分で立てた subagent で、親のスレッドと同じ `worktreePath` を返す。
+     - `t3_worktree_list` は使わない。検証役が PR の head を detached で取り出した worktree を返さない。
    - 使っていない Docker のイメージ（`docker image prune -a -f`）
 3. 担当ごとに、コミット、push、PR、`check` の動きを確かめる。報告の来た PR と、報告は無いが `check` の通った PR には、検証役を立てる。止まった担当は、新しい担当に入れ替える。
 4. 終わった検証役の判定を読み、「マージを決める」に進む。
