@@ -19,7 +19,7 @@ type WasmModule = {
   imports: number;
   functions: WasmFunction[];
   hasFunctionNames: boolean;
-  exportedFunctions: Map<number, string[]>;
+  exportedFunctions: Set<number>;
 };
 
 type Cursor = { bytes: Uint8Array; pos: number; end: number };
@@ -88,7 +88,7 @@ function readWasmModule(bytes: Uint8Array): WasmModule {
   const bodySizes: number[] = [];
   let hasFunctionNames = false;
   const names = new Map<number, string>();
-  const exportedFunctions = new Map<number, string[]>();
+  const exportedFunctions = new Set<number>();
   while (top.pos < top.end) {
     const id = byte(top);
     const size = u32(top);
@@ -141,11 +141,10 @@ function readWasmModule(bytes: Uint8Array): WasmModule {
     } else if (id === 7) {
       const count = u32(c);
       for (let i = 0; i < count; i++) {
-        const exported = name(c);
+        name(c);
         const kind = byte(c);
         const index = u32(c);
-        if (kind === 0)
-          exportedFunctions.set(index, [...(exportedFunctions.get(index) ?? []), exported]);
+        if (kind === 0) exportedFunctions.add(index);
       }
     } else if (id === 10) {
       const count = u32(c);
