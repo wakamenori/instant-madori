@@ -1,0 +1,41 @@
+# 指示を止める
+
+利用者は、待機中の指示も実行中の指示も、同じ操作で止められる。止めた指示から案は増えず、今の案はそのまま残る。仕事が先に終わっていたら、停止はその完了と確定した案を返し、案は残る。同じ停止を送り直すと、同じ答えが返る。止めた後も、待機中の次の指示は動き出す。
+
+## Sub-features
+
+- `stop-queued`：待機中の指示を止めると、`200` と `outcome: stopped` が返り、その指示は動かない。
+- `stop-running`：待たせている実行中の指示を止めると `stopped` が返り、案は増えない。
+- `stop-finished`：終わった指示を止めると `already_finished` が返る。完了していれば確定した案も返る。
+- `stop-replay`：同じ `requestId` で送り直すと、同じ本文が返る。
+- `stop-missing`：存在しない仕事は `404` になる。
+
+## How to get to it (user POV)
+
+- 画面はまだ無い。`POST /api/jobs/<jobId>/stop` に `{"requestId":"<uuid>"}` を送る。`jobId` は受付の応答の `job.jobId`。結果は停止の応答と、`GET /api/patterns/<id>/state` の `lastFinishedJob` で読む。
+
+## Driving it with curl
+
+Preconditions:
+
+- SKILL.md の「起動」の `pnpm dev` を、`MADORI_DEV_JOB_TEST_HOLD=before_render:30` を付けて起動している。仕事は実行権を取った後、描画の前に30秒待つ。待ちを付けずに動いていたら、片付けてから `MADORI_DEV_JOB_TEST_HOLD=before_render:30 perl -e 'setpgrp(0, 0); exec @ARGV or die "exec: $!"' mise exec -- pnpm dev >| "$EVIDENCE/dev.log" 2>&1 &` で起動し直す。
+- [案件](./projects.md)の「作る」を済ませ、`PAT=$(jq -r .pattern.id "$EVIDENCE/projects/create.json")` を設定している。
+- `J='content-type: application/json'`、`O='origin: http://127.0.0.1:5173'`、`API=http://127.0.0.1:5173/api`、`D="$EVIDENCE/stop"` を設定し、`$D` がある。
+- 送る関数 `send() { curl -sS -o "$D/$1.json" -w '%{http_code}\n' -X POST "$API/patterns/$PAT/messages" -H "$J" -H "$O" -d "{\"requestId\":\"$(uuidgen)\",\"body\":\"$2\"}"; }`、止める関数 `stop() { curl -sS -o "$D/$1.json" -w '%{http_code}\n' -X POST "$API/jobs/$2/stop" -H "$J" -H "$O" -d "{\"requestId\":\"$3\"}"; }`、状態を読む関数 `state() { curl -sS -o "$D/$1.json" "$API/patterns/$PAT/state"; }` を定義している。
+- [指示を送る](./instructions.md)の `settle` を、出力先を `$D` にして定義している。
+
+- **二つ送る。** `send accept-a 台所を広くしたい` と `send accept-b 窓を大きくしたい`。どちらも `202`。`A=$(jq -r .job.jobId "$D/accept-a.json")` と `B=$(jq -r .job.jobId "$D/accept-b.json")` を設定する。`state state-0` の `runningJob.jobId` が `$A`、`queuedJobs[0].jobId` が `$B`。A がまだ待機中なら、1秒おいて読み直す。
+- **待機中を止める。** `RB=$(uuidgen)` で `stop stop-b "$B" "$RB"`。`200` で、`outcome` が `stopped`、`job.state` が `cancelled`。`state state-1` の `queuedJobs` が `[]`、`lastFinishedJob.jobId` が `$B` で `lastFinishedJob.state` が `cancelled`、`runningJob.jobId` は `$A` のまま。
+- **送り直す。** `stop stop-b-replay "$B" "$RB"`。`200` で、`cmp "$D/stop-b.json" "$D/stop-b-replay.json"` が何も出さない。
+- **実行中を止める。** A の30秒の待ちの内に `stop stop-a "$A" "$(uuidgen)"`。`200` で、`outcome` が `stopped`、`job.state` が `cancelled`。`state state-2` の `runningJob` が `null`、`currentRevision` が `state-0` と同じ。`lastFinishedJob` は、番号の大きい `$B` のまま。`stop stop-a-again "$A" "$(uuidgen)"` は `200` で、`outcome` が `already_finished`、`job.state` が `cancelled`。待ちが終わった後、`$EVIDENCE/dev.log` の A の `job.finished` に `"outcome":"cancelled"` が出る。`GET /api/patterns/$PAT/revisions` の件数は送る前と同じ。
+- **終わった後に止める。** `send accept-c 収納を増やしたい` で `C=$(jq -r .job.jobId "$D/accept-c.json")` を設定し、`settle state-3` で終わるまで待つ（30秒の待ちを含む）。`stop stop-c "$C" "$(uuidgen)"`。`200` で、`outcome` が `already_finished`、`job.state` が `completed`、`job.revision.id` が `state-3` の `currentRevision.id`。案の一覧は送る前より一件多いまま。
+- **存在しない仕事。** `stop missing 00000000-0000-4000-8000-000000000000 "$(uuidgen)"`。`404` で、本文が `{"error":"not_found"}`。
+
+## Gotchas
+
+- 待ちを付けずに起動すると、サンプルの仕事は数秒で終わる。実行中の停止は確定と競い、`already_finished` と `completed` が返ることがある。誤りではなく、確定が先だったという答えである。
+- 待ちは手元のすべての仕事に掛かる。止めていない仕事も、描画の前に30秒待つ。
+- 止めた仕事の Workflow は、待ちが終わるまで残る。その間に次の待機中の指示が動き出す。止めた仕事の `job.finished` は、待ちが終わってから出る。
+- この段階では止めた後も待機列が進むので、次の仕事が終わると `lastFinishedJob` はその仕事に置き換わる。停止の直後に state を読む。
+- `lastFinishedJob` は、終わった時刻ではなく受付の番号で選ぶ。待機中に止めた B は、後で止めた A より番号が大きいので残る。
+- 別の利用者の仕事は `404` になる。確かめるには、SKILL.md のとおり片付けてから `MADORI_DEV_EMAIL=other@example.com` を付けて起動し直す。
