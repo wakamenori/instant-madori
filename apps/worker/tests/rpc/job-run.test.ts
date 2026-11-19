@@ -199,6 +199,29 @@ await test("Job runs restore D1 execution rights across retries and lost respons
     assert.equal(await f.snapshots(), 0);
     assert.deepEqual((await f.revisions())?.revisions, []);
   });
+  await t.test("a stop inside completion still ends cancelled", async () => {
+    const f = await fixture();
+    const end = await runJob(
+      {
+        ...f.deps,
+        store: {
+          ...f.deps.store,
+          jobs: {
+            ...db.store.jobs,
+            async complete(right, input) {
+              await stop(f.job.jobId);
+              return db.store.jobs.complete(right, input);
+            },
+          },
+        },
+      },
+      f.job,
+      stepEngine().steps,
+    );
+    assert.deepEqual(end, { kind: "cancelled" });
+    assert.equal(await f.snapshots(), 0);
+    assert.deepEqual((await f.revisions())?.revisions, []);
+  });
   await t.test("a stop between the failure read and update still ends cancelled", async () => {
     const f = await fixture([{ kind: "unavailable", reason: "containers_disabled" }]);
     const end = await runJob(

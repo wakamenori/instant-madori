@@ -214,15 +214,47 @@ await test("Stop orders against commit on real D1 and R2", async (t) => {
     assert.deepEqual(await counts(), before);
   });
 
-  await t.test("owner isolation, missing and unused jobs leave no request record", async () => {
+  await t.test("parallel stop and commit choose one terminal result", async () => {
+    for (let i = 0; i < 20; i++) {
+      const { right, snapshot, job } = await ready();
+      const before = await counts();
+      const [stopped, completed] = await Promise.all([
+        stop(job.jobId),
+        completeJob(deps, { right, snapshot, name: "案" }),
+      ]);
+      assert(stopped.kind === "applied");
+      if (stopped.result.outcome === "stopped") {
+        assert.deepEqual(completed, { kind: "execution_lost" });
+        assert.deepEqual(await counts(), before);
+      } else {
+        assert(stopped.result.job.state === "completed");
+        assert(completed.kind === "committed");
+        assert.deepEqual(stopped.result.job.revision, completed.revision);
+        assert.deepEqual(
+          await counts(),
+          before.map((n) => Number(n) + 1),
+        );
+      }
+    }
+  });
+  await t.test("a failed stop update rolls back its request record", async () => {
     const { job } = await ready();
     const requestId = crypto.randomUUID();
-    assert.deepEqual(await stop(job.jobId, requestId, otherId), { kind: "not_found" });
-    assert.deepEqual(await stop(crypto.randomUUID(), requestId), { kind: "not_found" });
-    for (const state of ["awaiting_answer", "limited"]) {
-      await db.raw.prepare("UPDATE jobs SET state = ? WHERE id = ?").bind(state, job.jobId).run();
-      assert.deepEqual(await stop(job.jobId, requestId), { kind: "not_found" });
+    await db.raw
+      .prepare(
+        `CREATE TRIGGER reject_stop BEFORE UPDATE OF state ON jobs
+      WHEN NEW.state = 'cancelled' BEGIN SELECT RAISE(ABORT, 'injected stop failure'); END`,
+      )
+      .run();
+    try {
+      await assert.rejects(stop(job.jobId, requestId), /injected stop failure/);
+    } finally {
+      await db.raw.prepare("DROP TRIGGER reject_stop").run();
     }
+    assert.equal(
+      await db.raw.prepare("SELECT state FROM jobs WHERE id = ?").bind(job.jobId).first("state"),
+      "running",
+    );
     assert.equal(
       await db.raw
         .prepare("SELECT count(*) AS n FROM requests WHERE request_id = ?")
@@ -230,7 +262,28 @@ await test("Stop orders against commit on real D1 and R2", async (t) => {
         .first("n"),
       0,
     );
+    assert.equal((await stop(job.jobId, requestId)).kind, "applied");
   });
+  await t.test(
+    "owner isolation, missing jobs and unwritten states leave no request record",
+    async () => {
+      const { job } = await ready();
+      const requestId = crypto.randomUUID();
+      assert.deepEqual(await stop(job.jobId, requestId, otherId), { kind: "not_found" });
+      assert.deepEqual(await stop(crypto.randomUUID(), requestId), { kind: "not_found" });
+      for (const state of ["awaiting_answer", "limited"]) {
+        await db.raw.prepare("UPDATE jobs SET state = ? WHERE id = ?").bind(state, job.jobId).run();
+        assert.deepEqual(await stop(job.jobId, requestId), { kind: "not_found" });
+      }
+      assert.equal(
+        await db.raw
+          .prepare("SELECT count(*) AS n FROM requests WHERE request_id = ?")
+          .bind(requestId)
+          .first("n"),
+        0,
+      );
+    },
+  );
 
   await t.test("every active state is stoppable and failed is already finished", async () => {
     for (const state of ["validating", "committing", "failed"]) {

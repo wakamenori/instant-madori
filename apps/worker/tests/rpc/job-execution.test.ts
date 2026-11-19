@@ -521,6 +521,7 @@ await test("Job execution through services on real D1 and R2", async (t) => {
             now,
           }),
         async () => observed.store.jobs.fail(fake, now),
+        () => observed.store.jobs.ownedBySubject(fake, "staging:verifier"),
         () =>
           observed.store.snapshots.write(fake, {
             id: crypto.randomUUID(),

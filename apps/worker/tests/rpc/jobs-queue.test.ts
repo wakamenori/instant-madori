@@ -69,9 +69,9 @@ await test("State queue reads scale with queued jobs instead of completed histor
           .prepare(
             `UPDATE jobs SET state = CASE WHEN message_id IN
         (SELECT id FROM messages WHERE pattern_id = ? AND number > 3030 - ?)
-        THEN 'queued' ELSE ? END WHERE pattern_id = ?`,
+        THEN 'queued' ELSE ? END, generation = CASE WHEN ? = 'completed' THEN 1 ELSE 0 END WHERE pattern_id = ?`,
           )
-          .bind(patternId, queued, finished, patternId)
+          .bind(patternId, queued, finished, finished, patternId)
           .run();
         const result = await db.raw
           .prepare(queuedJobsSql)
