@@ -221,6 +221,7 @@ export const patternStateResponseSchema = z.object({
   currentRevision: revisionSchema.nullable(),
   runningJob: acceptedJobSchema.nullable(),
   queuedJobs: z.array(acceptedJobSchema),
+  lastFinishedJob: finishedJobSchema.nullable(),
 });
 
 export type PatternStateResponse = z.infer<typeof patternStateResponseSchema>;

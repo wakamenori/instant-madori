@@ -23,6 +23,7 @@ export const revisionRoutes: Route[] = [
             currentRevision: outcome.state.currentRevision,
             runningJob: outcome.state.runningJob,
             queuedJobs: outcome.state.queuedJobs,
+            lastFinishedJob: outcome.state.lastFinishedJob,
           } satisfies PatternStateResponse);
         case "not_found":
           throw new ApiFailure(outcome.kind);

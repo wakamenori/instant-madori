@@ -1,9 +1,14 @@
-import { activeJobStates } from "./job-states.ts";
+import { activeJobStates, finishedJobStates } from "./job-states.ts";
 import type { OwnerId } from "../owner.ts";
 import { foundSchema, jsonRows, rows } from "./d1.ts";
 import type { D1 } from "./d1.ts";
-import { acceptedJobSchema, patternSchema, revisionSchema } from "@madori/contracts";
-import type { AcceptedJob, Pattern, Revision } from "@madori/contracts";
+import {
+  acceptedJobSchema,
+  finishedJobSchema,
+  patternSchema,
+  revisionSchema,
+} from "@madori/contracts";
+import type { AcceptedJob, FinishedJob, Pattern, Revision } from "@madori/contracts";
 import { patternJson } from "./patterns.ts";
 import { snapshotJson, snapshotSchema } from "./snapshots.ts";
 import type { Snapshot } from "./snapshots.ts";
@@ -26,6 +31,7 @@ export interface PatternState {
   currentRevision: Revision | null;
   runningJob: AcceptedJob | null;
   queuedJobs: AcceptedJob[];
+  lastFinishedJob: FinishedJob | null;
 }
 
 // Keep jobs outermost so completed message history does not drive the queue scan.
@@ -41,11 +47,17 @@ export const runningJobSql = `SELECT json_object('jobId', j.id, 'messageId', m.i
   CROSS JOIN messages m ON m.id = j.message_id AND m.pattern_id = j.pattern_id
   WHERE j.pattern_id = ? AND j.owner_id = ? AND j.state IN (${activeJobStates})`;
 
+export const lastFinishedJobSql = `SELECT ${finishedJobJson("j", "m", "r")} AS json
+  FROM messages m CROSS JOIN jobs j ON j.message_id = m.id AND j.pattern_id = m.pattern_id
+  LEFT JOIN revisions r ON r.job_id = j.id AND r.pattern_id = j.pattern_id
+  WHERE m.pattern_id = ? AND m.owner_id = ? AND j.state IN (${finishedJobStates})
+  ORDER BY m.number DESC LIMIT 1`;
+
 export async function getPatternState(
   db: D1,
   scope: { ownerId: OwnerId; patternId: string },
 ): Promise<PatternState | null> {
-  const [patterns, revisions, queuedJobs, runningJobs] = await db.batch([
+  const [patterns, revisions, queuedJobs, runningJobs, finishedJobs] = await db.batch([
     jsonRows(
       {
         sql: `SELECT ${patternJson("p")} AS json FROM patterns p WHERE p.id = ? AND p.owner_id = ?`,
@@ -73,6 +85,11 @@ export async function getPatternState(
       acceptedJobSchema,
       "running job",
     ),
+    jsonRows(
+      { sql: lastFinishedJobSql, bindings: [scope.patternId, scope.ownerId] },
+      finishedJobSchema,
+      "finished job",
+    ),
   ]);
   const pattern = patterns[0];
   if (!pattern) return null;
@@ -81,6 +98,7 @@ export async function getPatternState(
     currentRevision: revisions[0] ?? null,
     runningJob: runningJobs[0] ?? null,
     queuedJobs,
+    lastFinishedJob: finishedJobs[0] ?? null,
   };
 }
 

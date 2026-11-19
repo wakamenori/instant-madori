@@ -78,6 +78,7 @@ await test(
           currentRevision: revisions[0],
           runningJob: null,
           queuedJobs: [],
+          lastFinishedJob: { ...a, state: "failed" },
         });
         const history = await worker.call(`/api/patterns/${pattern.id}/revisions`, { as: owner });
         assert.deepEqual(revisionListResponseSchema.parse(await history.json()), {
@@ -137,6 +138,7 @@ await test(
           currentRevision: null,
           runningJob: a,
           queuedJobs: [b],
+          lastFinishedJob: null,
         });
         const c = await accept(pattern.id);
         await settleJobs(worker, owner, pattern.id, [a.jobId, b.jobId, c.jobId]);

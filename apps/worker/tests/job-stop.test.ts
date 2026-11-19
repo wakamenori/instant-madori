@@ -151,7 +151,9 @@ await test("Job stop through workerd HTTP", { timeout: 120_000 }, async (t) => {
       });
       await error(await stop(a.jobId, finishedId), 422, "request_id_reused");
       assert.equal(await (await stop(b.jobId, finishedId)).text(), finishedText);
-      assert.deepEqual((await state(pattern.id)).queuedJobs, []);
+      const after = await state(pattern.id);
+      assert.deepEqual(after.queuedJobs, []);
+      assert.deepEqual(after.lastFinishedJob, { ...b, state: "cancelled" });
     },
   );
   await t.test("running stop advances the queue before the held Workflow finishes", async () => {
@@ -168,6 +170,12 @@ await test("Job stop through workerd HTTP", { timeout: 120_000 }, async (t) => {
         .logEntries()
         .some((line) => line["event"] === "job.finished" && line["jobId"] === a.jobId),
     );
+    const isolated = await create();
+    const d = await accept(isolated.id);
+    await waitState(isolated.id, (value) => value.runningJob?.jobId === d.jobId);
+    await stop(d.jobId);
+    assert.deepEqual((await state(isolated.id)).lastFinishedJob, { ...d, state: "cancelled" });
+    await settleJobs(worker, owner, isolated.id, [d.jobId]);
     await stop(c.jobId);
     await settleJobs(worker, owner, pattern.id, [a.jobId, c.jobId]);
     const line = await worker.logLine(a.jobId, "job.finished");
