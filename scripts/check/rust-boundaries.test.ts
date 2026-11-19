@@ -21,11 +21,13 @@ function compliantMetadata(): CargoMetadata {
     addPackage(metadata, row.crate);
     metadata.workspace_members.push(row.crate);
   }
-  for (const name of ["solidcraft-geom", "solidcraft-render", "solidcraft-gpu"])
+  for (const name of ["solidcraft-geom", "solidcraft-viewport", "solidcraft-viewport-gpu"])
     addDependency(metadata, "madori-viewer", name);
   for (const name of ["solidcraft-engine", "solidcraft-doc", "solidcraft-io"])
     addDependency(metadata, "madori-modeling", name);
   addDependency(metadata, "madori-geometry", "madori-modeling");
+  addDependency(metadata, "solidcraft-viewport-gpu", "wgpu");
+  addDependency(metadata, "solidcraft-engine", "solidcraft-ui-text");
   const io = metadata.resolve.nodes.find((node) => node.id === "solidcraft-io");
   assert(io);
   io.features.push("external-workspace");
@@ -57,14 +59,16 @@ const violations: Record<string, (metadata: CargoMetadata, trees: Map<string, st
   "housing-dependencies": (metadata) => addDependency(metadata, "madori-housing", "reqwest"),
   "viewer-solidcraft": (metadata) => addDependency(metadata, "madori-viewer", "solidcraft-io"),
   "viewer-editing": (metadata) => {
-    addDependency(metadata, "solidcraft-render", "bridge");
+    addDependency(metadata, "solidcraft-viewport", "bridge");
     addDependency(metadata, "bridge", "madori-modeling");
   },
+  "viewer-ui-toolkit": (metadata) => addDependency(metadata, "solidcraft-viewport", "egui"),
   "modeling-solidcraft": (metadata) =>
     addDependency(metadata, "madori-modeling", "solidcraft-ui-egui"),
   "geometry-solidcraft": (metadata) =>
     addDependency(metadata, "madori-geometry", "solidcraft-kernel"),
-  "geometry-ui": (metadata) => addDependency(metadata, "solidcraft-engine", "egui"),
+  "geometry-ui-toolkit": (metadata) => addDependency(metadata, "solidcraft-engine", "egui"),
+  "geometry-plugin-runtime": (metadata) => addDependency(metadata, "solidcraft-engine", "wasmtime"),
   "geometry-cache-trust": (_metadata, trees) => {
     trees.set(
       "geometry-cache-trust",
@@ -120,19 +124,103 @@ void test("Rust tests can use dependencies across layers without adding them to 
   assert.deepEqual(checkRustBoundaries(metadata, compliantFeatureTrees()), []);
 });
 
-void test("viewer and geometry reject UI reached through production or build edges", () => {
-  for (const root of ["madori-viewer", "madori-geometry"]) {
-    for (const forbidden of ["egui", "egui-wgpu", "eframe", "winit", "solidcraft-ui-egui"]) {
+void test("toolkit leak through normal and build edges fails for viewer and geometry", () => {
+  for (const [root, id] of [
+    ["madori-viewer", "viewer-ui-toolkit"],
+    ["madori-geometry", "geometry-ui-toolkit"],
+  ]) {
+    for (const forbidden of ["egui", "egui-wgpu", "egui_extras", "eframe", "winit"]) {
+      for (const kind of [null, "build"] satisfies ("build" | null)[]) {
+        const metadata = compliantMetadata();
+        assert(root);
+        addDependency(metadata, root, "bridge", kind);
+        addDependency(metadata, "bridge", forbidden, kind);
+        assert(
+          checkRustBoundaries(metadata, compliantFeatureTrees()).some(
+            (message) =>
+              message.startsWith(`[${id}]`) &&
+              message.includes(`${root} reaches ${forbidden} (UI toolkit)`),
+          ),
+        );
+      }
+    }
+  }
+});
+
+void test("geometry rejects GPU rendering through normal and build edges", () => {
+  for (const forbidden of ["wgpu", "wgpu-core"]) {
+    for (const kind of [null, "build"] satisfies ("build" | null)[]) {
       const metadata = compliantMetadata();
-      addDependency(metadata, root, "bridge");
-      addDependency(metadata, "bridge", forbidden, "build");
+      addDependency(metadata, "solidcraft-engine", forbidden, kind);
       assert(
-        checkRustBoundaries(metadata, compliantFeatureTrees()).some((message) =>
-          message.includes(`${root} reaches ${forbidden}`),
+        checkRustBoundaries(metadata, compliantFeatureTrees()).some(
+          (message) =>
+            message.startsWith("[geometry-ui-toolkit]") &&
+            message.includes(`madori-geometry reaches ${forbidden} (GPU)`),
         ),
       );
     }
   }
+});
+
+void test("UI-free ui-text is allowed in geometry", () => {
+  assert.deepEqual(checkRustBoundaries(compliantMetadata(), compliantFeatureTrees()), []);
+});
+
+void test("wasmtime leak and craft-plugin-wasm leak fail for geometry", () => {
+  for (const forbidden of ["wasmtime", "wasmtime-environ", "craft-plugin-wasm"]) {
+    for (const kind of [null, "build"] satisfies ("build" | null)[]) {
+      const metadata = compliantMetadata();
+      addDependency(metadata, "solidcraft-engine", forbidden, kind);
+      assert(
+        checkRustBoundaries(metadata, compliantFeatureTrees()).some(
+          (message) =>
+            message.startsWith("[geometry-plugin-runtime]") &&
+            message.includes(`${forbidden} (plugin runtime)`),
+        ),
+      );
+    }
+  }
+});
+
+void test("viewer viewport-gpu and its wgpu are allowed", () => {
+  assert.deepEqual(checkRustBoundaries(compliantMetadata(), compliantFeatureTrees()), []);
+});
+
+void test("viewport-egui fails the viewer direct boundary and its egui fails the toolkit boundary", () => {
+  const metadata = compliantMetadata();
+  addDependency(metadata, "madori-viewer", "solidcraft-viewport-egui");
+  addDependency(metadata, "solidcraft-viewport-egui", "egui");
+  const messages = checkRustBoundaries(metadata, compliantFeatureTrees());
+  assert(messages.some((message) => message.startsWith("[viewer-solidcraft]")));
+  assert(messages.some((message) => message.startsWith("[viewer-ui-toolkit]")));
+});
+
+void test("viewer rejects every editing engine crate through a rendering dependency", () => {
+  for (const name of [
+    "madori-modeling",
+    "solidcraft-engine",
+    "solidcraft-doc",
+    "solidcraft-kernel",
+    "solidcraft-io",
+  ]) {
+    const metadata = compliantMetadata();
+    addDependency(metadata, "solidcraft-viewport", name);
+    assert(
+      checkRustBoundaries(metadata, compliantFeatureTrees()).some(
+        (message) =>
+          message.startsWith("[viewer-editing]") && message.includes(`${name} (editing engine)`),
+      ),
+    );
+  }
+});
+
+void test("crate family patterns match whole crate names", () => {
+  const metadata = compliantMetadata();
+  for (const name of ["my-egui", "eguiish", "wgpuish", "wasmtimeish", "craft-plugin-wasm-helper"]) {
+    addDependency(metadata, "solidcraft-engine", name);
+  }
+  assert.deepEqual(checkRustBoundaries(metadata, compliantFeatureTrees()), []);
 });
 
 void test("cache check requires target features and fails on missing or invalid trees", () => {
@@ -159,11 +247,11 @@ void test("missing workspace crates and incomplete graphs fail instead of skippi
   );
   const incomplete = compliantMetadata();
   incomplete.resolve.nodes = incomplete.resolve.nodes.filter(
-    (node) => node.id !== "solidcraft-render",
+    (node) => node.id !== "solidcraft-viewport",
   );
   assert(
     checkRustBoundaries(incomplete, compliantFeatureTrees()).some((message) =>
-      message.includes("Missing resolved package solidcraft-render"),
+      message.includes("Missing resolved package solidcraft-viewport"),
     ),
   );
 });

@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { z } from "zod";
-import { rustBoundaries } from "./boundaries.ts";
+import { crateFamilies, rustBoundaries } from "./boundaries.ts";
 
 const dependencyKind = z.enum(["dev", "build"]).nullable();
 export const cargoMetadataSchema = z.object({
@@ -118,8 +118,9 @@ export function checkRustBoundaries(
         fail(`Missing resolved package ${id}`);
         continue;
       }
-      if (new RegExp(row.forbiddenDeps, "u").test(pkg.name)) {
-        fail(`${root.name} reaches ${pkg.name}`);
+      for (const family of row.forbidden) {
+        const { pattern, label } = crateFamilies[family];
+        if (pattern.test(pkg.name)) fail(`${root.name} reaches ${pkg.name} (${label})`);
       }
       for (const dep of node.deps) {
         if (dep.dep_kinds.some((kind) => kind.kind !== "dev")) pending.push(dep.pkg);

@@ -4,6 +4,13 @@ import { checkModeFor } from "./ci-mode.ts";
 
 void test("Container, display, dependency, upstream and CI changes need the full check", () => {
   for (const file of [
+    ".cargo/config.toml",
+    "scripts/check/boundaries.ts",
+    "scripts/check/check.ts",
+    "scripts/check/check-viewer-wasm.ts",
+    "scripts/check/check-viewer-wasm.test.ts",
+    "scripts/check/rust-symbols.ts",
+    "scripts/check/rust-symbols.test.ts",
     "apps/geometry/src/main.rs",
     "apps/geometry/Dockerfile",
     "crates/modeling/src/lib.rs",
@@ -29,7 +36,6 @@ void test("other service changes use the default check", () => {
       "apps/worker/src/storage/d1.ts",
       "apps/web/src/App.tsx",
       "crates/housing/src/lib.rs",
-      "scripts/check/boundaries.ts",
     ]),
     "default",
   );

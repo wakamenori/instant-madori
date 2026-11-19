@@ -5,6 +5,10 @@ all-features = false
 unmaintained = "workspace"
 unsound = "all"
 yanked = "deny"
+ignore = [
+  { id = "RUSTSEC-2023-0071", reason = "rsa is used only inside pgp for public-key signature verification" },
+  { id = "RUSTSEC-2026-0387", reason = "crypto-bigint is used only inside pgp for public-key signature verification" },
+]
 
 [licenses]
 allow = [
@@ -16,6 +20,19 @@ allow = [
 ignore = true
 
 [bans]
+deny = [
+  { crate = "pgp", wrappers = ["solidcraft-io"], reason = "provenance verification only" },
+  { crate = "rsa", wrappers = ["pgp"], reason = "RUSTSEC-2023-0071 ignore holds only inside pgp" },
+  { crate = "crypto-bigint", wrappers = ["cx448", "elliptic-curve"], reason = "RUSTSEC-2026-0387 ignore holds only inside pgp" },
+  { crate = "cx448", wrappers = ["pgp"] },
+  { crate = "elliptic-curve", wrappers = ["cx448", "ecdsa", "k256", "p256", "p384", "p521", "pgp", "primeorder"] },
+  { crate = "ecdsa", wrappers = ["k256", "p256", "p384", "p521", "pgp"] },
+  { crate = "primeorder", wrappers = ["p256", "p384", "p521"] },
+  { crate = "k256", wrappers = ["pgp"] },
+  { crate = "p256", wrappers = ["pgp"] },
+  { crate = "p384", wrappers = ["pgp"] },
+  { crate = "p521", wrappers = ["pgp"] },
+]
 multiple-versions = "allow"
 # Upstream uses versionless path dependencies between its workspace crates.
 # Cargo.lock pins the actual resolved graph; this is not a registry wildcard policy.
@@ -26,4 +43,3 @@ allow-wildcard-paths = true
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
-allow-git = ["https://github.com/tangency-labs/solidcore"]

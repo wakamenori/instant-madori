@@ -3,8 +3,8 @@ use crate::{
     scene::{self, ShownScene},
     summary,
 };
-use solidcraft_gpu::view::{Frame, GpuTarget, Renderer, far_depth, reversed_depth};
-use solidcraft_render::Camera;
+use solidcraft_viewport::{Camera, MAX_SECTION_PLANES};
+use solidcraft_viewport_gpu::view::{Frame, GpuTarget, Renderer, far_depth, reversed_depth};
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, Ordering},
@@ -75,7 +75,7 @@ impl Viewer {
             .get_default_config(&adapter, 1, 1)
             .ok_or_else(|| Failure::new(Code::SurfaceUnavailable, "No surface configuration"))?;
         surface.configure(&device, &config);
-        let depth_format = solidcraft_gpu::depth_format(&device, false);
+        let depth_format = solidcraft_viewport_gpu::depth_format(&device, false);
         let depth = depth_texture(&device, &config, depth_format);
         let renderer = Renderer::new(
             &device,
@@ -85,6 +85,7 @@ impl Viewer {
                 samples: 1,
                 tess: false,
                 oit: false,
+                edges: false,
             },
             None,
         );
@@ -282,9 +283,11 @@ fn frame(camera: &Camera, [width, height]: [u32; 2], scene: &ShownScene) -> Fram
         view_proj: camera
             .view_proj(f64::from(width) / f64::from(height), scene.radius)
             .to_f32(),
+        turned_depth: None,
         back: camera.back().to_f32(),
         size_px: [width as f32, height as f32],
-        clip: [0.; 4],
+        clip: [[0.; 4]; MAX_SECTION_PLANES],
+        clip_hatch: [0; MAX_SECTION_PLANES],
         cap: [0.; 4],
         images: Vec::new(),
         clouds: Vec::new(),
@@ -294,7 +297,7 @@ fn frame(camera: &Camera, [width, height]: [u32; 2], scene: &ShownScene) -> Fram
         outline: true,
         eye: [eye[0], eye[1], eye[2], 1.],
         ao_radius: 0.,
-        ao_samples: solidcraft_gpu::view::AO_SAMPLES,
+        ao_samples: solidcraft_viewport_gpu::view::AO_SAMPLES,
         sky: [0.; 4],
         ssaa: 1.,
         hover_tint: [0.; 3],
