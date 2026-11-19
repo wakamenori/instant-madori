@@ -98,9 +98,21 @@ void test("a Wasm with only allowed crates passes and prints the table", (t) => 
 });
 
 const forbiddenSamples: Record<string, string[]> = {
-  cadKernel: ["_RNvNtCs3_9solidcore4eval7surface", "_RNvCs4_13solidcore_ops5union"],
-  editingEngine: ["_RNvCs5_17solidcraft_engine3run", "_RNvCs6_15madori_modeling5build"],
-  uiToolkit: ["_RNvCs7_9egui_wgpu4draw", "_RNvCs8_4egui3run"],
+  cadKernel: [
+    "_RNvNtCs3_9solidcore4eval7surface",
+    "_RNvCs4_13solidcore_ops5union",
+    "_RNvYNtCs4_16solidcore_record4Vec3NtNtCs3_9solidcore3tol10ScaledZero11scaled_zero",
+  ],
+  editingEngine: [
+    "_RNvCs5_17solidcraft_engine3run",
+    "_RNvCs6_15madori_modeling5build",
+    "_RNvYINtNtCs9_5alloc3vec3VecdENtCs6_17solidcraft_engine7Command7execute",
+  ],
+  uiToolkit: [
+    "_RNvCs7_9egui_wgpu4draw",
+    "_RNvCs8_4egui3run",
+    "_RNvYNtNtCs5_4wgpu3api6DeviceNtCs7_9egui_wgpu9RenderExt11paint_frame",
+  ],
 };
 for (const [family, symbols] of Object.entries(forbiddenSamples)) {
   for (const symbol of symbols) {
