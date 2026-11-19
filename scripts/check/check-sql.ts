@@ -1,5 +1,5 @@
 import { glob, readFile } from "node:fs/promises";
-import { relative, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
 import { repositoryRoot } from "../shared/repository.ts";
@@ -92,20 +92,34 @@ export function checkSqlSource(path: string, source: string) {
   return violations;
 }
 
-if (import.meta.main) {
+const targets = ["apps/worker/src/**/*.ts", "apps/worker/migrations/*.sql"];
+
+export async function checkSqlFiles(
+  root: string,
+): Promise<{ files: number; violations: string[] }> {
   const violations: string[] = [];
-  let checked = 0;
-  for await (const path of glob(["apps/worker/src/**/*.ts", "apps/worker/migrations/*.sql"], {
-    cwd: fileURLToPath(repositoryRoot),
-  })) {
-    const source = await readFile(new URL(path, repositoryRoot), "utf8");
-    violations.push(...checkSqlSource(path, source));
-    checked++;
+  let files = 0;
+  for (const pattern of targets) {
+    const paths: string[] = [];
+    for await (const path of glob(pattern, { cwd: root })) paths.push(path);
+    paths.sort();
+    if (paths.length === 0) violations.push(`${pattern}: no files found under ${root}.`);
+    for (const path of paths) {
+      violations.push(...checkSqlSource(path, await readFile(join(root, path), "utf8")));
+      files++;
+    }
   }
+  return { files, violations };
+}
+
+if (import.meta.main) {
+  const { files, violations } = await checkSqlFiles(
+    process.argv[2] ?? fileURLToPath(repositoryRoot),
+  );
   if (violations.length > 0) {
     console.error(violations.join("\n"));
     process.exitCode = 1;
   } else {
-    console.log(`SQL connection-state and request-write checks passed: ${checked} files.`);
+    console.log(`SQL connection-state and request-write checks passed: ${files} files.`);
   }
 }
