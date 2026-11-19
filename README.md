@@ -64,6 +64,8 @@ Viteのプロキシ（5173番）経由のAPI要求には、開発者として署
 
 初期設定は `pnpm setup`、引数の確認は `pnpm check --help`。upstreamの取得・取り込みには後述の `pnpm upstream:check` / `pnpm upstream:update` を使います。個別ツールを順に手動実行する必要はありません。
 
+Issue・PR・検証記録に貼る画像は、`pnpm images:upload --issue <番号> <ファイル>...` で `images` ブランチへ上げ、出力されたMarkdownを貼ります。作業中のブランチとworktreeは変わりません。置き方の決まりは[AGENTS.md](AGENTS.md)にあります。
+
 `--fast` はテスト実行・アプリのビルド・ネットワーク監査を省きます。Rustの型付き検査自体には依存のコンパイルが必要で、初回は時間がかかります。繰り返し実行ではCargoのキャッシュを再利用し、変更されたクレートを検査します。検査ごとの所要時間を出力します。
 
 `pnpm setup`・`pnpm dev`・`pnpm build`・`pnpm check --full` は、同じスクリプトでWasmをreleaseビルドします。Cargoのプロファイルとwasm-bindgenの入力先は一つの値から決め、`target/wasm32-unknown-unknown/release/madori_viewer.wasm` からバインディングを生成します。開発・検査・配信で同じWasmを使います。依存を含む初回のWasmのreleaseビルドは、手元の単発の参考値で189秒でした（依存のキャッシュが無い状態、`.cargo/config.toml` の `jobs = 4`）。初回は長くなりますが、再ビルドでは依存のキャッシュを再利用します。RustのテストとClippyはdebugのままです。
