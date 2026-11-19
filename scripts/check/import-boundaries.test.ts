@@ -816,6 +816,15 @@ void test("composition exceptions and type-only Store imports remain permitted",
   }
 });
 
+void test("user services cannot import API values", () => {
+  const from = "apps/worker/src/services/users.ts";
+  assert(
+    resolved(importValue(specifier(from, "apps/worker/src/api/x.ts")), from).some(
+      (diagnostic) => diagnostic.boundaryId === "worker-services-layers",
+    ),
+  );
+});
+
 void test("package imports maps keep the leading hash while asset suffixes are removed", () => {
   assert.deepEqual(resolved(importType("#api")), []);
   for (const name of ["#storage", "#storage?raw"])
