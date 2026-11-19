@@ -1,6 +1,6 @@
 {
   "repository": "https://github.com/tangency-labs/solidcraft",
-  "commit": "ae1d85e5d4e32183258b3d301fb26b8687f4b969",
+  "commit": "7c0f565e915faf6235d95d8cbdc74f8efed07451",
   "initialCommit": "9325e3ac8cc1dcad67bc5d218274e89e8a9b26fc",
   "localPatches": ["crates/io/Cargo.toml", "crates/io/build.rs"]
 }
