@@ -13,7 +13,7 @@ pstack の poteto-mode に従い、Issue に合う playbook で進める。多�
 
 1. T3 が origin/main から作った、自分の worktree で作業する。ほかのブランチや Issue に触らない。
 2. [verify-madori](../verify-madori/SKILL.md) の「準備」のとおりに準備する。ディスクが足りずにビルドが失敗したら、worktree の外を消さずに指揮役に報告する。
-3. Issue をコメントまで読み（`gh issue view <番号> --comments`）、それが指す plan.md の節を読む。依存の欄の Issue がすべて閉じているか確かめる。開いていれば、指揮役に報告して止まる。
+3. Issue をコメントまで読み（`gh issue view <番号> --json title,body,comments`）、それが指す plan.md の節を読む。依存の欄の Issue がすべて閉じているか確かめる。開いていれば、指揮役に報告して止まる。
 
 ## 設計を決める
 
