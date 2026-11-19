@@ -77,6 +77,7 @@ node .claude/skills/madori-coordinator/scripts/rank-ready.mjs
 - 検証役は、差分の大部分を書いた系統と別の系統のモデルにする。実装は Codex が書くので、普段は Claude Code の Opus にする。差分の大部分を Claude が書いた PR は、Codex に確かめさせる。Codex の立て方は pstack-models.md に従う。
 - `delegate_task` に `isolation: "worktree"` を付けて、指揮役のスレッドの子として立てる。指示は [verifier-brief.md](verifier-brief.md) の `{…}` を埋めて渡す。
 - 検証役のスレッドには PR を紐付けない。
+- 判定を PR に書いたら、検証役のスレッドを `t3_thread_organize`（`action: "settle"`）で settled にする。見回りの片付けは、settled でないスレッドの worktree を残すため。
 
 ## ブランチを staging で試す
 
