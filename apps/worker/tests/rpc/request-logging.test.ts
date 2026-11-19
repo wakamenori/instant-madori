@@ -10,6 +10,7 @@ void test("API request logs classify server failures and successful/client respo
   t.mock.method(console, "error", (line: string) => lines.push(line));
   const env: Env = {
     ENVIRONMENT: "invalid",
+    JOB_TEST_HOLD: "none",
     APP_ORIGINS: "",
     ACCESS_TEAM_DOMAIN: "",
     ACCESS_AUD: "",

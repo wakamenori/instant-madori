@@ -1,3 +1,4 @@
+import type { JobTestHold } from "./job-test-hold.ts";
 import type { JobExecutionReference } from "../storage/job-execution.ts";
 import type { Store } from "../storage/store.ts";
 import type { GeometryApi, GeometryInstance } from "../geometry/geometry-client.ts";
@@ -38,6 +39,7 @@ export interface JobStepConfig {
 }
 
 export interface JobSteps {
+  sleep(name: string, ms: number): Promise<void>;
   do<T extends Rpc.Serializable<T> & { kind: string }>(
     name: string,
     config: JobStepConfig,
@@ -52,6 +54,9 @@ export type PatternAdvance =
 export type PatternCoordinatorDeps = StoreDeps<"jobs", "claim" | "activeReference"> &
   Pick<ServiceDeps, "runtime"> & { jobRuns: JobRuns };
 
-export type JobWorkflowDeps = StoreDeps<"jobs", "restore" | "check" | "complete" | "fail"> &
+export type JobWorkflowDeps = StoreDeps<
+  "jobs",
+  "restore" | "check" | "complete" | "fail" | "ownedBySubject"
+> &
   StoreDeps<"snapshots", "write"> &
-  Pick<ServiceDeps, "geometry" | "runtime" | "wakePattern">;
+  Pick<ServiceDeps, "geometry" | "runtime" | "wakePattern"> & { testHold: JobTestHold | null };

@@ -231,3 +231,20 @@ export async function stopJobOnce(
   const once = await runOnce(db, stopResultSchema, batch);
   return once.kind === "not_applied" ? { kind: "not_found" } : once;
 }
+
+export async function isJobOwnedBySubject(db: D1, right: JobExecutionRight, subject: string) {
+  const { jobId, patternId, generation, ownerId } = readJobExecutionRight(right);
+  const row = await db.first(
+    rows(
+      {
+        sql: `SELECT 1 AS found FROM jobs j JOIN users u ON u.id = j.owner_id
+      WHERE j.id = ? AND j.pattern_id = ? AND j.generation = ? AND j.owner_id = ?
+        AND u.access_subject = ?`,
+        bindings: [jobId, patternId, generation, ownerId, subject],
+      },
+      foundSchema,
+      "job owner subject",
+    ),
+  );
+  return row !== null;
+}

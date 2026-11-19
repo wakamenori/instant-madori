@@ -60,3 +60,31 @@ await test("Verifier configuration", async (t) => {
     });
   }
 });
+
+await test("Job test hold configuration fails closed", () => {
+  for (const env of [local, remote, { ...remote, ENVIRONMENT: "production" }]) {
+    loadConfig({ ...env, JOB_TEST_HOLD: "none" });
+    for (const value of [
+      "",
+      "before_render:0",
+      "before_commit:7201",
+      "before_render:01",
+      "after_render:10",
+      "before_render:1.5",
+      123,
+    ]) {
+      assert.throws(() => loadConfig({ ...env, JOB_TEST_HOLD: value }), {
+        name: "ConfigError",
+        message: /JOB_TEST_HOLD/,
+      });
+    }
+  }
+  for (const value of ["before_render:1", "before_commit:7200"]) {
+    loadConfig({ ...local, JOB_TEST_HOLD: value });
+    loadConfig({ ...remote, JOB_TEST_HOLD: value });
+    assert.throws(
+      () => loadConfig({ ...remote, ENVIRONMENT: "production", JOB_TEST_HOLD: value }),
+      { name: "ConfigError", message: /JOB_TEST_HOLD/ },
+    );
+  }
+});

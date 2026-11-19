@@ -1,3 +1,4 @@
+import { jobTestHoldSettingSchema } from "../services/job-test-hold.ts";
 import { z } from "zod";
 
 /**
@@ -17,6 +18,7 @@ const jwksSchema = z.object({
 
 const envSchema = z
   .object({
+    JOB_TEST_HOLD: z.string().optional(),
     ENVIRONMENT: z.enum(["local", "staging", "production"]),
     /**
      * Space-separated Origins allowed to send mutating requests (CSRF defense behind
@@ -35,6 +37,12 @@ const envSchema = z
     ACCESS_VERIFIER_CLIENT_ID: z.string().trim().min(1).optional(),
   })
   .transform((env, context) => {
+    const hold = jobTestHoldSettingSchema.safeParse(env);
+    if (!hold.success) {
+      for (const issue of hold.error.issues)
+        context.addIssue({ code: "custom", path: issue.path, message: issue.message });
+      return z.NEVER;
+    }
     const localIssuer = new URL(env.ACCESS_TEAM_DOMAIN).hostname.endsWith(localIssuerSuffix);
     const local = env.ENVIRONMENT === "local";
     if (local !== localIssuer || local !== (env.ACCESS_JWKS !== undefined)) {

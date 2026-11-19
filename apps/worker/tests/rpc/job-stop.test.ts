@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { readFile } from "node:fs/promises";
 import { openJobDatabase, jobMigration, now } from "./jobs-support.ts";
 import {
+  stopJob,
   acceptInstruction,
   claimNextJob,
   completeJob,
@@ -72,6 +73,36 @@ await test("Stop orders against commit on real D1 and R2", async (t) => {
       ),
     );
 
+  await t.test(
+    "a lost stop wake replays and wakes again, finished replays never wake",
+    async () => {
+      const { job, patternId } = await ready();
+      const input = { ownerId, jobId: job.jobId, requestId: crypto.randomUUID() };
+      let fail = true;
+      const wakes: string[] = [];
+      const service = {
+        ...deps,
+        wakePattern(id: string) {
+          wakes.push(id);
+          if (fail) return Promise.reject(new Error("wake failed"));
+          return Promise.resolve();
+        },
+      };
+      await assert.rejects(stopJob(service, input), /wake failed/);
+      fail = false;
+      const replay = await stopJob(service, input);
+      assert(replay.kind === "stop");
+      assert.equal(replay.record, "replayed");
+      assert.equal(replay.result.outcome, "stopped");
+      assert.deepEqual(wakes, [patternId, patternId]);
+      const finished = { ...input, requestId: crypto.randomUUID() };
+      const result = await stopJob(service, finished);
+      assert(result.kind === "stop");
+      assert.equal(result.result.outcome, "already_finished");
+      assert.equal((await stopJob(service, finished)).kind, "stop");
+      assert.equal(wakes.length, 2);
+    },
+  );
   await t.test("queued stop skips the job and fixes its replay", async () => {
     const first = await ready();
     const queued = await accept(first.patternId);
