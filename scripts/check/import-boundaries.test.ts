@@ -11,7 +11,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, relative } from "node:path";
+import { dirname, join, matchesGlob, relative } from "node:path";
 import { ESLint } from "eslint";
 import { z } from "zod";
 import { createImportBoundaryChecker } from "./check-imports.ts";
@@ -315,6 +315,9 @@ const importCases: Record<string, string[]> = {
   ],
   "web-viewer-bindings": ["crates/viewer/pkg/madori_viewer.d.ts"],
 };
+const exceptedTargets: Record<string, string> = {
+  "web-config-scripts": "scripts/dev/local-access.ts",
+};
 for (const [layer, { allowed, typeOnly }] of Object.entries(workerLayerPermissions)) {
   importCases[`worker-${layer}-layers`] = Object.keys(workerLayerPermissions)
     .filter((target) => target !== layer && !allowed.includes(target) && !typeOnly.includes(target))
@@ -333,6 +336,15 @@ void test("every boundary row has explicit rejected and allowed cases", () => {
     [...Object.keys(importCases), ...Object.keys(syntaxCases)].sort(),
     typescriptBoundaries.map((row) => row.id).sort(),
   );
+  for (const row of typescriptBoundaries) {
+    if (row.kind !== "imports" || !row.exceptTargets) continue;
+    const target = exceptedTargets[row.id] ?? "";
+    assert(
+      row.targets.some((pattern) => matchesGlob(target, pattern)) &&
+        row.exceptTargets.some((pattern) => matchesGlob(target, pattern)),
+      `${row.id} allowed case imports a file its exceptTargets exempt`,
+    );
+  }
 });
 for (const row of typescriptBoundaries) {
   void test(`boundary ${row.id} rejects violations and allows dependencies`, async () => {
@@ -374,11 +386,10 @@ for (const row of typescriptBoundaries) {
         }
         const safe = `${dirname(from)}/safe.ts`;
         write(safe);
-        const allowed =
-          row.id === "web-internal-geometry"
-            ? importValue("@madori/contracts")
-            : importValue(specifier(from, safe));
-        assert.deepEqual(resolved(allowed, from), [], `${row.id} ${from}`);
+        const allowed = row.publicEntry
+          ? row.publicEntry.specifier
+          : specifier(from, exceptedTargets[row.id] ?? safe);
+        assert.deepEqual(resolved(importValue(allowed), from), [], `${row.id} ${from}`);
       } else {
         const cases = syntaxCases[row.id];
         assert(cases?.rejected.length && cases.allowed.length, row.id);
