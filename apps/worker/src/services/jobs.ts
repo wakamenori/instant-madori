@@ -1,3 +1,5 @@
+import { verifierSubject } from "../identity.ts";
+import type { JobTestHold, TestHoldPoint } from "./job-test-hold.ts";
 import { z } from "zod";
 import { renderPatternSample } from "./geometry.ts";
 import type { GeometryFailure } from "./geometry.ts";
@@ -10,7 +12,7 @@ import type {
 } from "./deps.ts";
 import { instructionBodySchema, nameSchema } from "@madori/contracts";
 import type { OwnerId } from "../owner.ts";
-import type { Acceptance } from "../storage/jobs.ts";
+import type { Acceptance, JobStop } from "../storage/jobs.ts";
 import type { ServiceDeps, StoreDeps } from "./deps.ts";
 import { requestKey } from "./requests.ts";
 import type { JobExecutionReference, JobExecutionRight } from "../storage/job-execution.ts";
@@ -52,6 +54,31 @@ export async function acceptInstruction(
     case "request_id_reused":
       return once;
   }
+}
+
+export type StopJobOutcome =
+  | {
+      kind: "stop";
+      record: "applied" | "replayed";
+      result: Extract<JobStop, { kind: "applied" | "replayed" }>["result"];
+    }
+  | { kind: "not_found" }
+  | { kind: "request_id_reused" };
+
+export async function stopJob(
+  {
+    store,
+    runtime,
+    wakePattern,
+  }: StoreDeps<"jobs", "stopOnce"> & Pick<ServiceDeps, "runtime" | "wakePattern">,
+  input: { ownerId: OwnerId; requestId: string; jobId: string },
+): Promise<StopJobOutcome> {
+  const { ownerId, requestId, jobId } = input;
+  const key = await requestKey(ownerId, requestId, "job.stop", { jobId });
+  const once = await store.jobs.stopOnce(key, { jobId, now: runtime.now() });
+  if (once.kind === "not_found" || once.kind === "request_id_reused") return once;
+  if (once.result.outcome === "stopped") await wakePattern(once.result.patternId);
+  return { kind: "stop", record: once.kind, result: once.result };
 }
 
 export function claimNextJob(
@@ -127,9 +154,11 @@ export const jobReferenceSchema = z.strictObject({
 type JobFailureReason =
   GeometryFailure | "execution_lost" | "invalid_snapshot" | "invalid_name" | "retries_exhausted";
 type Committed = { kind: "committed"; revisionId: string };
+type Cancelled = { kind: "cancelled" };
 type NotCommitted = { kind: "not_committed"; reason: JobFailureReason };
 export type JobEnd =
   | Committed
+  | Cancelled
   | { kind: "failed"; reason: JobFailureReason }
   | { kind: "not_running"; reason: JobFailureReason };
 
@@ -166,22 +195,23 @@ export async function runJob(
   job: JobExecutionReference,
   steps: JobSteps,
 ): Promise<JobEnd> {
-  let settled: Committed | NotCommitted;
+  let settled: Committed | Cancelled | NotCommitted;
   try {
+    await holdForTest(deps, job, steps, "before_render");
     const rendered = await steps.do(jobSteps.render.name, jobSteps.render.config, () =>
       render(deps, job),
     );
-    settled =
-      rendered.kind === "saved"
-        ? await steps.do(jobSteps.commit.name, jobSteps.commit.config, () =>
-            commit(deps, job, rendered.snapshot),
-          )
-        : rendered;
+    if (rendered.kind === "saved") {
+      await holdForTest(deps, job, steps, "before_commit");
+      settled = await steps.do(jobSteps.commit.name, jobSteps.commit.config, () =>
+        commit(deps, job, rendered.snapshot),
+      );
+    } else settled = rendered;
   } catch {
     settled = { kind: "not_committed", reason: "retries_exhausted" };
   }
   const end =
-    settled.kind === "committed"
+    settled.kind !== "not_committed"
       ? settled
       : await steps.do(jobSteps.fail.name, jobSteps.fail.config, () =>
           endWithoutRevision(deps, job, settled.reason),
@@ -196,8 +226,9 @@ export async function runJob(
 async function current(
   deps: JobWorkflowDeps,
   job: JobExecutionReference,
-): Promise<{ kind: "active"; right: JobExecutionRight } | Committed | NotCommitted> {
+): Promise<{ kind: "active"; right: JobExecutionRight } | Committed | Cancelled | NotCommitted> {
   const restored = await readCurrentJobExecution(deps, job);
+  if (restored.kind === "cancelled") return { kind: "cancelled" };
   if (restored.kind === "invalid") return { kind: "not_committed", reason: "execution_lost" };
   return restored.kind === "committed"
     ? { kind: "committed", revisionId: restored.revision.id }
@@ -207,7 +238,7 @@ async function current(
 async function render(
   deps: JobWorkflowDeps,
   job: JobExecutionReference,
-): Promise<{ kind: "saved"; snapshot: Snapshot } | Committed | NotCommitted> {
+): Promise<{ kind: "saved"; snapshot: Snapshot } | Committed | Cancelled | NotCommitted> {
   const now = await current(deps, job);
   if (now.kind !== "active") return now;
   const sample = await renderPatternSample(deps, { patternId: job.patternId, traceId: job.jobId });
@@ -222,7 +253,7 @@ async function commit(
   deps: JobWorkflowDeps,
   job: JobExecutionReference,
   snapshot: Snapshot,
-): Promise<Committed | NotCommitted> {
+): Promise<Committed | Cancelled | NotCommitted> {
   const now = await current(deps, job);
   if (now.kind !== "active") return now;
   const result = await completeJob(deps, { right: now.right, name: sampleRevisionName, snapshot });
@@ -237,8 +268,46 @@ async function endWithoutRevision(
   reason: JobFailureReason,
 ): Promise<JobEnd> {
   const now = await current(deps, job);
-  if (now.kind === "committed") return now;
+  if (now.kind === "committed" || now.kind === "cancelled") return now;
   if (now.kind === "not_committed") return { kind: "not_running", reason };
   const result = await recordJobFailure(deps, now.right);
-  return { kind: result.kind === "recorded" ? "failed" : "not_running", reason };
+  if (result.kind === "recorded") return { kind: "failed", reason };
+  const latest = await current(deps, job);
+  return latest.kind === "cancelled" || latest.kind === "committed"
+    ? latest
+    : { kind: "not_running", reason };
+}
+
+const testHoldSteps = {
+  before_render: { check: "check test hold before render", sleep: "test hold before render" },
+  before_commit: { check: "check test hold before commit", sleep: "test hold before commit" },
+} as const satisfies Record<TestHoldPoint, { check: string; sleep: string }>;
+
+async function holdForTest(
+  deps: JobWorkflowDeps,
+  job: JobExecutionReference,
+  steps: JobSteps,
+  at: TestHoldPoint,
+) {
+  const hold = deps.testHold;
+  if (hold === null || hold.at !== at) return;
+  const decision = await steps.do(testHoldSteps[at].check, storageStep, () =>
+    decideTestHold(deps, job, hold),
+  );
+  if (decision.kind === "hold") await steps.sleep(testHoldSteps[at].sleep, decision.seconds * 1000);
+}
+
+async function decideTestHold(
+  { store }: StoreDeps<"jobs", "restore" | "ownedBySubject">,
+  job: JobExecutionReference,
+  hold: JobTestHold,
+): Promise<{ kind: "hold"; seconds: number } | { kind: "skip" }> {
+  const restored = await store.jobs.restore(job);
+  if (restored.kind !== "active") return { kind: "skip" };
+  if (
+    hold.scope === "verifier" &&
+    !(await store.jobs.ownedBySubject(restored.right, verifierSubject))
+  )
+    return { kind: "skip" };
+  return { kind: "hold", seconds: hold.seconds };
 }

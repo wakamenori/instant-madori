@@ -17,6 +17,8 @@ export interface LogFields {
   jobId?: string;
   messageId?: string;
   messageNumber?: number;
+  stop?: "applied" | "replayed";
+  jobState?: "cancelled" | "completed" | "failed";
   acceptance?: "applied" | "replayed";
   generation?: number;
   step?: string;
@@ -50,6 +52,8 @@ const logKeys = {
   jobId: true,
   messageId: true,
   messageNumber: true,
+  stop: true,
+  jobState: true,
   acceptance: true,
   generation: true,
   step: true,

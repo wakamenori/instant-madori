@@ -19,6 +19,7 @@ export class JobWorkflow extends WorkflowEntrypoint<Env, JobExecutionReference> 
       generation: job.generation,
     };
     const steps: JobSteps = {
+      sleep: (name, ms) => step.sleep(name, ms),
       do: (name, config, body) =>
         step.do(name, config, async ({ attempt }) => {
           try {
@@ -49,11 +50,19 @@ export class JobWorkflow extends WorkflowEntrypoint<Env, JobExecutionReference> 
         }),
     };
     const end = await runJob(jobWorkflowDeps(this.env, systemRuntime), job, steps);
-    logEvent(end.kind === "committed" ? "info" : "error", "job.finished", {
-      ...ids,
-      outcome: end.kind,
-      ...(end.kind === "committed" ? { revisionId: end.revisionId } : { reason: end.reason }),
-    });
+    logEvent(
+      end.kind === "committed" || end.kind === "cancelled" ? "info" : "error",
+      "job.finished",
+      {
+        ...ids,
+        outcome: end.kind,
+        ...(end.kind === "committed"
+          ? { revisionId: end.revisionId }
+          : end.kind === "cancelled"
+            ? {}
+            : { reason: end.reason }),
+      },
+    );
     return end;
   }
 }

@@ -1,3 +1,4 @@
+import { verifierSubject } from "../identity.ts";
 import { accessAssertionHeader } from "@madori/contracts";
 import {
   createLocalJWKSet,
@@ -101,7 +102,7 @@ export async function verifyAccessToken(
     if (claims.data.common_name !== access.verifierClientId) throw new ApiFailure("forbidden");
     return freezeIdentity({
       issuer: access.issuer,
-      subject: "staging:verifier",
+      subject: verifierSubject,
       email: "verifier@staging.invalid",
     } as VerifiedIdentity);
   }

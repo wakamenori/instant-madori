@@ -62,6 +62,7 @@
   "secrets": { "required": ["ACCESS_JWKS"] },
   "vars": {
     "ENVIRONMENT": "local",
+    "JOB_TEST_HOLD": "none",
     "APP_ORIGINS": "http://127.0.0.1:5173",
     "ACCESS_TEAM_DOMAIN": "https://team.example.invalid",
     "ACCESS_AUD": "replace-me",
@@ -79,6 +80,7 @@
         "GEOMETRY_INSTANCE_TYPE": "standard-1",
         "GEOMETRY_IDLE_TIMEOUT_MS": "600000",
         "ENVIRONMENT": "staging",
+        "JOB_TEST_HOLD": "before_render:180",
         "APP_ORIGINS": "https://instant-madori-staging.firpmnfiywl.workers.dev",
         "ACCESS_TEAM_DOMAIN": "https://wild-water-1feb.cloudflareaccess.com",
         "ACCESS_AUD": "0b18b47f9a9305690d90a632359c0066a9aba1717eaf7572cb07d14679fdaab3",

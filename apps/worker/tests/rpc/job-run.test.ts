@@ -12,6 +12,8 @@ import {
 import type { JobExecutionReference, JobSteps, JobStepConfig } from "../../src/services/jobs.ts";
 import type { JobWorkflowDeps } from "../../src/services/deps.ts";
 import type { GeometryResult, DisplayArtifact } from "../../src/geometry/geometry-protocol.ts";
+import { requestKey } from "../../src/services/requests.ts";
+import { jobTestHoldSettingSchema } from "../../src/services/job-test-hold.ts";
 import { jobInstanceId, jobRuns } from "../../src/workflows/job-runs.ts";
 import { jobMigration, openJobDatabase, now } from "./jobs-support.ts";
 
@@ -28,6 +30,7 @@ function stepEngine({ rerun, loseResults }: { rerun?: string; loseResults?: stri
   const cache = new Map<string, unknown>();
   const attempts: string[] = [];
   const steps: JobSteps = {
+    sleep: async () => {},
     async do<T extends Rpc.Serializable<T> & { kind: string }>(
       name: string,
       config: JobStepConfig,
@@ -59,7 +62,12 @@ await test("Job runs restore D1 execution rights across retries and lost respons
   t.after(() => db.dispose());
   await db.apply(await readFile(jobMigration, "utf8"));
   const ownerId = await db.owner("job-run");
-  const base = { store: db.store, runtime: db.runtime, wakePattern: async () => {} };
+  const base = {
+    testHold: null,
+    store: db.store,
+    runtime: db.runtime,
+    wakePattern: async () => {},
+  };
   async function pattern() {
     const result = await db.store.projects.createOnce(
       {
@@ -133,6 +141,148 @@ await test("Job runs restore D1 execution rights across retries and lost respons
         .bind(patternId)
         .first<number>("n");
     return { job, deps, calls, wakes, state, revisions, snapshots };
+  }
+  async function stop(jobId: string) {
+    return db.store.jobs.stopOnce(
+      await requestKey(ownerId, crypto.randomUUID(), "job.stop", { jobId }),
+      { jobId, now },
+    );
+  }
+  for (const at of ["before_render", "before_commit"] as const) {
+    await t.test(`stop during ${at} ends cancelled and wakes without a revision`, async () => {
+      const f = await fixture();
+      const engine = stepEngine();
+      const before = new Set((await db.bucket.list()).objects.map((object) => object.key));
+      const end = await runJob(
+        { ...f.deps, testHold: { at, seconds: 3, scope: "every_job" } },
+        f.job,
+        {
+          ...engine.steps,
+          async sleep(name, ms) {
+            assert.equal(
+              name,
+              at === "before_render" ? "test hold before render" : "test hold before commit",
+            );
+            assert.equal(ms, 3000);
+            await stop(f.job.jobId);
+          },
+        },
+      );
+      assert.deepEqual(end, { kind: "cancelled" });
+      assert.equal(await f.state(), "cancelled");
+      assert.deepEqual((await f.revisions())?.revisions, []);
+      assert.deepEqual(f.wakes, [f.job.patternId]);
+      assert(!engine.attempts.includes("record failure"));
+      assert.equal(f.calls.length, at === "before_render" ? 0 : 1);
+      assert.equal(
+        (await db.bucket.list()).objects.filter((o) => !before.has(o.key)).length,
+        at === "before_render" ? 0 : 2,
+      );
+    });
+  }
+  await t.test("a stop during geometry discards the arriving result", async () => {
+    const f = await fixture();
+    const end = await runJob(
+      {
+        ...f.deps,
+        geometry: () => ({
+          async sampleDisplay() {
+            await stop(f.job.jobId);
+            return ok;
+          },
+        }),
+      },
+      f.job,
+      stepEngine().steps,
+    );
+    assert.deepEqual(end, { kind: "cancelled" });
+    assert.equal(await f.snapshots(), 0);
+    assert.deepEqual((await f.revisions())?.revisions, []);
+  });
+  await t.test("a stop inside completion still ends cancelled", async () => {
+    const f = await fixture();
+    const end = await runJob(
+      {
+        ...f.deps,
+        store: {
+          ...f.deps.store,
+          jobs: {
+            ...db.store.jobs,
+            async complete(right, input) {
+              await stop(f.job.jobId);
+              return db.store.jobs.complete(right, input);
+            },
+          },
+        },
+      },
+      f.job,
+      stepEngine().steps,
+    );
+    assert.deepEqual(end, { kind: "cancelled" });
+    assert.equal(await f.snapshots(), 0);
+    assert.deepEqual((await f.revisions())?.revisions, []);
+  });
+  await t.test("a stop between the failure read and update still ends cancelled", async () => {
+    const f = await fixture([{ kind: "unavailable", reason: "containers_disabled" }]);
+    const end = await runJob(
+      {
+        ...f.deps,
+        store: {
+          ...f.deps.store,
+          jobs: {
+            ...db.store.jobs,
+            async fail(right, time) {
+              await stop(f.job.jobId);
+              return db.store.jobs.fail(right, time);
+            },
+          },
+        },
+      },
+      f.job,
+      stepEngine().steps,
+    );
+    assert.deepEqual(end, { kind: "cancelled" });
+    assert.equal(await f.state(), "cancelled");
+    assert.deepEqual(f.wakes, [f.job.patternId]);
+  });
+  await t.test("staging holds the verifier only and stopped jobs skip the hold", async () => {
+    const f = await fixture();
+    const hold = jobTestHoldSettingSchema.parse({
+      ENVIRONMENT: "staging",
+      JOB_TEST_HOLD: "before_render:2",
+    });
+    let sleeps = 0;
+    const steps = () => ({
+      ...stepEngine().steps,
+      sleep() {
+        sleeps++;
+        return Promise.resolve();
+      },
+    });
+    assert.equal(
+      await db.store.jobs.ownedBySubject(await claimFor(f.job), "staging:verifier"),
+      false,
+    );
+    await runJob({ ...f.deps, testHold: hold }, f.job, steps());
+    assert.equal(sleeps, 0);
+    const verifier = await fixture();
+    await db.raw
+      .prepare("UPDATE users SET access_subject = ? WHERE id = ?")
+      .bind("staging:verifier", ownerId)
+      .run();
+    await runJob({ ...verifier.deps, testHold: hold }, verifier.job, steps());
+    assert.equal(sleeps, 1);
+    const stopped = await fixture();
+    await stop(stopped.job.jobId);
+    assert.deepEqual(await runJob({ ...stopped.deps, testHold: hold }, stopped.job, steps()), {
+      kind: "cancelled",
+    });
+    assert.equal(sleeps, 1);
+  });
+  async function claimFor(job: JobExecutionReference) {
+    const restored = await db.store.jobs.restore(job);
+    assert(restored.kind === "active");
+    return restored.right;
   }
   await t.test("commits one sample revision and wakes once", async () => {
     const f = await fixture();

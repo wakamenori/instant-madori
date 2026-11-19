@@ -80,7 +80,7 @@ AIは必要に応じて質問や選択肢を出せる。聞き返す基準は運
 | 停止・失敗・上限到達 | 未確定の変更を採用せず、最後の確定案へ戻す。待機指示は保留し、再開・取り消しを選べるようにする |
 | 接続断・画面を閉じた | サーバーで処理を継続する。開き直したときに進行状況と結果を読み直す                             |
 
-停止の受理後に届いた結果は採用しない。確定のほうが先に完了していた場合は、その完了を返し、停止によって完成済みの案を取り消さない。過去案への復帰は別の操作で行う。
+利用者は、実行中の指示も待機中の指示も、同じ停止の操作で止められる。待機中に止めた指示は実行されない。停止の受理後に届いた結果は採用しない。確定のほうが先に完了していた場合は、停止はその完了と確定した案を返し、停止によって完成済みの案を取り消さない。画面は停止の応答で、止めた（cancelled）か、確定が先だった（completedと確定した案）かを分け、確定が先なら新しい案へ切り替える。開き直した画面は、stateの最後に終わった指示から同じ区別を読む。過去案への復帰は別の操作で行う。
 
 プレビューの更新間隔は実測で調整する。負荷が大きければ更新頻度を下げ、完了時だけの更新にも切り替えられる構成にする。10分の処理上限は、目指す応答速度ではない。
 
@@ -427,16 +427,18 @@ AIは実行結果を受けて修正を続ける。確定はサービス側の検
 
 WorkflowのインスタンスIDは `job-<job ID>-g<実行世代>` とし、保存せずに参照から導く。作成は `createBatch` で行い、同じIDが既にあることを示すエラーコード10405を成功として扱う。取得の応答を失った場合も、activeなジョブの参照から同じIDを導くので、二つ目のインスタンスはできない。世代ごとにIDを分けるので、再取得した世代が保持期間中の古いインスタンスと衝突しない。アラームが例外で終わると、プラットフォームが間隔を延ばしながら再試行する。起こす呼出しが重なってもアラームは一つにまとまり、アラームの実行中に起こされたら、終わった後にもう一度動く。
 
-サービス基盤のジョブはAIを使わず、4から7の代わりに次の段階をこの順に進める。各段階は最初に参照から実行権を復元し、確定済みなら結果だけを返す。
+サービス基盤のジョブはAIを使わず、4から7の代わりに次の段階をこの順に進める。各段階は最初に参照からD1のジョブを読み直す。同じ世代でrunningなら実行権を復元し、completedなら結果だけを返し、cancelledなら作業をせずに停止として終わる。
 
 - `render snapshot`：パターンの接続用DOを通して、Containerで固定のサンプルの表示データを作り、試行ごとに新しいsnapshot IDでR2へ保存する。段階の戻り値はsnapshotの情報だけで、表示データを返さない。
 - `commit revision`：保存したsnapshotで、案名「サンプルの形」の案を条件付きで確定する。
-- `record failure`：確定しなかったときだけ、同じ世代のactiveなジョブをfailedにする。
-- `wake pattern`：確定・失敗のどちらの後もパターンDOを起こし、次の指示へ進める。失敗の後も待機列は進む。
+- `record failure`：確定も停止もしなかったときだけ、同じ世代のactiveなジョブをfailedにする。失敗の更新が当たらなかったら、D1を読み直して停止か確定を返す。
+- `wake pattern`：確定・失敗・停止のどの後もパターンDOを起こし、次の指示へ進める。失敗と停止の後も待機列は進む。
+
+試験のために、設定 `JOB_TEST_HOLD` が `before_render:<秒>` または `before_commit:<秒>` のとき、Workflowは `render snapshot` の前、または `render snapshot` が保存した後の `commit revision` の前で、ジョブがまだrunningであることをD1で確かめてから `step.sleep` で待つ。localではすべてのジョブを、stagingでは検証用の利用者（4.4）のジョブだけを待たせる。localとstaging以外の環境では `none` 以外を設定の誤りとして拒否し、APIの要求を500で失敗させ、Workflowも段階を始めない。待つ間にWorkflowは退去してよく、再デプロイを挟む試験にも使える。6.2でサンプルの段階をAIの処理に置き換えるときに消す。
 
 受付時のmessageの番号を受付順とする。HTTPの受付は認証・Origin・入力を検査し、所有者を条件にした専用の受付操作を呼ぶ。message・queuedのjob・要求の記録は同じbatchで保存し、再送では保存した受付結果を返す。DOはパターンIDを名前にして起こし、引数は渡さない。DOは本文や受付順をメモリにもストレージにも持たない。
 
-D1への確定では、実行権・編集元の案・実行世代が一致し、停止や上限到達が記録されていないことを条件にする。同じjob IDからの案の二重追加は一意制約で防ぐ。R2保存後に確定できなかったデータは未公開のままにし、参照されていないことを確認して後で回収する。
+D1への確定では、実行権・編集元の案・実行世代が一致し、ジョブがrunningであることを条件にする。停止と上限到達はジョブの状態をcancelled・limitedへ変えて記録するので、この条件で確定を拒む。同じjob IDからの案の二重追加は一意制約で防ぐ。R2保存後に確定できなかったデータは未公開のままにし、参照されていないことを確認して後で回収する。
 
 確定のsnapshotとrevisionの所有者は、呼出し元の値ではなくジョブ行から写す。manifestのキーもSQLの中でジョブの所有者とsnapshot IDから組み立てる。案の会話の区切りは、その案を作った指示のmessage番号とする。複製で未実行の指示を除く条件は、この番号の範囲ではなくジョブの取得の記録（世代と編集元）で決める（2.5）。
 
@@ -448,7 +450,7 @@ D1への確定では、実行権・編集元の案・実行世代が一致し、
 
 実行権の型は公開要求のOwnerIdと分け、パターン・ジョブID・世代・編集元・所有者を非公開の欄に持つ。取得と復元の操作だけが、検査済みのD1の行からこの型を作る。受け取るすべての操作は、非公開の欄の存在を確かめてからその欄を読み、偽造した値をD1とR2への呼出しの前に拒む。型は現在の有効性を保証せず、書込みのSQLで再検査する。
 
-パターンIDからactiveのジョブの参照（パターン・ジョブID・世代）を読める。Workflowにはこの参照を渡し、`readCurrentJobExecution` がD1と照合する。同じ世代のrunningなら実行権を復元し、completedなら結果だけを返す。それ以外は無効とする。復元と確定の再送では世代を増やさない。取得の応答を失っても、この読取りと復元で同じ世代を続けられる。
+パターンIDからactiveのジョブの参照（パターン・ジョブID・世代）を読める。Workflowにはこの参照を渡し、`readCurrentJobExecution` がD1と照合する。同じ世代のrunningなら実行権を復元し、completedなら結果だけを返し、cancelledなら停止として返す。それ以外は無効とする。復元と確定の再送では世代を増やさない。取得の応答を失っても、この読取りと復元で同じ世代を続けられる。
 
 表示データだけを生成する段階ではvalidatingとcommittingを使わず、runningからcompletedへ一つのbatchで変更する。次の表には、AIとの往復と整合性検査を含む状態も定義する。
 
@@ -464,7 +466,13 @@ D1への確定では、実行権・編集元の案・実行世代が一致し、
 | awaiting_answer              | 質問を保存し、回答を待っている。実行権を解放し、待機列を保留する |
 | cancelled / failed / limited | 停止・失敗・上限到達。未確定案を採用せず、待機列を保留する       |
 
-停止はWorkerがD1のジョブ状態を条件付きで変更し、確定との順序をそこで決める。停止が受理されたらWorkflowとContainerへ停止要求を伝える。Rustの計算を即座に止められない場合も、停止済み世代の結果は確定できない。
+停止は、Workerが所有者を条件にした一つの文でジョブの行を更新し、要求の記録と同じbatchで行う。queued・running・validating・committingのジョブだけをcancelledにする。確定のbatchはジョブがrunningであることを条件にするので、停止と確定はD1が先に処理したほうに決まる。停止が先なら確定のbatchは何も追加しない。確定が先なら停止は行を変えず、completedと確定した案を返す。completed・cancelled・failed・limitedは終端の状態で、どの操作もほかの状態へ戻さない。
+
+停止はWorkflowへ要求を送らず、インスタンスを終了させない。`terminate()` が実行中の段階をどう扱うかは文書に書かれておらず、どちらにしてもD1の条件が確定を拒むためである。Workflowの各段階は作業の前にD1からジョブを読み直し、cancelledなら作業をせずに終わる。Workflowの戻り値とログでは、停止をcancelledとして失敗と分ける。実行中の段階の試行は最後まで進むことがあるが、その結果はR2へ保存する前の検査と確定のbatchの条件で捨てられる。その検査の後に停止が届いた場合と、確定の前で待たせている間に止めた場合は、R2へ保存した内容が参照されないまま残り、5.4の回収の対象になる。止めたジョブのWorkflowは、実行中の段階の試行が終わるまで残る（`render snapshot` では試行ごとの期限の3分まで）。
+
+停止を記録したら、WorkerがパターンDOを起こす。DOは止めたジョブのWorkflowに触れず、次のqueuedのジョブの実行権を取ってWorkflowを開始する。止めたジョブのWorkflowがまだ動いていても、二つのWorkflowは別のジョブの行・実行世代・インスタンスIDを使うので、D1とR2への書込みは互いに影響しない。起こせなければ停止の要求は500で終わり、同じrequest IDの再送が記録した結果を返して起こし直す。止めたジョブのWorkflowも最後にDOを起こす。
+
+Containerへの停止要求は、ジョブを扱うContainerのルートとともに6.2で加える（4.7）。Rustの計算を即座に止められない場合も、停止したジョブの結果は確定できない。
 
 質問への回答は、質問イベントと関連付けて新しいジョブにする。保留中の通常指示より先に回答を処理し、その後の待機列の再開は利用者が選べるようにする。
 
@@ -509,11 +517,13 @@ request IDは利用者ごとの範囲で一意とし、固定するのは成功�
 
 入力が不正なら400 `invalid_request`、JSON全体の上限超過は413 `payload_too_large`、成功済みのrequest IDを別の内容や操作に使うと422 `request_id_reused` とする。認証の失敗は401 `unauthenticated`、認証後のOriginの拒否は403 `forbidden`、別の所有者と存在しないパターンは同じ404 `not_found` とする。
 
-stateはqueryパラメータを受け付けず、`{ pattern, currentRevision, runningJob, queuedJobs }` を返す。runningJobは実行権を持つジョブ（running・validating・committing）の `{ jobId, messageId, number }` で、なければnullにする。DBがパターンごとにactiveなジョブを一つに限るので、配列にしない。queuedJobsは同じ形の配列で、対応するmessageの番号の昇順に並べ、待機中がなければ空配列にする。同じジョブを両方に入れない。パターン・最新案・実行中のジョブ・待機中のジョブは同じD1 batchで読み、所有者を条件にする。実行中のジョブのSELECTは `jobs_one_active_per_pattern` 索引を `INDEXED BY` で使う。所有者の条件を加えると、統計を取った後のSQLiteはこの索引を使わず、パターンのジョブをすべて読むためである。待機列のSELECTはjobsをCROSS JOINの外側に置き、`jobs_queue` 索引でパターンとqueuedを絞ってからmessageを読む。完了済みの会話とジョブの件数を読取り量に含めない。
+`POST /api/jobs/:id/stop` はJSONの `{ requestId }` を受け取り、待機中または実行中の指示を止める。所有者・Origin・request IDは他の変更要求と同じに確かめ、別の所有者と存在しないジョブは同じ404 `not_found` にする。応答は200で、`outcome` が結果を分ける。この要求で止めた場合は `{ outcome: "stopped", job: { jobId, messageId, number, state: "cancelled" } }` を返す。既に終わっていた場合は行を変えず、`{ outcome: "already_finished", job }` を返す。jobのstateはcompleted・cancelled・failedのいずれかで、completedなら確定した案を `revision` に含める。どちらの結果も記録し、同じrequest IDの再送は同じ状態コードと本文を返す。ジョブの状態は応答の時点で決まっているので202にはしない。エラーの本文は `{ error }` だけで確定した案を運べないので、既に終わっていた場合もエラーにしない。
+
+stateはqueryパラメータを受け付けず、`{ pattern, currentRevision, runningJob, queuedJobs, lastFinishedJob }` を返す。runningJobは実行権を持つジョブ（running・validating・committing）の `{ jobId, messageId, number }` で、なければnullにする。DBがパターンごとにactiveなジョブを一つに限るので、配列にしない。queuedJobsは同じ形の配列で、対応するmessageの番号の昇順に並べ、待機中がなければ空配列にする。同じジョブを両方に入れない。パターン・最新案・実行中のジョブ・待機中のジョブ・最後に終わったジョブは同じD1 batchで読み、所有者を条件にする。実行中のジョブのSELECTは `jobs_one_active_per_pattern` 索引を `INDEXED BY` で使う。所有者の条件を加えると、統計を取った後のSQLiteはこの索引を使わず、パターンのジョブをすべて読むためである。待機列のSELECTはjobsをCROSS JOINの外側に置き、`jobs_queue` 索引でパターンとqueuedを絞ってからmessageを読む。lastFinishedJobは、終わった（completed・cancelled・failed）ジョブのうちmessageの番号が最も大きいものを、停止の応答のjobと同じ形で返し、なければnullにする。待機中に止めたジョブも含む。このSELECTはmessageを外側に置いて番号の降順に読み、最初に終わったジョブで止めるので、読取り量は待機中・実行中のジョブの数で決まる。完了済みの会話とジョブの件数を読取り量に含めない。この段階では停止の後も待機列が進むので、後の指示が終わると、lastFinishedJobはその指示に置き換わる。止めた画面は、記録された停止の応答を同じrequest IDの再送で読み直せる。
 
 受付のログにはrequest ID・pattern ID・job ID・message ID・受付番号と、初回か再送かを表す `acceptance: applied | replayed` を型付きのキーで記録する。指示の本文はログに含めない。
 
-ジョブの実行のログは、ジョブIDをtrace IDとして型付きのキーで記録する。パターンDOはアラームごとに `pattern.advanced`（結果、ジョブID、世代、インスタンスを作ったか）を書く。Workflowは段階の試行ごとに `job.step`（段階名、試行の番号、結果）を、終わりに `job.finished` を書く。形状処理の呼出しにも同じtrace IDを渡すので、接続用DOの `container.started`・`container.ready` も同じIDでたどれる。受付のログとはジョブIDでつながる。
+ジョブの実行のログは、ジョブIDをtrace IDとして型付きのキーで記録する。パターンDOはアラームごとに `pattern.advanced`（結果、ジョブID、世代、インスタンスを作ったか）を書く。Workflowは段階の試行ごとに `job.step`（段階名、試行の番号、結果）を、終わりに `job.finished` を書く。`job.finished` の結果はcommitted・cancelled・failed・not_runningで、committedとcancelledはinfo、それ以外はerrorで書く。停止の要求のログには、request ID・job ID・pattern IDと、記録が初回か再送かを表す `stop: applied | replayed`、`outcome: stopped | already_finished`、停止後のジョブの状態 `jobState` を型付きのキーで記録する。形状処理の呼出しにも同じtrace IDを渡すので、接続用DOの `container.started`・`container.ready` も同じIDでたどれる。受付のログとはジョブIDでつながる。
 
 | API                                         | 役割                                                                      |
 | ------------------------------------------- | ------------------------------------------------------------------------- |
@@ -526,7 +536,7 @@ stateはqueryパラメータを受け付けず、`{ pattern, currentRevision, ru
 | GET /api/patterns/:id/messages・revisions   | 会話と履歴のページ取得                                                    |
 | POST /api/patterns/:id/messages             | 指示・質問への回答を受け付ける                                            |
 | POST /api/patterns/:id/restore・clone       | 確定案からの復帰・複製                                                    |
-| POST /api/jobs/:id/stop                     | 実行中の処理の停止                                                        |
+| POST /api/jobs/:id/stop                     | 待機中・実行中の指示の停止                                                |
 | POST /api/patterns/:id/queue/resume・cancel | 保留指示の再開・取り消し                                                  |
 | POST /api/assets                            | 添付画像の登録・検査                                                      |
 | GET /api/sample/display                     | サンプルの3D表示データ。一時的なAPIで、案を作る経路ができたら削除         |

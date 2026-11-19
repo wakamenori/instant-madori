@@ -6,7 +6,7 @@
 
 - `instruction-accept`：受け付けると `202` と仕事の番号が返る。
 - `instruction-replay`：同じ `requestId` と本文を送り直すと、同じ仕事が返る。
-- `instruction-run`：仕事が終わると、パターンの状態の `runningJob` と `queuedJobs` が空になり、今の案が「サンプルの形」になる。
+- `instruction-run`：仕事が終わると、パターンの状態の `runningJob` と `queuedJobs` が空になり、今の案が「サンプルの形」になり、`lastFinishedJob` がその仕事になる。
 - `instruction-view`：できた案を開くと、サンプルの表示データが返る。
 - `instruction-chain`：二つ目の指示の案は、一つ目の案を編集元に持つ。仕事一件につき案は一件。
 - `instruction-invalid`：空白だけの本文は拒まれる。
@@ -27,7 +27,7 @@ Preconditions:
 
 - **送る。** `RID=$(uuidgen)` で `curl -sS -o "$D/accept.json" -w '%{http_code}\n' -X POST "$API/patterns/$PAT/messages" -H "$J" -H "$O" -d "{\"requestId\":\"$RID\",\"body\":\"南向きの居間を広くしたい\"}"`。`202` で、`job.number` が `1`。
 - **送り直す。** 同じ `RID` と本文で、出力先を `"$D/replay.json"` にして送る。`202` で、`job.jobId` が `accept.json` と同じ。
-- **終わるまで待つ。** `settle state-1` が成功する。`$D/state-1.json` の `currentRevision.name` が `サンプルの形`、`currentRevision.baseRevisionId` が `null`。`REV1=$(jq -r .currentRevision.id "$D/state-1.json")` を設定する。
+- **終わるまで待つ。** `settle state-1` が成功する。`$D/state-1.json` の `currentRevision.name` が `サンプルの形`、`currentRevision.baseRevisionId` が `null`、`lastFinishedJob.state` が `completed` で `lastFinishedJob.revision.id` が `currentRevision.id` と同じ。`REV1=$(jq -r .currentRevision.id "$D/state-1.json")` を設定する。
 - **案を開く。** `curl -sS -o "$D/view-1.bin" -D "$D/view-1.headers" -w '%{http_code} %{content_type}\n' "$API/revisions/$REV1/view"`。`200 application/vnd.madori.display; version=1` で、`$D/view-1.headers` の `x-revision-id` が `$REV1`。
 - **二つ目を送る。** 新しい `requestId` と本文 `窓を大きくしたい` で、出力先を `"$D/accept-2.json"` にして送る。`202` で、`job.number` が `2`。`settle state-2` が成功し、`$D/state-2.json` の `currentRevision.number` が `2`、`currentRevision.baseRevisionId` が `$REV1`。
 - **案の一覧。** `curl -sS -o "$D/revisions.json" -w '%{http_code}\n' "$API/patterns/$PAT/revisions"`。`200` で、`revisions` が二件。番号は `2`、`1` の順で、どちらの `name` も `サンプルの形`。`nextCursor` が `null`。
@@ -37,5 +37,6 @@ Preconditions:
 
 - 新しいパターンの最初の仕事は、そのパターン用の Container を冷えた状態から起こす。手元ではイメージがビルド済みなら数秒で終わるが、新しいイメージの最初の起動は1分近くかかることがあるので、`settle` は5分まで待つ。二つ目からは、休止時間（10分）の内なら同じ Container を使う。
 - `MADORI_DEV_CONTAINERS=0 pnpm dev` で起動すると、仕事は再試行せずに失敗して待ち行列が空になる。案は増えず、`currentRevision` は前のまま。`$EVIDENCE/dev.log` の `job.finished` の行に `"reason":"containers_disabled"` が出る。
-- 仕事の状態は `state` の `runningJob` と `queuedJobs` だけが見せる。受付の応答の `job` は受付の記録で、仕事が終わった後に送り直しても変わらない。
+- 仕事の状態は `state` の `runningJob`・`queuedJobs`・`lastFinishedJob` が見せる。`lastFinishedJob` は、終わった仕事のうち番号が最も大きいもので、次の仕事が終わると置き換わる。受付の応答の `job` は受付の記録で、仕事が終わった後に送り直しても変わらない。
+- 仕事を止める手順は[指示を止める](./stop.md)にある。
 - 本文は UTF-8 で 16384 バイトまで。

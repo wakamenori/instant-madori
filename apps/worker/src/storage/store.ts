@@ -14,6 +14,12 @@ export function createStore(db: D1, bucket: R2) {
       upsertAccess: (input: Parameters<typeof upsertAccessUser>[1]) => upsertAccessUser(db, input),
     },
     jobs: {
+      ownedBySubject: (right: Parameters<typeof jobs.isJobOwnedBySubject>[1], subject: string) =>
+        jobs.isJobOwnedBySubject(db, right, subject),
+      stopOnce: (
+        key: Parameters<typeof jobs.stopJobOnce>[1],
+        input: Parameters<typeof jobs.stopJobOnce>[2],
+      ) => jobs.stopJobOnce(db, key, input),
       claim: (input: Parameters<typeof execution.claimNextJob>[1]) =>
         execution.claimNextJob(db, input),
       restore: (reference: Parameters<typeof execution.readCurrentJobExecution>[1]) =>

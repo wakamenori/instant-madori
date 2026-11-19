@@ -3,6 +3,7 @@ import { ensureDevAccess } from "./local-access.ts";
 import { assertSucceeded, start, stop } from "../shared/processes.ts";
 import type { ProcessOutcome } from "../shared/processes.ts";
 
+const jobTestHold = process.env["MADORI_DEV_JOB_TEST_HOLD"];
 const wrangler = "node_modules/wrangler/bin/wrangler.js";
 
 // Installed before any child starts: children run in their own process groups, so Ctrl-C
@@ -56,6 +57,7 @@ if (migrated) {
         "127.0.0.1",
         "--port",
         "8787",
+        ...(jobTestHold === undefined ? [] : ["--var", `JOB_TEST_HOLD:${jobTestHold}`]),
         ...(process.env["MADORI_DEV_CONTAINERS"] === "0" ? ["--enable-containers=false"] : []),
       ],
       {

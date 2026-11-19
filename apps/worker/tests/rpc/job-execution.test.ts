@@ -378,7 +378,9 @@ await test("Job execution through services on real D1 and R2", async (t) => {
           .prepare("UPDATE jobs SET state = ? WHERE id = ?")
           .bind(terminal, ref.jobId)
           .run();
-        assert.deepEqual(await readCurrentJobExecution(deps, ref), { kind: "invalid" });
+        assert.deepEqual(await readCurrentJobExecution(deps, ref), {
+          kind: terminal === "cancelled" ? "cancelled" : "invalid",
+        });
         const before = await count();
         assert.deepEqual(await complete(live.right, next.snapshot), { kind: "execution_lost" });
         assert.deepEqual(await count(), before);
@@ -519,6 +521,7 @@ await test("Job execution through services on real D1 and R2", async (t) => {
             now,
           }),
         async () => observed.store.jobs.fail(fake, now),
+        () => observed.store.jobs.ownedBySubject(fake, "staging:verifier"),
         () =>
           observed.store.snapshots.write(fake, {
             id: crypto.randomUUID(),

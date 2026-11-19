@@ -9,6 +9,8 @@ import {
   acceptInstructionResponseSchema,
   createProjectResponseSchema,
   revisionListResponseSchema,
+  stopJobResponseSchema,
+  patternStateResponseSchema,
 } from "@madori/contracts";
 import { settleJobs } from "./support/settle-jobs.ts";
 import { geometryInternal } from "@madori/contracts/geometry-internal";
@@ -40,7 +42,7 @@ void test(
     const worker = await startLocalWorker({
       containers: true,
       readyTimeoutMs: 800_000,
-      vars: { GEOMETRY_IDLE_TIMEOUT_MS: String(idleTimeoutMs) },
+      vars: { GEOMETRY_IDLE_TIMEOUT_MS: String(idleTimeoutMs), JOB_TEST_HOLD: "before_commit:15" },
     });
     const bootMs = performance.now() - started;
     try {
@@ -153,7 +155,7 @@ void test(
       );
       await t.test(
         "jobs commit immutable sample revisions through each pattern's Container",
-        async () => {
+        async (jobsTest) => {
           const created = await worker.call("/api/projects", {
             method: "POST",
             as: user,
@@ -195,6 +197,119 @@ void test(
             summary.free();
             revisions.unshift(revision);
           }
+          async function accept() {
+            const response = await worker.call(`/api/patterns/${pattern.id}/messages`, {
+              method: "POST",
+              as: user,
+              body: { requestId: crypto.randomUUID(), body: "次の案を作って" },
+            });
+            assert.equal(response.status, 202);
+            return acceptInstructionResponseSchema.parse(await response.json()).job;
+          }
+          await jobsTest.test("stopped during the hold, the commit is refused", async () => {
+            const current = revisions[0];
+            assert(current);
+            const beforeView = await worker.call(`/api/revisions/${current.id}/view`, { as: user });
+            assert.equal(beforeView.status, 200);
+            const bytes = new Uint8Array(await beforeView.arrayBuffer());
+            const job = await accept();
+            const deadline = Date.now() + 120_000;
+            let held: boolean;
+            do {
+              held = worker
+                .logEntries()
+                .some(
+                  (line) =>
+                    line["jobId"] === job.jobId &&
+                    line["event"] === "job.step" &&
+                    line["step"] === "check test hold before commit" &&
+                    line["outcome"] === "hold",
+                );
+              if (held) break;
+              await setTimeout(50);
+            } while (Date.now() < deadline);
+            assert(held, "the job saved R2 data and reached the durable hold");
+            assert(
+              worker
+                .logEntries()
+                .some(
+                  (line) =>
+                    line["jobId"] === job.jobId &&
+                    line["step"] === "render snapshot" &&
+                    line["outcome"] === "saved",
+                ),
+            );
+            const response = await worker.call(`/api/jobs/${job.jobId}/stop`, {
+              method: "POST",
+              as: user,
+              body: { requestId: crypto.randomUUID() },
+            });
+            assert.equal(response.status, 200);
+            assert.deepEqual(stopJobResponseSchema.parse(await response.json()), {
+              outcome: "stopped",
+              job: { ...job, state: "cancelled" },
+            });
+            const state = await settleJobs(worker, user, pattern.id, [job.jobId], 60_000);
+            assert.deepEqual(state.currentRevision, current);
+            assert.deepEqual(state.lastFinishedJob, { ...job, state: "cancelled" });
+            const finished = await worker.logLine(job.jobId, "job.finished");
+            assert.equal(finished["level"], "info");
+            assert.equal(finished["outcome"], "cancelled");
+            assert(
+              worker
+                .logEntries()
+                .some(
+                  (line) =>
+                    line["jobId"] === job.jobId &&
+                    line["step"] === "commit revision" &&
+                    line["outcome"] === "cancelled",
+                ),
+            );
+            const history = await worker.call(`/api/patterns/${pattern.id}/revisions`, {
+              as: user,
+            });
+            assert.deepEqual(revisionListResponseSchema.parse(await history.json()), {
+              revisions,
+              nextCursor: null,
+            });
+            const afterView = await worker.call(`/api/revisions/${current.id}/view`, { as: user });
+            assert.equal(afterView.status, 200);
+            assert.deepEqual(new Uint8Array(await afterView.arrayBuffer()), bytes);
+          });
+          await jobsTest.test(
+            "completion first keeps its committed revision in stop and state",
+            async () => {
+              const job = await accept();
+              const state = await settleJobs(worker, user, pattern.id, [job.jobId], 120_000);
+              const revision = state.currentRevision;
+              assert(revision);
+              assert.equal(revision.number, 3);
+              assert.equal(revision.baseRevisionId, revisions[0]?.id);
+              revisions.unshift(revision);
+              const requestId = crypto.randomUUID();
+              const stop = () =>
+                worker.call(`/api/jobs/${job.jobId}/stop`, {
+                  method: "POST",
+                  as: user,
+                  body: { requestId },
+                });
+              const response = await stop();
+              assert.equal(response.status, 200);
+              const text = await response.text();
+              const expected = { ...job, state: "completed", revision };
+              assert.deepEqual(stopJobResponseSchema.parse(JSON.parse(text)), {
+                outcome: "already_finished",
+                job: expected,
+              });
+              assert.equal(await (await stop()).text(), text);
+              const responseState = await worker.call(`/api/patterns/${pattern.id}/state`, {
+                as: user,
+              });
+              const after = patternStateResponseSchema.parse(await responseState.json());
+              assert.deepEqual(after.currentRevision, revision);
+              assert.deepEqual(after.lastFinishedJob, expected);
+            },
+          );
           const history = await worker.call(`/api/patterns/${pattern.id}/revisions`, { as: user });
           assert.equal(history.status, 200);
           assert.deepEqual(revisionListResponseSchema.parse(await history.json()), {

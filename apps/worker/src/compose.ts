@@ -1,3 +1,4 @@
+import { jobTestHoldSettingSchema } from "./services/job-test-hold.ts";
 import { geometryClient } from "./geometry/geometry-client.ts";
 import { d1 } from "./storage/d1.ts";
 import { r2 } from "./storage/r2.ts";
@@ -41,15 +42,22 @@ export function patternCoordinatorDeps(
 }
 
 export function jobWorkflowDeps(
-  env: Pick<Env, "DB" | "BLOBS" | "GEOMETRY" | "PATTERNS">,
+  env: Pick<Env, "DB" | "BLOBS" | "GEOMETRY" | "PATTERNS" | "ENVIRONMENT" | "JOB_TEST_HOLD">,
   runtime: Runtime,
 ): JobWorkflowDeps {
   const { jobs, snapshots } = createStore(d1(env.DB), r2(env.BLOBS));
   return {
     store: {
-      jobs: { restore: jobs.restore, check: jobs.check, complete: jobs.complete, fail: jobs.fail },
+      jobs: {
+        restore: jobs.restore,
+        check: jobs.check,
+        complete: jobs.complete,
+        fail: jobs.fail,
+        ownedBySubject: jobs.ownedBySubject,
+      },
       snapshots: { write: snapshots.write },
     },
+    testHold: jobTestHoldSettingSchema.parse(env),
     runtime,
     geometry: geometryClient((name) => env.GEOMETRY.getByName(name)),
     wakePattern: patternWake(env),

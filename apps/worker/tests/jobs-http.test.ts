@@ -157,6 +157,7 @@ await test("Instruction acceptance through workerd and local D1", async (t) => {
         currentRevision: null,
         runningJob: null,
         queuedJobs: [],
+        lastFinishedJob: { ...second.job, state: "failed" },
       });
       const history = await worker.call(`/api/patterns/${pattern.id}/revisions`, { as: owner });
       assert.equal(history.status, 200);

@@ -1,3 +1,4 @@
+import { activeJobStates } from "./job-states.ts";
 import { z } from "zod";
 import { revisionSchema } from "@madori/contracts";
 import { jsonRows, rows } from "./d1.ts";
@@ -49,7 +50,7 @@ class JobExecutionRight {
             ON m.id = q.message_id AND m.pattern_id = q.pattern_id
             WHERE q.pattern_id = ? AND q.state = 'queued' ORDER BY m.number LIMIT 1)
           AND NOT EXISTS (SELECT 1 FROM jobs a WHERE a.pattern_id = ?
-            AND a.state IN ('running', 'validating', 'committing'))
+            AND a.state IN (${activeJobStates}))
         RETURNING id AS jobId, pattern_id AS patternId, owner_id AS ownerId,
           generation, base_revision_id AS baseRevisionId`,
           bindings: [now, patternId, patternId, patternId],
@@ -74,17 +75,18 @@ class JobExecutionRight {
         'revision', CASE WHEN r.id IS NULL THEN NULL ELSE ${revisionJson("r")} END) AS json
         FROM jobs j LEFT JOIN revisions r ON r.job_id = j.id AND r.pattern_id = j.pattern_id
         WHERE j.id = ? AND j.pattern_id = ? AND j.generation = ?
-          AND j.state IN ('running', 'completed')`,
+          AND j.state IN ('running', 'completed', 'cancelled')`,
           bindings: [jobId, patternId, generation],
         },
         executionSchema.extend({
-          state: z.enum(["running", "completed"]),
+          state: z.enum(["running", "completed", "cancelled"]),
           revision: revisionSchema.nullable(),
         }),
         "current job execution",
       ),
     );
     if (row === null) return { kind: "invalid" as const };
+    if (row.state === "cancelled") return { kind: "cancelled" as const };
     if (row.state === "completed") {
       if (row.revision === null) return { kind: "invalid" as const };
       return { kind: "committed" as const, revision: row.revision };
@@ -109,7 +111,7 @@ export async function readActiveJobReference(db: D1, input: { patternId: string 
     rows(
       {
         sql: `SELECT pattern_id AS patternId, id AS jobId, generation FROM jobs
-      WHERE pattern_id = ? AND state IN ('running', 'validating', 'committing')`,
+      WHERE pattern_id = ? AND state IN (${activeJobStates})`,
         bindings: [input.patternId],
       },
       referenceSchema,
