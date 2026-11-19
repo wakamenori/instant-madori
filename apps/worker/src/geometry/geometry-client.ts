@@ -2,12 +2,13 @@ import type { GeometryCall, GeometryResult, DisplayArtifact } from "./geometry-p
 export interface GeometryApi {
   sampleDisplay(call: GeometryCall): Promise<GeometryResult<DisplayArtifact>>;
 }
-/** 6.2 will add pattern/job keys here; callers never construct DO names. */
-export type GeometryInstance = { kind: "sample" };
+export type GeometryInstance = { kind: "sample" } | { kind: "pattern"; patternId: string };
 function geometryInstanceName(key: GeometryInstance): string {
   switch (key.kind) {
     case "sample":
       return "sample";
+    case "pattern":
+      return `pattern:${key.patternId}`;
   }
 }
 export function geometryClient(

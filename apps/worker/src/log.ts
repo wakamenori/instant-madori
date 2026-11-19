@@ -18,6 +18,12 @@ export interface LogFields {
   messageId?: string;
   messageNumber?: number;
   acceptance?: "applied" | "replayed";
+  generation?: number;
+  step?: string;
+  attempt?: number;
+  outcome?: string;
+  revisionId?: string;
+  instance?: "created" | "existing";
   bytes?: number;
   geometryStart?: "cold" | "warm";
   geometryMs?: number;
@@ -45,6 +51,12 @@ const logKeys = {
   messageId: true,
   messageNumber: true,
   acceptance: true,
+  generation: true,
+  step: true,
+  attempt: true,
+  outcome: true,
+  revisionId: true,
+  instance: true,
   bytes: true,
   geometryStart: true,
   geometryMs: true,

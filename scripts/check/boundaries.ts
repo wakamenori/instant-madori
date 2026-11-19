@@ -19,7 +19,11 @@ const workerLayerScopes = {
   },
   "worker-objects": {
     files: [`apps/worker/src/objects/**/*.${typescriptExtensions}`],
-    ignores: [],
+    ignores: ["apps/worker/src/objects/pattern-coordinator.ts"],
+  },
+  "worker-workflows": {
+    files: [`apps/worker/src/workflows/**/*.${typescriptExtensions}`],
+    ignores: ["apps/worker/src/workflows/job-workflow.ts"],
   },
 };
 
@@ -36,6 +40,11 @@ export const typescriptScopes = {
   "web-wasm": { files: ["apps/web/src/viewer/wasm.ts"], ignores: [] },
   "web-config": { files: [`apps/web/vite.config.${typescriptExtensions}`], ignores: [] },
   ...workerLayerScopes,
+  "worker-objects-entry": {
+    files: ["apps/worker/src/objects/pattern-coordinator.ts"],
+    ignores: [],
+  },
+  "worker-workflows-entry": { files: ["apps/worker/src/workflows/job-workflow.ts"], ignores: [] },
   "worker-api-entry": { files: ["apps/worker/src/api/app.ts"], ignores: [] },
   "worker-access": { files: ["apps/worker/src/api/access.ts"], ignores: [] },
   "worker-d1": { files: ["apps/worker/src/storage/d1.ts"], ignores: [] },
@@ -88,6 +97,11 @@ export const workerLayers: Record<
     typeOnly: [],
     reason: "docs/plan.md §4.2 geometry owns Container connections without business decisions",
   },
+  workflows: {
+    allowed: ["services"],
+    typeOnly: [],
+    reason: "docs/plan.md §4.2 workflows call services without storage or Container connections",
+  },
   objects: {
     allowed: ["services"],
     typeOnly: [],
@@ -127,19 +141,20 @@ type TypeScriptBoundary = {
 const workerLayerNames = Object.keys(workerLayers).filter((layer): layer is WorkerLayer =>
   Object.hasOwn(workerLayers, layer),
 );
+const workerLayerMembers: Record<WorkerLayer, TypeScriptScope[]> = {
+  api: ["worker-api-entry", "worker-access"],
+  services: ["worker-user-service"],
+  storage: ["worker-d1", "worker-r2"],
+  geometry: [],
+  objects: ["worker-objects-entry"],
+  workflows: ["worker-workflows-entry"],
+};
 const workerLayerBoundaries: TypeScriptBoundary[] = workerLayerNames.flatMap((layer) => {
   const { allowed, typeOnly, reason } = workerLayers[layer];
   const forbidden = workerLayerNames.filter(
     (target) => target !== layer && !allowed.includes(target) && !typeOnly.includes(target),
   );
-  const from: TypeScriptScope[] =
-    layer === "storage"
-      ? ["worker-storage", "worker-d1", "worker-r2"]
-      : layer === "api"
-        ? ["worker-api", "worker-api-entry", "worker-access"]
-        : layer === "services"
-          ? ["worker-services", "worker-user-service"]
-          : [`worker-${layer}`];
+  const from: TypeScriptScope[] = [`worker-${layer}`, ...workerLayerMembers[layer]];
   const rows: TypeScriptBoundary[] = [];
   if (forbidden.length) {
     rows.push({
@@ -210,13 +225,21 @@ export const typescriptBoundaries: TypeScriptBoundary[] = [
     id: "worker-composition-entry",
     from: allScopes.filter(
       (scope) =>
-        scope.startsWith("worker-") && !["worker-api-entry", "worker-composition"].includes(scope),
+        scope.startsWith("worker-") &&
+        ![
+          "worker-api-entry",
+          "worker-objects-entry",
+          "worker-workflows-entry",
+          "worker-composition",
+        ].includes(scope),
     ),
     kind: "imports",
     targets: ["apps/worker/src/compose.ts"],
     allowTypeImports: true,
-    reason: "docs/plan.md §4.2 only api/app.ts constructs service dependencies",
-    message: "Only api/app.ts may import the composition function.",
+    reason:
+      "docs/plan.md §4.2 only api/app.ts, objects/pattern-coordinator.ts and workflows/job-workflow.ts construct service dependencies",
+    message:
+      "Only api/app.ts, objects/pattern-coordinator.ts and workflows/job-workflow.ts may import composition functions.",
   },
   {
     id: "worker-store-construction",

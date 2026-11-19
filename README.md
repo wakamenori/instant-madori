@@ -108,7 +108,7 @@ Workerの保存境界では、型名・バインディングの取り出し・�
 - 使う箇所にキャストを書かず、宣言で型を作る形。型述語、ジェネリックの補助関数、オーバーロードのシグネチャ、戻り値の型の宣言がこれに当たる。
 - 計算したキーやrest分割代入でバインディングを取り出す形。
 - `zod` の別名やnamespaceのimport、計算したプロパティ、分割代入、`zod/v4` などの別のパスから `any`・`custom` を名前でimportする形と、`z.ZodType<T>` へのキャストや `transform` の中のキャストで検証しないスキーマを作る形。
-- 例外として許可したファイル（`compose.ts`、`api/app.ts`、`storage/` のファイル）が、組み立て関数、Storeやアダプターの構築関数を再exportする形。再exportしたものは、そのファイルを値としてimportできる層と `src/` 直下のファイルから使える。
+- 例外として許可したファイル（`compose.ts`、`api/app.ts`、`objects/pattern-coordinator.ts`、`workflows/job-workflow.ts`、`storage/` のファイル）が、組み立て関数、Storeやアダプターの構築関数を再exportする形。再exportしたものは、そのファイルを値としてimportできる層と `src/` 直下のファイルから使える。
 
 `OwnerId` は他のIDとの取り違えを型で防ぎ、生成には `VerifiedIdentity` と保存処理を通った結果を要求する。異なる認証主体の結果との組み合わせは実行時に拒否する。上記の明示的な偽造やSQLの所有者条件は保証しない。所有者条件は実際のD1に対する所有権のテストとレビューで確かめる。
 
@@ -151,7 +151,7 @@ Miniflareのsharp依存は、LGPLのlibvipsを含むため除外しています�
 | 場所                     | 担当                                                                                   |
 | ------------------------ | -------------------------------------------------------------------------------------- |
 | `apps/web`               | React・TypeScriptの画面                                                                |
-| `apps/worker`            | Cloudflare WorkersのAPI・静的配信                                                      |
+| `apps/worker`            | Cloudflare WorkersのAPI・静的配信・Durable Objects・Workflow                           |
 | `apps/geometry`          | ネイティブRustのHTTP入口、Container用Dockerfile                                        |
 | `crates/display`         | 依存を持たない表示データの型と版付きバイナリ形式                                       |
 | `crates/geometry-api`    | 内部API契約とTypeScript定義の生成                                                      |
@@ -219,6 +219,6 @@ mise exec -- node --env-file=/path/to/.env scripts/deploy/registry-retention.ts 
 
 `GEOMETRY_INSTANCE_TYPE` と `GEOMETRY_IDLE_TIMEOUT_MS` は環境別の設定です。値の根拠は[検証3](docs/verification/verification-03.md)にあります。休止時間は10分のままです。接続用DOが操作の開始・終了時刻を保存し、最後の操作の完了から休止時間が過ぎたらアラームでContainerを止めます。操作には応答本文の読取りを含み、操作中は止めません。停止ログ `container.idle_stopped` の `ms` は最後の操作からの経過時間です。DOが再起動しても保存した期限を戻します。実行環境の停止猶予は休止時間に60秒を足した値にするため、休止時間の設定範囲は60,000〜21,540,000 msです。停止に失敗した場合は記録を残し、1秒から倍増し休止時間を上限とする間隔で再試行します。ローカルの確認は[検証4](docs/verification/verification-04.md)に記録します。Workers Logsを有効にしているので、接続用DOの `container.ready`（`mode: cold` の `ms` が起動時間）とContainer内の `geometry.request`（`vmHwmKib` がメモリの最大値）を、Workers Logsの検索APIで読めます。検索には `Workers Observability Write` の権限を持つトークンが要ります。検証3で使った取得と集計のスクリプトは[記録フォルダ](docs/verification/evidence/verification-03/)にあります。
 
-Container接続用DOと内部プロトコルは `apps/worker/src/geometry/` に置き、`services/` から呼びます。将来のパターンごとの調整DOは `objects/` から `services/` を呼ぶ構成です。
+Container接続用DOと内部プロトコルは `apps/worker/src/geometry/` に置き、`services/` から呼びます。パターンごとの調整DOは `objects/`、ジョブのWorkflowは `workflows/` に置き、どちらも `services/` だけを呼びます。ジョブの形状処理は、パターンごとの接続用DOとそのContainerで行います。
 
 内部APIの本文は `crates/geometry-api` で定義し、`pnpm generate:geometry` でJSON Schema・Zod・TypeScript型を再生成します。`pnpm check` も全モードで再生成し、RustとNodeのテストが生成結果の一致を検査します。

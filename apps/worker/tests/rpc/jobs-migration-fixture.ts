@@ -96,7 +96,7 @@ try {
     })),
   );
   assert.deepEqual((await db.raw.prepare("PRAGMA foreign_key_check").all()).results, []);
-  const deps = { store: db.store, runtime: db.runtime };
+  const deps = { store: db.store, runtime: db.runtime, wakePattern: async () => {} };
   const accepted = await acceptInstruction(deps, {
     ownerId,
     patternId,

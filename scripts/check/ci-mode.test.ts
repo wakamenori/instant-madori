@@ -41,3 +41,14 @@ void test("other service changes use the default check", () => {
   );
   assert.equal(checkModeFor([]), "default");
 });
+
+void test("job orchestration changes require the real Container path", () => {
+  for (const path of [
+    "objects/pattern-coordinator.ts",
+    "workflows/job-workflow.ts",
+    "workflows/job-runs.ts",
+    "services/jobs.ts",
+    "compose.ts",
+  ])
+    assert.equal(checkModeFor([`apps/worker/src/${path}`]), "full", path);
+});

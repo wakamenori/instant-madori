@@ -13,3 +13,6 @@ export default {
 } satisfies ExportedHandler<Env>;
 
 export { GeometryContainer } from "./geometry/geometry-container.ts";
+
+export { PatternCoordinator } from "./objects/pattern-coordinator.ts";
+export { JobWorkflow } from "./workflows/job-workflow.ts";

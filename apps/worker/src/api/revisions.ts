@@ -21,6 +21,7 @@ export const revisionRoutes: Route[] = [
           return Response.json({
             pattern: outcome.state.pattern,
             currentRevision: outcome.state.currentRevision,
+            runningJob: outcome.state.runningJob,
             queuedJobs: outcome.state.queuedJobs,
           } satisfies PatternStateResponse);
         case "not_found":

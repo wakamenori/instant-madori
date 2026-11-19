@@ -15,7 +15,7 @@ import { dirname, join, relative } from "node:path";
 import { ESLint } from "eslint";
 import { z } from "zod";
 import { createImportBoundaryChecker } from "./check-imports.ts";
-import type { typescriptScopes } from "./boundaries.ts";
+import { typescriptScopes } from "./boundaries.ts";
 import {
   boundaryTestIgnores,
   checkWorkerLayers,
@@ -44,6 +44,9 @@ const scopes = {
   "worker-storage": "apps/worker/src/storage/projects.ts",
   "worker-geometry": "apps/worker/src/geometry/geometry-client.ts",
   "worker-objects": "apps/worker/src/objects/pattern.ts",
+  "worker-workflows": "apps/worker/src/workflows/steps.ts",
+  "worker-objects-entry": "apps/worker/src/objects/pattern-coordinator.ts",
+  "worker-workflows-entry": "apps/worker/src/workflows/job-workflow.ts",
   "worker-api-entry": "apps/worker/src/api/app.ts",
   "worker-access": "apps/worker/src/api/access.ts",
   "worker-d1": "apps/worker/src/storage/d1.ts",
@@ -288,6 +291,7 @@ const workerLayerPermissions: Record<
   services: { allowed: ["geometry"], typeOnly: ["storage"] },
   storage: { allowed: [], typeOnly: [] },
   geometry: { allowed: [], typeOnly: [] },
+  workflows: { allowed: ["services"], typeOnly: [] },
   objects: { allowed: ["services"], typeOnly: [] },
 };
 const importCases: Record<string, string[]> = {
@@ -777,7 +781,18 @@ void test("symlinks cannot disguise the target layer", () => {
 });
 
 void test("composition exceptions and type-only Store imports remain permitted", async () => {
-  assert.deepEqual(resolved(importValue("../compose.ts"), scopes["worker-api-entry"]), []);
+  for (const scope of [
+    "worker-api-entry",
+    "worker-objects-entry",
+    "worker-workflows-entry",
+  ] as const)
+    assert.deepEqual(resolved(importValue("../compose.ts"), scopes[scope]), []);
+  for (const scope of ["worker-objects", "worker-workflows"] as const)
+    assert(
+      resolved(importValue("../compose.ts"), scopes[scope]).some(
+        (row) => row.boundaryId === "worker-composition-entry",
+      ),
+    );
   assert.deepEqual(
     resolved(importType("../storage/store.ts", "Store"), scopes["worker-services"]),
     [],
@@ -808,5 +823,48 @@ void test("package imports maps keep the leading hash while asset suffixes are r
       resolved(importType(name)).some(
         (diagnostic) => diagnostic.boundaryId === "worker-api-layers",
       ),
+    );
+});
+
+void test("entry scopes retain their layer rules without overlapping the layer scope", () => {
+  for (const layer of Object.keys(workerLayers)) {
+    const row = typescriptBoundaries.find((entry) => entry.id === `worker-${layer}-layers`);
+    assert(row);
+    const layerScope = Object.entries(typescriptScopes).find(
+      ([name]) => name === `worker-${layer}`,
+    )?.[1];
+    assert(layerScope);
+    for (const [name, scope] of Object.entries(typescriptScopes)) {
+      if (name === `worker-${layer}`) continue;
+      for (const file of scope.files.filter((file) =>
+        file.startsWith(`apps/worker/src/${layer}/`),
+      )) {
+        assert(
+          row.from.some((member) => member === name),
+          `${name} retains ${layer} rules`,
+        );
+        assert(
+          layerScope.ignores.some((ignored) => ignored === file),
+          `${file} has one scope`,
+        );
+      }
+    }
+  }
+});
+
+void test("plan layer table declares every enforced Worker layer", () => {
+  const plan = readFileSync(new URL("../../docs/plan.md", import.meta.url), "utf8")
+    .split("### 4.2")[1]
+    ?.split("### 4.3")[0];
+  assert(plan);
+  for (const layer of Object.keys(workerLayers))
+    assert(
+      plan
+        .split("\n")
+        .some(
+          (line) =>
+            line.startsWith("|") && line.split("|")[1]?.trim().replaceAll("`", "") === `${layer}/`,
+        ),
+      `${layer} layer table row`,
     );
 });

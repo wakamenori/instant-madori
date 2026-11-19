@@ -61,6 +61,7 @@ await test("Immutable revisions through local D1, R2 and public HTTP", async (t)
     assert.deepEqual(patternStateResponseSchema.parse(await response.json()), {
       pattern,
       currentRevision: null,
+      runningJob: null,
       queuedJobs: [],
     });
     const list = await worker.call(listPath, { as: owner });
@@ -87,6 +88,7 @@ await test("Immutable revisions through local D1, R2 and public HTTP", async (t)
       assert.deepEqual(patternStateResponseSchema.parse(await state.json()), {
         pattern,
         currentRevision: latest,
+        runningJob: null,
         queuedJobs: [],
       });
       for (const revision of [first, latest]) {
