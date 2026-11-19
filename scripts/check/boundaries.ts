@@ -7,7 +7,7 @@ const workerLayerScopes = {
   },
   "worker-services": {
     files: [`apps/worker/src/services/**/*.${typescriptExtensions}`],
-    ignores: ["apps/worker/src/services/users.ts"],
+    ignores: [],
   },
   "worker-storage": {
     files: [`apps/worker/src/storage/**/*.${typescriptExtensions}`],
@@ -51,7 +51,6 @@ export const typescriptScopes = {
   "worker-r2": { files: ["apps/worker/src/storage/r2.ts"], ignores: [] },
   "worker-composition": { files: ["apps/worker/src/compose.ts"], ignores: [] },
   "worker-owner": { files: ["apps/worker/src/owner.ts"], ignores: [] },
-  "worker-user-service": { files: ["apps/worker/src/services/users.ts"], ignores: [] },
   "worker-other": {
     files: [`apps/worker/**/*.${typescriptExtensions}`],
     ignores: [
@@ -143,7 +142,7 @@ const workerLayerNames = Object.keys(workerLayers).filter((layer): layer is Work
 );
 const workerLayerMembers: Record<WorkerLayer, TypeScriptScope[]> = {
   api: ["worker-api-entry", "worker-access"],
-  services: ["worker-user-service"],
+  services: [],
   storage: ["worker-d1", "worker-r2"],
   geometry: [],
   objects: ["worker-objects-entry"],
@@ -325,7 +324,7 @@ export const typescriptBoundaries: TypeScriptBoundary[] = [
   },
   {
     id: "services-http",
-    from: ["worker-services", "worker-user-service"],
+    from: ["worker-services"],
     kind: "globals",
     names: ["Request", "Response"],
     reason: "docs/plan.md §4.2 services must not contain Request or Response",

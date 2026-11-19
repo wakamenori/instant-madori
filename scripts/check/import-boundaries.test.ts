@@ -53,7 +53,6 @@ const scopes = {
   "worker-r2": "apps/worker/src/storage/r2.ts",
   "worker-composition": "apps/worker/src/compose.ts",
   "worker-owner": "apps/worker/src/owner.ts",
-  "worker-user-service": "apps/worker/src/services/users.ts",
   "worker-other": "apps/worker/src/index.ts",
   contracts: "packages/contracts/src/index.ts",
 } satisfies Record<keyof typeof typescriptScopes, string>;
