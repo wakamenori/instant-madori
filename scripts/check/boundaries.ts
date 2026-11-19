@@ -392,7 +392,7 @@ export const crateFamilies = {
   },
 } satisfies Record<string, { pattern: RegExp; label: string }>;
 
-export type CrateFamily = keyof typeof crateFamilies;
+type CrateFamily = keyof typeof crateFamilies;
 
 type RustBoundary = {
   id: string;
