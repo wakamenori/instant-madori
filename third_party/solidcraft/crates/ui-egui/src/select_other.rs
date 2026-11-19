@@ -31,9 +31,9 @@ use solidcraft_engine::sketch::CurveKind;
 use std::hash::{Hash, Hasher};
 
 use crate::SolveApp;
-use crate::theme::Tokens;
 use crate::tool_modifiers::Held;
 use crate::viewport::{Hit, Proj};
+use solidcraft_theme::Tokens;
 
 /// How long the left button stays down, without moving, before the list opens.
 pub const HOLD_SECS: f64 = 0.5;
@@ -109,7 +109,7 @@ fn rows_capped(app: &SolveApp, proj: &Proj, pos: Pos2, through: bool) -> (Vec<Ro
     let mut found = crate::viewport::candidates(app, &hits);
     let dialog = app.dialog.as_ref().is_some_and(|d| d.wants_picks());
     // A body behind each face (body picking already turns faces into bodies).
-    if !dialog && !app.ui.pick_bodies {
+    if !dialog && !app.picks_bodies() {
         for h in &hits {
             if let Hit::Face { body, .. } = h {
                 found.push((h.clone(), Sel::Body { name: body.clone() }));
@@ -246,6 +246,7 @@ fn rank(s: &Sel, sketching: bool) -> (u8, u8) {
         Sel::Profile { .. } => 7,
         Sel::Plane { .. } => 8,
         Sel::Axis { .. } => 9,
+        Sel::Drawing { .. } => 10,
     };
     let own = matches!(s, Sel::SketchPoint { .. } | Sel::SketchMidpoint { .. } | Sel::SketchCurve { .. });
     (if sketching && !own { 1 } else { 0 }, kind)
@@ -337,11 +338,14 @@ pub fn label(app: &SolveApp, sel: &Sel) -> String {
         Sel::Face { body, index, .. } => format!("Face {} · {body}", index + 1),
         Sel::Body { name } => format!("Body · {name}"),
         Sel::Occurrence { path } => format!("Occurrence {path:?}"),
+        Sel::Drawing { object, .. } => format!("Drawing object {object}"),
         Sel::Feature { id } => app.session.doc.feature(*id).map(|f| f.name.clone()).unwrap_or_else(|| format!("Feature {id}")),
         Sel::Profile { sketch, index } => format!("Profile {} · {}", index + 1, sketch_name(app, *sketch)),
         Sel::Plane { name } if matches!(name.as_str(), "XY" | "XZ" | "YZ") => format!("{} Plane", app.preferences.origin_plane_names.label(name)),
         Sel::Axis { name } if matches!(name.as_str(), "X" | "Y" | "Z") => format!("{name} Axis"),
-        Sel::Plane { name } | Sel::Axis { name } | Sel::ConstructionPoint { name } => name.clone(),
+        Sel::Plane { name } | Sel::Axis { name } | Sel::ConstructionPoint { name } => {
+            crate::dialogs::component_origin_label(&app.session, app.preferences.origin_plane_names, name).unwrap_or_else(|| name.clone())
+        }
     }
 }
 
@@ -370,7 +374,7 @@ fn icon(app: &SolveApp, sel: &Sel) -> &'static str {
         Sel::Edge { .. } => "fillet",
         Sel::Face { .. } | Sel::Feature { .. } => "presspull",
         Sel::Body { .. } => "body",
-        Sel::Occurrence { .. } => "component",
+        Sel::Occurrence { .. } | Sel::Drawing { .. } => "component",
         Sel::Profile { .. } => "sketch",
         Sel::Plane { .. } => "plane",
         Sel::Axis { .. } => "axis",
@@ -577,7 +581,7 @@ fn cycle_key(app: &SolveApp) -> u64 {
     }
     app.session.active_sketch.hash(&mut h);
     app.ui.pick_off.hash(&mut h);
-    app.ui.pick_bodies.hash(&mut h);
+    app.picks_bodies().hash(&mut h);
     app.dialog.is_some().hash(&mut h);
     h.finish()
 }
@@ -630,7 +634,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let mut picked = None;
     let screen = ctx.content_rect();
     let margins = crate::ui_kit::Menu::frame().total_margin().sum();
-    let width = crate::context_menu::LIST_W.min(screen.width());
+    let width = crate::ui_kit::LIST_W.min(screen.width());
     let w = (width - margins.x).max(0.0);
     let header = 20.0;
     let gap = vec2(12.0, 12.0);
@@ -649,13 +653,13 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             ui.set_max_height(size.y);
             crate::ui_kit::Menu::show(ui, width, |ui| {
                 let (r, _) = ui.allocate_exact_size(vec2(w, header), Sense::hover());
-                let title = crate::i18n::tr_label("Select Other").to_uppercase();
+                let title = solidcraft_ui_text::tr_label("Select Other").to_uppercase();
                 let title = if p.total > p.rows.len() { format!("{title} · {} / {}", p.rows.len(), p.total) } else { title };
                 ui.painter().text(
                     pos2(r.left() + 8.0, r.center().y),
                     Align2::LEFT_CENTER,
                     title,
-                    FontId::proportional(crate::theme::Tokens::get().font_panel),
+                    FontId::proportional(solidcraft_theme::Tokens::get().font_panel),
                     t.text_dim,
                 );
                 egui::ScrollArea::vertical().min_scrolled_height(0.0).max_height(scroll_height).show(ui, |ui| {
