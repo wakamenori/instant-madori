@@ -135,9 +135,7 @@ function path(p: Parser): CrateRoot | undefined {
         return owner;
       }
       case "Y":
-        // A provided method is defined by the trait, even when Self belongs to another crate.
-        type(p);
-        return path(p);
+        return traitDefinitionOwner(p);
       case "N": {
         const namespace = next(p);
         if (!/[A-Za-z]/u.test(namespace)) throw fail(p, "invalid namespace");
@@ -157,6 +155,11 @@ function path(p: Parser): CrateRoot | undefined {
         throw fail(p, `unexpected path tag ${tag}`);
     }
   });
+}
+
+function traitDefinitionOwner(p: Parser): CrateRoot | undefined {
+  type(p);
+  return path(p);
 }
 
 function genericArg(p: Parser) {

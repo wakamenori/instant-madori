@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { repositoryRoot } from "../shared/repository.ts";
 import { crateFamilies, rustBoundaries, viewerWasmBoundary } from "./boundaries.ts";
 import { v0Crates, V0SymbolError, type RustSymbol } from "./rust-symbols.ts";
-// Node provides WebAssembly at runtime, but its types are declared only in the DOM library.
+// Node provides WebAssembly at runtime, but TypeScript declares it only in the DOM and web worker libraries.
 declare const WebAssembly: { validate(bytes: Uint8Array): boolean };
 
 class WasmFormatError extends Error {}

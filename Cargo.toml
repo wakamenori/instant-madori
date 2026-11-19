@@ -20,7 +20,6 @@ serde = { version = "1", features = ["derive"] }
 madori-display = { path = "crates/display" }
 madori-modeling = { path = "crates/modeling" }
 solidcraft-doc = { path = "third_party/solidcraft/crates/doc" }
-# The service does not run plugins; the default plugins feature brings the wasmtime runtime.
 solidcraft-engine = { path = "third_party/solidcraft/crates/engine", default-features = false }
 solidcraft-geom = { path = "third_party/solidcraft/crates/geom" }
 # The upstream cache fingerprint does not describe this workspace's dependency resolution.

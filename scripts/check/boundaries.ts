@@ -383,7 +383,6 @@ export const typescriptBoundaries: TypeScriptBoundary[] = [
 export const boundaryTestIgnores = [`**/*.test.${typescriptExtensions}`, "**/tests/**"];
 
 export const crateFamilies = {
-  // geom reaches the CAD kernel, so only the Wasm boundary may forbid its code.
   cadKernel: { pattern: /^solidcore(?:-ops)?$/u, label: "CAD kernel" },
   uiToolkit: { pattern: /^(?:egui(?:[-_].*)?|eframe|winit)$/u, label: "UI toolkit" },
   gpu: { pattern: /^wgpu(?:-.*)?$/u, label: "GPU" },
@@ -418,7 +417,7 @@ type RustBoundary = {
   message: string;
 } & (
   | { kind: "direct"; allowedDirectDeps: string[]; dependencyPrefix?: string }
-  | { kind: "graph"; forbidden: CrateFamily[] }
+  | { kind: "graph"; forbidden: Exclude<CrateFamily, "cadKernel">[] }
   | {
       kind: "features";
       target: string;
