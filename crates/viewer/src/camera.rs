@@ -1,11 +1,17 @@
 use solidcraft_geom::Aabb3;
-use solidcraft_render::Camera;
+use solidcraft_viewport::{Camera, vec::Bounds};
 pub fn initial_camera(bounds: &Aabb3, aspect: f64) -> Camera {
     let mut camera = Camera {
         fov: 40_f64.to_radians(),
         ..Default::default()
     };
-    camera.fit_aspect(bounds, aspect);
+    camera.fit_aspect(
+        &Bounds {
+            min: bounds.min,
+            max: bounds.max,
+        },
+        aspect,
+    );
     camera
 }
 pub fn fit_first(camera: &mut Camera, fitted: &mut bool, bounds: &Aabb3, aspect: f64) {

@@ -1,7 +1,7 @@
 use madori_display::DisplayModel;
-use solidcraft_geom::{Aabb3, Mesh};
-use solidcraft_gpu::{capture::scene_geometry, view::SceneSlot};
-use solidcraft_render::{Rgb, Scene, SceneMesh};
+use solidcraft_geom::{Aabb3, Mesh, MeshGeom};
+use solidcraft_viewport::{Rgb, Scene, SceneMesh};
+use solidcraft_viewport_gpu::{capture::scene_geometry, view::SceneSlot};
 use std::sync::{Arc, Mutex};
 pub struct ShownScene {
     pub key: u64,
@@ -42,6 +42,7 @@ pub fn scene(model: &DisplayModel) -> (Scene, Aabb3) {
             opacity: f32::from(c.a) / 255.,
             closed: body.closed(),
             hatch: Default::default(),
+            values: None,
         });
     }
     scene.radius = bounds.diagonal().max(1.);

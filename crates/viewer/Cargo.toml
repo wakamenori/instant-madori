@@ -13,8 +13,8 @@ workspace = true
 [dependencies]
 madori-display.workspace = true
 solidcraft-geom.workspace = true
-solidcraft-render.workspace = true
-solidcraft-gpu.workspace = true
+solidcraft-viewport.workspace = true
+solidcraft-viewport-gpu.workspace = true
 wasm-bindgen.workspace = true
 wgpu.workspace = true
 
