@@ -22,7 +22,7 @@ upstreamの更新は原則取り込む。住宅サービスの機能、データ
 
 採用版は、2026-11-19のupstream main`7c0f565e915faf6235d95d8cbdc74f8efed07451`である。前の採用版`ae1d85e5d`から5,213コミットを、更新手順どおり`git subtree merge`で取り込んだ。競合は`crates/io/Cargo.toml`の`[features]`の1か所だけで、独自変更の`external-workspace`とupstreamの`dxf-legacy-baseline-tests`を両方残して解消した。マージしたツリーとupstreamとの差分は、記録した独自変更の2ファイルだけである。
 
-この版から、upstreamは形状のカーネルsolidcoreを`solidcore/`に同梱し、gitの依存として取得しない。描画は、カメラとシーンを持つ`crates/viewport`と、wgpuで描く`crates/viewport-gpu`に分かれた。サービスのビューアは、geom・viewport・viewport-gpuに直接依存する。geomがsolidcoreに依存するため、ビューアのCargoの依存グラフにはsolidcoreが入る。
+この版から、upstreamは形状のカーネルsolidcoreを`solidcore/`に同梱し、gitの依存として取得しない。描画は、カメラとシーンを持つ`crates/viewport`と、wgpuで描く`crates/viewport-gpu`に分かれた。サービスのビューアは、geom・viewport・viewport-gpuに直接依存する。geomがsolidcoreに依存するため、ビューアのCargoの依存グラフにはsolidcoreが入る。利用者に届くWasmにsolidcoreのコードが無いことは、`pnpm check --full`の「Viewer Wasm contents」の段が確かめる。
 
 ### pluginを使わない
 
@@ -36,7 +36,7 @@ upstreamの更新は原則取り込む。住宅サービスの機能、データ
 
 ### Containerのビルドに必要なメモリ
 
-Docker DesktopのVMには、12 GBのメモリを割り当てる。Dockerの中でのsolidcoreのreleaseビルドは、一つのrustcで最大3.99 GBを使った。8.32 GBのVMでは、このビルドがSIGKILLで止まった。
+Docker DesktopのVMには、12 GBのメモリを割り当てる。Dockerの中でのsolidcoreのreleaseビルドは、一つのrustcで最大3.99 GBを使った。8.32 GBのVMでは、このビルドがSIGKILLで止まった。12 GBのVMでは、ビルドの並列数を`.cargo/config.toml`の`jobs = 4`のままにして、Containerのイメージのビルドが526 sで通った。そのうちcargoのreleaseビルドは8分29秒だった。
 
 ## 独自変更
 
