@@ -17,6 +17,7 @@ export interface PatternState {
   pattern: Pattern;
   /** The revision with the greatest number, or null before the first commit. */
   currentRevision: Revision | null;
+  runningJob: AcceptedJob | null;
   queuedJobs: AcceptedJob[];
 }
 
@@ -27,11 +28,17 @@ export const queuedJobsSql = `SELECT json_object('jobId', j.id, 'messageId', m.i
   WHERE j.pattern_id = ? AND j.owner_id = ? AND j.state = 'queued'
   ORDER BY m.number`;
 
+export const runningJobSql = `SELECT json_object('jobId', j.id, 'messageId', m.id,
+  'number', m.number) AS json
+  FROM jobs j INDEXED BY jobs_one_active_per_pattern
+  CROSS JOIN messages m ON m.id = j.message_id AND m.pattern_id = j.pattern_id
+  WHERE j.pattern_id = ? AND j.owner_id = ? AND j.state IN ('running', 'validating', 'committing')`;
+
 export async function getPatternState(
   db: D1,
   scope: { ownerId: OwnerId; patternId: string },
 ): Promise<PatternState | null> {
-  const [patterns, revisions, queuedJobs] = await db.batch([
+  const [patterns, revisions, queuedJobs, runningJobs] = await db.batch([
     jsonRows(
       {
         sql: `SELECT ${patternJson("p")} AS json FROM patterns p WHERE p.id = ? AND p.owner_id = ?`,
@@ -54,12 +61,18 @@ export async function getPatternState(
       acceptedJobSchema,
       "queued job",
     ),
+    jsonRows(
+      { sql: runningJobSql, bindings: [scope.patternId, scope.ownerId] },
+      acceptedJobSchema,
+      "running job",
+    ),
   ]);
   const pattern = patterns[0];
   if (!pattern) return null;
   return {
     pattern,
     currentRevision: revisions[0] ?? null,
+    runningJob: runningJobs[0] ?? null,
     queuedJobs,
   };
 }

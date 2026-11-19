@@ -184,7 +184,7 @@ try {
       newId: () => crypto.randomUUID(),
       newTraceId: () => crypto.randomUUID(),
     };
-    const deps = { store, runtime };
+    const deps = { store, runtime, wakePattern: async () => {} };
     const commit = async (bytes = display, name = "案") => {
       const accepted = await acceptInstruction(deps, {
         ownerId: input.ownerId,

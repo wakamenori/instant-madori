@@ -12,7 +12,7 @@ await test("Instruction acceptance on real D1", async (t) => {
   await db.apply(await readFile(jobMigration, "utf8"));
   const ownerId = await db.owner("owner");
   const otherId = await db.owner("other");
-  const deps = { store: db.store, runtime: db.runtime };
+  const deps = { store: db.store, runtime: db.runtime, wakePattern: async () => {} };
   async function pattern(owner = ownerId) {
     const result = await db.store.projects.createOnce(
       {
@@ -222,7 +222,7 @@ await test("Instruction acceptance on real D1", async (t) => {
       };
       const request = input("rollback");
       await assert.rejects(
-        acceptInstruction({ store: db.store, runtime }, request),
+        acceptInstruction({ store: db.store, runtime, wakePattern: async () => {} }, request),
         /UNIQUE constraint failed/,
       );
       assert.deepEqual(await counts(), before);

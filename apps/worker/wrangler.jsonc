@@ -45,6 +45,7 @@
         "name": "GEOMETRY",
         "class_name": "GeometryContainer",
       },
+      { "name": "PATTERNS", "class_name": "PatternCoordinator" },
     ],
   },
   "exports": {
@@ -52,6 +53,9 @@
       "type": "durable-object",
       "storage": "sqlite",
     },
+    "PatternCoordinator": { "type": "durable-object", "storage": "sqlite" },
+    // Workflow names are unique per account, so each environment names its own.
+    "JobWorkflow": { "type": "workflow", "name": "instant-madori-job" },
   },
   // Type generation reads secret names from here, not from the generated .dev.vars.
   // Staging must not set ACCESS_JWKS, so it declares no secrets.
@@ -106,6 +110,7 @@
             "name": "GEOMETRY",
             "class_name": "GeometryContainer",
           },
+          { "name": "PATTERNS", "class_name": "PatternCoordinator" },
         ],
       },
       "exports": {
@@ -113,6 +118,8 @@
           "type": "durable-object",
           "storage": "sqlite",
         },
+        "PatternCoordinator": { "type": "durable-object", "storage": "sqlite" },
+        "JobWorkflow": { "type": "workflow", "name": "instant-madori-staging-job" },
       },
     },
   },

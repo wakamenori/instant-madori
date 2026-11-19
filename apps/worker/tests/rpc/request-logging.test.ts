@@ -25,6 +25,9 @@ void test("API request logs classify server failures and successful/client respo
     get ASSETS(): never {
       throw new Error("not reached");
     },
+    get PATTERNS(): never {
+      throw new Error("PATTERNS not used");
+    },
     get GEOMETRY(): never {
       throw new Error("not reached");
     },

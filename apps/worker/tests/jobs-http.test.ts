@@ -14,6 +14,7 @@ import {
 import type { AcceptInstructionRequest } from "@madori/contracts";
 import { signAccessToken } from "../../../scripts/dev/local-access.ts";
 import { newUser, startLocalWorker, testAppOrigin } from "./support/local-worker.ts";
+import { settleJobs } from "./support/settle-jobs.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -136,7 +137,8 @@ await test("Instruction acceptance through workerd and local D1", async (t) => {
         422,
         "request_id_reused",
       );
-      assert.deepEqual((await state()).queuedJobs, [accepted.job]);
+      await settleJobs(worker, owner, pattern.id, [accepted.job.jobId]);
+      assert.deepEqual((await state()).queuedJobs, []);
     },
   );
 
@@ -144,15 +146,17 @@ await test("Instruction acceptance through workerd and local D1", async (t) => {
   assert.equal(secondResponse.status, 202);
   const second = acceptInstructionResponseSchema.parse(await secondResponse.json());
   await t.test(
-    "two instructions have consecutive numbers, stay queued and add no revision",
+    "two instructions have consecutive receipts and finish without a revision",
     async () => {
       assert.equal(second.job.number, 2);
       assert.notEqual(second.job.jobId, accepted.job.jobId);
       assert.notEqual(second.job.messageId, accepted.job.messageId);
+      await settleJobs(worker, owner, pattern.id, [accepted.job.jobId, second.job.jobId]);
       assert.deepEqual(await state(), {
         pattern,
         currentRevision: null,
-        queuedJobs: [accepted.job, second.job],
+        runningJob: null,
+        queuedJobs: [],
       });
       const history = await worker.call(`/api/patterns/${pattern.id}/revisions`, { as: owner });
       assert.equal(history.status, 200);
@@ -165,6 +169,7 @@ await test("Instruction acceptance through workerd and local D1", async (t) => {
 
   await t.test("a receipt remains identical after completion or cancellation", async () => {
     for (const jobState of ["completed", "cancelled"]) {
+      await settleJobs(worker, owner, pattern.id, [accepted.job.jobId, second.job.jobId]);
       await worker.withPausedWorker(async (persisted) => {
         await execFileAsync(
           process.execPath,
@@ -180,7 +185,7 @@ await test("Instruction acceptance through workerd and local D1", async (t) => {
       const replay = await send();
       assert.equal(replay.status, 202);
       assert.equal(await replay.text(), firstText);
-      assert.deepEqual((await state()).queuedJobs, [second.job]);
+      assert.deepEqual((await state()).queuedJobs, []);
     }
   });
 
@@ -210,7 +215,9 @@ await test("Instruction acceptance through workerd and local D1", async (t) => {
     await error(await raw(path, new Uint8Array([0xff])), 400, "invalid_request");
     const corrected = await send({ requestId: retryId, body: "修正した指示" });
     assert.equal(corrected.status, 202);
-    assert.equal(acceptInstructionResponseSchema.parse(await corrected.json()).job.number, 3);
+    const correctedJob = acceptInstructionResponseSchema.parse(await corrected.json()).job;
+    assert.equal(correctedJob.number, 3);
+    await settleJobs(worker, owner, pattern.id, [correctedJob.jobId]);
     for (const query of ["limit=1", "cursor=a&cursor=b", "__proto__=x"]) {
       await error(
         await worker.call(`${statePath}?${query}`, { as: owner }),
@@ -223,11 +230,18 @@ await test("Instruction acceptance through workerd and local D1", async (t) => {
   await t.test("UTF-8 limits hold for ASCII, kana, emoji and escaped JSON", async () => {
     const boundaryPattern = await create();
     const boundaryPath = `/api/patterns/${boundaryPattern.id}/messages`;
+    const jobIds: string[] = [];
+    const remember = async (response: Response) => {
+      assert.equal(response.status, 202);
+      const job = acceptInstructionResponseSchema.parse(await response.json()).job;
+      jobIds.push(job.jobId);
+      assert.equal(job.number, jobIds.length);
+    };
     const maximums = ["a".repeat(16384), "あ".repeat(5461) + "a", "😀".repeat(4096)];
     for (const text of maximums) {
       assert.equal(Buffer.byteLength(text), 16384);
       const valid = await send({ requestId: crypto.randomUUID(), body: text }, boundaryPath);
-      assert.equal(valid.status, 202);
+      await remember(valid);
       await error(
         await send({ requestId: crypto.randomUUID(), body: `${text}a` }, boundaryPath),
         400,
@@ -243,7 +257,7 @@ await test("Instruction acceptance through workerd and local D1", async (t) => {
       for (const extra of ["", "a"]) {
         const json = `{"requestId":"${crypto.randomUUID()}","body":"${escaped(text + extra)}"}`;
         const response = await raw(boundaryPath, json);
-        if (extra === "") assert.equal(response.status, 202);
+        if (extra === "") await remember(response);
         else await error(response, 400, "invalid_request");
       }
     }
@@ -252,11 +266,11 @@ await test("Instruction acceptance through workerd and local D1", async (t) => {
         { requestId: crypto.randomUUID(), body: `x${character.repeat(16383)}` },
         boundaryPath,
       );
-      assert.equal(response.status, 202);
+      await remember(response);
     }
     const json = JSON.stringify({ requestId: crypto.randomUUID(), body: "x" });
     const atLimit = json.padEnd(128 * 1024, " ");
-    assert.equal((await raw(boundaryPath, atLimit)).status, 202);
+    await remember(await raw(boundaryPath, atLimit));
     await error(await raw(boundaryPath, `${atLimit} `), 413, "payload_too_large");
     const streamed: RequestInit = {
       method: "POST",
@@ -285,7 +299,11 @@ await test("Instruction acceptance through workerd and local D1", async (t) => {
     );
     const response = await worker.call(`/api/patterns/${boundaryPattern.id}/state`, { as: owner });
     assert.equal(response.status, 200);
-    assert.equal(patternStateResponseSchema.parse(await response.json()).queuedJobs.length, 9);
+    await response.arrayBuffer();
+    assert.equal(jobIds.length, 9);
+    const settled = await settleJobs(worker, owner, boundaryPattern.id, jobIds);
+    assert.equal(settled.runningJob, null);
+    assert.deepEqual(settled.queuedJobs, []);
   });
 
   await t.test("no structured log contains the instruction marker", async () => {
@@ -293,6 +311,7 @@ await test("Instruction acceptance through workerd and local D1", async (t) => {
     const trace = response.headers.get("x-trace-id");
     assert(trace);
     await worker.logLine(trace);
+    await settleJobs(worker, owner, pattern.id, [accepted.job.jobId]);
     assert(!JSON.stringify(worker.logEntries()).includes(marker));
   });
 });

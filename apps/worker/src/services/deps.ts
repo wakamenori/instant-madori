@@ -1,3 +1,4 @@
+import type { JobExecutionReference } from "../storage/job-execution.ts";
 import type { Store } from "../storage/store.ts";
 import type { GeometryApi, GeometryInstance } from "../geometry/geometry-client.ts";
 /**
@@ -20,8 +21,37 @@ export interface ServiceDeps {
   store: Store;
   geometry: (key: GeometryInstance) => GeometryApi;
   runtime: Runtime;
+  wakePattern: (patternId: string) => Promise<void>;
 }
 
 export type StoreDeps<K extends keyof Store, O extends keyof Store[K]> = {
   store: { [P in K]: Pick<Store[P], O> };
 };
+
+export interface JobRuns {
+  start(job: JobExecutionReference): Promise<"created" | "existing">;
+}
+
+export interface JobStepConfig {
+  retries: { limit: number; delay: number; backoff: "exponential" };
+  timeout: number;
+}
+
+export interface JobSteps {
+  do<T extends Rpc.Serializable<T> & { kind: string }>(
+    name: string,
+    config: JobStepConfig,
+    run: () => Promise<T>,
+  ): Promise<T>;
+}
+
+export type PatternAdvance =
+  | { kind: "idle" }
+  | { kind: "claimed" | "running"; job: JobExecutionReference; instance: "created" | "existing" };
+
+export type PatternCoordinatorDeps = StoreDeps<"jobs", "claim" | "activeReference"> &
+  Pick<ServiceDeps, "runtime"> & { jobRuns: JobRuns };
+
+export type JobWorkflowDeps = StoreDeps<"jobs", "restore" | "check" | "complete" | "fail"> &
+  StoreDeps<"snapshots", "write"> &
+  Pick<ServiceDeps, "geometry" | "runtime" | "wakePattern">;

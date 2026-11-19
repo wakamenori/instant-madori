@@ -27,7 +27,7 @@ await test("Job execution through services on real D1 and R2", async (t) => {
   await db.apply(await readFile(jobMigration, "utf8"));
   const ownerId = await db.owner("execution");
   const otherId = await db.owner("other-execution");
-  const deps = { store: db.store, runtime: db.runtime };
+  const deps = { store: db.store, runtime: db.runtime, wakePattern: async () => {} };
   async function pattern(owner = ownerId) {
     const result = await db.store.projects.createOnce(
       {

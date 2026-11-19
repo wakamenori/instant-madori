@@ -204,7 +204,7 @@ AIが編集をまとめて案を提示するたびに履歴を一件追加する
 | ジョブの進行       | Workflows。一指示のAIとの往復、形状操作、検査、確定を段階として進める                               |
 | 形状処理           | Cloudflare Containers上のRustサービス。住宅操作とSolidCraftのSessionを実行する                      |
 
-ブラウザはAIや形状処理サービスへ直接接続しない。Workerを入口にし、Workflowが必要な形状処理をContainerへ依頼する。カメラ操作はブラウザ内で完結する。Containersへ接続するためのDOと、パターンの進行を管理するDOは、役割と識別子を分ける。
+ブラウザはAIや形状処理サービスへ直接接続しない。Workerを入口にし、Workflowが必要な形状処理をContainerへ依頼する。カメラ操作はブラウザ内で完結する。Containersへ接続するためのDOと、パターンの進行を管理するDOは、役割と識別子を分ける。パターンの進行を管理するDOはパターンIDを名前にし、ジョブの状態を持たない。WorkflowはWorkerの `exports` に `type: "workflow"` で宣言し、パターンのDOが `ctx.exports` から作る。Workflowの名前はアカウントの中で一意なので、環境ごとに別の名前を付ける。形状処理は、パターンごとの接続用DOとそのContainerで行う。
 
 初期構成にCloudflare Queuesは追加しない。順序と待機列を保存データで管理し、Workflowsの再開機能を使う。コンテナのメモリ・ディスクと、Workflowの保持状態を、案件の恒久保存先にはしない。
 
@@ -417,15 +417,24 @@ AIは実行結果を受けて修正を続ける。確定はサービス側の検
 #### 受付から確定まで
 
 1. Workerが入力と所有者を確認し、同じ要求の再送を識別するrequest IDを受け取る。
-2. Workerが、認証済みの指示、queuedのジョブ、要求の記録を一つのD1のbatchで保存する。受付順はこの保存で決まる。保存の後に、WorkerはパターンIDをパターンDOへ渡す。
-3. パターンDOが、D1から指示のmessage番号が最も小さいqueuedのジョブの実行権を取り、そのジョブのWorkflowを開始する。一つの条件付きUPDATEでrunningへ変更し、実行世代を1増やし、その時点の最新案を編集元に固定する。最初の案の前は編集元をNULLとする。running・validating・committingのジョブが既にあれば取得しない。
+2. Workerが、認証済みの指示、queuedのジョブ、要求の記録を一つのD1のbatchで保存する。受付順はこの保存で決まる。保存の後に、受付の操作がパターンIDをパターンDOへ渡して起こす。同じ要求の再送でも起こし直す。起こせなければ500を返す。保存は残るので、同じrequest IDの再送は保存した受付結果を返し、もう一度起こす。
+3. パターンDOは、起こされるとアラームを予約する。アラームの中で、自分の名前（`getByName` に渡したパターンID）を `ctx.id.name` から読み、D1から指示のmessage番号が最も小さいqueuedのジョブの実行権を取り、そのジョブのWorkflowを開始する。一つの条件付きUPDATEでrunningへ変更し、実行世代を1増やし、その時点の最新案を編集元に固定する。最初の案の前は編集元をNULLとする。running・validating・committingのジョブが既にあれば取得せず、そのactiveなジョブの参照を読んで、そのWorkflowを開始する。
 4. WorkflowがAIへ必要な情報を渡し、操作要求を受け取る。
 5. Containerが編集元またはチェックポイントの住宅データと操作の一括を受け、要求内の作業用Sessionで住宅由来のCADと対応表を再生成し、操作・検査・表示生成を行う。一括内では評価キャッシュを引き継ぐ。家のCADと対応表は要求内の派生物であり、保存対象は4.3に従う。
 6. 操作結果と必要な表示データを保存し、プレビューを通知する。失敗した操作は作業用の直前状態へ戻し、AIへ理由を返す。
 7. AIが編集を終えたら3.6の検査を行う。保存前に実行権と既存の結果を読み、完了済みならその結果を返す。合格した4.3の住宅情報・表示データ等は、試行ごとに新しいsnapshot IDで不変のR2オブジェクトとして保存する。manifestにはジョブIDと世代をcustomMetadata、SHA-256をchecksumとして付ける。
 8. 確定前に、実行権の所有者とsnapshot IDから作ったmanifestのキーをHEADし、存在・ジョブID・世代・SHA-256を照合する。不一致は実行権の失効と区別して返し、ジョブを変更しない。合格したらD1の一つのbatchでsnapshotとrevisionを追加し、ジョブをcompletedへ変更する。その後に完了を通知する。
 
-受付時のmessageの番号を受付順とする。HTTPの受付は認証・Origin・入力を検査し、所有者を条件にした専用の受付操作を呼ぶ。message・queuedのjob・要求の記録は同じbatchで保存し、再送では保存した受付結果を返す。DOへはパターンIDだけを渡し、本文や受付順をDOのメモリで管理しない。
+WorkflowのインスタンスIDは `job-<job ID>-g<実行世代>` とし、保存せずに参照から導く。作成は `createBatch` で行い、同じIDが既にあることを示すエラーコード10405を成功として扱う。取得の応答を失った場合も、activeなジョブの参照から同じIDを導くので、二つ目のインスタンスはできない。世代ごとにIDを分けるので、再取得した世代が保持期間中の古いインスタンスと衝突しない。アラームが例外で終わると、プラットフォームが間隔を延ばしながら再試行する。起こす呼出しが重なってもアラームは一つにまとまり、アラームの実行中に起こされたら、終わった後にもう一度動く。
+
+サービス基盤のジョブはAIを使わず、4から7の代わりに次の段階をこの順に進める。各段階は最初に参照から実行権を復元し、確定済みなら結果だけを返す。
+
+- `render snapshot`：パターンの接続用DOを通して、Containerで固定のサンプルの表示データを作り、試行ごとに新しいsnapshot IDでR2へ保存する。段階の戻り値はsnapshotの情報だけで、表示データを返さない。
+- `commit revision`：保存したsnapshotで、案名「サンプルの形」の案を条件付きで確定する。
+- `record failure`：確定しなかったときだけ、同じ世代のactiveなジョブをfailedにする。
+- `wake pattern`：確定・失敗のどちらの後もパターンDOを起こし、次の指示へ進める。失敗の後も待機列は進む。
+
+受付時のmessageの番号を受付順とする。HTTPの受付は認証・Origin・入力を検査し、所有者を条件にした専用の受付操作を呼ぶ。message・queuedのjob・要求の記録は同じbatchで保存し、再送では保存した受付結果を返す。DOはパターンIDを名前にして起こし、引数は渡さない。DOは本文や受付順をメモリにもストレージにも持たない。
 
 D1への確定では、実行権・編集元の案・実行世代が一致し、停止や上限到達が記録されていないことを条件にする。同じjob IDからの案の二重追加は一意制約で防ぐ。R2保存後に確定できなかったデータは未公開のままにし、参照されていないことを確認して後で回収する。
 
@@ -469,6 +478,15 @@ AI呼び出し、形状操作、保存・確定を別のWorkflowステップに�
 - ステップの戻り値は1 MiBまでである（[Workflowsの制限](https://developers.cloudflare.com/workflows/reference/limits/)）。表示データなどの大きなデータはR2へ保存する。
 - ステップは既定で、最初の試行の後に5回まで再試行する。間隔は10秒から指数的に延び、期限は試行ごとに10分である（[スリープと再試行](https://developers.cloudflare.com/workflows/build/sleeping-and-retrying/)）。期限が試行ごとに数えられるため、5.2の一指示10分の上限は、ステップの期限では守れない。
 
+サービス基盤のジョブの段階は、次の方針で再試行する。Containerへ一時的につながらない場合（`start_failed`・`exited`・`not_ready`・`token_rejected`・`unreachable`）は、`render snapshot` が例外を投げて段階を再試行する。Containerが無効な環境（`containers_disabled`）、Containerとのプロトコルの版の不一致（`protocol_mismatch`）、形状の生成の失敗、内部プロトコル違反は再試行しない。結果の値として返し、ジョブをfailedにする。この分類は `services/geometry.ts` の一つの表に置き、理由を加えると型検査が分類を求める。D1・R2の例外は段階の再試行に任せ、再試行が尽きたら `retries_exhausted` としてジョブをfailedにする。
+
+| 段階                                                | 再試行の回数 | 間隔                  | 試行ごとの期限 |
+| --------------------------------------------------- | ------------ | --------------------- | -------------- |
+| `render snapshot`                                   | 3            | 5秒から指数的に延ばす | 3分            |
+| `commit revision`・`record failure`・`wake pattern` | 5            | 2秒から指数的に延ばす | 1分            |
+
+`render snapshot` の期限には、Containerの準備の待ち（最大60秒）と表示データの要求（30秒）が一回分入る。
+
 操作は入力スナップショットと操作IDを固定し、完了済みなら保存した結果を返す。Containerが停止して途中のメモリを失った場合は、最後に保存したチェックポイントからやり直す。古い実行世代の結果は無効にする。
 
 APIの応答を受け取れず再呼び出しが必要になった場合、課金を伴う外部処理まで「一回しか実行されない」とは仮定しない。試行ごとに費用を扱い、案の確定は一度に限定する。
@@ -491,9 +509,11 @@ request IDは利用者ごとの範囲で一意とし、固定するのは成功�
 
 入力が不正なら400 `invalid_request`、JSON全体の上限超過は413 `payload_too_large`、成功済みのrequest IDを別の内容や操作に使うと422 `request_id_reused` とする。認証の失敗は401 `unauthenticated`、認証後のOriginの拒否は403 `forbidden`、別の所有者と存在しないパターンは同じ404 `not_found` とする。
 
-stateはqueryパラメータを受け付けず、`{ pattern, currentRevision, queuedJobs }` を返す。queuedJobsは `{ jobId, messageId, number }` の配列で、対応するmessageの番号の昇順に並べ、待機中がなければ空配列にする。パターン・最新案・待機中のジョブは同じD1 batchで読み、所有者を条件にする。待機列のSELECTはjobsをCROSS JOINの外側に置き、`jobs_queue` 索引でパターンとqueuedを絞ってからmessageを読む。完了済みの会話の件数を読取り量に含めない。
+stateはqueryパラメータを受け付けず、`{ pattern, currentRevision, runningJob, queuedJobs }` を返す。runningJobは実行権を持つジョブ（running・validating・committing）の `{ jobId, messageId, number }` で、なければnullにする。DBがパターンごとにactiveなジョブを一つに限るので、配列にしない。queuedJobsは同じ形の配列で、対応するmessageの番号の昇順に並べ、待機中がなければ空配列にする。同じジョブを両方に入れない。パターン・最新案・実行中のジョブ・待機中のジョブは同じD1 batchで読み、所有者を条件にする。実行中のジョブのSELECTは `jobs_one_active_per_pattern` 索引を `INDEXED BY` で使う。所有者の条件を加えると、統計を取った後のSQLiteはこの索引を使わず、パターンのジョブをすべて読むためである。待機列のSELECTはjobsをCROSS JOINの外側に置き、`jobs_queue` 索引でパターンとqueuedを絞ってからmessageを読む。完了済みの会話とジョブの件数を読取り量に含めない。
 
 受付のログにはrequest ID・pattern ID・job ID・message ID・受付番号と、初回か再送かを表す `acceptance: applied | replayed` を型付きのキーで記録する。指示の本文はログに含めない。
+
+ジョブの実行のログは、ジョブIDをtrace IDとして型付きのキーで記録する。パターンDOはアラームごとに `pattern.advanced`（結果、ジョブID、世代、インスタンスを作ったか）を書く。Workflowは段階の試行ごとに `job.step`（段階名、試行の番号、結果）を、終わりに `job.finished` を書く。形状処理の呼出しにも同じtrace IDを渡すので、接続用DOの `container.started`・`container.ready` も同じIDでたどれる。受付のログとはジョブIDでつながる。
 
 | API                                         | 役割                                                                      |
 | ------------------------------------------- | ------------------------------------------------------------------------- |
