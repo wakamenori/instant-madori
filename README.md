@@ -104,7 +104,7 @@ Workerの保存境界では、型名・バインディングの取り出し・�
 - `OwnerId`・`VerifiedIdentity` の名前を書かないキャストで作る形。ブランドを含む型へのキャスト（例：`as AuthenticatedUser`、`as AuthenticatedUser["id"]`、`as RequestKey`）、型の別名を通したキャストがこれに当たる。
 - `JobExecutionRight` の型の別名、indexed access、tuple、union、`typeof`、名前を変えたimport、`import()` 型を通したキャスト。直接の型名と名前空間付きの型名へのキャストは構文検査で拒む。実行権を受け取る操作は、非公開の欄の存在を実行時に確認してからその欄を読み、偽造した値がD1・R2へ届くことを防ぐ。
 - 保存結果の `resolved.constructor` を構築可能な型へキャストし、任意の利用者行を渡す形。非公開コンストラクタも、明示的なキャストによる偽造までは防がない。
-- `VerifiedIdentity` の欄の直接代入や `Object.assign` による書き換えは、生成時の凍結で拒否する。既存の証拠をspreadし、別の値へ置き換えたオブジェクトや、型の偽造はこの保証に含まれない。
+- `VerifiedIdentity` の欄の直接代入や `Object.assign` による書き換えは、生成時の凍結で拒否する。型の偽造はこの保証に含まれない。
 - 使う箇所にキャストを書かず、宣言で型を作る形。型述語、ジェネリックの補助関数、オーバーロードのシグネチャ、戻り値の型の宣言がこれに当たる。
 - 計算したキーやrest分割代入でバインディングを取り出す形。
 - `zod` の別名やnamespaceのimport、計算したプロパティ、分割代入、`zod/v4` などの別のパスから `any`・`custom` を名前でimportする形と、`z.ZodType<T>` へのキャストや `transform` の中のキャストで検証しないスキーマを作る形。

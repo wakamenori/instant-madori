@@ -79,7 +79,7 @@ void test("Storage types reject unverified identities, duplicate owners and forg
     ]),
     [
       [2322, 13],
-      [2741, 14],
+      [2739, 14],
       [2322, 15],
       [2353, 16],
       [2345, 17],
@@ -90,7 +90,7 @@ void test("Storage types reject unverified identities, duplicate owners and forg
   );
   const imports = `
     import { authenticatedUser } from "../../src/owner.ts";
-    import { freezeIdentity } from "../../src/identity.ts";
+    import { freezeIdentity, VerifiedIdentity as IdentityClass } from "../../src/identity.ts";
     import type { User } from "@madori/contracts";
     declare const user: User;
     declare const identity: VerifiedIdentity;
@@ -116,9 +116,16 @@ void test("Storage types reject unverified identities, duplicate owners and forg
     [],
   );
   const valid = `
+    import { verifyAccessToken } from "../../src/api/access.ts";
+    import type { AccessConfig } from "../../src/api/config.ts";
+    declare const request: Request;
+    declare const access: AccessConfig;
     async function resolve() {
       const result = await store.users.upsertAccess({ identity, newId: patternId, now: "now" });
       const owner: OwnerId = authenticatedUser(identity, result).id;
+      const verified = await verifyAccessToken(request, access);
+      const verifiedResult = await store.users.upsertAccess({ identity: verified, newId: patternId, now: "now" });
+      authenticatedUser(verified, verifiedResult);
       return owner;
     }
   `;
@@ -131,6 +138,9 @@ void test("Storage types reject unverified identities, duplicate owners and forg
     store.users.upsertAccess({ issuer: "issuer", subject: "subject", email: "email", newId: patternId, now: "now" });
     freezeIdentity({ issuer: "issuer", subject: "subject", email: "email" });
     identity.subject = "other";
+    authenticatedUser({ ...identity, subject: "x" }, resolved);
+    store.users.upsertAccess({ identity: { ...identity, subject: "x" }, newId: patternId, now: "now" });
+    new IdentityClass(identity);
   `;
   for (const path of [
     fixtureFile,
@@ -139,7 +149,7 @@ void test("Storage types reject unverified identities, duplicate owners and forg
     assert.deepEqual(diagnostics(imports + valid, path), []);
     assert.deepEqual(
       diagnostics(imports + invalid, path).map((diagnostic) => diagnostic.code),
-      [2554, 2554, 2345, 2345, 2345, 2353, 2345, 2540],
+      [2554, 2554, 2345, 2345, 2345, 2353, 2345, 2540, 2345, 2739, 2673],
     );
   }
   const batchImports = `

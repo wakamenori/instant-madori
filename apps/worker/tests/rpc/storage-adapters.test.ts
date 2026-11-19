@@ -213,11 +213,15 @@ void test("owners require frozen verified identities and matching untampered D1 
         verifierClientId: "owner-verifier",
       },
     );
-    assert.deepEqual(verifier, {
-      issuer: identity.issuer,
-      subject: "staging:verifier",
-      email: "verifier@staging.invalid",
-    });
+    const { issuer, subject, email } = verifier;
+    assert.deepEqual(
+      { issuer, subject, email },
+      {
+        issuer: identity.issuer,
+        subject: "staging:verifier",
+        email: "verifier@staging.invalid",
+      },
+    );
     for (const verified of [identity, verifier]) {
       const mutable: { issuer: string; subject: string; email: string } = verified;
       for (const field of ["issuer", "subject", "email"] as const) {
@@ -225,6 +229,12 @@ void test("owners require frozen verified identities and matching untampered D1 
           mutable[field] = "victim";
         }, TypeError);
         assert.throws(() => Object.assign(verified, { [field]: "victim" }), TypeError);
+        assert.throws(() => Object.defineProperty(verified, field, { value: "victim" }), TypeError);
+        assert.throws(
+          () =>
+            Object.defineProperty(Object.getPrototypeOf(verified), field, { get: () => "victim" }),
+          TypeError,
+        );
       }
       assert.equal(Object.isFrozen(verified), true);
     }

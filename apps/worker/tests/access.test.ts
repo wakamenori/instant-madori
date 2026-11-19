@@ -8,9 +8,14 @@ import { accessAssertionHeader } from "@madori/contracts";
 import { errors } from "jose";
 import { verifyAccessToken } from "../src/api/access.ts";
 import type { AccessConfig } from "../src/api/config.ts";
+import type { VerifiedIdentity } from "../src/identity.ts";
 import { ApiFailure } from "../src/api/http.ts";
 import { createAccessKey, signAccessToken } from "../../../scripts/dev/local-access.ts";
 import type { AccessKey } from "../../../scripts/dev/local-access.ts";
+
+function identityFields({ issuer, subject, email }: VerifiedIdentity) {
+  return { issuer, subject, email };
+}
 
 const user = { subject: "user-1", email: "user@example.com" };
 
@@ -48,7 +53,7 @@ await test("Remote Access keys", async (t) => {
   await t.test("a token signed by a published key is accepted", async () => {
     const endpoint = await keyEndpoint(200, jwks);
     t.after(endpoint.close);
-    assert.deepEqual(await verify(endpoint.issuer, key), {
+    assert.deepEqual(identityFields(await verify(endpoint.issuer, key)), {
       issuer: endpoint.issuer,
       subject: user.subject,
       email: user.email,
@@ -188,18 +193,20 @@ await test("Verifier service tokens", async (t) => {
 
   await t.test("the configured service token maps to a fixed verifier identity", async () => {
     const identity = await verifyClaims(serviceClaims, enabled);
-    assert.deepEqual(identity, {
+    assert.deepEqual(identityFields(identity), {
       issuer: key.issuer,
       subject: "staging:verifier",
       email: "verifier@staging.invalid",
     });
     const replacement = "replacement-client.access";
     assert.deepEqual(
-      await verifyClaims(
-        { ...serviceClaims, common_name: replacement },
-        { ...access, verifierClientId: replacement },
+      identityFields(
+        await verifyClaims(
+          { ...serviceClaims, common_name: replacement },
+          { ...access, verifierClientId: replacement },
+        ),
       ),
-      identity,
+      identityFields(identity),
       "rotating the configured Client ID preserves the verifier identity",
     );
   });
@@ -245,7 +252,7 @@ await test("Verifier service tokens", async (t) => {
   }
 
   await t.test("a configured verifier does not change invited users", async () => {
-    assert.deepEqual(await verifyClaims({}, enabled), {
+    assert.deepEqual(identityFields(await verifyClaims({}, enabled)), {
       issuer: key.issuer,
       subject: user.subject,
       email: user.email,
