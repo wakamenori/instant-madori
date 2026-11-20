@@ -569,6 +569,35 @@ void test("contracts public entry keeps its declared package spelling", () => {
   }
 });
 
+void test("storage response import names are case-sensitive", () => {
+  const from = scopes["worker-storage"];
+  assert(
+    resolved(importType("@madori/contracts", "ApiError"), from).some(
+      (diagnostic) => diagnostic.boundaryId === "storage-response",
+    ),
+  );
+  for (const name of ["apiError", "APIERROR"])
+    assert.deepEqual(resolved(importType("@madori/contracts", name), from), [], name);
+});
+
+for (const file of ["stray.ts", "nested/stray.ts"]) {
+  void test(`reports ${file} outside tsconfig before checking imports`, () => {
+    if (file === "nested/stray.ts") {
+      write("nested/tsconfig.json", JSON.stringify({ include: ["included.ts"] }));
+      write("nested/included.ts");
+    }
+    assert.deepEqual(resolved('import "./missing.ts";', file), [
+      {
+        file,
+        line: 1,
+        column: 1,
+        boundaryId: "outside-tsconfig",
+        message: "No tsconfig.json includes this file.",
+      },
+    ]);
+  });
+}
+
 void test("namespace, aliases and import qualifiers enforce response name restrictions", () => {
   for (const source of [
     'import type { ProjectResponse as Alias } from "@madori/contracts";',
