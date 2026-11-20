@@ -89,6 +89,23 @@ await test("digest entries follow their prepared source or their own digest", ()
   });
 });
 
+await test("keeps a directly referenced manifest when only an old version references its source", () => {
+  const manifest = { ...tag(20, digest(20)), preparedFrom: digest(1) };
+  const plan = selectTags({
+    ...input,
+    versions: [version(12, [ref(20)]), ...versions.slice(1)],
+    tags: [manifest],
+  });
+  assert.deepEqual(plan, {
+    kind: "ready",
+    repository,
+    keep: [manifest],
+    remove: [],
+    prepared: [],
+    unreferenced: [],
+  });
+});
+
 for (const [name, overrides] of [
   ["unreadable digest", { tags: [...input.tags, { ...tag(1, "unreadable"), digest: null }] }],
   ["malformed digest", { tags: [{ ...tag(1, "broken"), digest: "sha256:broken" }] }],
