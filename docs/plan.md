@@ -619,6 +619,8 @@ git worktreeで並行して開発するときは、worktreeごとにRustの `tar
 
 stagingはworkers.devのホスト名で公開し、Worker宛先のAccessアプリで守る（preview URLは無効）。マイグレーションはデプロイの前に適用するため、動いている前の版のWorkerと両立する形で書く。デプロイの流れ、試験用ブランチのデプロイ、最初に環境を作る手順は、README「stagingへデプロイする」にまとめる。初期値の `.invalid` 発行元はローカル以外で拒否する。インスタンスの種類と休止時間は環境別の変数で指定する。Workers Logsを有効にし、Container内の標準出力もそこへ集める。接続用DOが出す `container.ready` ログの `mode: cold` で起動時間、Rustの要求ログの `vmHwmKib` でLinux上のメモリ最大値を読む。
 
+Wranglerは、アップロードした版を約3秒のうちに読めないと、その版を公開したまま、Containerのアプリケーション設定とトリガーを適用せずに失敗し、同じ `wrangler deploy` のやり直しを求める。Wranglerの版を変えても直らないため、stagingのデプロイは `scripts/deploy/wrangler-deploy.ts` を通し、この失敗のときだけ同じコマンドを初回を含めて3回まで、待たずにやり直す。失敗はWranglerの構造化出力にある失敗の文の完全一致で見分け、ほかの失敗はやり直さない。
+
 疎通の確認では、Accessのservice tokenを4.4の検証用ユーザーとして使う。確かめる項目、Client IDの渡し方、要求の期限は、README「stagingへデプロイする」にまとめる。
 
 デプロイ・疎通・R2の確認が成功した後、`scripts/deploy/registry-retention.ts --apply` でstagingのContainerイメージを回収する。レジストリの `_catalog?tags=true` から、通常のタグと、Wranglerの一覧に出ないダイジェスト名を取得する。Cloudflareがデプロイ時に作る実行用イメージは、マニフェストの注釈 `io.cloudflare.cloudchamber.image_digest` が指す生成元のダイジェストで判定する。注釈がなければ自身のダイジェストを使う。最新10版と現在のデプロイに含まれる全版が参照するものは別名も含めて保持し、古い版だけが参照するものを削除する。どの版からも参照されないものはデプロイ途中の可能性があるため、`unreferenced` に記録して残す。
