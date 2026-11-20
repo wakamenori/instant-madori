@@ -76,7 +76,7 @@ Viteのプロキシ（5173番）経由のAPI要求には、開発者として署
 | `pnpm dev`          | Web・WorkerとDockerの形状処理Containerを起動                                                                                                                                      |
 | `pnpm build`        | releaseのWasm・Web・Worker・ネイティブRustの成果物だけをビルド                                                                                                                    |
 
-補助スクリプトは `scripts/check/`・`scripts/dev/`・`scripts/generate/`・`scripts/build/`・`scripts/upstream/`・`scripts/deploy/` に目的別に置き、複数の目的で使う部品は `scripts/shared/` に置きます。テストは対象ファイルと同じフォルダーに置きます。
+補助スクリプトは `scripts/check/`・`scripts/dev/`・`scripts/generate/`・`scripts/build/`・`scripts/upstream/`・`scripts/deploy/`・`scripts/measure/` に目的別に置き、複数の目的で使う部品は `scripts/shared/` に置きます。テストは対象ファイルと同じフォルダーに置きます。
 
 初期設定は `pnpm setup`、引数の確認は `pnpm check --help`。upstreamの取得・取り込みには後述の `pnpm upstream:check` / `pnpm upstream:update` を使います。個別ツールを順に手動実行する必要はありません。
 
@@ -256,3 +256,16 @@ mise exec -- node --env-file=/path/to/.env scripts/deploy/registry-retention.ts 
 Container接続用DOと内部プロトコルは `apps/worker/src/geometry/` に置き、`services/` から呼びます。パターンごとの調整DOは `objects/`、ジョブのWorkflowは `workflows/` に置き、どちらも `services/` だけを呼びます。ジョブの形状処理は、パターンごとの接続用DOとそのContainerで行います。
 
 内部APIの本文は `crates/geometry-api` で定義し、`pnpm generate:geometry` でJSON Schema・Zod・TypeScript型を再生成します。`pnpm check` も全モードで再生成し、RustとNodeのテストが生成結果の一致を検査します。
+
+### stagingのContainerを計測する
+
+stagingのContainerの計測は `scripts/measure/` のコマンドで行います。Workers Logsを読むコマンドは、`Workers Observability Write` の権限を持つCloudflareのAPIトークンを、環境変数 `CF_API_TOKEN_FILE` が指すファイルから読みます。トークンは出力しません。
+
+| コマンド                                                             | 用途                                                                                                                                                                                                                                                                                                                                                      |
+| -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm measure:logs --from <ISO時刻> --to <ISO時刻> --out <ファイル>` | 時間帯のWorkers Logsを、古い順に1行1件のJSONで書き出す。各行はログの項目に `t`（ms）と `service` を加えた形で、検証3の `events.jsonl` と同じ。2,000件に達したら、時間帯を狭めるよう求めて失敗する。既存のファイルは上書きしない                                                                                                                           |
+| `pnpm -s measure:summary <ファイル>`                                 | 書き出したログから、コールドスタート（`container.ready` の `mode: cold`）、処理時間、`vmHwmKib` の最大値、`geometry.limits`、Containerの起動と停止をJSONで集計する。定義は検証3と同じで、中央値は件数が偶数のとき小さいほうの値を採る                                                                                                                     |
+| `pnpm measure:deploy --ref <ブランチ> --instance <種類>`             | pushしたブランチの先頭を、`gh workflow run deploy-staging.yml --ref <ブランチ>` でstagingへデプロイし、実行の成功まで待つ。そのコミットの `env.staging.vars.GEOMETRY_INSTANCE_TYPE` が `<種類>` でないとき、または待機中のデプロイがあるとき（新しい実行が待機中の実行を取り消すため）は、実行を始めずに失敗する。`wrangler.jsonc` の変更とpushは手で行う |
+| `pnpm measure:cold`                                                  | 直近2時間のログに現れたContainerがすべて停止し、最後の停止から5分たつまで待つ。次の要求は新しいContainerを起動する                                                                                                                                                                                                                                        |
+
+インスタンスの種類を変えて測るときは、計測用のブランチで `wrangler.jsonc` の種類を変えてcommitとpushをし、`pnpm measure:deploy` と `pnpm measure:cold` を順に実行してから要求を送ります。手で `wrangler deploy --env staging` を実行すると、検証用のClient IDが渡りません。ログには停止したContainerを識別する項目が無いため、`measure:cold` は停止の行を起動の行と対にせず、動いているContainerの数を数えます。複数のパターンのContainerが同時に動くと、早く終わることがあります。測った後に、集計の `coldReadyMs` の件数と、`limits` の `cgroupMemoryMax` が種類と合うことを確かめます。

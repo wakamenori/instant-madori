@@ -1,0 +1,224 @@
+{
+  "coldReadyMs": {
+    "n": 7,
+    "min": 339,
+    "median": 356,
+    "max": 38247
+  },
+  "coldRequestGeometryMs": {
+    "n": 7,
+    "min": 518,
+    "median": 538,
+    "max": 38434
+  },
+  "warmRequestGeometryMs": {
+    "n": 103,
+    "min": 28,
+    "median": 33,
+    "max": 560
+  },
+  "warmContainerHandlerMs": {
+    "n": 102,
+    "min": 25,
+    "median": 29,
+    "max": 557
+  },
+  "warmContainerHandlerMsByStart": [
+    {
+      "start": 1794634240597,
+      "ms": {
+        "n": 5,
+        "min": 26,
+        "median": 27,
+        "max": 30
+      }
+    },
+    {
+      "start": 1794636413717,
+      "ms": {
+        "n": 8,
+        "min": 25,
+        "median": 29,
+        "max": 557
+      }
+    },
+    {
+      "start": 1794636866898,
+      "ms": {
+        "n": 29,
+        "min": 27,
+        "median": 30,
+        "max": 34
+      }
+    },
+    {
+      "start": 1794637278177,
+      "ms": {
+        "n": 29,
+        "min": 27,
+        "median": 30,
+        "max": 32
+      }
+    },
+    {
+      "start": 1794638395640,
+      "ms": {
+        "n": 2,
+        "min": 28,
+        "median": 28,
+        "max": 30
+      }
+    },
+    {
+      "start": 1794639411844,
+      "ms": {
+        "n": 29,
+        "min": 25,
+        "median": 28,
+        "max": 31
+      }
+    }
+  ],
+  "maxVmHwmKib": 47012,
+  "limits": [
+    {
+      "t": 1794638433833,
+      "cgroupCpuMax": "max 100000",
+      "cgroupMemoryMax": "4294967296",
+      "parallelism": 1
+    },
+    {
+      "t": 1794639412164,
+      "cgroupCpuMax": "max 100000",
+      "cgroupMemoryMax": "268435456",
+      "parallelism": 1
+    }
+  ],
+  "counts": {
+    "apiRequests": 110,
+    "containerDisplayLines": 108,
+    "failedApiRequests": 0
+  },
+  "containerEvents": [
+    {
+      "t": 1794634240597,
+      "event": "container.started",
+      "mode": null,
+      "ms": null
+    },
+    {
+      "t": 1794634248675,
+      "event": "container.ready",
+      "mode": "cold",
+      "ms": 8078
+    },
+    {
+      "t": 1794635222367,
+      "event": "Container exited (code: 0)",
+      "mode": null,
+      "ms": null
+    },
+    {
+      "t": 1794635295951,
+      "event": "container.started",
+      "mode": null,
+      "ms": null
+    },
+    {
+      "t": 1794635296290,
+      "event": "container.ready",
+      "mode": "cold",
+      "ms": 339
+    },
+    {
+      "t": 1794636258285,
+      "event": "Container exited (code: 0)",
+      "mode": null,
+      "ms": null
+    },
+    {
+      "t": 1794636413717,
+      "event": "container.started",
+      "mode": null,
+      "ms": null
+    },
+    {
+      "t": 1794636414064,
+      "event": "container.ready",
+      "mode": "cold",
+      "ms": 347
+    },
+    {
+      "t": 1794636786162,
+      "event": "Container exited (code: 0)",
+      "mode": null,
+      "ms": null
+    },
+    {
+      "t": 1794636866898,
+      "event": "container.started",
+      "mode": null,
+      "ms": null
+    },
+    {
+      "t": 1794636867275,
+      "event": "container.ready",
+      "mode": "cold",
+      "ms": 377
+    },
+    {
+      "t": 1794637246911,
+      "event": "Container exited (code: 0)",
+      "mode": null,
+      "ms": null
+    },
+    {
+      "t": 1794637278177,
+      "event": "container.started",
+      "mode": null,
+      "ms": null
+    },
+    {
+      "t": 1794637278524,
+      "event": "container.ready",
+      "mode": "cold",
+      "ms": 347
+    },
+    {
+      "t": 1794637751647,
+      "event": "Container exited (code: 0)",
+      "mode": null,
+      "ms": null
+    },
+    {
+      "t": 1794638395640,
+      "event": "container.started",
+      "mode": null,
+      "ms": null
+    },
+    {
+      "t": 1794638433887,
+      "event": "container.ready",
+      "mode": "cold",
+      "ms": 38247
+    },
+    {
+      "t": 1794639379726,
+      "event": "Container exited (code: 0)",
+      "mode": null,
+      "ms": null
+    },
+    {
+      "t": 1794639411844,
+      "event": "container.started",
+      "mode": null,
+      "ms": null
+    },
+    {
+      "t": 1794639412200,
+      "event": "container.ready",
+      "mode": "cold",
+      "ms": 356
+    }
+  ]
+}
