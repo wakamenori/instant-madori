@@ -44,7 +44,7 @@ const ready = [...issues.values()].filter(
 ready.sort(
   (a, b) => stage(a) - stage(b) || chain(b.number) - chain(a.number) || a.number - b.number,
 );
-for (const issue of ready.slice(0, 25)) {
+for (const issue of ready) {
   const milestone = issue.milestone?.title ?? "-";
   console.log(
     [`#${issue.number}`, milestone, `chain=${chain(issue.number)}`, issue.title].join("\t"),
