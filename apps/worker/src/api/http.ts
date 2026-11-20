@@ -42,6 +42,8 @@ export type RoutePath =
   | "/api/projects/:projectId/patterns"
   | "/api/patterns/:patternId"
   | "/api/patterns/:patternId/messages"
+  | "/api/patterns/:patternId/queue/resume"
+  | "/api/patterns/:patternId/queue/cancel"
   | "/api/patterns/:patternId/state"
   | "/api/patterns/:patternId/revisions"
   | "/api/revisions/:revisionId/view"

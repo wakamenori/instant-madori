@@ -62,6 +62,7 @@ await test("Immutable revisions through local D1, R2 and public HTTP", async (t)
       pattern,
       currentRevision: null,
       runningJob: null,
+      queueHold: null,
       queuedJobs: [],
       lastFinishedJob: null,
     });
@@ -95,6 +96,7 @@ await test("Immutable revisions through local D1, R2 and public HTTP", async (t)
         pattern,
         currentRevision: latest,
         runningJob: null,
+        queueHold: null,
         queuedJobs: [],
       });
       for (const revision of [first, latest]) {

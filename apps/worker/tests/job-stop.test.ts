@@ -156,45 +156,72 @@ await test("Job stop through workerd HTTP", { timeout: 120_000 }, async (t) => {
       assert.deepEqual(after.lastFinishedJob, { ...b, state: "cancelled" });
     },
   );
-  await t.test("running stop advances the queue before the held Workflow finishes", async () => {
-    const c = await accept(pattern.id);
-    const stopped = await stop(a.jobId);
-    assert.equal(stopped.status, 200);
-    assert.deepEqual(await stopped.json(), {
-      outcome: "stopped",
-      job: { ...a, state: "cancelled" },
-    });
-    await waitState(pattern.id, (value) => value.runningJob?.jobId === c.jobId);
-    assert(
-      !worker
-        .logEntries()
-        .some((line) => line["event"] === "job.finished" && line["jobId"] === a.jobId),
-    );
-    const isolated = await create();
-    const d = await accept(isolated.id);
-    await waitState(isolated.id, (value) => value.runningJob?.jobId === d.jobId);
-    await stop(d.jobId);
-    assert.deepEqual((await state(isolated.id)).lastFinishedJob, { ...d, state: "cancelled" });
-    await settleJobs(worker, owner, isolated.id, [d.jobId]);
-    await stop(c.jobId);
-    await settleJobs(worker, owner, pattern.id, [a.jobId, c.jobId]);
-    const line = await worker.logLine(a.jobId, "job.finished");
-    assert.equal(line["level"], "info");
-    assert.equal(line["outcome"], "cancelled");
-    assert.equal(line["reason"], undefined);
-    assert(
-      !worker
-        .logEntries()
-        .some(
-          (line) =>
-            line["jobId"] === b.jobId &&
-            ["job.step", "job.finished", "pattern.advanced"].includes(String(line["event"])),
-        ),
-    );
-    const response = await worker.call(`/api/patterns/${pattern.id}/revisions`, { as: owner });
-    assert.deepEqual(revisionListResponseSchema.parse(await response.json()), {
-      revisions: [],
-      nextCursor: null,
-    });
-  });
+  await t.test(
+    "running stop holds the queue; resume starts the next before the held Workflow finishes",
+    async () => {
+      const c = await accept(pattern.id);
+      const stopped = await stop(a.jobId);
+      assert.equal(stopped.status, 200);
+      assert.deepEqual(await stopped.json(), {
+        outcome: "stopped",
+        job: { ...a, state: "cancelled" },
+      });
+      const waiting = await waitState(pattern.id, () =>
+        worker
+          .logEntries()
+          .some(
+            (line) =>
+              line["event"] === "pattern.advanced" &&
+              line["outcome"] === "queue_held" &&
+              line["heldBy"] === a.jobId,
+          ),
+      );
+      assert.deepEqual(waiting.queueHold, { job: { ...a, state: "cancelled" } });
+      assert.deepEqual(waiting.queuedJobs, [c]);
+      assert.equal(waiting.runningJob, null);
+      assert(
+        !worker
+          .logEntries()
+          .some((line) => line["event"] === "job.step" && line["jobId"] === c.jobId),
+      );
+      const resume = await worker.call(`/api/patterns/${pattern.id}/queue/resume`, {
+        as: owner,
+        method: "POST",
+        body: { heldBy: a.jobId, requestId: crypto.randomUUID() },
+      });
+      assert.equal(resume.status, 200);
+      await waitState(pattern.id, (value) => value.runningJob?.jobId === c.jobId);
+      assert(
+        !worker
+          .logEntries()
+          .some((line) => line["event"] === "job.finished" && line["jobId"] === a.jobId),
+      );
+      const isolated = await create();
+      const d = await accept(isolated.id);
+      await waitState(isolated.id, (value) => value.runningJob?.jobId === d.jobId);
+      await stop(d.jobId);
+      assert.deepEqual((await state(isolated.id)).lastFinishedJob, { ...d, state: "cancelled" });
+      await settleJobs(worker, owner, isolated.id, [d.jobId]);
+      await stop(c.jobId);
+      await settleJobs(worker, owner, pattern.id, [a.jobId, c.jobId]);
+      const line = await worker.logLine(a.jobId, "job.finished");
+      assert.equal(line["level"], "info");
+      assert.equal(line["outcome"], "cancelled");
+      assert.equal(line["reason"], undefined);
+      assert(
+        !worker
+          .logEntries()
+          .some(
+            (line) =>
+              line["jobId"] === b.jobId &&
+              ["job.step", "job.finished", "pattern.advanced"].includes(String(line["event"])),
+          ),
+      );
+      const response = await worker.call(`/api/patterns/${pattern.id}/revisions`, { as: owner });
+      assert.deepEqual(revisionListResponseSchema.parse(await response.json()), {
+        revisions: [],
+        nextCursor: null,
+      });
+    },
+  );
 });

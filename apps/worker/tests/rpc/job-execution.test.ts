@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { readFile } from "node:fs/promises";
 import {
   acceptInstruction,
   claimNextJob,
@@ -19,12 +18,12 @@ import { d1 } from "../../src/storage/d1.ts";
 import type { D1 } from "../../src/storage/d1.ts";
 import { r2 } from "../../src/storage/r2.ts";
 import type { R2 } from "../../src/storage/r2.ts";
-import { openJobDatabase, jobMigration, now } from "./jobs-support.ts";
+import { openJobDatabase, applyJobMigrations, now } from "./jobs-support.ts";
 
 await test("Job execution through services on real D1 and R2", async (t) => {
   const db = await openJobDatabase();
   t.after(() => db.dispose());
-  await db.apply(await readFile(jobMigration, "utf8"));
+  await applyJobMigrations(db);
   const ownerId = await db.owner("execution");
   const otherId = await db.owner("other-execution");
   const deps = { store: db.store, runtime: db.runtime, wakePattern: async () => {} };
@@ -520,7 +519,7 @@ await test("Job execution through services on real D1 and R2", async (t) => {
             name: "案",
             now,
           }),
-        async () => observed.store.jobs.fail(fake, now),
+        async () => observed.store.jobs.failAndHoldQueue(fake, now),
         () => observed.store.jobs.ownedBySubject(fake, "staging:verifier"),
         () =>
           observed.store.snapshots.write(fake, {

@@ -40,19 +40,16 @@ test "$(git rev-parse HEAD)" = "$HEAD_SHA" || exit 1
 gh pr view "$PR" --json headRefOid --jq .headRefOid
 ```
 
-メインのチェックアウトのビルド成果物をリンクしてから準備する。Rust を最初からビルドし直さずに済む。`pnpm setup` の最後の `lefthook install` は、全 worktree で共有の `.git/hooks/pre-commit` を、この worktree を指すように書き換える。準備の後、メインのチェックアウトで入れ直す。
+`pnpm setup` は、worktree に `target` と `.tools` が無ければ、メインのチェックアウトのものを copy-on-write で複製し、自作の crate だけをこの worktree でビルドし直す（README「開発を始める」）。worktree ごとに `target` を持つので、ほかの worktree と同時に cargo を使ってよい。Git のフックはメインのチェックアウトでだけ登録されるので、入れ直さない。
 
 ```sh
 MAIN=$(git worktree list --porcelain | sed -n '1s/^worktree //p')
-[ -e target ] || ln -s "$MAIN/target" target
-[ -e .tools ] || ln -s "$MAIN/.tools" .tools
 export CARGO_INCREMENTAL=0
 mise exec -- pnpm install --frozen-lockfile
 mise exec -- pnpm setup
-(cd "$MAIN" && mise exec -- pnpm exec lefthook install)
 ```
 
-ディスクの空きを 20 GiB 以上に保つ（`df -h /`）。ほかにビルドの置き場を作らない。
+ディスクの空きを 20 GiB 以上に保つ（`df -h /`）。複製した `target` は、`du` では複製元と同じ大きさに見える。空きは `df` で確かめる。
 
 ## 起動
 
@@ -166,3 +163,17 @@ c() { printf '%s\n' "$HDRS" | curl -sS -H @- "$@"; }
 - **止める。** `body=$(printf '{"requestId":"%s"}' "$(uuidgen)")` で `c -o "$D/stop.json" -w '%{http_code}\n' -X POST "$STG/api/jobs/$JOB/stop" -H "$J" -H "origin: $STG" -d "$body"`。`200` で、`outcome` が `stopped`、`job.state` が `cancelled`。同じ `$body` で出力先を `"$D/stop-replay.json"` にして送り直すと `200` で、`cmp "$D/stop.json" "$D/stop-replay.json"` が何も出さない。
 - **state を読む。** `c -o "$D/state-1.json" "$STG/api/patterns/$PAT/state"`。`runningJob` と `currentRevision` が `null`、`lastFinishedJob.jobId` が `$JOB` で、`lastFinishedJob.state` が `cancelled`。
 - **待ちが明けた後に読む。** 200秒おいて、state を `"$D/state-2.json"` に読み直し、`c -o "$D/revisions.json" -w '%{http_code}\n' "$STG/api/patterns/$PAT/revisions"` を実行する。state は `state-1` と同じで、`revisions` が `[]`。
+
+### 検証用の利用者で待機列の保留を確かめる
+
+実行中の指示を止めたときに待機中の指示があれば、待機列は保留になる。待ちの間に一件目を止め、二件目が動かないことを確かめてから再開し、二件目が完了して案が一件増えることを確かめる。二件目も描画の前に180秒待つので、終わるまでに4分ほどかかる。前の節と同じく、ヘッダーはシェルの変数に持ち、下の各手順は一つのスクリプトで続けて実行する。`STG`・`J`・`HDRS`・`c` は前の節のとおりに設定し、`D="$EVIDENCE/staging-hold"; mkdir -p "$D"` にする。
+
+- **案件を得る。** 前の節と同じ要求で `PID` を設定する。
+- **パターンを足す。** 前の節と同じ要求を、名前を `保留の確認`、出力先を `"$D/pattern.json"` にして送る。`201`。`PAT` を設定する。
+- **二つ送る。** 前の節の「送る」を、本文を `保留の確認1` と `保留の確認2`、出力先を `"$D/accept-a.json"` と `"$D/accept-b.json"` にして続けて送る。どちらも `202`。`A=$(jq -r .job.jobId "$D/accept-a.json")` と `B=$(jq -r .job.jobId "$D/accept-b.json")` を設定する。
+- **待ちに入るのを待つ。** 前の節と同じ繰り返しで、`runningJob.jobId` が `$A` になるのを待つ。出力先は `"$D/state-0.json"`。
+- **止める。** 前の節と同じ要求を `$A` へ送り、出力先を `"$D/stop.json"` にする。`200` で、`outcome` が `stopped`。
+- **保留を読む。** `c -o "$D/hold-1.json" "$STG/api/patterns/$PAT/state"`。`runningJob` が `null`、`queuedJobs` が `$B` の一件、`queueHold.job.jobId` が `$A` で `queueHold.job.state` が `cancelled`。
+- **二件目が動かないことを確かめる。** 30秒おいて、state を `"$D/hold-2.json"` に読み直す。`runningJob`・`queuedJobs`・`queueHold` が `hold-1` と同じ。
+- **再開する。** `body=$(printf '{"requestId":"%s","heldBy":"%s"}' "$(uuidgen)" "$A")` で `c -o "$D/resume.json" -w '%{http_code}\n' -X POST "$STG/api/patterns/$PAT/queue/resume" -H "$J" -H "origin: $STG" -d "$body"`。`200` で、`jobs` が `$B` の一件。同じ `$body` で出力先を `"$D/resume-replay.json"` にして送り直すと `200` で、`cmp "$D/resume.json" "$D/resume-replay.json"` が何も出さない。
+- **二件目の完了を待つ。** `for i in $(seq 1 300); do c -o "$D/state-3.json" "$STG/api/patterns/$PAT/state"; jq -e --arg j "$B" '.lastFinishedJob.jobId == $j and .runningJob == null' "$D/state-3.json" >/dev/null && break; sleep 1; done`。`lastFinishedJob.state` が `completed`、`queueHold` が `null`、`queuedJobs` が `[]`。`c -o "$D/revisions.json" -w '%{http_code}\n' "$STG/api/patterns/$PAT/revisions"` は `200` で、`revisions` が一件、その `id` が `lastFinishedJob.revision.id`。

@@ -7,7 +7,7 @@
 - `pattern-list`：案件のパターンを、作った順に一覧する。
 - `pattern-create`：パターンを足す。
 - `pattern-rename`：今の版を添えて名前を変える。
-- `pattern-state`：パターンの今の案、動いている仕事と待っている仕事、最後に終わった仕事を読む。
+- `pattern-state`：パターンの今の案、動いている仕事と待っている仕事、最後に終わった仕事、待機列の保留を読む。
 - `pattern-missing`：存在しない案件のパターンは `404` になる。
 
 ## How to get to it (user POV)
@@ -25,7 +25,7 @@ Preconditions:
 - **一覧。** `curl -sS -o "$D/list.json" -w '%{http_code}\n' "$API/projects/$PID/patterns"`。`200` で、案件と一緒にできた最初のパターンが一件ある。
 - **足す。** `curl -sS -o "$D/create.json" -w '%{http_code}\n' -X POST "$API/projects/$PID/patterns" -H "$J" -H "$O" -d "{\"requestId\":\"$(uuidgen)\",\"name\":\"二つ目のパターン\"}"`。`201`。一覧を読み直すと二件になり、二件目が `二つ目のパターン`。
 - **名前を変える。** `PAT=$(jq -r .pattern.id "$D/create.json")` と `V=$(jq .pattern.version "$D/create.json")` を設定し、`curl -sS -o "$D/rename.json" -w '%{http_code}\n' -X PATCH "$API/patterns/$PAT" -H "$J" -H "$O" -d "{\"requestId\":\"$(uuidgen)\",\"version\":$V,\"name\":\"名前を変えたパターン\"}"`。`200` で、`pattern.version` が `V + 1`。
-- **状態を読む。** `curl -sS -o "$D/state.json" -w '%{http_code}\n' "$API/patterns/$PAT/state"`。`200` で、`currentRevision` が `null`、`runningJob` が `null`、`queuedJobs` が `[]`、`lastFinishedJob` が `null`。
+- **状態を読む。** `curl -sS -o "$D/state.json" -w '%{http_code}\n' "$API/patterns/$PAT/state"`。`200` で、`currentRevision` が `null`、`runningJob` が `null`、`queuedJobs` が `[]`、`lastFinishedJob` が `null`、`queueHold` が `null`。
 - **無い案件。** `curl -sS -o "$D/missing.json" -w '%{http_code}\n' "$API/projects/00000000-0000-4000-8000-000000000000/patterns"`。`404` で、本文が `{"error":"not_found"}`。
 
 ## Gotchas

@@ -81,6 +81,37 @@ export async function stopJob(
   return { kind: "stop", record: once.kind, result: once.result };
 }
 
+interface ReleaseInput {
+  ownerId: OwnerId;
+  requestId: string;
+  patternId: string;
+  heldBy: string;
+}
+type ReleaseDeps = StoreDeps<"queue", "resumeOnce" | "cancelOnce"> &
+  StoreDeps<"patterns", "get"> &
+  Pick<ServiceDeps, "runtime" | "wakePattern">;
+export async function releaseQueue(
+  { store, runtime, wakePattern }: ReleaseDeps,
+  input: ReleaseInput,
+  action: "resume" | "cancel",
+) {
+  const { ownerId, requestId, patternId, heldBy } = input;
+  const key = await requestKey(ownerId, requestId, `queue.${action}`, { patternId, heldBy });
+  const releaseOnce = action === "resume" ? store.queue.resumeOnce : store.queue.cancelOnce;
+  const once = await releaseOnce(key, { patternId, heldBy, now: runtime.now() });
+  switch (once.kind) {
+    case "not_applied": {
+      const pattern = await store.patterns.get({ patternId, ownerId });
+      return pattern ? { kind: "version_conflict" as const } : { kind: "not_found" as const };
+    }
+    case "request_id_reused":
+      return once;
+    case "applied":
+    case "replayed":
+      if (action === "resume") await wakePattern(patternId);
+      return { kind: "released" as const, record: once.kind, result: once.result };
+  }
+}
 export function claimNextJob(
   { store, runtime }: StoreDeps<"jobs", "claim"> & Pick<ServiceDeps, "runtime">,
   input: { patternId: string },
@@ -138,10 +169,10 @@ export async function completeJob(
 }
 
 export function recordJobFailure(
-  { store, runtime }: StoreDeps<"jobs", "fail"> & Pick<ServiceDeps, "runtime">,
+  { store, runtime }: StoreDeps<"jobs", "failAndHoldQueue"> & Pick<ServiceDeps, "runtime">,
   right: JobExecutionRight,
 ) {
-  return store.jobs.fail(right, runtime.now());
+  return store.jobs.failAndHoldQueue(right, runtime.now());
 }
 
 export type { JobExecutionReference } from "../storage/job-execution.ts";
@@ -172,7 +203,10 @@ export async function advancePattern(
   const claim = await claimNextJob(deps, input);
   const job =
     claim.kind === "claimed" ? claim.right.reference : await readActiveJobReference(deps, input);
-  if (job === null) return { kind: "idle" };
+  if (job === null) {
+    const hold = await deps.store.jobs.holdingJob(input.patternId);
+    return hold ? { kind: "queue_held", heldBy: hold.heldBy } : { kind: "idle" };
+  }
   const instance = await deps.jobRuns.start(job);
   return { kind: claim.kind === "claimed" ? "claimed" : "running", job, instance };
 }

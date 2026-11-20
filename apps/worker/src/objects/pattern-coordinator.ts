@@ -24,14 +24,16 @@ export class PatternCoordinator extends DurableObject<Env> {
       logEvent("info", "pattern.advanced", {
         patternId,
         outcome: advance.kind,
-        ...(advance.kind === "idle"
-          ? {}
-          : {
-              traceId: advance.job.jobId,
-              jobId: advance.job.jobId,
-              generation: advance.job.generation,
-              instance: advance.instance,
-            }),
+        ...(advance.kind === "queue_held"
+          ? { heldBy: advance.heldBy }
+          : advance.kind === "idle"
+            ? {}
+            : {
+                traceId: advance.job.jobId,
+                jobId: advance.job.jobId,
+                generation: advance.job.generation,
+                instance: advance.instance,
+              }),
       });
     } catch (error) {
       logEvent("error", "pattern.advance_failed", { patternId, error: describeError(error) });
