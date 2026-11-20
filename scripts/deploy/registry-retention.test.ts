@@ -148,7 +148,7 @@ function fixture() {
       });
     if (args[2] === "list")
       return JSON.stringify([
-        { name: repository, tags: ["tag-12", "tag-2", "tag-1"] },
+        { name: repository, tags: ["tag-12", "tag-3", "tag-2", "tag-1"] },
         { name: other, tags: ["foreign"] },
       ]);
     assert.equal(args[2], "delete");
@@ -176,6 +176,7 @@ await test("reads every version page and detail", async () => {
 await test("dry-run reports candidates without deleting or reading other repositories' manifests", async () => {
   const f = fixture();
   const result = await runRetention(f);
+  assert.deepEqual(result.keep, [tag(12), tag(3)]);
   assert.deepEqual(result.remove, [tag(2), tag(1)]);
   assert(!f.calls.some((args) => args[2] === "delete"));
   assert(f.logs.some((s) => s.includes('"mode":"dry-run"')));
