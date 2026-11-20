@@ -74,6 +74,19 @@ await test("logs omit nonprimitive values without calling toJSON", (t) => {
   assert.equal(conversions, 0);
 });
 
+await test("logs omit values whose primitive type differs from the key's", (t) => {
+  const lines: string[] = [];
+  t.mock.method(console, "log", (line: string) => {
+    lines.push(line);
+  });
+  const fields: LogFields = { status: 200 };
+  Object.assign(fields, { bytes: "test-only-token", route: 404, ms: 15 });
+  logEvent("info", "api.request", fields);
+  assert.deepEqual(lines, [
+    JSON.stringify({ level: "info", event: "api.request", status: 200, ms: 15 }),
+  ]);
+});
+
 await test("logs omit prototype names even when supplied as own keys", (t) => {
   const lines: string[] = [];
   t.mock.method(console, "log", (line: string) => {
