@@ -117,6 +117,7 @@ export default defineConfig(
     "**/.wrangler/**",
     "target/**",
     ".tools/**",
+    ".claude/worktrees/**",
     "crates/viewer/pkg/**",
     "apps/worker/worker-configuration.d.ts",
     "docs/verification/evidence/**",
