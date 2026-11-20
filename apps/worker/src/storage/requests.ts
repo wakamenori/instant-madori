@@ -86,8 +86,10 @@ async function storedResult<T>(
  *   writes it names their result (e.g. "the new row exists"); placed before them it states
  *   their precondition, and the writes then require the record (see `recordedBy`).
  * - `result`: a scalar query producing the result JSON. It must build the whole object in
- *   one `json_object` expression: SQLite drops the JSON subtype across subqueries, so
- *   nesting the results of separate subqueries would store strings.
+ *   one `json_object` expression. SQLite reads a value as JSON only when it comes directly
+ *   from a JSON function. JSON from a FROM-clause subquery or a CTE nests as a quoted
+ *   string, and JSON from a nested scalar subquery does so in some query plans, such as
+ *   one with ORDER BY and LIMIT.
  *
  * The statement returns the stored result, so the first response and every replay are the
  * same bytes. A second record for the same request ID fails on the primary key, which
