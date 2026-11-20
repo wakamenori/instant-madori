@@ -406,7 +406,10 @@ export const boundaryTestIgnores = [`**/*.test.${typescriptExtensions}`, "**/tes
 
 export const crateFamilies = {
   cadKernel: { pattern: /^solidcore(?:-ops)?$/u, label: "CAD kernel" },
-  uiToolkit: { pattern: /^(?:egui(?:[-_].*)?|eframe|winit)$/u, label: "UI toolkit" },
+  uiToolkit: {
+    pattern: /^(?:egui(?:[-_].*)?|epaint(?:[-_].*)?|emath|ecolor|eframe|winit)$/u,
+    label: "UI toolkit",
+  },
   gpu: { pattern: /^wgpu(?:-.*)?$/u, label: "GPU" },
   pluginRuntime: { pattern: /^(?:wasmtime(?:-.*)?|craft-plugin-wasm)$/u, label: "plugin runtime" },
   editingEngine: {

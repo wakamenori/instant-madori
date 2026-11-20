@@ -142,7 +142,17 @@ void test("toolkit leak through normal and build edges fails for viewer and geom
     ["madori-viewer", "viewer-ui-toolkit"],
     ["madori-geometry", "geometry-ui-toolkit"],
   ]) {
-    for (const forbidden of ["egui", "egui-wgpu", "egui_extras", "eframe", "winit"]) {
+    for (const forbidden of [
+      "egui",
+      "egui-wgpu",
+      "egui_extras",
+      "epaint",
+      "epaint_default_fonts",
+      "emath",
+      "ecolor",
+      "eframe",
+      "winit",
+    ]) {
       for (const kind of [null, "build"] satisfies ("build" | null)[]) {
         const metadata = compliantMetadata();
         assert(root);
@@ -230,7 +240,16 @@ void test("viewer rejects every editing engine crate through a rendering depende
 
 void test("crate family patterns match whole crate names", () => {
   const metadata = compliantMetadata();
-  for (const name of ["my-egui", "eguiish", "wgpuish", "wasmtimeish", "craft-plugin-wasm-helper"]) {
+  for (const name of [
+    "my-egui",
+    "eguiish",
+    "epainter",
+    "emathx",
+    "my-ecolor",
+    "wgpuish",
+    "wasmtimeish",
+    "craft-plugin-wasm-helper",
+  ]) {
     addDependency(metadata, "solidcraft-engine", name);
   }
   assert.deepEqual(checkRustBoundaries(metadata, compliantFeatureTrees()), []);
