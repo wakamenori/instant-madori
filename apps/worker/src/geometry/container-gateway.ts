@@ -241,7 +241,7 @@ export class ContainerGateway {
   #reset(
     container: ContainerHandle,
     generation: number,
-    reason: string,
+    reason: UnavailableReason,
     traceId: string,
   ): Promise<void> {
     if (generation !== this.#generation) return Promise.resolve();

@@ -1,3 +1,4 @@
+import type { JobStepName, JobStepResult } from "./jobs.ts";
 import type { JobTestHold } from "./job-test-hold.ts";
 import type { JobExecutionReference } from "../storage/job-execution.ts";
 import type { Store } from "../storage/store.ts";
@@ -40,8 +41,8 @@ export interface JobStepConfig {
 
 export interface JobSteps {
   sleep(name: string, ms: number): Promise<void>;
-  do<T extends Rpc.Serializable<T> & { kind: string }>(
-    name: string,
+  do<T extends Rpc.Serializable<T> & JobStepResult>(
+    name: JobStepName,
     config: JobStepConfig,
     run: () => Promise<T>,
   ): Promise<T>;

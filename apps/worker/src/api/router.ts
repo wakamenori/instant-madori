@@ -2,6 +2,7 @@ import type { AuthenticatedUser } from "../owner.ts";
 import { z } from "zod";
 import type { LogFields } from "../log.ts";
 import type { ServiceDeps } from "../services/deps.ts";
+import type { HttpMethod, RoutePath } from "./http.ts";
 
 /** What an authenticated route handler receives. */
 export interface RouteContext {
@@ -16,12 +17,12 @@ export interface RouteContext {
   log: LogFields;
 }
 
-type Method = "GET" | "POST" | "PATCH";
+type Method = Extract<HttpMethod, "GET" | "POST" | "PATCH">;
 
 export interface Route {
   method: Method;
   /** Path template; `:name` segments are UUID parameters. */
-  path: string;
+  path: RoutePath;
   handle(context: RouteContext): Promise<Response>;
 }
 

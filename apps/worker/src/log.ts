@@ -1,13 +1,17 @@
 import { z } from "zod";
+import type { HttpMethod, RoutePath } from "./api/http.ts";
+import type { GeometryResult } from "./geometry/geometry-protocol.ts";
 
 const errorDescription: unique symbol = Symbol("ErrorDescription");
 const errorDescriptionSchema = z.string().brand(errorDescription);
 
+type FailedGeometry = Exclude<GeometryResult<unknown>, { kind: "ok" }>;
+
 export interface LogFields {
   traceId?: string;
   rayId?: string | undefined;
-  method?: string;
-  route?: string;
+  method?: HttpMethod | undefined;
+  route?: `${HttpMethod} ${RoutePath}` | "/api/health";
   userId?: string;
   status?: number;
   ms?: number;
@@ -21,18 +25,45 @@ export interface LogFields {
   jobState?: "cancelled" | "completed" | "failed";
   acceptance?: "applied" | "replayed";
   generation?: number;
-  step?: string;
+  step?:
+    | "render snapshot"
+    | "commit revision"
+    | "record failure"
+    | "wake pattern"
+    | "check test hold before render"
+    | "check test hold before commit";
   attempt?: number;
-  outcome?: string;
+  outcome?:
+    | "saved"
+    | "committed"
+    | "cancelled"
+    | "hold"
+    | "skip"
+    | "stopped"
+    | "already_finished"
+    | "not_committed"
+    | "failed"
+    | "not_running"
+    | "woken"
+    | "error"
+    | "idle"
+    | "claimed"
+    | "running";
   revisionId?: string;
   instance?: "created" | "existing";
   bytes?: number;
-  geometryStart?: "cold" | "warm";
+  geometryStart?: Extract<GeometryResult<unknown>, { kind: "ok" }>["start"];
   geometryMs?: number;
-  geometryFailure?: string;
+  geometryFailure?: FailedGeometry["reason"];
   geometryStatus?: number;
-  geometryViolation?: string;
-  reason?: string;
+  geometryViolation?: Extract<FailedGeometry, { reason: "protocol_violation" }>["violation"];
+  reason?:
+    | FailedGeometry["reason"]
+    | "execution_lost"
+    | "invalid_snapshot"
+    | "invalid_name"
+    | "retries_exhausted"
+    | "idle_timeout";
   why?: "stale_image" | "no_record";
   image?: string;
   mode?: "cold" | "adopted" | "reprobe";

@@ -155,12 +155,15 @@ type JobFailureReason =
   GeometryFailure | "execution_lost" | "invalid_snapshot" | "invalid_name" | "retries_exhausted";
 type Committed = { kind: "committed"; revisionId: string };
 type Cancelled = { kind: "cancelled" };
+type Saved = { kind: "saved"; snapshot: Snapshot };
+type TestHoldDecision = { kind: "hold"; seconds: number } | { kind: "skip" };
 type NotCommitted = { kind: "not_committed"; reason: JobFailureReason };
 export type JobEnd =
   | Committed
   | Cancelled
   | { kind: "failed"; reason: JobFailureReason }
   | { kind: "not_running"; reason: JobFailureReason };
+export type JobStepResult = Saved | NotCommitted | JobEnd | TestHoldDecision | { kind: "woken" };
 
 export async function advancePattern(
   deps: PatternCoordinatorDeps,
@@ -189,6 +192,9 @@ const jobSteps = {
   fail: { name: "record failure", config: storageStep },
   wake: { name: "wake pattern", config: storageStep },
 } as const satisfies Record<string, { name: string; config: JobStepConfig }>;
+
+export type JobStepName =
+  (typeof jobSteps)[keyof typeof jobSteps]["name"] | (typeof testHoldSteps)[TestHoldPoint]["check"];
 
 export async function runJob(
   deps: JobWorkflowDeps,
@@ -238,7 +244,7 @@ async function current(
 async function render(
   deps: JobWorkflowDeps,
   job: JobExecutionReference,
-): Promise<{ kind: "saved"; snapshot: Snapshot } | Committed | Cancelled | NotCommitted> {
+): Promise<Saved | Committed | Cancelled | NotCommitted> {
   const now = await current(deps, job);
   if (now.kind !== "active") return now;
   const sample = await renderPatternSample(deps, { patternId: job.patternId, traceId: job.jobId });
@@ -301,7 +307,7 @@ async function decideTestHold(
   { store }: StoreDeps<"jobs", "restore" | "ownedBySubject">,
   job: JobExecutionReference,
   hold: JobTestHold,
-): Promise<{ kind: "hold"; seconds: number } | { kind: "skip" }> {
+): Promise<TestHoldDecision> {
   const restored = await store.jobs.restore(job);
   if (restored.kind !== "active") return { kind: "skip" };
   if (
