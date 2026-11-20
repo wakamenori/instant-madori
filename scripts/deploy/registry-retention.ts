@@ -356,7 +356,7 @@ if (import.meta.main) {
   } catch (error) {
     console.error(
       error instanceof z.ZodError
-        ? "Invalid Cloudflare response; no further tags deleted"
+        ? "Invalid Cloudflare response; no tags deleted"
         : error instanceof Error
           ? error.message
           : "Registry retention failed",
