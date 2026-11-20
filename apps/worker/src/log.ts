@@ -18,6 +18,7 @@ export interface LogFields {
   error?: ReturnType<typeof describeError>;
   requestId?: string;
   patternId?: string;
+  heldBy?: string;
   jobId?: string;
   messageId?: string;
   messageNumber?: number;
@@ -46,6 +47,7 @@ export interface LogFields {
     | "not_running"
     | "woken"
     | "error"
+    | "queue_held"
     | "idle"
     | "claimed"
     | "running";
@@ -86,6 +88,7 @@ const logKeys = {
   error: "string",
   requestId: "string",
   patternId: "string",
+  heldBy: "string",
   jobId: "string",
   messageId: "string",
   messageNumber: "number",

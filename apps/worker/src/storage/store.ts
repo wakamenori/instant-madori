@@ -5,6 +5,7 @@ import * as patterns from "./patterns.ts";
 import * as revisions from "./revisions.ts";
 import * as snapshots from "./snapshots.ts";
 import * as jobs from "./jobs.ts";
+import * as queue from "./job-queue.ts";
 import * as execution from "./job-execution.ts";
 import { upsertAccessUser } from "./users.ts";
 
@@ -13,7 +14,18 @@ export function createStore(db: D1, bucket: R2) {
     users: {
       upsertAccess: (input: Parameters<typeof upsertAccessUser>[1]) => upsertAccessUser(db, input),
     },
+    queue: {
+      resumeOnce: (
+        key: Parameters<typeof queue.resumeQueueOnce>[1],
+        input: Parameters<typeof queue.resumeQueueOnce>[2],
+      ) => queue.resumeQueueOnce(db, key, input),
+      cancelOnce: (
+        key: Parameters<typeof queue.cancelQueueOnce>[1],
+        input: Parameters<typeof queue.cancelQueueOnce>[2],
+      ) => queue.cancelQueueOnce(db, key, input),
+    },
     jobs: {
+      holdingJob: (patternId: string) => queue.readHoldingJob(db, patternId),
       ownedBySubject: (right: Parameters<typeof jobs.isJobOwnedBySubject>[1], subject: string) =>
         jobs.isJobOwnedBySubject(db, right, subject),
       stopOnce: (
@@ -32,8 +44,8 @@ export function createStore(db: D1, bucket: R2) {
         right: Parameters<typeof jobs.completeJob>[2],
         input: Parameters<typeof jobs.completeJob>[3],
       ) => jobs.completeJob(db, bucket, right, input),
-      fail: (right: Parameters<typeof jobs.recordJobFailure>[1], now: string) =>
-        jobs.recordJobFailure(db, right, now),
+      failAndHoldQueue: (right: Parameters<typeof jobs.failJobAndHoldQueue>[1], now: string) =>
+        jobs.failJobAndHoldQueue(db, right, now),
       acceptOnce: (
         key: Parameters<typeof jobs.acceptInstructionOnce>[1],
         input: Parameters<typeof jobs.acceptInstructionOnce>[2],

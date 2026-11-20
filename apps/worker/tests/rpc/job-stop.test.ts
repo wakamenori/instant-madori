@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { readFile } from "node:fs/promises";
-import { openJobDatabase, jobMigration, now } from "./jobs-support.ts";
+import { openJobDatabase, applyJobMigrations, now } from "./jobs-support.ts";
 import {
   stopJob,
   acceptInstruction,
@@ -17,7 +16,7 @@ import { r2 } from "../../src/storage/r2.ts";
 await test("Stop orders against commit on real D1 and R2", async (t) => {
   const db = await openJobDatabase();
   t.after(() => db.dispose());
-  await db.apply(await readFile(jobMigration, "utf8"));
+  await applyJobMigrations(db);
   const ownerId = await db.owner("stop");
   const otherId = await db.owner("other-stop");
   const deps = { store: db.store, runtime: db.runtime, wakePattern: async () => {} };
@@ -147,7 +146,7 @@ await test("Stop orders against commit on real D1 and R2", async (t) => {
     assert.deepEqual(await completeJob(deps, { right, snapshot, name: "案" }), {
       kind: "execution_lost",
     });
-    assert.deepEqual(await db.store.jobs.fail(right, now), { kind: "not_recorded" });
+    assert.deepEqual(await db.store.jobs.failAndHoldQueue(right, now), { kind: "not_recorded" });
     assert.deepEqual(await counts(), before);
     assert.deepEqual((await db.store.snapshots.display(snapshot)).bytes, new Uint8Array([1, 2, 3]));
   });

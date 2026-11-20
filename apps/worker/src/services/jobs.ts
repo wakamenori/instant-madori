@@ -138,10 +138,10 @@ export async function completeJob(
 }
 
 export function recordJobFailure(
-  { store, runtime }: StoreDeps<"jobs", "fail"> & Pick<ServiceDeps, "runtime">,
+  { store, runtime }: StoreDeps<"jobs", "failAndHoldQueue"> & Pick<ServiceDeps, "runtime">,
   right: JobExecutionRight,
 ) {
-  return store.jobs.fail(right, runtime.now());
+  return store.jobs.failAndHoldQueue(right, runtime.now());
 }
 
 export type { JobExecutionReference } from "../storage/job-execution.ts";
@@ -172,7 +172,10 @@ export async function advancePattern(
   const claim = await claimNextJob(deps, input);
   const job =
     claim.kind === "claimed" ? claim.right.reference : await readActiveJobReference(deps, input);
-  if (job === null) return { kind: "idle" };
+  if (job === null) {
+    const hold = await deps.store.jobs.holdingJob(input.patternId);
+    return hold ? { kind: "queue_held", heldBy: hold.heldBy } : { kind: "idle" };
+  }
   const instance = await deps.jobRuns.start(job);
   return { kind: claim.kind === "claimed" ? "claimed" : "running", job, instance };
 }

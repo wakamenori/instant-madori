@@ -4,6 +4,7 @@ import {
   stoppableJobStates,
   finishedJobStates,
 } from "./job-states.ts";
+import { holdsQueueOnEnd, releaseWhenLastQueuedJobStops, releaseEmptyQueue } from "./job-queue.ts";
 import { z } from "zod";
 import { foundSchema, jsonRows, rows, write } from "./d1.ts";
 import type { D1 } from "./d1.ts";
@@ -52,6 +53,7 @@ export async function acceptInstructionOnce(db: D1, key: RequestKey, input: NewI
             ?, ? FROM patterns p WHERE p.id = ? AND p.owner_id = ?`,
         bindings: [input.messageId, input.body, input.now, input.patternId, key.ownerId],
       },
+      releaseEmptyQueue(input.patternId, key.ownerId),
       {
         sql: `INSERT INTO jobs
           (id, pattern_id, owner_id, message_id, state, generation, base_revision_id, created_at, updated_at)
@@ -174,12 +176,12 @@ export async function completeJob(
   return revision ? { kind: "committed" as const, revision } : { kind: "execution_lost" as const };
 }
 
-export async function recordJobFailure(db: D1, right: JobExecutionRight, now: string) {
+export async function failJobAndHoldQueue(db: D1, right: JobExecutionRight, now: string) {
   const { jobId, patternId, generation, baseRevisionId, ownerId } = readJobExecutionRight(right);
   const result = await db.first(
     rows(
       {
-        sql: `UPDATE jobs SET state = 'failed', updated_at = ?
+        sql: `UPDATE jobs SET state = 'failed', updated_at = ?, ${holdsQueueOnEnd("jobs")}
       WHERE id = ? AND pattern_id = ? AND generation = ? AND base_revision_id IS ? AND owner_id = ?
         AND state IN (${activeJobStates}) RETURNING 1 AS found`,
         bindings: [now, jobId, patternId, generation, baseRevisionId, ownerId],
@@ -209,9 +211,10 @@ export async function stopJobOnce(
     table: "jobs",
     set: {
       sql: `state = CASE WHEN state IN (${stoppableJobStates}) THEN 'cancelled' ELSE state END,
-        updated_at = CASE WHEN state IN (${stoppableJobStates}) THEN ? ELSE updated_at END`,
+        updated_at = CASE WHEN state IN (${stoppableJobStates}) THEN ? ELSE updated_at END, ${holdsQueueOnEnd("jobs")}`,
       bindings: [input.now],
     },
+    companions: [releaseWhenLastQueuedJobStops(input.jobId, key.ownerId)],
     where: {
       sql: `id = ? AND owner_id = ? AND state IN (${stoppableJobStates}, ${finishedJobStates})`,
       bindings: [input.jobId, key.ownerId],

@@ -1,14 +1,13 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { acceptedJobSchema, finishedJobSchema } from "@madori/contracts";
 import { runningJobSql, queuedJobsSql, lastFinishedJobSql } from "../../src/storage/revisions.ts";
-import { jobMigration, now, openJobDatabase } from "./jobs-support.ts";
+import { applyJobMigrations, now, openJobDatabase } from "./jobs-support.ts";
 
 await test("State queue reads scale with queued jobs instead of completed history on D1", async (t) => {
   const db = await openJobDatabase();
   t.after(() => db.dispose());
-  await db.apply(await readFile(jobMigration, "utf8"));
+  await applyJobMigrations(db);
   const ownerId = await db.owner("queue-reader");
   const otherId = await db.owner("queue-other");
   const created = await db.store.projects.createOnce(

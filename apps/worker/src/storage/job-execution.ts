@@ -1,3 +1,4 @@
+import { queueNotHeld } from "./job-queue.ts";
 import { activeJobStates } from "./job-states.ts";
 import { z } from "zod";
 import { revisionSchema } from "@madori/contracts";
@@ -51,9 +52,10 @@ class JobExecutionRight {
             WHERE q.pattern_id = ? AND q.state = 'queued' ORDER BY m.number LIMIT 1)
           AND NOT EXISTS (SELECT 1 FROM jobs a WHERE a.pattern_id = ?
             AND a.state IN (${activeJobStates}))
+          AND ${queueNotHeld}
         RETURNING id AS jobId, pattern_id AS patternId, owner_id AS ownerId,
           generation, base_revision_id AS baseRevisionId`,
-          bindings: [now, patternId, patternId, patternId],
+          bindings: [now, patternId, patternId, patternId, patternId],
         },
         executionSchema,
         "job execution",
