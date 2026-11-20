@@ -21,7 +21,7 @@ Preconditions:
 - SKILL.md の「起動」の `pnpm dev` を、`MADORI_DEV_JOB_TEST_HOLD=before_render:30` を付けて起動している。仕事は実行権を取った後、描画の前に30秒待つ。待ちを付けずに動いていたら、片付けてから `MADORI_DEV_JOB_TEST_HOLD=before_render:30 perl -e 'setpgrp(0, 0); exec @ARGV or die "exec: $!"' mise exec -- pnpm dev >| "$EVIDENCE/dev.log" 2>&1 &` で起動し直す。
 - [案件](./projects.md)の「作る」を済ませ、`PAT=$(jq -r .pattern.id "$EVIDENCE/projects/create.json")` を設定している。
 - `J='content-type: application/json'`、`O='origin: http://127.0.0.1:5173'`、`API=http://127.0.0.1:5173/api`、`D="$EVIDENCE/stop"` を設定し、`$D` がある。
-- 送る関数 `send() { curl -sS -o "$D/$1.json" -w '%{http_code}\n' -X POST "$API/patterns/$PAT/messages" -H "$J" -H "$O" -d "{\"requestId\":\"$(uuidgen)\",\"body\":\"$2\"}"; }`、止める関数 `stop() { curl -sS -o "$D/$1.json" -w '%{http_code}\n' -X POST "$API/jobs/$2/stop" -H "$J" -H "$O" -d "{\"requestId\":\"$3\"}"; }`、状態を読む関数 `state() { curl -sS -o "$D/$1.json" "$API/patterns/$PAT/state"; }` を定義している。
+- 送る関数 `send() { curl -sS -o "$D/${1}.json" -w '%{http_code}\n' -X POST "$API/patterns/$PAT/messages" -H "$J" -H "$O" -d "{\"requestId\":\"$(uuidgen)\",\"body\":\"${2}\"}"; }`、止める関数 `stop() { curl -sS -o "$D/${1}.json" -w '%{http_code}\n' -X POST "$API/jobs/${2}/stop" -H "$J" -H "$O" -d "{\"requestId\":\"${3}\"}"; }`、状態を読む関数 `state() { curl -sS -o "$D/${1}.json" "$API/patterns/$PAT/state"; }` を定義している。
 - [指示を送る](./instructions.md)の `settle` を、出力先を `$D` にして定義している。
 
 - **二つ送る。** `send accept-a 台所を広くしたい` と `send accept-b 窓を大きくしたい`。どちらも `202`。`A=$(jq -r .job.jobId "$D/accept-a.json")` と `B=$(jq -r .job.jobId "$D/accept-b.json")` を設定する。`state state-0` の `runningJob.jobId` が `$A`、`queuedJobs[0].jobId` が `$B`。A がまだ待機中なら、1秒おいて読み直す。
