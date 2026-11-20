@@ -111,6 +111,9 @@ const forbiddenSamples: Record<string, string[]> = {
   uiToolkit: [
     "_RNvCs7_9egui_wgpu4draw",
     "_RNvCs8_4egui3run",
+    "_RNvCs9_6epaint4tess",
+    "_RNvCsa_5emath4lerp",
+    "_RNvCsb_6ecolor4gray",
     "_RNvYNtNtCs5_4wgpu3api6DeviceNtCs7_9egui_wgpu9RenderExt11paint_frame",
   ],
 };
