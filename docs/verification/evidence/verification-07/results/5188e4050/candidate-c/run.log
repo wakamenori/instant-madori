@@ -1,0 +1,28 @@
+base: generate 97.821 ms, saved 9050 B (doc 9504 B), errors clean = true, sections = (true, "max |housing area - 3D section area| = 0 m2")
+S1.1 pass=true op=84.071ms rebuild=73.001ms saved=12058B :: v1-lower volume 651949649.255 vs expected 651949649.259 (base minus door minus arch); max |housing area - 3D section area| = 0 m2
+S1.2 pass=true op=66.547ms rebuild=73.735ms saved=12058B :: v1-lower min x 4440, volume 651949649.255 (arch still cut), r1 16.666 m2, r2 12.979 m2; max |housing area - 3D section area| = 0 m2
+S1.3 pass=true op=45.417ms rebuild=54.367ms saved=7659B :: deleted features [wall:v1-lower,door:d1,arch1.sketch,arch1.cut], r1 = 30.106 m2, r2 present = false; max |housing area - 3D section area| = 0 m2
+S2.1 pass=true op=66.729ms rebuild=65.509ms saved=10322B :: north volume 5532000000 vs expected 5532000000; max |housing area - 3D section area| = 0 m2
+S2.2 pass=true op=65.925ms rebuild=65.545ms saved=10322B :: north volume 5820000000 (= lengthened wall minus the same wedge), r3 17.05 m2, r6 17.05 m2; max |housing area - 3D section area| = 0 m2
+   S2 sloped face centroid moved by dx=600.0000000000036
+S3.1 pass=true op=0.472ms rebuild=61.598ms saved=9049B :: blue on "F6:-x" at x=3940.0 area 7371000.0 (expected 7371000); max |housing area - 3D section area| = 0 m2
+S3.2 pass=true op=54.04ms rebuild=61.051ms saved=9049B :: blue on "F6:-x" at x=4440.0 area 7371000.0; max |housing area - 3D section area| = 0 m2
+S3.3 pass=true op=7.745ms rebuild=72.827ms saved=9403B :: blue area 5526000.0 (expected 5526000), blue on r2 side: [], green still on x=4560.0; max |housing area - 3D section area| = 0 m2
+S4.1 pass=true op=27.727ms rebuild=82.118ms saved=12286B :: 12 step bodies, s01 volume 45000000, s12 top z 2400; max |housing area - 3D section area| = 0 m2
+S4.2 pass=true op=804.636ms rebuild=142.514ms saved=15492B :: s01 volume 45540000 (expected 45540000), s01 min x 220; max |housing area - 3D section area| = 0 m2
+S4.3 pass=true op=78.163ms rebuild=137.959ms saved=15492B :: s01 volume 45540000, s01 min x 820 (nosing front), s12 max x 3850; max |housing area - 3D section area| = 0 m2
+S5.1 pass=true op=81.663ms rebuild=122.225ms saved=10774B :: chair1 volume 18866271.564, bbox min [1500.0, 1500.0]; max |housing area - 3D section area| = 0 m2
+S5.2 pass=true op=127.694ms rebuild=130.633ms saved=14912B :: shelf1 x [3590, 3940], y [6100, 7700], volume 68880000; max |housing area - 3D section area| = 0 m2
+S5.3 pass=true op=129.211ms rebuild=138.323ms saved=14912B :: shelf1 x [4090, 4440], chair1 volume 18866271.564; max |housing area - 3D section area| = 0 m2
+S5.4 pass=true op=222.968ms rebuild=123.647ms saved=13521B :: chair1 volume 18866271.564 bbox unchanged = true, rooms: {"keptId":"r1","merged":["r1","r2"],"removedId":"r2"}; max |housing area - 3D section area| = 0 m2
+X1.1 pass=true op=75.39ms rebuild=59.813ms saved=9050B :: rejected as expected, rolled back = true: cad.edit gap1: room "r2" no longer matches its 3D section ({"closed":false,"note":"no closed region around the room centre at any section height"})
+X1.2 pass=true op=58.979ms rebuild=62.923ms saved=9050B :: rejected as expected, rolled back = true: cad.edit may not run parameters.change: house parameters and generated features belong to the housing data
+X2.1 pass=true op=73.648ms rebuild=74.765ms saved=12058B :: arch cut; max |housing area - 3D section area| = 0 m2
+X2.2 pass=true op=82.523ms rebuild=139.245ms saved=12577B :: v1-lower volume 651518063.784; max |housing area - 3D section area| = 0 m2
+X2.3 pass=true op=204.133ms rebuild=141.475ms saved=12577B :: rejected as expected, rolled back = true: FeatureFailed { command: "timeline.edit", feature: "archround1.fillet", message: "archround1.fillet: the reference `F20:side:l11|F6:-x` no longer exists as it was picked; reselect it" }
+X3.1 pass=true op=70.422ms rebuild=72.468ms saved=10201B :: followLint: "cad.edit slant2 depends on [\"north\"] but uses no anchor parameter and no face attachment: it will not follow when they move"; max |housing area - 3D section area| = 0 m2
+X3.2 pass=false op=67.272ms rebuild=67.727ms saved=10201B :: north volume 5816962500; a slope that followed would give 5820000000; no evaluation error was raised either way; max |housing area - 3D section area| = 0 m2
+   X3 sloped face centroid moved by dx=25.00000000000182
+X4.1 pass=true op=68.953ms rebuild=74.271ms saved=12058B :: arch cut; max |housing area - 3D section area| = 0 m2
+X4.2 pass=false op=51.462ms rebuild=74.128ms saved=12058B :: accepted with no error; v1-lower volume 798818861.623 vs 651949649.258884 if door and arch did not overlap: door and arch now merge into one irregular hole that neither the housing data nor the bindings describe; max |housing area - 3D section area| = 0 m2
+X5.1 pass=true op=71.539ms rebuild=60.136ms saved=9050B :: rejected as expected, rolled back = true: cad.edit archmiss: "solid.extrude" (cut) changed no body
