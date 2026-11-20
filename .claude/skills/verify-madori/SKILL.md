@@ -208,7 +208,7 @@ Worker と DO が再起動しても、待たせている指示は完了し、案
 - **段階が始まるのを待つ。** `for i in $(seq 1 900); do s=$(gh run view "$RUN" --json status,jobs --jq '[.status, ((.jobs[0].steps // [])[] | select(.name == "Migrate and deploy") | .status)] | join(" ")'); case "$s" in *" in_progress") break;; completed*) echo "run ended: $s"; break;; esac; sleep 2; done`。`in_progress` で抜ける。`run ended` で抜けたら、実行の失敗を報告して止まる。
 - **送る。** 前の節の「送る」を、本文を `再デプロイの確認`、出力先を `"$D/accept.json"` にして送る。`202`。`JOB` を設定する。
 - **完了を待つ。** `for i in $(seq 1 600); do c -o "$D/state-1.json" "$STG/api/patterns/$PAT/state"; jq -e --arg j "$JOB" '.lastFinishedJob.jobId == $j and .runningJob == null' "$D/state-1.json" >/dev/null && break; sleep 1; done`。`lastFinishedJob.state` が `completed`。`c -o "$D/revisions.json" -w '%{http_code}\n' "$STG/api/patterns/$PAT/revisions"` は `200` で、`revisions` が一件、その `id` が `lastFinishedJob.revision.id`。`gh run view "$RUN" --json conclusion` が `success`。
-- **Workers Logs を読む。** Workers Logs の検索 API から、`T0` から今までのこのパターンの行を版つきで取り出す。トークンの値は表示しない。行は数分遅れて出る。`job.finished` と、新しい版の最後の `pattern.advanced` の `idle` の両方がそろうまで、1分おきに読み直す。二つのどちらが先に届くかは決まっていない。
+- **Workers Logs を読む。** Workers Logs の検索 API から、`T0` から今までのこのパターンの行を版つきで取り出す。トークンの値は表示しない。行は数分遅れて出る。`job.finished` と、`outcome` が `idle` の `pattern.advanced`（版は問わない）の両方がそろうまで、1分おきに読み直す。二つのどちらが先に届くかは決まっていない。そろったら、下の順で判定する。
 
   ```sh
   T0=$T0 PAT=$PAT mise exec -- node --env-file="$MAIN/.env" -e '
@@ -228,4 +228,10 @@ Worker と DO が再起動しても、待たせている指示は完了し、案
     }' >| "$D/logs.jsonl"
   ```
 
-  `pattern.advanced` の行は、待ちの間に古い版から新しい版に変わる。最初の行は古い版の `claimed`、新しい版の行は `running` で `instanceStatus` を持ち、約30秒ごとに出る。`job.step` の `check test hold before render` は、新しい版の最初の `pattern.advanced` より前にある。`job.step` と `job.finished` は、待ちを始めた古い版のままで、`job.finished` の `outcome` が `committed`。最後の `pattern.advanced` は新しい版の `idle` である。この行と `job.finished` の前後は問わない。`failed` と `stalled` の `pattern.advanced`、`pattern.advance_failed` は無い。`pattern.advanced` が一つの版だけなら、DO の版の切り替えを確かめられなかったので、新しいパターンでこの節をやり直す。動いている DO が新しい版に移るまでには、待ちの180秒より長くかかることがある。
+  まず版を見る。`pattern.advanced` が一つの版だけなら、DO の版の切り替えを確かめられなかったので、ほかの条件は見ずに、新しいパターンでこの節をやり直す。動いている DO が新しい版に移るまでには、待ちの180秒より長くかかることがある。二つの版があれば、次のすべてを満たすと合格である。
+
+  - 最初の `pattern.advanced` は古い版の `claimed`、最後は新しい版の `idle`。
+  - 新しい版の `pattern.advanced` は `running` で `instanceStatus` を持ち、約30秒ごとに出る。
+  - `job.step` の `check test hold before render` は、新しい版の最初の `pattern.advanced` より前にある。
+  - `job.step` と `job.finished` は待ちを始めた古い版のままで、`job.finished` の `outcome` が `committed`。`idle` と `job.finished` の前後は問わない。
+  - `failed` と `stalled` の `pattern.advanced`、`pattern.advance_failed` は無い。
