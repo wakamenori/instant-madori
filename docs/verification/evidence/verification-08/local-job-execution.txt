@@ -1,0 +1,42 @@
+Using secrets defined in process.env
+[33m▲ [43;33m[[43;30mWARNING[43;33m][0m [1mMissing required secrets: ACCESS_JWKS. Add them to .dev.vars, .env, or set as environment variables.[0m
+
+
+[33m▲ [43;33m[[43;30mWARNING[43;33m][0m [1m				You have defined bindings to the following internal Durable Objects:[0m
+
+  				- {"name":"GEOMETRY","class_name":"GeometryContainer"}
+  - {"name":"PATTERNS","class_name":"PatternCoordinator"}
+  				These will not work in local development, but they should work in production.
+  
+  				If you want to develop these locally, you can define your DO in a separate Worker, with a separate configuration file.
+  				For detailed instructions, refer to the Durable Objects section here: [4mhttps://developers.cloudflare.com/workers/wrangler/api#supported-bindings[0m
+
+
+A DurableObjectNamespace in the config referenced the class "GeometryContainer", but no such Durable Object class is exported from the worker. Please make sure the class name matches, it is exported, and the class extends 'DurableObject'. Attempts to call to this Durable Object class will fail at runtime, but historically this was not a startup-time error. Future versions of workerd may make this a startup-time error.
+A DurableObjectNamespace in the config referenced the class "PatternCoordinator", but no such Durable Object class is exported from the worker. Please make sure the class name matches, it is exported, and the class extends 'DurableObject'. Attempts to call to this Durable Object class will fail at runtime, but historically this was not a startup-time error. Future versions of workerd may make this a startup-time error.
+▶ Job execution through services on real D1 and R2
+  ✔ twenty simultaneous claims per pattern pick the first instruction once (295.751917ms)
+  ✔ concurrent completions and replays return one immutable revision (191.160458ms)
+  ✔ old generations and obsolete bases cannot add snapshots or revisions (138.36ms)
+  ✔ R2 survives check rollback and the same right retries once (101.002625ms)
+  ✔ R2 survives revision collision rollback and the same right retries once (152.3635ms)
+  ✔ R2 survives completion update rollback and the same right retries once (105.948959ms)
+  ✔ snapshot attack rejects foreign owner key without blocking the other owner's commit (102.246334ms)
+  ✔ snapshot attack rejects failed job snapshot without blocking the other owner's commit (121.24225ms)
+  ✔ snapshot attack rejects different snapshot ID without blocking the other owner's commit (97.52675ms)
+  ✔ snapshot attack rejects foreign snapshot ID without blocking the other owner's commit (95.0465ms)
+  ✔ missing manifests and wrong hashes are invalid snapshots, and head failures propagate (141.18ms)
+  ✔ failure and completion serialize consistently without changing queued jobs (182.743542ms)
+  ✔ restore verifies state and generation and recovers a lost claim response (189.637625ms)
+  ✔ conversation cutoffs exclude instructions queued before, during, or between retries (304.887917ms)
+  ✔ invalid names leave the right running without creating D1 rows (50.216333ms)
+  ✔ forged rights reject before any D1 or R2 call (133.287875ms)
+✔ Job execution through services on real D1 and R2 (2740.141166ms)
+ℹ tests 17
+ℹ suites 0
+ℹ pass 17
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 3199.441

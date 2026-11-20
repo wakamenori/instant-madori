@@ -97,10 +97,23 @@ for (const row of rustBoundaries) {
   });
 }
 
-void test("direct dependency checks also reject build dependencies and unapproved pure housing dependencies", () => {
+void test("housing accepts its schema and JSON dependencies and rejects reqwest", () => {
+  const metadata = compliantMetadata();
+  for (const name of ["schemars", "serde", "serde_json"])
+    addDependency(metadata, "madori-housing", name);
+  assert.deepEqual(checkRustBoundaries(metadata, compliantFeatureTrees()), []);
+  addDependency(metadata, "madori-housing", "reqwest");
+  assert(
+    checkRustBoundaries(metadata, compliantFeatureTrees()).some(
+      (message) => message.startsWith("[housing-dependencies]") && message.includes("reqwest"),
+    ),
+  );
+});
+
+void test("direct dependency checks also reject build dependencies", () => {
   for (const [parent, dependency, id] of [
     ["madori-display", "serde", "display-dependencies"],
-    ["madori-housing", "serde", "housing-dependencies"],
+    ["madori-housing", "reqwest", "housing-dependencies"],
     ["madori-viewer", "solidcraft-engine", "viewer-solidcraft"],
     ["madori-modeling", "solidcraft-ui-egui", "modeling-solidcraft"],
   ]) {

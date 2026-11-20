@@ -1,0 +1,46 @@
+Using secrets defined in process.env
+[33m▲ [43;33m[[43;30mWARNING[43;33m][0m [1mMissing required secrets: ACCESS_JWKS. Add them to .dev.vars, .env, or set as environment variables.[0m
+
+
+[33m▲ [43;33m[[43;30mWARNING[43;33m][0m [1m				You have defined bindings to the following internal Durable Objects:[0m
+
+  				- {"name":"GEOMETRY","class_name":"GeometryContainer"}
+  - {"name":"PATTERNS","class_name":"PatternCoordinator"}
+  				These will not work in local development, but they should work in production.
+  
+  				If you want to develop these locally, you can define your DO in a separate Worker, with a separate configuration file.
+  				For detailed instructions, refer to the Durable Objects section here: [4mhttps://developers.cloudflare.com/workers/wrangler/api#supported-bindings[0m
+
+
+A DurableObjectNamespace in the config referenced the class "GeometryContainer", but no such Durable Object class is exported from the worker. Please make sure the class name matches, it is exported, and the class extends 'DurableObject'. Attempts to call to this Durable Object class will fail at runtime, but historically this was not a startup-time error. Future versions of workerd may make this a startup-time error.
+A DurableObjectNamespace in the config referenced the class "PatternCoordinator", but no such Durable Object class is exported from the worker. Please make sure the class name matches, it is exported, and the class extends 'DurableObject'. Attempts to call to this Durable Object class will fail at runtime, but historically this was not a startup-time error. Future versions of workerd may make this a startup-time error.
+▶ Job runs restore D1 execution rights across retries and lost responses
+  ✔ stop during before_render ends cancelled and wakes without a revision (77.503167ms)
+  ✔ stop during before_commit ends cancelled and wakes without a revision (77.042667ms)
+  ✔ a stop during geometry discards the arriving result (53.686667ms)
+  ✔ a stop inside completion still ends cancelled (95.702875ms)
+  ✔ a stop between the failure read and update still ends cancelled (46.704167ms)
+  ✔ staging holds the verifier only and stopped jobs skip the hold (192.785166ms)
+  ✔ commits one sample revision and wakes once (62.99525ms)
+  ✔ containers_disabled fails permanently on the first render attempt (38.127958ms)
+  ✔ protocol_mismatch fails permanently on the first render attempt (39.119167ms)
+  ✔ build_failed fails permanently on the first render attempt (37.393959ms)
+  ✔ protocol_violation fails permanently on the first render attempt (54.759625ms)
+  ✔ unreachable exhausts four render attempts then records failure (42.233458ms)
+  ✔ unreachable followed by success commits (68.880167ms)
+  ✔ a replayed render leaves two manifests but commits only its persisted snapshot (86.177583ms)
+  ✔ rerun commit responses keep exactly one revision (59.46225ms)
+  ✔ loseResults commit responses keep exactly one revision (73.842292ms)
+  ✔ replaying the failure record returns not_running (29.755875ms)
+  ✔ a stale generation writes nothing and still wakes (28.79975ms)
+  ✔ acceptance wakes applied and replayed receipts and retries a lost wake (54.248583ms)
+✔ Job runs restore D1 execution rights across retries and lost responses (1533.498125ms)
+✔ Workflow run IDs and createBatch classify duplicates without platform imports (1.017833ms)
+ℹ tests 21
+ℹ suites 0
+ℹ pass 21
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1974.958583

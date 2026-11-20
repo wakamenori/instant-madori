@@ -1,9 +1,23 @@
 import assert from "node:assert/strict";
-import { readdirSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
+import {
+  existsSync,
+  readdirSync,
+  readFileSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { text } from "node:stream/consumers";
+import { setTimeout as sleep } from "node:timers/promises";
+import { fileURLToPath } from "node:url";
 import { after, test } from "node:test";
 import { runChecks } from "./check.ts";
+import { nodeTestFlags } from "./test-results.ts";
 
 type Command = string[];
 const modes = ["--fast", "default", "--full"] as const;
@@ -37,6 +51,7 @@ void test("import boundaries read TypeScript after ESLint fixes and formatting, 
           commands.push(invoked);
           return typeCheck(invoked) ? Promise.reject(failure) : Promise.resolve();
         },
+        (stage) => stage(),
         resultsDir,
       ),
       (error) => error === failure,
@@ -66,6 +81,7 @@ void test("each mode clears previous results before the first step and records e
         commands.set(label, args);
         return Promise.resolve();
       },
+      (stage) => stage(),
       resultsDir,
     );
     for (const [label, suite] of [
@@ -94,5 +110,109 @@ void test("each mode clears previous results before the first step and records e
       assert(rust.includes("--no-fail-fast"));
       assert(rust.some((flag) => flag.includes(join(resultsDir, "rust.jsonl"))));
     }
+  }
+});
+
+void test("full checks hold one Docker slot across container integration and pruning", async () => {
+  mkdirSync("apps/worker/tests", { recursive: true });
+  writeFileSync("apps/worker/tests/container.e2e.ts", "");
+  writeFileSync("apps/worker/tests/example.test.ts", "");
+  for (const mode of modes) {
+    const commands: string[] = [];
+    await runChecks(
+      mode,
+      [],
+      (label, _command, args) => {
+        commands.push([label, ...args].join(" "));
+        return Promise.resolve();
+      },
+      async (stage) => {
+        commands.push("enter");
+        await stage();
+        commands.push("exit");
+      },
+      resultsDir,
+    );
+    const markers = commands.filter((command) => command === "enter" || command === "exit");
+    if (mode !== "--full") {
+      assert.deepEqual(markers, []);
+      continue;
+    }
+    assert.deepEqual(markers, ["enter", "exit"]);
+    const end = commands.indexOf("exit");
+    assert.deepEqual(commands.slice(commands.indexOf("enter") + 1, end), [
+      [
+        "Container integration",
+        ...nodeTestFlags(resultsDir, "container"),
+        "apps/worker/tests/container.e2e.ts",
+      ].join(" "),
+      "Prune Docker build cache scripts/dev/prune-build-cache.ts",
+    ]);
+    assert.deepEqual(
+      commands.slice(end + 1).map((line) => line.split(" ").slice(0, 3).join(" ")),
+      ["JavaScript dependency licenses", "JavaScript vulnerability audit", "Rust dependency audit"],
+    );
+  }
+});
+
+void test("a second Ctrl-C lets check stop its running step", async () => {
+  const directory = mkdtempSync(join(wasmBindingsOnly, "bin-"));
+  const pidFile = join(directory, "pnpm.pid");
+  writeFileSync(
+    join(directory, "cargo"),
+    `#!/bin/sh
+echo '{"packages":[],"workspace_members":[]}'
+`,
+    { mode: 0o755 },
+  );
+  writeFileSync(
+    join(directory, "pnpm"),
+    `#!${process.execPath}
+import { writeFileSync, renameSync } from "node:fs";
+process.on("SIGTERM", () => {
+  writeFileSync(process.env.STEP_PID + ".stopping", "");
+  setTimeout(() => process.exit(0), 100);
+});
+writeFileSync(process.env.STEP_PID + ".tmp", String(process.pid));
+renameSync(process.env.STEP_PID + ".tmp", process.env.STEP_PID);
+setTimeout(() => process.exit(1), 10000);
+`,
+    { mode: 0o755 },
+  );
+  const check = spawn(
+    process.execPath,
+    [fileURLToPath(new URL("./check.ts", import.meta.url)), "--fast"],
+    {
+      env: { ...process.env, PATH: directory + ":" + process.env["PATH"], STEP_PID: pidFile },
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 10000,
+      killSignal: "SIGKILL",
+    },
+  );
+  const closed = once(check, "close");
+  const stderr = text(check.stderr);
+  check.stdout.resume();
+  try {
+    const deadline = Date.now() + 5000;
+    while (!existsSync(pidFile)) {
+      assert(
+        check.exitCode === null && check.signalCode === null && Date.now() < deadline,
+        "pnpm stub did not start",
+      );
+      await sleep(10);
+    }
+    const pid = Number(readFileSync(pidFile, "utf8"));
+    check.kill("SIGINT");
+    while (!existsSync(pidFile + ".stopping")) {
+      assert(Date.now() < deadline, "pnpm stub did not receive SIGTERM");
+      await sleep(1);
+    }
+    check.kill("SIGINT");
+    assert.deepEqual(await closed, [1, null]);
+    assert.match(await stderr, /\[check\] Check interrupted/);
+    assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
+  } finally {
+    check.kill("SIGKILL");
+    await closed;
   }
 });

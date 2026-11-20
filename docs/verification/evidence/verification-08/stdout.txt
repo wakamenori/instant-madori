@@ -1,0 +1,10 @@
+head fd9f5ea30192f4c9bda167cfa1adb9fd71797e2e run 44825758357 start 2026-11-20T22:04:38Z
+PASS instruction replay  +1  0 -> 1  (184.713s)
+PASS stop after commit  +0  1 -> 1  (0.366s)
+PASS stop while held  +0  1 -> 1  (11.09s)
+PASS redeploy while held  +1  1 -> 2  (207.433s)
+PASS queue hold after a stop, then resume  +1  2 -> 3  (223.242s)
+PASS log evidence
+PASS stopped Workflows ended without a revision  +0  3 -> 3  (0.482s)
+PASS staging fault journey
+exit 0 end 2026-11-20T22:17:13Z

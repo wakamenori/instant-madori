@@ -108,20 +108,35 @@ AIが編集をまとめて案を提示するたびに履歴を一件追加する
 
 ### 3.1 階・部屋・共有境界・壁の表現
 
-住宅の編集データを次の構成で持つ。各要素には名前とは別の安定したIDを与える。
+住宅の編集データは、要素の種類ごとの一覧で持つ。各要素には名前とは別の安定したIDを与える。IDは家全体で重複させず、表示データの `ElementId` と同じく、64バイト以下の英数字と `._:-` に収める。関係は片方向だけを保存し、逆向きの関係は住宅データを作るときに求める。
 
-| 要素       | 保持する情報                                                                           |
-| ---------- | -------------------------------------------------------------------------------------- |
-| 階         | 基準高さ、階高、床領域、階段の床開口                                                   |
-| 頂点・境界 | 平面上の座標、境界の始点・終点、接する部屋、対応する壁                                 |
-| 部屋       | 名前・用途、向きを持った境界の列。輪郭はこの境界から得る                               |
-| 壁         | 境界への参照、厚さ、左右側面のオフセット、高さ、接する部屋ごとの面の役割、開口への参照 |
+| 要素 | 保存する情報                                                                     | 求める情報                             |
+| ---- | -------------------------------------------------------------------------------- | -------------------------------------- |
+| 階   | 基準高さ、階高。床領域と階段の床開口は6.3で加える                                | なし                                   |
+| 頂点 | 属する階、平面上の座標                                                           | 接する境界                             |
+| 境界 | 始点と終点の頂点、その上に立つ壁                                                 | 左右に接する部屋                       |
+| 壁   | 境界の中に一つだけ持ち、境界のIDで指す。境界から左右の側面までのオフセット、高さ | 厚さ、側ごとの面の役割、取り付いた開口 |
+| 部屋 | 名前、用途、向きを持った境界の列                                                 | 輪郭、属する階                         |
+
+部屋の境界の列は、上から見て反時計回りとする。境界を始点から終点へたどる部屋は境界の左側に、逆にたどる部屋は右側に接する。一つの境界の各側に接する部屋は一つまでとする。壁の面の役割は、その側に部屋があればその部屋、なければ外側とする。壁の幅は境界から左右の側面までのオフセット（どちらも0以上）で持ち、厚さはその和として求める。一直線に続く壁のまとまりは保存せず、それを動かす操作が求める。座標と長さはmmの浮動小数で持ち、境界の共有は座標の一致ではなく頂点のIDで表す。各一覧は追加順を保ち、その順を要求の始めのCADの生成順とする。要求の中の操作が足した要素は、生成する側が自分の生成順の末尾に足す（3.5）。
+
+住宅データを作るとき（保存したJSONを読むときを含む）、次のものを要素IDと理由を付けてまとめて返し、住宅データを作らない。自己交差、開口のはみ出し、重なりなどの形の検査は3.6で行う。
+
+- IDの文字・長さの違反と、IDの重複
+- 存在しない階・頂点・境界・壁への参照
+- 両端が同じ頂点の境界、長さ0の境界、二つの階をまたぐ境界、同じ二つの頂点を結ぶ二つ目の境界
+- 閉じていない、同じ頂点を二度通る、または反時計回りでない部屋の境界の列と、同じ境界を二度含む列
+- 三つ以上の部屋、または同じ側の二つの部屋に接する境界。どの部屋にも接しない境界と、どの境界にも使われない頂点
+- 有限でない数と、絶対値が10 km（10⁷ mm）を超える数
+- 負のオフセット・開口の位置・床からの高さと、0以下の厚さ・高さ・幅・階高
+
+住宅データは `{"version": 1, "house": {…}}` の形のJSONで読み書きする。読むときは版を確かめ、知らない版と未知の欄を拒んでから、上の検査を行う。後から足す欄は、無ければ空として読み、空なら書かない。欄の名前や意味を変えるときは版を上げ、古い版を読むときに今の形へ移す（5.4）。
 
 隣室との境界を一つのデータで共有し、変更時に両側の部屋と壁を更新する。部屋の輪郭と壁座標を独立に書き換えて後から合わせる方式は採らない。壁厚を反映した室内側の輪郭から、面積と2D表示を生成する。部屋の輪郭を変える加工がある部屋は、3.4のとおり3Dから求める。LDK内部の用途は設備・家具の配置で表し、用途別の面積境界を追加しない。
 
 壁の追加・分割・統合では、境界と部屋の関係も同じ操作内で更新する。部屋IDを残すか統合先へ移すかを操作結果に含め、参照先が変わったことをAIへ返す。
 
-壁の平面形は、境界と左右側面のオフセットから住宅側で決め、壁ごとに押し出す。外側の面をそろえた厚さ違いも、一つの共有頂点と側ごとのオフセットで表す。中心線を40 mmずらすためだけの短い接続壁を足さない。
+壁の平面形は、境界と左右側面のオフセットから住宅側で決め、壁ごとに押し出す。接合の形は保存せず、頂点の座標・オフセット・要素IDから求める。外側の面をそろえた厚さ違いも、一つの共有頂点と側ごとのオフセットで表す。中心線を40 mmずらすためだけの短い接続壁を足さない。
 
 節点では入射する壁を角度順に並べ、次の優先順位で輪郭の端を決める。一直線からのずれが3度以下の組を通し壁の候補とし、候補が複数ならずれの小さい組を優先し、同じなら安定した要素IDで決める。この角度幅は[検証6](verification/verification-06.md)の0.3・1・2・3・5度の比較に基づく。
 
@@ -271,6 +286,7 @@ instant-madori/
 │   ├── build/
 │   ├── upstream/
 │   ├── deploy/
+│   ├── measure/
 │   └── shared/
 ├── .github/
 │   ├── workflows/
@@ -301,7 +317,7 @@ instant-madori/
 | packages/contracts/       | 通信スキーマと共有型。Rust側の定義から生成した型・スキーマの受け渡し先                                                                         |
 | third_party/solidcraft/   | 固定した版のSolidCraft一式。SolidCraft自体に必要な修正もこの領域で行う                                                                         |
 | third_party/solidcraft.md | 取り込み元、採用コミット、独自変更の理由、更新手順。subtreeの外に置く                                                                          |
-| docs/・scripts/           | サービスの計画・検証記録。scripts/はcheck・dev・generate・build・upstream・deployに分け、複数の目的で使う部品はsharedに置く                    |
+| docs/・scripts/           | サービスの計画・検証記録。scripts/はcheck・dev・generate・build・upstream・deploy・measureに分け、複数の目的で使う部品はsharedに置く           |
 | .github/workflows/        | PRの検査（check.yml）とstagingへのデプロイ（deploy-staging.yml）。開発用Macのself-hosted runnerで動く                                          |
 | .github/ISSUE_TEMPLATE/   | 作業の単位（Issue）のテンプレート                                                                                                              |
 | .github/dependabot.yml    | npm・Cargoの依存関係の更新提案                                                                                                                 |
@@ -335,11 +351,11 @@ TypeScriptのアプリと共有定義のimport境界は、TypeScriptのモジュ
 
 `apps/` は起動・デプロイするもの、`crates/` はRustの機能をまとめたモジュール、`packages/` はJS/TS側から共有する定義を置く。`apps/geometry` は `crates/modeling` を呼ぶ入口とし、住宅の計算やCADとの対応をHTTP処理に散らさない。
 
-`crates/housing` は画面・HTTP・Cloudflareへ依存させない。`crates/modeling` が住宅モデルとSolidCraftのengine・doc・kernelを利用する。評価キャッシュの誤った再利用を防ぐ `external-workspace` featureを有効にするため、modelingはsolidcraft-ioにも直接依存する。`crates/viewer` はgeom・viewport・viewport-gpuを利用し、wgpuで描く。`solidcraft-viewport-egui` は使わない。ビューアには編集エンジン（modeling・engine・doc・kernel・io）とUIツールキット（egui系・eframe・winit）を含めず、依存を持たない `crates/display` の表示データで接続する。geomがsolidcoreに依存するため、Cargoの依存グラフではsolidcoreもビューアに届く。利用者に届くコードは、`pnpm check --full` がreleaseのWasm（wasm-bindgenの前）の名前セクションで確かめる。各関数を本体を定義したcrateに数え、CADカーネル（solidcore・solidcore-ops）・編集エンジン・UIツールキットの関数があれば失敗する。禁止する族は、ビューアの依存グラフの行と `viewerWasmBoundary` から導く。crateごとの関数の数とコード量は、Markdownの表でログに出す。`crates/modeling` が符号化し、`crates/viewer` が復号する。`crates/geometry-api` は形状処理の内部APIを定義し、TypeScriptの定義を `packages/contracts/src/generated/geometry-internal.ts` へ生成する。公開する表示メディア型は同じ生成処理で `packages/contracts/src/generated/display.ts` に出し、`@madori/contracts` から公開する。WebとViteの設定は内部API定義をimportせず、`packages/contracts` への相対パスでの参照も使わず、公開した `@madori/contracts` から参照する。公開入口への参照もパッケージ名に限るのは、宣言した依存を通すためである。相対パスに置き換えると、Knipがパッケージの依存宣言を未使用と判断して削除でき、pnpmの依存の図からWebとcontractsの関係が消えてしまう。
+`crates/housing` が直接依存してよいのは serde・serde_json・schemars だけとし、画面・HTTP・Cloudflare・CADへは依存させない。この一覧は、`scripts/check/boundaries.ts` の `housing-dependencies` の行と一緒に変える。`crates/modeling` が住宅モデルとSolidCraftのengine・doc・kernelを利用する。評価キャッシュの誤った再利用を防ぐ `external-workspace` featureを有効にするため、modelingはsolidcraft-ioにも直接依存する。`crates/viewer` はgeom・viewport・viewport-gpuを利用し、wgpuで描く。`solidcraft-viewport-egui` は使わない。ビューアには編集エンジン（modeling・engine・doc・kernel・io）とUIツールキット（egui系・eframe・winit）を含めず、依存を持たない `crates/display` の表示データで接続する。geomがsolidcoreに依存するため、Cargoの依存グラフではsolidcoreもビューアに届く。利用者に届くコードは、`pnpm check --full` がreleaseのWasm（wasm-bindgenの前）の名前セクションで確かめる。各関数を本体を定義したcrateに数え、CADカーネル（solidcore・solidcore-ops）・編集エンジン・UIツールキットの関数があれば失敗する。禁止する族は、ビューアの依存グラフの行と `viewerWasmBoundary` から導く。crateごとの関数の数とコード量は、Markdownの表でログに出す。`crates/modeling` が符号化し、`crates/viewer` が復号する。`crates/geometry-api` は形状処理の内部APIを定義し、TypeScriptの定義を `packages/contracts/src/generated/geometry-internal.ts` へ生成する。公開する表示メディア型は同じ生成処理で `packages/contracts/src/generated/display.ts` に出し、`@madori/contracts` から公開する。WebとViteの設定は内部API定義をimportせず、`packages/contracts` への相対パスでの参照も使わず、公開した `@madori/contracts` から参照する。公開入口への参照もパッケージ名に限るのは、宣言した依存を通すためである。相対パスに置き換えると、Knipがパッケージの依存宣言を未使用と判断して削除でき、pnpmの依存の図からWebとcontractsの関係が消えてしまう。
 
 内部API本文は `crates/geometry-api` のRust型にschemarsを適用し、インライン化したJSON Schemaからjson-schema-to-zodでZod検証とTypeScript型を生成する。`pnpm generate:geometry` で定数と本文を一緒に更新し、RustとNodeのテストが生成結果のずれを検出する。再帰型と参照が残る型は生成時に拒否する。結果の共用体は `kind` を判別子とする。固定幅整数には範囲を付け、JavaScriptで正確に表せない64/128ビット整数は文字列で運ぶ。ポインター幅に依存する整数も生成時に拒否し、通信には固定幅の型を選ぶ。Optionは `skip_serializing_if = "Option::is_none"` でNoneを省略し、受信時は省略とnullを許す。各ルートに本文型のスキーマ生成関数を登録し、要求・応答のスロットから方向を導出する。エラー本文はルートごとに登録せず、プロトコル共通のスキーマ・メディア型・本文上限を定義し、Rustのエラー応答とWorkerの検証で使う。同名の本文を異なる契約で登録すると生成を停止する。要求はDeserialize契約で生成し、オブジェクトの未知フィールド拒否を生成時に検査する。応答はSerialize契約で生成し、共有型に指定された未知フィールド拒否を応答スキーマから再帰的に除き、追加フィールドを許容する。ルートにはHTTPメソッドと要求・応答本文の形式（なし、JSONのスキーマと本文上限、バイナリのメディア型と本文上限）を登録し、Workerの受信方針をそこから組み立てる。
 
-住宅データはRust側で定義し、通信に必要な型とスキーマを生成してJS/TS側へ渡す。WebとWorkerの共通の通信定義も `packages/contracts` で管理し、同じ型を両側で独立に手書きしない。
+住宅データはRust側で定義し、通信に必要な型とスキーマを生成してJS/TS側へ渡す。住宅データの型のJSON Schemaは `crates/housing` がschemarsで導出する。`crates/geometry-api` は同じ形の型を写さず、その型を内部API本文とAIの操作の入力に組み込む。WebとWorkerの共通の通信定義も `packages/contracts` で管理し、同じ型を両側で独立に手書きしない。
 
 ルートのREADME、AGENTS、開発設定は本サービス向けに整える。SolidCraft由来の資料と開発設定は取り込み領域に保持する。本計画書は `docs/plan.md`、検証記録と、画像を除く証拠は `docs/verification/` に置く。Issue、PR、検証記録に貼る画像は、main と履歴を共有しない追記だけの `images` ブランチに置き、画像を加えた commit に固定したリンクで参照する。
 
@@ -630,7 +646,11 @@ git worktreeで並行して開発するときは、worktreeごとにRustの `tar
 
 開発では `pnpm dev` がWeb画面、Worker・D1、Wasmと、`wrangler dev` 経由のDocker Containerを接続する。画面だけを扱うときは `MADORI_DEV_CONTAINERS=0` でContainerを無効にする。`pnpm check --full` はDockerイメージをビルドし、実Containerとの接続も検査する。Dockerはビルドプラットフォーム上のRustからLinux amd64向けにコンパイルし、Cargoのキャッシュを再利用する。イメージのビルドに送る材料からは、取り込み領域のうちビルドが読まない大きなデータ（テストの正解データと入力、資料、使わない資産とクレート）を `.dockerignore` で除く。除くパスは、Linux向けのビルドのdep-infoに現れないことで確かめる。テスト用と本番用の認証設定・DB・R2・秘密情報は分離する。
 
-`pnpm check --full` の最後で、ローカルDocker Engineの未使用ビルドキャッシュを回収する。Cargoのregistry・git・targetを含む `exec.cachemount` は合計8 GiBまで保持する。別の枠で `regular` と `frontend` を最近使った順に合計4 GiBまで保持する。形状サービスの一組の層（Rustの基底層・aptのRUN・COPY・CargoのRUN・frontend・実行用のCOPY）は、計測値で約3.91 GBである。4 GiBの枠は一組を残すが、更新時の余裕は残らない。BuildKitは、再利用した基底層とaptのRUNの最終使用時刻を更新しない。そのため、記録が枠を超えると、回収はRustの基底イメージの層を最も古い記録として選ぶ。計測では、選んだ基底層の記録は回収の後も残り、層の記録の合計は回収の前後とも約6.37 GBで、枠を超えたままだった。時間の範囲では集中したビルドの容量を制限できないため、容量を上限にする。各枠の報告値が上限を超えた場合だけ、最終使用時刻が古い未使用記録から丸ごと削除する。`source.local`・`source.git.checkout`・`internal` の未使用記録はすべて回収する。未知の種類は選ばずに保持し、一行で報告する。使用中の記録は削除しない。Dockerは使用中のcache mountを0バイトと報告するため、その実容量を上限の計算に含められず、使用が終わった後に上限を超えることがある。並行したビルドや回収で計測後の状態も変わる。回収後の報告値は使用中のmountの実容量を保証しない。選別はDocker EngineのID・種類・バイト数・使用状態・時刻を検証した純粋関数で行い、選んだIDだけをBuildKitへ渡す。手動のdry-runも同じ選別を使い、保持・削除の記録を出す。手元とrunnerで同じ入口を使い、UnixソケットのローカルEngineだけを対象にする。イメージ・Container・ボリューム、runnerのCargoのtargetとツールは対象にしない。
+開発用のMacでは、複数のエージェントとself-hosted runnerが一つのCPUとDocker Engineを共有する。Dockerを使う重い作業が重なると、関係の無い試験まで時間切れで落ちる。そのため、Dockerを使う作業の数を、マシン全体で共有する「Dockerの枠」で制限する。`pnpm check --full` の実Containerの接続検査とビルドキャッシュの回収、Containerを有効にした `pnpm dev` は、枠を一つ取ってから始め、枠が埋まっていれば空くまで待つ。枠は開発用に二つ、runner用に一つとし、その数は `scripts/shared/docker-slots.ts` の一つの表だけで定める。runnerは環境変数 `GITHUB_ACTIONS=true` で見分け、runner用の枠だけを使うので、開発の作業が枠を埋めていても待たない。runnerは一度に一つのジョブを動かすので、stagingへのデプロイで `wrangler deploy` が行うイメージのビルドを含めても、runnerのDockerの作業は一つまでになる。
+
+枠は、ユーザーのホーム（`os.userInfo().homedir`）の `.local/state/instant-madori/docker-slots/` にある枠ごとのファイルへの、排他のflockで表す。macOSには `flock(1)` が無いので、`O_EXLOCK` を付けた一回の `open(2)` で取る。共有するマシンはmacOSなので、枠はmacOSでだけ働く。Linuxでは枠を取らずに実行し、そのことを一行出す。枠を使っているかはロックだけで決め、pidや時刻の記録には頼らない。そのため、落ちたプロセスや `kill -9` で止めたプロセスの枠は、OSが外して残らない。枠は取ったプロセスだけが持ち、子プロセスへは渡さない。Wranglerは自分の子プロセスに別のファイル記述子を渡し、Dockerのビルドを別のプロセスグループで起動するので、子に渡しても実際のDockerの作業までは届かない。そのうえ、`kill -9` の後に残った `wrangler dev` が枠を持ち続ける。枠を持つプロセスは、枠のファイルに目的・pid・開始時刻・チェックアウトを書き、手放すときに消す。待つプロセスと `status` は、この記録を表示だけに使う。ロックを取るのは枠を取るときだけで、自分の側（開発用かrunner用）の枠に限る。開発の作業がrunner用の枠のロックに触れることはない。待つプロセスは、待ち始めとその後の一分ごとに、各枠を持つプロセスを表示する。長く起動したままの `pnpm dev` は枠を一つ持ち続けるが、時間で止めることはしない。ポートが固定なので `pnpm dev` は同時に一つしか動かず、占める枠は一つまでである。
+
+`pnpm check --full` は、実Containerとの接続を検査した直後に、同じDockerの枠を持ったまま、ローカルDocker Engineの未使用ビルドキャッシュを回収する。Cargoのregistry・git・targetを含む `exec.cachemount` は合計8 GiBまで保持する。別の枠で `regular` と `frontend` を最近使った順に合計4 GiBまで保持する。形状サービスの一組の層（Rustの基底層・aptのRUN・COPY・CargoのRUN・frontend・実行用のCOPY）は、計測値で約3.91 GBである。4 GiBの枠は一組を残すが、更新時の余裕は残らない。BuildKitは、再利用した基底層とaptのRUNの最終使用時刻を更新しない。そのため、記録が枠を超えると、回収はRustの基底イメージの層を最も古い記録として選ぶ。計測では、選んだ基底層の記録は回収の後も残り、層の記録の合計は回収の前後とも約6.37 GBで、枠を超えたままだった。時間の範囲では集中したビルドの容量を制限できないため、容量を上限にする。各枠の報告値が上限を超えた場合だけ、最終使用時刻が古い未使用記録から丸ごと削除する。`source.local`・`source.git.checkout`・`internal` の未使用記録はすべて回収する。未知の種類は選ばずに保持し、一行で報告する。使用中の記録は削除しない。Dockerは使用中のcache mountを0バイトと報告するため、その実容量を上限の計算に含められず、使用が終わった後に上限を超えることがある。並行したビルドや回収で計測後の状態も変わる。回収後の報告値は使用中のmountの実容量を保証しない。選別はDocker EngineのID・種類・バイト数・使用状態・時刻を検証した純粋関数で行い、選んだIDだけをBuildKitへ渡す。手動のdry-runも同じ選別を使い、保持・削除の記録を出す。手元とrunnerで同じ入口を使い、UnixソケットのローカルEngineだけを対象にする。イメージ・Container・ボリューム、runnerのCargoのtargetとツールは対象にしない。
 
 招待した利用者が使い始めるまでは、stagingだけを環境とし、本番の環境は作らない。本番の環境（設定、Accessアプリ、D1、R2、デプロイ手順）は、招待の前に6.6で用意する。本番はWorkerと静的ファイル、D1マイグレーション、R2、DO・Workflow、Containerイメージを一組の版としてデプロイする。RustはContainerの対象であるLinux向けにビルドし、Wasmは別の成果物として作る。形状処理のメモリと起動時間を測り、Containerのサイズ・同時実行数・休止条件を選ぶ。Cloudflareの利用料はできるだけ少なくする。Containerは動いている間だけ、確保したメモリ・ディスクと使ったCPUで課金される（[Containersの料金](https://developers.cloudflare.com/containers/platform/pricing/)）。そのため、インスタンスの種類と休止時間を利用料を左右する値として選び、止め忘れたContainerを残さない。
 
@@ -760,6 +780,8 @@ workspace継承、依存パッチ、資産参照、評価キャッシュの誤�
 
 招待した利用者がログインして案件を作れ、別利用者の案件・パターン・案・ジョブへアクセスできない。サンプルの形をサーバーからブラウザへ表示できる。停止と確定の競合、同じ要求の再送、R2保存後のDB失敗、Worker・Containerの停止を試し、以前の確定案と履歴が壊れない。
 
+障害の試験のうち、stagingで起こせるものは `scripts/check/staging-faults/main.ts` で繰り返す。同じ要求の再送、確定の後と待ちの間の停止、待たせたジョブをまたぐWorkerとパターンDOの再起動、停止の後の待機列の保留と再開である。このスクリプトは、検証用の利用者のジョブを `before_render` で待たせる `JOB_TEST_HOLD` に頼る。R2保存後のDB失敗、確定の前の停止、Containerの停止はstagingで起こせないので、ローカルの試験で確かめる。stagingのContainerはデプロイで入れ替わらず、一つのContainerを外から止める手段もないためである。Cloudflare上で起動の途中にContainerが止まったときの扱いは、検証用の利用者だけに効く停止の設定を加えるまで確かめられない。
+
 **この段階で確かめること**
 
 Linux Container上のSolidCraftの動作、必要メモリと起動時間、WebGPUが使えるPCブラウザでの描画を確認する。結果に基づいて資源設定と実行時の上限を決める。既存検証のWasmサイズだけで、本体の配信サイズを確定しない。
@@ -861,6 +883,7 @@ Linux Container上のSolidCraftの動作、必要メモリと起動時間、WebG
 | [検証5](verification/verification-05.md)                                                                                                | stagingで、最後の要求から約10分（600,164 ms）でContainerが止まることを確認                                                                                                                                                                                                                               |
 | [検証6](verification/verification-06.md)                                                                                                | 家一軒の試作で、要求ごとに住宅データからCADを作り直す方式、壁ごとの輪郭の押し出しと接合の規則、完了した要求の間でSessionを保持しないことを決めた                                                                                                                                                         |
 | [検証7](verification/verification-07.md)                                                                                                | 三つのデータの持ち方を同じ場面で比べ、加工を取り付け先の座標系で、物体を自分の座標系で書いた形と部屋か壁での置き場所で、住宅データに持つ方式を採った。投影による面積の照合を確かめた                                                                                                                     |
+| [検証8](verification/verification-08.md)                                                                                                | stagingで、再送、確定の後と待ちの間の停止、待たせたジョブをまたぐ再デプロイ、待機列の保留と再開を一つのパターンで試し、前の案と表示データが変わらないことを確認。再デプロイの後もWorkflowは古い版で確定し、Containerは引き継がれた。R2保存後のDB失敗とContainerの停止はローカルで確認                    |
 | [SolidCraftの構成](../third_party/solidcraft/docs/architecture.md)、[Session](../third_party/solidcraft/crates/engine/src/lib.rs)       | 形状処理を専用画面と分けて利用する。同期的な処理と協調的な停止をサービス側で扱う                                                                                                                                                                                                                         |
 | [外観](../third_party/solidcraft/crates/doc/src/appearance.rs)、[面の名前](../third_party/solidcraft/docs/book/src/dev/naming.md)       | 見た目と面の追跡を利用し、住宅としての役割と対応を補う                                                                                                                                                                                                                                                   |
 | [素材画像](../third_party/solidcraft/docs/render-runtime-textures.md)、[描画経路](../third_party/solidcraft/docs/render-integration.md) | 通常の描画経路に素材・影の機能がすべて揃っているとは扱わず、追加実装を計画する                                                                                                                                                                                                                           |
