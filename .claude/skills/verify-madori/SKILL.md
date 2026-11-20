@@ -73,10 +73,30 @@ wait
 
 ```sh
 for i in $(seq 1 120); do curl -fsS http://127.0.0.1:5173/api/me >/dev/null 2>&1 && break; sleep 5; done
-curl -sS -o /dev/null -m 120 -w '%{http_code} %{content_type}\n' http://127.0.0.1:5173/api/sample/display
+(
+  set -eu
+  api=http://127.0.0.1:5173/api
+  headers=(-H 'origin: http://127.0.0.1:5173' -H 'content-type: application/json')
+  project=$(curl -fsS "${headers[@]}" "$api/projects" -d '{"requestId":"a2e54e37-3687-4dbd-a8cd-b2813b114d69","name":"起動確認"}')
+  pattern=$(jq -er '.pattern.id' <<< "$project")
+  accepted=$(curl -fsS "${headers[@]}" "$api/patterns/$pattern/messages" \
+    -d "{\"requestId\":\"$(uuidgen)\",\"body\":\"起動確認\"}")
+  job=$(jq -er '.job.jobId' <<< "$accepted")
+  for i in {1..210}; do
+    state=$(curl -fsS "$api/patterns/$pattern/state")
+    if jq -e --arg job "$job" '.lastFinishedJob.jobId == $job' <<< "$state" >/dev/null; then
+      revision=$(jq -er '.lastFinishedJob | select(.state == "completed") | .revision.id' <<< "$state")
+      curl -sS -o /dev/null -w '%{http_code} %{content_type}\n' "$api/revisions/$revision/view"
+      exit
+    fi
+    sleep 2
+  done
+  echo "Job $job timed out" >&2
+  exit 1
+)
 ```
 
-二つ目が `200 application/vnd.madori.display; version=1` なら、Worker から Durable Object を通って Container まで届いている。Container の起動待ちは最大 60 秒。`$EVIDENCE/dev.log` に `Container image(s) ready` と `Ready on http://127.0.0.1:8787` が出ないまま 10 分過ぎたら、ログの末尾を報告して止まる。
+二つ目が `200 application/vnd.madori.display; version=1` なら、5173 番で受け付けた指示がジョブとしてパターンの Durable Object と Container まで届き、確定した案の表示データを取得できた。Container の起動待ちは最大 60 秒。`$EVIDENCE/dev.log` に `Container image(s) ready` と `Ready on http://127.0.0.1:8787` が出ないまま 10 分過ぎたら、ログの末尾を報告して止まる。
 
 ## 状態確認
 

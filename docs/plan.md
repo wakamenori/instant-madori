@@ -559,7 +559,6 @@ queueHoldは、待機列が保留中なら `{ job: { jobId, messageId, number, s
 | POST /api/jobs/:id/stop                     | 待機中・実行中の指示の停止                                                |
 | POST /api/patterns/:id/queue/resume・cancel | 保留指示の再開・取り消し                                                  |
 | POST /api/assets                            | 添付画像の登録・検査                                                      |
-| GET /api/sample/display                     | サンプルの3D表示データ。一時的なAPIで、案を作る経路ができたら削除         |
 | GET /api/revisions/:id/view                 | 2D・3D表示データと取得先。manifestの版1では3Dの表示データのバイト列を返す |
 | POST /api/revisions/:id/pick・sunlight      | 対象選択の確定と日差しの計算                                              |
 | GET /api/patterns/:id/events                | 途中経過と状態変更をSSEで配信                                             |
