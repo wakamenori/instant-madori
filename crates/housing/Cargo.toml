@@ -4,5 +4,14 @@ version.workspace = true
 edition.workspace = true
 publish.workspace = true
 
+[dependencies]
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+madori-display.workspace = true
+madori-geometry-api.workspace = true
+
 [lints]
 workspace = true
