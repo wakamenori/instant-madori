@@ -1,3 +1,4 @@
+import { machineSlots, withDockerSlot } from "../shared/docker-slots.ts";
 import { access, glob } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { start, stop } from "../shared/processes.ts";
@@ -15,6 +16,7 @@ export async function runChecks(
   mode: "--fast" | "default" | "--full",
   crates: ReturnType<typeof serviceCrates>,
   run: (label: string, command: string, args: string[]) => Promise<void>,
+  inDockerSlot: (stage: () => Promise<void>) => Promise<void>,
 ): Promise<void> {
   const pnpm = (label: string, ...commandArgs: string[]) => run(label, "pnpm", commandArgs);
   const cargo = (label: string, ...commandArgs: string[]) => run(label, "cargo", commandArgs);
@@ -148,11 +150,14 @@ export async function runChecks(
       "staging",
       "--containers-rollout=none",
     );
-    await run("Container integration", process.execPath, [
-      "--test",
-      "--test-reporter=spec",
-      "apps/worker/tests/container.e2e.ts",
-    ]);
+    await inDockerSlot(async () => {
+      await run("Container integration", process.execPath, [
+        "--test",
+        "--test-reporter=spec",
+        "apps/worker/tests/container.e2e.ts",
+      ]);
+      await script("Prune Docker build cache", "scripts/dev/prune-build-cache.ts");
+    });
     await script("JavaScript dependency licenses", "scripts/check/check-licenses.ts");
     await pnpm("JavaScript vulnerability audit", "audit", "--audit-level", "low");
     await run("Rust dependency audit", "mise", [
@@ -167,7 +172,6 @@ export async function runChecks(
       "-D",
       "unused-wrapper",
     ]);
-    await script("Prune Docker build cache", "scripts/dev/prune-build-cache.ts");
   }
 }
 
@@ -184,24 +188,25 @@ async function main() {
   process.chdir(fileURLToPath(repositoryRoot));
 
   const active = new Set<ReturnType<typeof start>>();
-  let interrupted = false;
+  const interruption = new AbortController();
   function interrupt() {
-    interrupted = true;
+    if (interruption.signal.aborted) return;
+    interruption.abort(new Error("Check interrupted"));
     void stop([...active]).catch((error: unknown) => console.error(error));
   }
-  process.once("SIGINT", interrupt);
-  process.once("SIGTERM", interrupt);
+  process.on("SIGINT", interrupt);
+  process.on("SIGTERM", interrupt);
   const started = performance.now();
 
   async function run(label: string, command: string, commandArgs: string[]) {
-    if (interrupted) throw new Error("Check interrupted");
+    interruption.signal.throwIfAborted();
     console.log(`\n[check] ${label}`);
     const stepStarted = performance.now();
     const child = start(command, commandArgs);
     active.add(child);
     const result = await child.finished;
     active.delete(child);
-    if (interrupted) throw new Error("Check interrupted");
+    interruption.signal.throwIfAborted();
     if (result.kind === "error") throw result.error;
     if (result.code !== 0) {
       throw new Error(`${label} failed (${result.signal ?? result.code ?? "unknown exit"})`);
@@ -211,7 +216,13 @@ async function main() {
   const crates = serviceCrates();
 
   try {
-    await runChecks(mode, crates, run);
+    await runChecks(mode, crates, run, (stage) =>
+      withDockerSlot(
+        machineSlots(),
+        { purpose: "pnpm check --full", signal: interruption.signal },
+        stage,
+      ),
+    );
     console.log(
       `\n[check] Passed (${mode}, ${((performance.now() - started) / 1000).toFixed(1)}s).`,
     );
