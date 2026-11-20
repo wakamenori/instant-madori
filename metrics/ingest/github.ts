@@ -70,7 +70,7 @@ export function commentRecord(data: unknown) {
     issue_or_pr: number.parse(Number(c.issue_url.split("/").at(-1))),
     author: c.user.login,
     markers: Object.entries(markers)
-      .filter(([, re]) => re.test(c.body))
+      .filter(([marker, re]) => c.body.includes(marker) || re.test(c.body))
       .map(([m]) => m),
     body_length: c.body.length,
   });

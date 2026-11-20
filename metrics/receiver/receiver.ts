@@ -279,7 +279,7 @@ export async function startReceiver(options: Options) {
   }
   timers.push(periodic(rebuild, 1000));
   for (const p of options.pollers ?? [
-    ...t3Pollers(t3File, dirname(identity)),
+    ...t3Pollers(t3File, dirname(identity), home.root),
     ...githubPollers(home.root),
   ]) {
     let active = false;
