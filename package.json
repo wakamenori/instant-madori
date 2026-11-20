@@ -7,6 +7,10 @@
     "node": "26.x"
   },
   "scripts": {
+    "measure:logs": "node scripts/measure/measure.ts logs",
+    "measure:summary": "node scripts/measure/measure.ts summary",
+    "measure:deploy": "node scripts/measure/measure.ts deploy",
+    "measure:cold": "node scripts/measure/measure.ts cold",
     "check": "node scripts/check/check.ts",
     "images:upload": "node scripts/dev/upload-images.ts",
     "docker:prune-build-cache": "node scripts/dev/prune-build-cache.ts",
