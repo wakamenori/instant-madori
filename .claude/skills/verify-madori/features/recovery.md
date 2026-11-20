@@ -18,6 +18,7 @@
 Preconditions:
 
 - SKILL.md の「起動」の `pnpm dev` を、`MADORI_DEV_JOB_TEST_HOLD=before_render:420` を付けて起動している。仕事は実行権を取った後、描画の前に7分待つ。待ちを付けずに動いていたら、片付けてから `MADORI_DEV_JOB_TEST_HOLD=before_render:420 perl -e 'setpgrp(0, 0); exec @ARGV or die "exec: $!"' mise exec -- pnpm dev >| "$EVIDENCE/dev.log" 2>&1 &` で起動し直す。
+- 起動の確認は一つ目（`/api/me`）だけを行う。二つ目は指示を最後まで流すので、7分の待ちで時間切れになる。この地図の仕事は描画まで進まないので、Container は使わない。
 - [案件](./projects.md)の「作る」を済ませ、`PAT=$(jq -r .pattern.id "$EVIDENCE/projects/create.json")` を設定している。
 - [指示を止める](./stop.md)の `J`・`O`・`API`・`send`・`stop`・`state` を、`D="$EVIDENCE/recovery"` にして定義し、`$D` がある。
 
