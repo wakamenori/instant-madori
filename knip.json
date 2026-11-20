@@ -16,7 +16,8 @@
         "scripts/check/r2-create-only/worker.ts",
         "scripts/deploy/registry-retention.ts",
         "metrics/hook/hook.ts",
-        "metrics/receiver/receiver.ts"
+        "metrics/receiver/receiver.ts",
+        "metrics/build/build.ts"
       ],
       "project": ["scripts/**/*.ts", "metrics/**/*.ts", "*.mjs"]
     },

@@ -59,7 +59,8 @@ const scopes = {
   "metrics-l1": "metrics/l1/privacy.ts",
   "metrics-ingest": "metrics/ingest/otlp.ts",
   "metrics-receiver": "metrics/receiver/receiver.ts",
-  "metrics-other": "metrics/build/build.ts",
+  "metrics-build": "metrics/build/build.ts",
+  "metrics-other": "metrics/other.ts",
 } satisfies Record<keyof typeof typescriptScopes, string>;
 const importType = (specifier: string, name = "Domain") =>
   `import type { ${name} } from ${JSON.stringify(specifier)};`;
@@ -392,6 +393,7 @@ const importCases: Record<string, string[]> = {
     "metrics/hook/spool.ts",
     "metrics/l1/store.ts",
   ],
+  "metrics-build-inputs": ["metrics/receiver/t3.ts"],
   "metrics-l1-writer": ["metrics/l1/store.ts"],
 };
 const exceptedTargets: Record<string, string> = {

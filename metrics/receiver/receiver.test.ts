@@ -14,6 +14,8 @@ void test("listener ownership, durable hold, spool replay and expiration", async
   const options = {
     home,
     port: 0,
+    pollers: [],
+    rebuild: false,
     identity: "/fake/.git",
     clock: () => now,
     t3File: join(dir, "t3"),

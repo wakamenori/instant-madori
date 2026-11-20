@@ -33,6 +33,7 @@ const metricsAreaScopes = {
     files: [`metrics/hook/**/*.${typescriptExtensions}`, "metrics/home.ts"],
     ignores: [],
   },
+  "metrics-build": { files: [`metrics/build/**/*.${typescriptExtensions}`], ignores: [] },
   "metrics-l1": { files: [`metrics/l1/**/*.${typescriptExtensions}`], ignores: [] },
   "metrics-ingest": { files: [`metrics/ingest/**/*.${typescriptExtensions}`], ignores: [] },
   "metrics-receiver": { files: [`metrics/receiver/**/*.${typescriptExtensions}`], ignores: [] },
@@ -490,6 +491,14 @@ export const typescriptBoundaries: TypeScriptBoundary[] = [
     ],
     reason: "metrics/README.md L1に書くのは受け口だけにして、書き手を一つにする",
     message: "Ingest is pure; IO belongs to metrics/receiver.",
+  },
+  {
+    id: "metrics-build-inputs",
+    from: ["metrics-build"],
+    kind: "imports",
+    targets: ["metrics/{receiver,ingest,hook}/**"],
+    reason: "metrics/README.md L2から上は、L1だけから作り直せる",
+    message: "The derived build reads L1 and does not call collectors.",
   },
   {
     id: "metrics-l1-writer",

@@ -1,6 +1,6 @@
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdirSync, readdirSync, readFileSync, statSync, unlinkSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { homedir } from "node:os";
 import { join, dirname } from "node:path";
@@ -13,15 +13,14 @@ import { openL1Writer } from "../l1/store.ts";
 import { codexProof } from "./t3.ts";
 import type { Obj } from "../l1/envelope.ts";
 
-type Poller = {
-  name: string;
-  intervalMs: number;
-  poll(signal: AbortSignal): Promise<readonly RecordInput[]>;
-};
+import { githubPollers, BudgetLimit } from "./github.ts";
+import { t3Pollers } from "./t3-pollers.ts";
+import type { Poller } from "./poller.ts";
 type Options = {
   home: ReturnType<typeof metricsHome>;
   identity: string;
   port: number;
+  rebuild?: boolean;
   clock?: () => Date;
   t3File?: string;
   pollers?: readonly Poller[];
@@ -65,6 +64,9 @@ export async function startReceiver(options: Options) {
     const tally = (sources[source] ??= {});
     tally[field] = Number(tally[field] ?? 0) + n;
   }
+  let dirty = true,
+    building = false,
+    lastBuild = 0;
   function ingest(parsed: Parsed) {
     const at = clock().toISOString(),
       proofs = new Map<string, RecordInput | "foreign" | null>();
@@ -96,6 +98,7 @@ export async function startReceiver(options: Options) {
       parsed.rejects,
     );
     for (const [source, tally] of Object.entries(tallies)) {
+      if (tally.appended) dirty = true;
       for (const [key, value] of Object.entries(tally)) count(source, key, value);
       (sources[source] ??= {}).last_batch_at = at;
     }
@@ -149,6 +152,7 @@ export async function startReceiver(options: Options) {
             window: { from: windowStart, to: at },
             sources,
             t3_failures: failures.t3_failures ?? 0,
+            build_failures: failures.build_failures ?? 0,
             poll_failures: failures.poll_failures ?? 0,
             spool_failures: failures.spool_failures ?? 0,
             spool: {
@@ -169,6 +173,7 @@ export async function startReceiver(options: Options) {
       ],
       at,
     );
+    dirty = true;
     sequence++;
     windowStart = at;
     abandoned = 0;
@@ -244,24 +249,60 @@ export async function startReceiver(options: Options) {
   }
   const timers = [periodic(drain, 1000), periodic(flush, 60000)],
     controller = new AbortController();
-  for (const p of options.pollers ?? []) {
+
+  function rebuild() {
+    if (options.rebuild === false || !dirty || building || clock().getTime() - lastBuild < 60_000)
+      return;
+    dirty = false;
+    building = true;
+    lastBuild = clock().getTime();
+    const env = { ...process.env, INSTANT_MADORI_METRICS_HOME: home.root };
+    const complete = (error: Error | null) => {
+      building = false;
+      if (error) {
+        dirty = true;
+        increment("build_failures");
+      }
+    };
+    execFile(
+      process.execPath,
+      [join(import.meta.dirname, "../build/build.ts")],
+      { env, signal: controller.signal },
+      (error) => {
+        const viewer = join(import.meta.dirname, "../viewer/build.ts");
+        if (error || controller.signal.aborted || !existsSync(viewer)) complete(error);
+        else execFile(process.execPath, [viewer], { env, signal: controller.signal }, complete);
+      },
+    );
+  }
+  timers.push(periodic(rebuild, 1000));
+  for (const p of options.pollers ?? [
+    ...t3Pollers(t3File, dirname(identity)),
+    ...githubPollers(home.root),
+  ]) {
     let active = false;
+    async function cycle() {
+      if (active) return;
+      active = true;
+      try {
+        const records = await p.poll(controller.signal);
+        if (controller.signal.aborted) return;
+        ingest({ records: [...records], rejects: [], drops: [] });
+        p.committed?.();
+        (sources[p.name] ??= {}).last_poll = clock().toISOString();
+      } catch (error) {
+        count(p.name, error instanceof BudgetLimit ? "skipped_cycles" : "failed_cycles", 1);
+        if (!(error instanceof BudgetLimit)) increment("poll_failures");
+      } finally {
+        active = false;
+      }
+    }
     timers.push(
       periodic(() => {
-        if (active) return;
-        active = true;
-        void p
-          .poll(controller.signal)
-          .then((records) => {
-            if (!controller.signal.aborted)
-              ingest({ records: [...records], rejects: [], drops: [] });
-          })
-          .catch(() => increment("poll_failures"))
-          .finally(() => {
-            active = false;
-          });
+        void cycle();
       }, p.intervalMs),
     );
+    void cycle();
   }
   return {
     url: "http://127.0.0.1:" + address.port,
@@ -288,7 +329,6 @@ if (import.meta.main) {
     home: metricsHome(process.env),
     identity,
     port: 4318,
-    pollers: [],
   });
   for (const signal of ["SIGTERM", "SIGINT"])
     process.once(signal, () => {
