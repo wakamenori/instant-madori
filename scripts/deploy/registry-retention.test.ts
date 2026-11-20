@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { test } from "node:test";
-import { collectVersions, registryClient, runRetention, selectTags } from "./registry-retention.ts";
+import {
+  collectVersions,
+  registryClient,
+  runRetention,
+  selectTags,
+  workersApi,
+} from "./registry-retention.ts";
 
 const account = "4a67230af28ec94d9c70ca48572d8e9f";
 const repository = "instant-madori-staging-geometrycontainer-geometry";
@@ -497,6 +503,49 @@ for (const name of [
     };
     await assert.rejects(runRetention({ ...f, apply: true, json }));
     assert.deepEqual(f.mutations, []);
+  });
+}
+
+const workersBase = `https://api.cloudflare.com/client/v4/accounts/${account}/workers/scripts/instant-madori-staging`;
+const versionMissing = {
+  success: false,
+  errors: [{ code: 100146, message: "This Worker version does not exist." }],
+};
+function workersFetch(
+  f: ReturnType<typeof fixture>,
+  answers: Record<string, () => Response>,
+): typeof fetch {
+  return async (url, init) => {
+    const request = new Request(url, init);
+    assert.equal(request.headers.get("authorization"), "Bearer token");
+    const path = request.url.replace(workersBase, "");
+    return answers[path]?.() ?? Response.json(await f.json(path));
+  };
+}
+
+for (const [name, answers, kind, mutations] of [
+  ["deletes once every version reads", {}, "ready", ["tag-2", "tag-1", digest(1), "gc"]],
+  [
+    "deletes nothing while a re-run's version answers 404",
+    { [`/versions/${id(11)}`]: () => Response.json(versionMissing, { status: 404 }) },
+    "deferred",
+    [],
+  ],
+] satisfies [string, Record<string, () => Response>, "ready" | "deferred", string[]][]) {
+  await test(`apply through the Workers API ${name}`, async () => {
+    const f = fixture();
+    const plan = await runRetention({
+      ...f,
+      apply: true,
+      json: workersApi("token", workersFetch(f, answers)),
+    });
+    assert.equal(plan.kind, kind);
+    if (kind === "deferred") assert.deepEqual(f.calls, []);
+    assert.deepEqual(f.mutations, mutations);
+    assert.equal(
+      f.logs.some((line) => line.startsWith("::warning") && line.includes(id(11))),
+      mutations.length === 0,
+    );
   });
 }
 
