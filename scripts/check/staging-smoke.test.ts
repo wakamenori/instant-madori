@@ -379,7 +379,7 @@ void test("deployment rejects a missing or blank Client ID before migration and 
         assert.equal(result.stdout, `::add-mask::${value}\n`);
         assert.equal(
           readFileSync(commands, "utf8"),
-          `exec wrangler d1 migrations apply DB --remote --env staging\nexec wrangler deploy --env staging --var ACCESS_VERIFIER_CLIENT_ID:${value}\n`,
+          `exec wrangler d1 migrations apply DB --remote --env staging\nexec node ../../scripts/deploy/wrangler-deploy.ts --env staging --var ACCESS_VERIFIER_CLIENT_ID:${value}\n`,
         );
       } else {
         assert.notEqual(result.status, 0);
