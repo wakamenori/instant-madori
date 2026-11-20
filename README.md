@@ -185,7 +185,7 @@ Miniflareのsharp依存は、LGPLのlibvipsを含むため除外しています�
 
 ## SolidCraftの更新
 
-**upstreamの更新は原則取り込みます。** 住宅サービスへの影響を確認し、問題があれば調整するか、理由を記録して保留します。採用版は[solidcraft.json](third_party/solidcraft.json)、独自変更・更新手順・初回移行の記録は[solidcraft.md](third_party/solidcraft.md)を参照してください。
+**upstreamの更新は原則取り込みます。** 住宅サービスへの影響を確認し、問題があれば調整するか、理由を記録して保留します。採用版は[solidcraft.json](third_party/solidcraft.json)、独自変更・更新手順・初回移行の記録は[solidcraft.md](third_party/solidcraft.md)を参照してください。Containerのイメージのビルドは、取り込み領域のうちビルドが読まないデータを `.dockerignore` で除いて送ります。更新の後に `pnpm check --full` のDockerのビルドが除いたファイルを読めずに失敗したら、`.dockerignore` からそのパスの行を消します。
 
 SolidCraftの元のREADME・資料・ライセンスは取り込み領域に保持しています。[MITライセンス](third_party/solidcraft/LICENSE-MIT)、[Apacheライセンス](third_party/solidcraft/LICENSE-APACHE)、[NOTICE](third_party/solidcraft/NOTICE)、[資産と依存の帰属](third_party/solidcraft/ATTRIBUTION.md)を参照してください。
 

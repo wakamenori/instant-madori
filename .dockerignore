@@ -11,3 +11,17 @@ crates/viewer/pkg
 docs
 # Local development keys (scripts/dev/local-access.ts)
 .local
+# Upstream data, documents and crates that the geometry build never reads (checked against rustc dep-info).
+# If an upstream update makes the build read one of them, the Docker build fails naming the file; delete its line.
+third_party/solidcraft/docs
+third_party/solidcraft/tests
+third_party/solidcraft/vendor
+third_party/solidcraft/assets/fonts
+third_party/solidcraft/assets/locales
+third_party/solidcraft/assets/render/starter/materials/exports
+third_party/solidcraft/crates/ui-egui
+third_party/solidcraft/solidcore/docs
+third_party/solidcraft/solidcore/fixtures
+third_party/solidcraft/solidcore/plan
+third_party/solidcraft/solidcore/crates/goldens
+third_party/solidcraft/solidcore/crates/solidcore/tests
