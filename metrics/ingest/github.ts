@@ -32,9 +32,14 @@ const commentSchema = z.object({
   issue_url: str,
   created_at: str,
 });
+// The coordinator's own wording (占有を、今から始める / 占有を終える / 占有が終わり). "占有が終わってから
+// マージする" defers a merge and must not end an occupancy. Bump commentRulesVersion with any change
+// so the comment poller rereads history under the new rules.
+export const commentRulesVersion = "markers-2";
 const markers = {
-  staging_occupy_end: /占有.{0,12}(?:解除|解放|終了)|(?:解除|解放).{0,12}占有/u,
-  staging_occupy_start: /占有.{0,12}(?:開始|します|開始しました)|(?:開始).{0,12}占有/u,
+  staging_occupy_end:
+    /占有を終え(?:る|た)|占有が終わ(?:り|った|る。)|占有を(?:解除|解放|終了)|占有の(?:終了|解除)/u,
+  staging_occupy_start: /占有を、?\s*(?:今から)?\s*始め|占有が始ま|占有を開始|占有の開始/u,
   verdict_pass: /\bPASS\b/u,
   verdict_fail: /\bFAIL\b/u,
   merged: /マージしました|\bmerged\b/iu,

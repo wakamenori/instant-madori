@@ -39,3 +39,29 @@ void test("pollers retain issue references, notification markers and verifier de
   assert.equal(messageVerdict("検証 #391 @ abcd", "assistant", "PASS"), "PASS");
   assert.equal(messageVerdict("#313 implementation", "assistant", "PASS"), null);
 });
+void test("comment markers follow the coordinator's staging occupancy wording", () => {
+  const markersOf = (body: string) =>
+    commentRecord({
+      id: 1,
+      body,
+      user: { login: "actor" },
+      issue_url: "issues/41",
+      created_at: "2026-11-20T14:10:44Z",
+    }).payload.markers;
+  assert.deepEqual(
+    markersOf("PR #393 をマージした。この Issue の担当の staging の占有を、今から始める。"),
+    ["staging_occupy_start"],
+  );
+  assert.deepEqual(
+    markersOf("担当が staging の確認を終えたので、この Issue の担当の staging の占有を終える"),
+    ["staging_occupy_end"],
+  );
+  assert.deepEqual(
+    markersOf("指揮役：#313 の担当の staging の占有が終わり、終わっていない deploy-staging は無い"),
+    ["staging_occupy_end"],
+  );
+  assert.deepEqual(
+    markersOf("#313 の担当が staging を占有しているので、その占有が終わってからマージする。"),
+    [],
+  );
+});

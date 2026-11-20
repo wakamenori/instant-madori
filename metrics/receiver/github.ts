@@ -6,6 +6,7 @@ import { z } from "zod";
 import {
   blockerSchema,
   commentRecord,
+  commentRulesVersion,
   issueRecord,
   jobRecord,
   prRecord,
@@ -36,7 +37,8 @@ async function authToken(signal: AbortSignal) {
 export function githubPollers(home: string, tokenFor = authToken, request = fetch): Poller[] {
   return (["github.issue", "github.pr", "github.comment", "github.actions.job"] as const).map(
     (name) => {
-      const path = join(home, name + ".cursor.json");
+      const version = name === "github.comment" ? "." + commentRulesVersion : "";
+      const path = join(home, name + version + ".cursor.json");
       let state: z.infer<typeof stateSchema> = { since: first, tags: {} };
       try {
         state = stateSchema.parse(JSON.parse(readFileSync(path, "utf8")));
