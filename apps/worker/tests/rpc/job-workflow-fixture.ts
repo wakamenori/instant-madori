@@ -103,7 +103,7 @@ try {
   if (input.kind === "rows") {
     const rows = await db
       .prepare(
-        "SELECT j.id AS jobId, j.state, j.generation, j.updated_at AS updatedAt FROM jobs j JOIN messages m ON m.id = j.message_id WHERE j.pattern_id = ? ORDER BY m.number",
+        "SELECT j.id AS jobId, j.state, j.generation, j.updated_at AS updatedAt, j.holds_queue AS holdsQueue FROM jobs j JOIN messages m ON m.id = j.message_id WHERE j.pattern_id = ? ORDER BY m.number",
       )
       .bind(input.patternId)
       .all();

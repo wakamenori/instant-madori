@@ -22,6 +22,7 @@ export interface LogFields {
   jobId?: string;
   messageId?: string;
   messageNumber?: number;
+  queue?: "applied" | "replayed";
   stop?: "applied" | "replayed";
   jobState?: "cancelled" | "completed" | "failed";
   acceptance?: "applied" | "replayed";
@@ -47,6 +48,7 @@ export interface LogFields {
     | "not_running"
     | "woken"
     | "error"
+    | "resumed"
     | "queue_held"
     | "idle"
     | "claimed"
@@ -92,6 +94,7 @@ const logKeys = {
   jobId: "string",
   messageId: "string",
   messageNumber: "number",
+  queue: "string",
   stop: "string",
   jobState: "string",
   acceptance: "string",

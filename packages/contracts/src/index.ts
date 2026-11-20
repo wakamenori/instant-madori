@@ -245,6 +245,7 @@ export const patternStateResponseSchema = z.object({
   pattern: patternSchema,
   currentRevision: revisionSchema.nullable(),
   runningJob: acceptedJobSchema.nullable(),
+  queueHold: queueHoldSchema.nullable(),
   queuedJobs: z.array(acceptedJobSchema),
   lastFinishedJob: finishedJobSchema.nullable(),
 });

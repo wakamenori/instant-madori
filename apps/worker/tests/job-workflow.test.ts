@@ -64,6 +64,7 @@ await test(
         jobId: z.uuid(),
         state: z.string(),
         generation: z.int(),
+        holdsQueue: z.literal(0),
         updatedAt: z.iso.datetime(),
       }),
     );
@@ -77,6 +78,7 @@ await test(
           pattern,
           currentRevision: revisions[0],
           runningJob: null,
+          queueHold: null,
           queuedJobs: [],
           lastFinishedJob: { ...a, state: "failed" },
         });
@@ -137,11 +139,27 @@ await test(
           pattern,
           currentRevision: null,
           runningJob: a,
+          queueHold: null,
           queuedJobs: [b],
           lastFinishedJob: null,
         });
         const c = await accept(pattern.id);
-        await settleJobs(worker, owner, pattern.id, [a.jobId, b.jobId, c.jobId]);
+        for (const held of [a, b]) {
+          await worker.logLine(held.jobId, "job.finished");
+          const response = await worker.call(`/api/patterns/${pattern.id}/state`, { as: owner });
+          const state = patternStateResponseSchema.parse(await response.json());
+          assert.deepEqual(state.queueHold, { job: { ...held, state: "failed" } });
+          const resume = await worker.call(`/api/patterns/${pattern.id}/queue/resume`, {
+            method: "POST",
+            as: owner,
+            body: { heldBy: held.jobId, requestId: crypto.randomUUID() },
+          });
+          assert.equal(resume.status, 200);
+        }
+        assert.equal(
+          (await settleJobs(worker, owner, pattern.id, [a.jobId, b.jobId, c.jobId])).queueHold,
+          null,
+        );
         const advanced = await worker.logLine(a.jobId, "pattern.advanced");
         assert.equal(advanced["outcome"], "running");
         assert.equal(advanced["instance"], "created");

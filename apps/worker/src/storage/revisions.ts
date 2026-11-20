@@ -1,14 +1,16 @@
+import { queueHoldSql } from "./job-queue.ts";
 import { activeJobStates, finishedJobStates } from "./job-states.ts";
 import type { OwnerId } from "../owner.ts";
 import { foundSchema, jsonRows, rows } from "./d1.ts";
 import type { D1 } from "./d1.ts";
 import {
   acceptedJobSchema,
+  queueHoldSchema,
   finishedJobSchema,
   patternSchema,
   revisionSchema,
 } from "@madori/contracts";
-import type { AcceptedJob, FinishedJob, Pattern, Revision } from "@madori/contracts";
+import type { AcceptedJob, FinishedJob, QueueHold, Pattern, Revision } from "@madori/contracts";
 import { patternJson } from "./patterns.ts";
 import { snapshotJson, snapshotSchema } from "./snapshots.ts";
 import type { Snapshot } from "./snapshots.ts";
@@ -31,6 +33,7 @@ export interface PatternState {
   currentRevision: Revision | null;
   runningJob: AcceptedJob | null;
   queuedJobs: AcceptedJob[];
+  queueHold: QueueHold | null;
   lastFinishedJob: FinishedJob | null;
 }
 
@@ -57,7 +60,7 @@ export async function getPatternState(
   db: D1,
   scope: { ownerId: OwnerId; patternId: string },
 ): Promise<PatternState | null> {
-  const [patterns, revisions, queuedJobs, runningJobs, finishedJobs] = await db.batch([
+  const [patterns, revisions, queuedJobs, runningJobs, finishedJobs, holds] = await db.batch([
     jsonRows(
       {
         sql: `SELECT ${patternJson("p")} AS json FROM patterns p WHERE p.id = ? AND p.owner_id = ?`,
@@ -90,6 +93,11 @@ export async function getPatternState(
       finishedJobSchema,
       "finished job",
     ),
+    jsonRows(
+      { sql: queueHoldSql, bindings: [scope.patternId, scope.ownerId] },
+      queueHoldSchema,
+      "queue hold",
+    ),
   ]);
   const pattern = patterns[0];
   if (!pattern) return null;
@@ -98,6 +106,7 @@ export async function getPatternState(
     currentRevision: revisions[0] ?? null,
     runningJob: runningJobs[0] ?? null,
     queuedJobs,
+    queueHold: holds[0] ?? null,
     lastFinishedJob: finishedJobs[0] ?? null,
   };
 }

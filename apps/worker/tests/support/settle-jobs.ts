@@ -10,12 +10,23 @@ export async function settleJobs(
   patternId: string,
   jobIds: readonly string[],
   timeoutMs = 30_000,
+  options: { resumeHolds?: boolean } = {},
 ) {
   const deadline = Date.now() + timeoutMs;
   do {
     const response = await worker.call(`/api/patterns/${patternId}/state`, { as });
     assert.equal(response.status, 200);
     const state = patternStateResponseSchema.parse(await response.json());
+    if (state.queueHold) {
+      const heldBy = state.queueHold.job.jobId;
+      assert(options.resumeHolds, `Queue for ${patternId} is held by ${heldBy}`);
+      const resumed = await worker.call(`/api/patterns/${patternId}/queue/resume`, {
+        method: "POST",
+        as,
+        body: { requestId: crypto.randomUUID(), heldBy },
+      });
+      assert.equal(resumed.status, 200);
+    }
     const finished = new Set(
       worker
         .logEntries()
