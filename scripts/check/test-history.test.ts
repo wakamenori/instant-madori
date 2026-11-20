@@ -102,3 +102,11 @@ void test("a main failure with passes only on a different PR commit needs invest
     branches: ["main"],
   });
 });
+void test("report escapes control characters from artifact ids", () => {
+  const report = formatReport(
+    new Map([["typescript: a\nb\u001b[2J", [obs("fail", "pr", 1)]]]),
+    false,
+  );
+  assert.match(report, /a\\nb\\u001b\[2J/u);
+  assert.doesNotMatch(report, /\p{Cc}/u);
+});

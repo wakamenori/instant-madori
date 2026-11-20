@@ -90,7 +90,7 @@ export function formatReport(tests: Map<string, Observation[]>, all: boolean, fi
         b.rate - a.rate ||
         a.id.localeCompare(b.id),
     )
-    .map((r) => r.text)
+    .map((r) => r.text.replace(/\p{Cc}/gu, (c) => JSON.stringify(c).slice(1, -1)))
     .join("\n");
 }
 
