@@ -614,8 +614,10 @@ void test("once-only batches preserve their private protocol on real D1", async 
         await runOnce(db, schema, decoy.batch);
         let iterations = 0;
         class Shifting extends Array<unknown> {
-          override *[Symbol.iterator]() {
-            yield* ++iterations === 1 ? [target.input.id, ownerA] : [decoy.input.id, ownerA];
+          override [Symbol.iterator]() {
+            const values: unknown[] =
+              ++iterations === 1 ? [target.input.id, ownerA] : [decoy.input.id, ownerA];
+            return values.values();
           }
         }
         const request = key();
