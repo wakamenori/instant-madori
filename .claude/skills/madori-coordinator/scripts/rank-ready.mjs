@@ -41,8 +41,8 @@ const chain = (number, seen = new Set()) => {
 const groups = new Map([
   ["段階", []],
   ["開発基盤", []],
-  ["期限なし", []],
   ["milestone なし", []],
+  ["期限なし", []],
 ]);
 const throughput = (issue) => issue.labels.nodes.some((label) => label.name === "スループット");
 const ready = [...issues.values()].filter(
