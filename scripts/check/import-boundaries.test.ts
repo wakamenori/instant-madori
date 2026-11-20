@@ -55,10 +55,16 @@ const scopes = {
   "worker-owner": "apps/worker/src/owner.ts",
   "worker-other": "apps/worker/src/index.ts",
   contracts: "packages/contracts/src/index.ts",
+  "metrics-hook": "metrics/hook/hook.ts",
+  "metrics-l1": "metrics/l1/privacy.ts",
+  "metrics-ingest": "metrics/ingest/otlp.ts",
+  "metrics-receiver": "metrics/receiver/receiver.ts",
+  "metrics-other": "metrics/build/build.ts",
 } satisfies Record<keyof typeof typescriptScopes, string>;
 const importType = (specifier: string, name = "Domain") =>
   `import type { ${name} } from ${JSON.stringify(specifier)};`;
-const importValue = (specifier: string) => `import { value } from ${JSON.stringify(specifier)};`;
+const importValue = (specifier: string, name = "value") =>
+  `import { ${name} } from ${JSON.stringify(specifier)};`;
 const root = mkdtempSync(join(tmpdir(), "madori-import-boundaries-"));
 after(() => rmSync(root, { recursive: true, force: true }));
 function write(path: string, text = "export const value = 1; export type Domain = string;") {
@@ -111,13 +117,14 @@ for (const [path, name] of [
     }),
   );
 }
-write(
-  "scripts/tsconfig.json",
-  JSON.stringify({
-    compilerOptions: { ...options, module: "NodeNext", moduleResolution: "NodeNext" },
-    include: ["**/*.ts"],
-  }),
-);
+for (const path of ["scripts", "metrics"])
+  write(
+    `${path}/tsconfig.json`,
+    JSON.stringify({
+      compilerOptions: { ...options, module: "NodeNext", moduleResolution: "NodeNext" },
+      include: ["**/*.ts"],
+    }),
+  );
 mkdirSync(join(root, "node_modules/@madori"), { recursive: true });
 for (const [name, path] of [
   ["contracts", "packages/contracts"],
@@ -160,6 +167,12 @@ for (const path of [
   "scripts/dev/local-access.ts",
   "scripts/check/check.ts",
   "crates/viewer/pkg/madori_viewer.d.ts",
+  "metrics/home.ts",
+  "metrics/hook/spool.ts",
+  "metrics/l1/envelope.ts",
+  "metrics/l1/store.ts",
+  "metrics/ingest/membership.ts",
+  "metrics/receiver/t3.ts",
 ])
   write(path);
 write(
@@ -293,6 +306,36 @@ const syntaxCases: Record<string, BoundaryCases> = {
       "const Request = { value: 1 }; void Request.value;",
     ],
   },
+  "metrics-hook-packages": {
+    rejected: [
+      'import { z } from "zod";',
+      'import ts from "typescript";',
+      'export { z } from "zod";',
+      'export * from "zod";',
+      'void import("zod");',
+    ],
+    allowed: [
+      'import { readFileSync } from "node:fs";',
+      'import { metricsHome } from "../home.ts";',
+      'import { writeSpoolFile } from "./spool.ts";',
+      'import type { ZodType } from "zod";',
+    ],
+  },
+  "metrics-ingest-io": {
+    rejected: [
+      'import { readFileSync } from "node:fs";',
+      'import { readFile } from "node:fs/promises";',
+      'import { createServer } from "node:http";',
+      'import { DatabaseSync } from "node:sqlite";',
+      'import { execFileSync } from "node:child_process";',
+      'void import("node:fs");',
+    ],
+    allowed: [
+      'import { createHash } from "node:crypto";',
+      'import type { Stats } from "node:fs";',
+      'import { z } from "zod";',
+    ],
+  },
 };
 
 const workerLayerPermissions: Record<
@@ -327,10 +370,29 @@ const importCases: Record<string, string[]> = {
     "packages/contracts/src/generated/geometry-internal.schema.json",
   ],
   "web-viewer-bindings": ["crates/viewer/pkg/madori_viewer.d.ts"],
+  "metrics-service": [
+    "apps/web/src/api.ts",
+    "apps/worker/src/api/app.ts",
+    "packages/contracts/src/index.ts",
+    "scripts/shared/repository.ts",
+  ],
+  "service-metrics": ["metrics/l1/envelope.ts", "metrics/hook/spool.ts"],
+  "metrics-hook-closure": ["metrics/l1/envelope.ts", "metrics/ingest/membership.ts"],
+  "metrics-l1-layers": [
+    "metrics/hook/spool.ts",
+    "metrics/ingest/membership.ts",
+    "metrics/receiver/t3.ts",
+    "metrics/home.ts",
+  ],
+  "metrics-ingest-layers": ["metrics/receiver/t3.ts", "metrics/l1/store.ts"],
+  "metrics-l1-writer": ["metrics/l1/store.ts"],
 };
 const exceptedTargets: Record<string, string> = {
   "web-config-scripts": "scripts/dev/local-access.ts",
+  "metrics-hook-closure": "metrics/home.ts",
 };
+// Rows with importNamePattern need an import of a matching name.
+const importedNames: Record<string, string> = { "metrics-l1-writer": "openL1Writer" };
 for (const [layer, { allowed, typeOnly }] of Object.entries(workerLayerPermissions)) {
   importCases[`worker-${layer}-layers`] = Object.keys(workerLayerPermissions)
     .filter((target) => target !== layer && !allowed.includes(target) && !typeOnly.includes(target))
@@ -369,14 +431,17 @@ for (const row of typescriptBoundaries) {
         for (const target of targets) {
           if (row.id === "production-test-imports") write(target);
           const name = specifier(from, target);
+          const imported = importedNames[row.id];
           const sources: string[] = [
-            row.id === "storage-response" ? importType(name, "ProjectResponse") : importValue(name),
+            row.id === "storage-response"
+              ? importType(name, "ProjectResponse")
+              : importValue(name, imported),
             `void import(${JSON.stringify(name)});`,
             `export * from ${JSON.stringify(name)};`,
             ...(!row.allowTypeImports
               ? [
-                  `type X = import(${JSON.stringify(name)}).ProjectResponse;`,
-                  `export type { ProjectResponse } from ${JSON.stringify(name)};`,
+                  `type X = import(${JSON.stringify(name)}).${imported ?? "ProjectResponse"};`,
+                  `export type { ${imported ?? "ProjectResponse"} } from ${JSON.stringify(name)};`,
                 ]
               : []),
           ];
@@ -390,7 +455,7 @@ for (const row of typescriptBoundaries) {
           const testSource: string =
             row.id === "storage-response"
               ? importType(specifier(testFile, target), "ProjectResponse")
-              : importValue(specifier(testFile, target));
+              : importValue(specifier(testFile, target), imported);
           assert.equal(
             resolved(testSource, testFile).some((diagnostic) => diagnostic.boundaryId === row.id),
             row.appliesToTests === true,
@@ -927,4 +992,14 @@ void test("plan layer table declares every enforced Worker layer", () => {
         ),
       `${layer} layer table row`,
     );
+});
+
+void test("the receiver opens L1 for writing and other metrics areas may name its types", () => {
+  const store = "metrics/l1/store.ts";
+  const receiver = scopes["metrics-receiver"];
+  assert.deepEqual(resolved(importValue(specifier(receiver, store), "openL1Writer"), receiver), []);
+  for (const scope of ["metrics-other", "metrics-ingest"] as const) {
+    const from = scopes[scope];
+    assert.deepEqual(resolved(importType(specifier(from, store), "L1Writer"), from), [], scope);
+  }
 });

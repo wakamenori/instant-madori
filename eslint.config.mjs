@@ -132,6 +132,7 @@ export default defineConfig(
       `apps/**/*.${typescriptExtensions}`,
       `packages/**/*.${typescriptExtensions}`,
       `scripts/**/*.${typescriptExtensions}`,
+      `metrics/**/*.${typescriptExtensions}`,
     ],
     extends: [js.configs.recommended, tseslint.configs.recommendedTypeChecked],
     languageOptions: {
@@ -156,6 +157,12 @@ export default defineConfig(
   {
     files: [`apps/worker/**/*.${typescriptExtensions}`],
     languageOptions: { globals: { self: "readonly" } },
+  },
+  {
+    // The hook runs inside every agent session, and what it prints reaches the session.
+    files: [`metrics/hook/**/*.${typescriptExtensions}`],
+    ignores: boundaryTestIgnores,
+    rules: { "no-console": "error" },
   },
   ...boundaryConfigs,
   prettier,

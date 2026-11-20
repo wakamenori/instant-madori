@@ -14,9 +14,11 @@
         "scripts/check/smoke.ts",
         "scripts/check/staging-smoke.ts",
         "scripts/check/r2-create-only/worker.ts",
-        "scripts/deploy/registry-retention.ts"
+        "scripts/deploy/registry-retention.ts",
+        "metrics/hook/hook.ts",
+        "metrics/receiver/receiver.ts"
       ],
-      "project": ["scripts/**/*.ts", "*.mjs"]
+      "project": ["scripts/**/*.ts", "metrics/**/*.ts", "*.mjs"]
     },
     "apps/web": {
       "project": ["src/**/*.{ts,tsx}"]
