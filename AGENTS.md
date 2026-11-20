@@ -4,7 +4,7 @@
 
 ## 進め方
 
-作業の進め方、設計、レビュー、コミットとPRの書き方は、pstackの poteto-mode に従う。タスクの最初に `/pstack:poteto-mode` を起動し、起動できなければ pstack プラグインの `skills/poteto-mode/SKILL.md` を読んで従う。モデルの割り当ては、[.claude/rules/pstack-models.md](.claude/rules/pstack-models.md) に従う。計画のmilestoneとIssueを進めるときは、指揮役は `/madori-coordinator`、Issueの担当は `/madori-owner` を使う。アプリの振る舞いは `/verify-madori` で確かめる。このファイルには、このリポジトリ固有の構成・検査・安全の決まりだけを書く。
+作業の進め方、設計、レビュー、コミットとPRの書き方は、pstackの poteto-mode に従う。poteto-mode は Skill ツールでは起動できないので、タスクの最初に、Claude Code が入れた pstack プラグインの `skills/poteto-mode/SKILL.md` を読んで従う。その探し方は [madori-owner](.claude/skills/madori-owner/SKILL.md) の冒頭にある。モデルの割り当ては、[.claude/rules/pstack-models.md](.claude/rules/pstack-models.md) に従う。計画のmilestoneとIssueを進めるときは、指揮役は `/madori-coordinator`、Issueの担当は `/madori-owner` を使う。アプリの振る舞いは `/verify-madori` で確かめる。このファイルには、このリポジトリ固有の構成・検査・安全の決まりだけを書く。
 
 - ユーザーの作業を失わない。リポジトリを変更する前にGitの作業状態と履歴を確認し、関係のない変更を巻き戻さない。
 - プロダクトの文書と議論は日本語でよい。コードの識別子とコメントは英語で書く。
