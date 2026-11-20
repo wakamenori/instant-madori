@@ -212,6 +212,31 @@ export const acceptInstructionResponseSchema = z.object({ job: acceptedJobSchema
 
 export type AcceptInstructionResponse = z.infer<typeof acceptInstructionResponseSchema>;
 
+/** The job whose stop or failure holds its pattern's queue (plan 2.4). Widen with limited (5.2) and awaiting_answer (6.2). */
+export const holdingJobSchema = acceptedJobSchema.extend({
+  state: z.enum(["cancelled", "failed"]),
+});
+export type HoldingJob = z.infer<typeof holdingJobSchema>;
+/** Present while the queue is held. Every job in `queuedJobs` waits for resume or cancel. */
+export const queueHoldSchema = z.object({ job: holdingJobSchema });
+export type QueueHold = z.infer<typeof queueHoldSchema>;
+
+/**
+ * Body of POST /api/patterns/:id/queue/resume and .../cancel. `heldBy` is `queueHold.job.jobId`
+ * from the state the client saw. The request applies only while that job still holds the queue.
+ */
+export const releaseQueueRequestSchema = z.strictObject({
+  requestId: requestIdSchema,
+  heldBy: z.uuid().transform((id) => id.toLowerCase()),
+});
+export type ReleaseQueueRequest = z.infer<typeof releaseQueueRequestSchema>;
+/** The instructions that were waiting when the hold was released, in number order. */
+export const resumeQueueResponseSchema = z.object({ jobs: z.array(acceptedJobSchema) });
+export type ResumeQueueResponse = z.infer<typeof resumeQueueResponseSchema>;
+/** Every instruction this request cancelled, in number order. */
+export const cancelQueueResponseSchema = z.object({ jobs: z.array(cancelledJobSchema) });
+export type CancelQueueResponse = z.infer<typeof cancelQueueResponseSchema>;
+
 export const patternStateQuerySchema = z.strictObject({});
 
 export type PatternStateQuery = z.infer<typeof patternStateQuerySchema>;
