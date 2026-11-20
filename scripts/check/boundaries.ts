@@ -462,10 +462,10 @@ export const rustBoundaries: RustBoundary[] = [
     id: "housing-dependencies",
     crate: "madori-housing",
     kind: "direct",
-    allowedDirectDeps: [],
+    allowedDirectDeps: ["schemars", "serde", "serde_json"],
     reason:
-      "AGENTS.md 構成と境界; docs/plan.md §4.2 housing is independent of HTTP, browser, Cloudflare and CAD",
-    message: "Housing dependencies need an explicit pure-domain allowlist entry.",
+      "AGENTS.md 構成と境界; docs/plan.md §3.1 and §4.2 housing uses serialization and schema dependencies only",
+    message: "Housing may depend only on schemars, serde and serde_json.",
   },
   {
     id: "viewer-solidcraft",

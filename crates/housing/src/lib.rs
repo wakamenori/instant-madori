@@ -1,2 +1,14 @@
-//! Housing data and consistency rules, independent of CAD, HTTP, and rendering.
-//! The domain implementation starts in plan section 6.2.
+//! A house stores each wall on its boundary. Rooms reference those boundaries in
+//! counterclockwise order. Coordinates, elevations, and lengths are millimetres.
+mod data;
+mod error;
+mod house;
+mod id;
+mod json;
+mod topology;
+
+pub use data::*;
+pub use error::*;
+pub use house::{BoundaryView, EdgeView, Face, House, RoomView, VertexView};
+pub use id::{BoundaryId, OpeningId, RoomId, StoreyId, VertexId};
+pub use json::{ReadError, WriteError};
