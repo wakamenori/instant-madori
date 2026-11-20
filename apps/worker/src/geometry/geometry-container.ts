@@ -29,12 +29,16 @@ export class GeometryContainer extends DurableObject<Env> implements GeometryApi
           return container.images;
         },
         start: (options) => container.start(options),
-        monitor: () => container.monitor(),
         destroy: (reason) => container.destroy(reason),
         setInactivityTimeout: (ms) => container.setInactivityTimeout(ms),
         fetchPort: (request) => container.getTcpPort(protocol.port).fetch(request),
       },
       {
+        readStopRetry: () => ctx.storage.kv.get("stopRetryMs"),
+        writeStopRetry: (ms) => ctx.storage.kv.put("stopRetryMs", ms),
+        clearStopRetry: () => {
+          ctx.storage.kv.delete("stopRetryMs");
+        },
         readActivity: () => ctx.storage.kv.get("lastActivityAt"),
         writeActivity: (at) => ctx.storage.kv.put("lastActivityAt", at),
         clearActivity: () => {
@@ -70,6 +74,14 @@ export class GeometryContainer extends DurableObject<Env> implements GeometryApi
       {
         now: () => Date.now(),
         sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+        deadline: (ms) => {
+          const controller = new AbortController();
+          const timer = setTimeout(
+            () => controller.abort(new DOMException("Deadline exceeded", "TimeoutError")),
+            ms,
+          );
+          return { signal: controller.signal, clear: () => clearTimeout(timer) };
+        },
         newToken: () => {
           const bytes = crypto.getRandomValues(new Uint8Array(32));
           return btoa(String.fromCharCode(...bytes))

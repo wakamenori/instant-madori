@@ -1,8 +1,10 @@
 import { z } from "zod";
-import type { LogFields } from "../log.ts";
+import { describeError, type LogFields } from "../log.ts";
 // A fresh DO needs this margin so its idle alarm runs before the runtime stops its Container.
 export const containerInactivityMarginMs = 60_000;
 type InstanceType = "lite" | "standard-1" | "standard-2" | "standard-3" | "standard-4";
+// No monitor(): a pending one keeps the DO invocation open until the Container exits.
+// The runtime updates `running` without holding the invocation.
 export interface ContainerHandle {
   readonly running: boolean;
   readonly images: Readonly<Record<string, string>>;
@@ -12,7 +14,6 @@ export interface ContainerHandle {
     env: Record<string, string>;
     instance: InstanceType;
   }): void;
-  monitor(): Promise<void>;
   destroy(reason: string): Promise<void>;
   setInactivityTimeout(ms: number): Promise<void>;
   fetchPort(request: Request): Promise<Response>;
@@ -26,6 +27,9 @@ export interface GatewayStore {
   read(): unknown;
   write(record: StartRecord): void;
   clear(): void;
+  readStopRetry(): unknown;
+  writeStopRetry(ms: number): void;
+  clearStopRetry(): void;
   readActivity(): unknown;
   writeActivity(at: number): void;
   clearActivity(): void;
@@ -47,9 +51,15 @@ export interface GatewaySettings {
     intervalMs: number;
   };
 }
+export interface Deadline {
+  readonly signal: AbortSignal;
+  clear(): void;
+}
 export interface GatewayEnvironment {
   now(): number;
   sleep(ms: number): Promise<void>;
+  // Each pending runtime timer keeps a DO invocation open until it fires or is cleared.
+  deadline(ms: number): Deadline;
   newToken(): string;
   log(event: string, fields: LogFields, level?: "info" | "error"): void;
 }
@@ -72,7 +82,7 @@ export type UnavailableReason =
 type Unavailable = { kind: "unavailable"; reason: UnavailableReason };
 export type GatewayResult =
   { kind: "response"; response: Response; start: "cold" | "warm"; ms: number } | Unavailable;
-type Ready = { kind: "ready"; record: StartRecord; generation: number };
+type Ready = { kind: "ready"; record: StartRecord; generation: number; start: "cold" | "warm" };
 
 const startRecordSchema = z.object({
   token: z.string().min(1),
@@ -86,7 +96,6 @@ export class ContainerGateway {
   #generation = 0;
   #resetting: Promise<void> | null = null;
   #active = 0;
-  #stopRetryMs = 1_000;
   private readonly container: ContainerHandle | undefined;
   private readonly store: GatewayStore;
   private readonly settings: GatewaySettings;
@@ -112,19 +121,34 @@ export class ContainerGateway {
     );
     await this.store.setAlarm(this.#activity() + this.settings.idleTimeoutMs);
   }
+  /** The operation awaits every send it starts and consumes or cancels each response body. */
   async run<T>(
     operation: (send: (request: GatewayRequest) => Promise<GatewayResult>) => Promise<T>,
   ): Promise<T> {
+    const deadlines: Deadline[] = [];
     ++this.#active;
     try {
       while (this.#resetting) await this.#resetting;
       if (this.container) await this.#touch();
-      return await operation((request) => this.#send(request));
+      return await operation((request) => this.#send(request, deadlines));
     } finally {
+      for (const deadline of deadlines) deadline.clear();
       while (this.#resetting) await this.#resetting;
       --this.#active;
-      if (this.container?.running) await this.#touch();
-      else if (this.#active === 0) await this.#forget();
+      if (this.container?.running) {
+        try {
+          await this.container.setInactivityTimeout(
+            this.settings.idleTimeoutMs + containerInactivityMarginMs,
+          );
+        } catch (error) {
+          this.environment.log(
+            "container.inactivity_failed",
+            { error: describeError(error) },
+            "error",
+          );
+        }
+        await this.#touch();
+      } else if (this.#active === 0) await this.#forget();
     }
   }
   async alarm(): Promise<void> {
@@ -155,12 +179,18 @@ export class ContainerGateway {
         await container.destroy("idle timeout");
       } catch {
         this.environment.log("container.destroy_failed", { reason: "idle_timeout" }, "error");
-        await this.store.setAlarm(this.environment.now() + this.#stopRetryMs);
-        this.#stopRetryMs = Math.min(this.#stopRetryMs * 2, this.settings.idleTimeoutMs);
+        const retry = z
+          .number()
+          .finite()
+          .positive()
+          .max(this.settings.idleTimeoutMs)
+          .safeParse(this.store.readStopRetry());
+        const delay = retry.success ? retry.data : 1_000;
+        await this.store.setAlarm(this.environment.now() + delay);
+        this.store.writeStopRetry(Math.min(delay * 2, this.settings.idleTimeoutMs));
         return;
       }
       await this.#forget();
-      this.#stopRetryMs = 1_000;
       this.environment.log("container.idle_stopped", {
         ms: this.environment.now() - lastActivityAt,
       });
@@ -180,20 +210,20 @@ export class ContainerGateway {
   async #touch(): Promise<void> {
     const now = this.environment.now();
     this.store.writeActivity(now);
-    this.#stopRetryMs = 1_000;
+    this.store.clearStopRetry();
     await this.store.setAlarm(now + this.settings.idleTimeoutMs);
   }
   async #forget(): Promise<void> {
     this.#ready = null;
     this.store.clear();
     this.store.clearActivity();
+    this.store.clearStopRetry();
     await this.store.deleteAlarm();
   }
-  async #send(request: GatewayRequest): Promise<GatewayResult> {
+  async #send(request: GatewayRequest, deadlines: Deadline[]): Promise<GatewayResult> {
     const container = this.container;
     if (!container) return { kind: "unavailable", reason: "containers_disabled" };
     const started = this.environment.now();
-    const start = this.#ready && container.running ? "warm" : "cold";
     const ready = await this.#ensure(container, request.traceId);
     if (ready.kind === "unavailable") return ready;
     try {
@@ -201,11 +231,13 @@ export class ContainerGateway {
       headers.set(this.settings.authorizationHeader, `Bearer ${ready.record.token}`);
       headers.set(this.settings.traceHeader, request.traceId);
       if (request.contentType) headers.set("content-type", request.contentType);
+      const deadline = this.environment.deadline(request.timeoutMs);
+      deadlines.push(deadline);
       const response = await container.fetchPort(
         new Request(`http://container${request.path}`, {
           method: request.method,
           headers,
-          signal: AbortSignal.timeout(request.timeoutMs),
+          signal: deadline.signal,
           ...(request.body === undefined ? {} : { body: request.body }),
         }),
       );
@@ -214,7 +246,12 @@ export class ContainerGateway {
         await this.#reset(container, ready.generation, "token_rejected", request.traceId);
         return { kind: "unavailable", reason: "token_rejected" };
       }
-      return { kind: "response", response, start, ms: this.environment.now() - started };
+      return {
+        kind: "response",
+        response,
+        start: ready.start,
+        ms: this.environment.now() - started,
+      };
     } catch {
       if (ready.generation === this.#generation) {
         this.#ready = null;
@@ -227,7 +264,7 @@ export class ContainerGateway {
     while (this.#resetting) await this.#resetting;
     if (this.#starting) return this.#starting;
     if (!container.running) this.#ready = null;
-    if (this.#ready) return this.#ready;
+    if (this.#ready) return { ...this.#ready, start: "warm" };
     const starting = this.#prepare(container, traceId);
     this.#starting = starting;
     try {
@@ -307,57 +344,40 @@ export class ContainerGateway {
       await this.#reset(container, generation, "start_failed", traceId);
       return { kind: "unavailable", reason: "start_failed" };
     }
-    const monitoredToken = record.token;
-    let exited = false;
-    const exit = container
-      .monitor()
-      .then(
-        () => undefined,
-        () => undefined,
-      )
-      .then(() => {
-        exited = true;
-        if (
-          this.#generation === generation &&
-          startRecordSchema.safeParse(this.store.read()).data?.token === monitoredToken
-        ) {
-          this.store.clear();
-          this.#ready = null;
-        }
-        this.environment.log("container.exited", { traceId });
-        return "exited" as const;
-      });
-    const probe = async (): Promise<"ready" | "protocol_mismatch" | "not_ready"> => {
+    const probe = async (): Promise<"ready" | "exited" | "protocol_mismatch" | "not_ready"> => {
       const policy = this.settings.readiness;
-      while (this.environment.now() - started < policy.deadlineMs && !exited) {
+      while (container.running) {
+        if (this.environment.now() - started >= policy.deadlineMs) return "not_ready";
+        const deadline = this.environment.deadline(policy.probeTimeoutMs);
         try {
           const response = await container.fetchPort(
-            new Request(`http://container${policy.path}`, {
-              signal: AbortSignal.timeout(policy.probeTimeoutMs),
-            }),
+            new Request(`http://container${policy.path}`, { signal: deadline.signal }),
           );
           if (response.ok) {
-            return (await policy.acceptHealth(response)) ? "ready" : "protocol_mismatch";
+            const healthy = await policy.acceptHealth(response);
+            if (!container.running) return "exited";
+            return healthy ? "ready" : "protocol_mismatch";
           }
           await response.body?.cancel();
         } catch {
           /* The process may not have bound its port yet. */
+        } finally {
+          deadline.clear();
         }
-        if (!exited) await this.environment.sleep(policy.intervalMs);
+        if (container.running) await this.environment.sleep(policy.intervalMs);
       }
-      return "not_ready";
+      return "exited";
     };
-    const outcome = await Promise.race([exit, probe()]);
-    if (outcome !== "ready" || exited) {
-      const reason = exited ? "exited" : outcome === "ready" ? "exited" : outcome;
-      await this.#reset(container, generation, reason, traceId);
-      return { kind: "unavailable", reason };
+    const outcome = await probe();
+    if (outcome !== "ready") {
+      await this.#reset(container, generation, outcome, traceId);
+      return { kind: "unavailable", reason: outcome };
     }
     this.environment.log("container.ready", {
       traceId,
       mode,
       ms: this.environment.now() - started,
     });
-    return { kind: "ready", record, generation };
+    return { kind: "ready", record, generation, start: mode === "cold" ? "cold" : "warm" };
   }
 }
