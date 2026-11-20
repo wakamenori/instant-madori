@@ -25,6 +25,8 @@ mise exec -- pnpm dev
 
 `git worktree add` で作った別のworktreeでは、`pnpm setup` が最初に、メインのチェックアウトの `target/` と `.tools/` をcopy-on-write（macOSはAPFSのclonefile、Linuxはreflink）で複製します。複製した後、自作のRustのクレート（workspaceのクレートと、path依存のSolidCraftのクレート）のソースの更新時刻を進めます。Cargoはpath依存のクレートが新しいかどうかをソースの更新時刻だけで判断し、クレートを見分けるハッシュもworkspaceからの相対パスで作るので、このままでは別のチェックアウトがコンパイルしたクレートを再利用してしまうためです。外部のクレートは複製をそのまま使い、自作のクレートだけをそのworktreeでビルドし直します。worktreeごとに `target/` を持つので、複数のworktreeで同時にCargoを使えます。`target/` がシンボリックリンクなら、リンクだけを外して複製に置き換えます。`target/` のディレクトリがすでにあれば、何もしません。空の `target/` を作っておくと、複製せずに最初からビルドします。複製元と別のファイルシステムにあるworktreeでは、全体のコピーになるので止まります。Gitのフックは全worktreeで共有なので、メインのチェックアウトでだけ登録します。
 
+手元の単発の値（2026-11-20）では、26 GB・約1.9万ファイルの `target/` の複製は5〜9秒で終わり、ディスクの空きはほとんど変わりませんでした。複製の後の `pnpm setup` は312秒で、自作の11のクレートだけをWasmのreleaseでビルドし直し、外部のクレートはビルドしませんでした。続く `pnpm check` は536秒でした。この二つの時間は、別のworktreeで検証が動いていた間に測ったので、ほかの負荷の分だけ伸びている可能性があります。worktreeごとに増えるディスクは、複製の後に書かれたファイルの合計で、`pnpm setup` の後で0.60 GB、`pnpm check` の後で3.94 GBでした。worktreeを消すと戻ります。メインのチェックアウトの `target/` が古くなるほど、複製と共有できる部分が減り、外部のクレートもworktreeごとにビルドし直すことになります。
+
 `pnpm dev`は、ローカルのD1へマイグレーションを適用してから次のプロセスを起動し、Ctrl-Cでまとめて終了します。ContainerとプロキシはWranglerが終了時に削除します。終了処理の失敗は報告し、起動・実行結果と終了コードを維持します。
 
 Containerを使うローカルセッション（実Containerテスト、別worktreeやself-hosted runnerでの `pnpm check --full`）は同時に起動できます。Miniflareがセッションごとに異なるIDをContainerの名前（`workerd-<ID>-instant-madori-GeometryContainer-...`）に付けるためです。`pnpm dev` だけは8787番と5173番のポートを固定しているので、同時に一つしか起動できません。クラッシュしたセッションのContainerは残ることがあります。`docker ps -a --format '{{.ID}} {{.Names}}'` で `workerd-` で始まる名前を確かめ、動いているセッションがないときに `docker rm --force <ID>...` で削除します。
