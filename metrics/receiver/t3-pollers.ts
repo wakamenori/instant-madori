@@ -2,7 +2,7 @@ import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
-import { candidate, messageVerdict, threadTitle } from "../ingest/polled.ts";
+import { t3Record } from "../ingest/polled.ts";
 import type { Poller } from "./poller.ts";
 
 const threads = "orchestration_v2_projection_threads";
@@ -45,7 +45,6 @@ const queries = {
       "r.thread_id,r.child_thread_id,r.provider,r.origin,r.status,r.started_at,r.completed_at",
   },
 } as const;
-const scalarRow = z.record(z.string(), z.union([z.string(), z.number(), z.null()]));
 export function t3Pollers(file: string, root: string, home: string): Poller[] {
   return (Object.keys(queries) as (keyof typeof queries)[]).map((name) => {
     const query = queries[name];
@@ -73,31 +72,7 @@ export function t3Pollers(file: string, root: string, home: string): Poller[] {
           return db
             .prepare(sql)
             .all(root, since)
-            .map((raw) => {
-              const { id, title, prs, head, ...fields } = scalarRow.parse(raw);
-              const extras =
-                name === "t3.thread"
-                  ? {
-                      ...threadTitle(String(title)),
-                      project_match: true,
-                      pr_numbers: z.array(z.number()).parse(JSON.parse(String(prs))),
-                    }
-                  : name === "t3.message"
-                    ? {
-                        verdict: messageVerdict(
-                          String(title),
-                          String(fields.role),
-                          String(head ?? ""),
-                        ),
-                      }
-                    : {};
-              return candidate(
-                name,
-                String(id),
-                String(fields.created_at ?? fields.requested_at ?? fields.started_at ?? "") || null,
-                { ...fields, ...extras },
-              );
-            });
+            .map((raw) => t3Record(name, raw));
         } finally {
           db.close();
         }

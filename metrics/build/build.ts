@@ -12,7 +12,7 @@ try {
   const uri = pathToFileURL(home.database);
   uri.searchParams.set("mode", "ro");
   db.prepare("ATTACH ? AS raw").run(uri.href);
-  db.exec("PRAGMA journal_mode=WAL; BEGIN");
+  db.exec("PRAGMA main.journal_mode=WAL; BEGIN");
   const quote = (name: string) => '"' + name.replaceAll('"', '""') + '"';
   for (const row of db
     .prepare(
