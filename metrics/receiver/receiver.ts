@@ -322,6 +322,8 @@ export async function startReceiver(options: Options) {
   };
 }
 if (import.meta.main) {
+  // L1, the derived database, and the dashboard hold this repository's activity; keep them owner-only.
+  process.umask(0o077);
   const identity = execFileSync(
     "git",
     ["-C", import.meta.dirname, "rev-parse", "--path-format=absolute", "--git-common-dir"],

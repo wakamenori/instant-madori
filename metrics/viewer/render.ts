@@ -329,6 +329,10 @@ function mergeWait(d: DashboardData) {
     axis: ["0分", format(max) + "分"],
     headers: ["推定理由", "待ち時間の合計（分）"],
     rows: entries.map(([key, v]) => [reasons.get(key) ?? key, v]),
+    note:
+      `PASSからマージまでを測れたのは、マージ済み${d.mart_merge_wait.length}件のうち` +
+      `${d.mart_merge_wait.filter((r) => r.minutes !== null).length}件。` +
+      "待ちの区間の一部でも占有やデプロイと重なれば、その区間全体をその理由に数える。",
   });
 }
 function wip(d: DashboardData) {

@@ -114,3 +114,21 @@ void test("issue drill-down preserves span times and wait grouping", () => {
   assert.ok(html.includes("検証役 2026-11-20 15:00 〜 2026-11-20 17:00"));
   assert.ok(html.includes("&lt;section&gt;活動"));
 });
+void test("merge waits state how many merged PRs had a measurable wait", () => {
+  const merged = "2026-11-20T16:31:44Z";
+  const html = renderDashboard({
+    ...empty,
+    mart_merge_wait: [
+      {
+        pr: 409,
+        last_pass: "2026-11-20T15:14:27Z",
+        merged,
+        minutes: 77.3,
+        reason: "staging_occupied",
+      },
+      { pr: 372, last_pass: null, merged, minutes: null, reason: "none" },
+    ],
+  });
+  assert.ok(html.includes("マージ済み2件のうち1件"));
+  assert.ok(html.includes("staging占有 77.3分"));
+});
