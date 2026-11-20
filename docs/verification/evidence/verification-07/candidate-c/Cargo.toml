@@ -1,0 +1,13 @@
+[package]
+name = "candidate-c"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+madori-modeling.workspace = true
+madori-display.workspace = true
+solidcraft-doc.workspace = true
+solidcraft-engine.workspace = true
+serde.workspace = true
+serde_json.workspace = true

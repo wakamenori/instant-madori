@@ -1,0 +1,173 @@
+{
+  "appearance": [
+    {
+      "color": "#366fa8",
+      "side": "r1",
+      "wall": "v1-lower"
+    },
+    {
+      "color": "#329966",
+      "side": "r2",
+      "wall": "v1-lower"
+    },
+    {
+      "color": "#cd7853",
+      "side": "outside",
+      "wall": "south"
+    }
+  ],
+  "doors": [
+    {
+      "along": [
+        1000,
+        1900
+      ],
+      "wall": "v1-lower",
+      "z": [
+        0,
+        2050
+      ]
+    },
+    {
+      "along": [
+        5000,
+        5900
+      ],
+      "wall": "v1-upper",
+      "z": [
+        0,
+        2050
+      ]
+    },
+    {
+      "along": [
+        1000,
+        1900
+      ],
+      "wall": "v2-lower",
+      "z": [
+        0,
+        2050
+      ]
+    },
+    {
+      "along": [
+        5000,
+        5900
+      ],
+      "wall": "v2-upper",
+      "z": [
+        0,
+        2050
+      ]
+    },
+    {
+      "along": [
+        1600,
+        2500
+      ],
+      "wall": "spine",
+      "z": [
+        0,
+        2050
+      ]
+    }
+  ],
+  "exteriorThickness": 200,
+  "height": 2400,
+  "horizontalSplit": 4000,
+  "interiorThickness": 120,
+  "rooms": [
+    {
+      "cell": [
+        0,
+        0
+      ],
+      "id": "r1",
+      "use": "LDK"
+    },
+    {
+      "cell": [
+        1,
+        0
+      ],
+      "id": "r2",
+      "use": "bedroom"
+    },
+    {
+      "cell": [
+        2,
+        0
+      ],
+      "id": "r3",
+      "use": "bedroom"
+    },
+    {
+      "cell": [
+        0,
+        1
+      ],
+      "id": "r4",
+      "use": "entry"
+    },
+    {
+      "cell": [
+        1,
+        1
+      ],
+      "id": "r5",
+      "use": "washroom"
+    },
+    {
+      "cell": [
+        2,
+        1
+      ],
+      "id": "r6",
+      "use": "study"
+    }
+  ],
+  "secondSplit": 8000,
+  "size": [
+    12000,
+    8000
+  ],
+  "splitAfter": 4500,
+  "splitBefore": 4000,
+  "units": "mm",
+  "windows": [
+    {
+      "along": [
+        1200,
+        2400
+      ],
+      "wall": "south",
+      "z": [
+        900,
+        2000
+      ]
+    },
+    {
+      "along": [
+        9000,
+        10200
+      ],
+      "wall": "north",
+      "z": [
+        900,
+        2000
+      ]
+    },
+    {
+      "along": [
+        2000,
+        3200
+      ],
+      "wall": "east",
+      "z": [
+        900,
+        2000
+      ]
+    }
+  ]
+}

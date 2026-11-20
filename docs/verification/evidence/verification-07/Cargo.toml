@@ -1,0 +1,22 @@
+[workspace]
+resolver = "3"
+members = ["candidate-a", "candidate-b", "candidate-c"]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace.dependencies]
+madori-modeling = { path = "../../../../crates/modeling" }
+madori-display = { path = "../../../../crates/display" }
+solidcraft-doc = { path = "../../../../third_party/solidcraft/crates/doc" }
+solidcraft-engine = { path = "../../../../third_party/solidcraft/crates/engine" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+
+[profile.dev]
+debug = 0
+
+[profile.dev.package."*"]
+opt-level = 2

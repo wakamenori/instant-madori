@@ -1,0 +1,34 @@
+warning: unused variable: `users`
+   --> candidate-a/src/main.rs:796:17
+    |
+796 |             let users: Vec<String> = h
+    |                 ^^^^^ help: if this is intentional, prefix it with an underscore: `_users`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+base: 85 cmds, 102.0 ms, problems []
+S1.1 pass=true 92ms 2478B :: v1-lower lost 232570351 mm3 (arch 232570351); jambs at y=2500/3400 near x=4000: true :: []
+S1.2 pass=true 85ms 2478B :: jambs at y=2500/3400 near x=4500: true; r1 16.6656 r2 12.9792 :: []
+S1.3 pass=true 60ms 1818B :: v1-lower, d1, arch gone: true; merged r7 30.1056 m2 :: []
+S2.1 pass=true 72ms 2402B :: 1 sloped face(s) on north, all on z=1800+0.3*(12000-x): true :: []
+S2.2 pass=true 72ms 2402B :: 1 sloped face(s) on north, all on z=1800+0.3*(12600-x): true; r3 17.0496 r6 17.0496 :: []
+S3.1 pass=true 67ms 2187B :: blue on x=3940 -X faces only: true; 1 face piece(s), area 7371000.0 (want 7371000); r2 side keeps #329966 on 7371000.000000001 (want 7371000): true :: []
+S3.2 pass=true 65ms 2187B :: blue on x=4440 -X faces only: true; 1 face piece(s), area 7371000.0 (want 7371000); r2 side keeps #329966 on 7371000.000000001 (want 7371000): true :: []
+S3.3 pass=true 72ms 2281B :: blue on x=4440 -X faces only: true; 1 face piece(s), area 5525999.999999999 (want 5526000); r2 side keeps #329966 on 5526000 (want 5526000): true :: []
+S3.4 pass=true 86ms 2516B :: blue on x=4440 -X faces only: true; 4 face piece(s), area 5464800.0 (want 5464800); r2 side keeps #329966 on 5526000 (want 5526000): true :: []
+S4.1 pass=true 77ms 2283B :: stair volume 3510000000 want 3510000000; bbox min x 300 :: []
+S4.2 pass=true 342ms 2477B :: stair volume 3519720000 want 3519720000 (12 nosings); bbox min x 300 want 300, min y 4270 want 4270 :: []
+S4.3 pass=true 339ms 2477B :: stair volume 3519720000 want 3519720000 (12 nosings); bbox min x 900 want 900, min y 4270 want 4270 :: []
+S5.1 pass=true 119ms 3282B :: chair bbox min x 1500, room Some("r1"), volume 18878342.91748853 :: []
+S5.2 pass=true 148ms 4322B :: shelf bbox min x 3640 want 3640; chair unchanged: true :: []
+S5.3 pass=true 145ms 4322B :: shelf bbox min x 4140 want 4140; chair unchanged: true :: []
+S5.4 pass=true 140ms 3953B :: v1-lower, d1, arch gone: true; merged r7 30.1056 m2; chair unchanged volume+bbox: true; chair room now Some(String("r7")) :: []
+N.1 pass=true :: ["room r1: housing area 14745600 vs 3D section 14733600", "room r2: housing area 14899200 vs 3D section 14887200"]
+N.2 pass=true :: ["modifier miss1 changed nothing on v1-lower"]
+N.3 pass=true :: ["unmapped body v1-lower (1)"]
+N.4 pass=true :: ["invariant: wall v1-lower: wall v1-lower has a free end at node s1"]
+N.5 pass=true :: ["operation rejected: south has rooms [\"r1\", \"r2\", \"r3\"] on L and [] on R; only a wall with exactly one room on each side can be deleted"]
+N.6 pass=true :: ["operation rejected: object bad1: boolean solid.box needs explicit own targets"]
+N.7 pass=true :: ["operation rejected: object bad2: target must start with bad2."]
+N.8 pass=true :: ["operation rejected: room r3 is not bounded by v1-lower"]
+D determinism doc=true display=true
