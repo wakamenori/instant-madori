@@ -46,6 +46,7 @@ void test(
     });
     const bootMs = performance.now() - started;
     try {
+      const preexistingIds = new Set((await runningContainers()).map(({ id }) => id));
       const viewer = await import("../../../crates/viewer/pkg/madori_viewer.js");
       await viewer.default({
         module_or_path: await readFile(
@@ -356,6 +357,55 @@ void test(
         assert.deepEqual(after.currentRevision, revision);
         assert.deepEqual(after.lastFinishedJob, expected);
       });
+      await t.test(
+        "a Container killed outside the gateway is replaced by the next job",
+        async () => {
+          const created = await worker.call("/api/projects", {
+            method: "POST",
+            as: user,
+            body: { requestId: crypto.randomUUID() },
+          });
+          assert.equal(created.status, 201);
+          const { pattern: ownPattern } = createProjectResponseSchema.parse(await created.json());
+          const image = worker.logEntries().find((e) => e["event"] === "container.started")?.[
+            "image"
+          ];
+          assert.equal(typeof image, "string");
+          const sessionContainers = async () =>
+            (await runningContainers()).filter((container) => container.image === image);
+          const before = new Set((await sessionContainers()).map(({ id }) => id));
+          async function runJob() {
+            const accepted = await worker.call(`/api/patterns/${ownPattern.id}/messages`, {
+              method: "POST",
+              as: user,
+              body: { requestId: crypto.randomUUID(), body: "次の案を作って" },
+            });
+            assert.equal(accepted.status, 202);
+            const { job } = acceptInstructionResponseSchema.parse(await accepted.json());
+            await settleJobs(worker, user, ownPattern.id, [job.jobId], 300_000);
+            const started = await worker.logLine(job.jobId, "container.started");
+            assert.equal(started["image"], image);
+            assert.equal((await worker.logLine(job.jobId, "job.finished"))["outcome"], "committed");
+            return job;
+          }
+          const first = await runJob();
+          await worker.logLine(first.jobId, "container.ready");
+          const added = (await sessionContainers()).filter(
+            ({ id }) => !before.has(id) && !preexistingIds.has(id),
+          );
+          assert.equal(added.length, 1, "the first job started one new Container");
+          const target = added[0];
+          assert(target);
+          await docker("docker", ["kill", target.id]);
+
+          await runJob();
+          const history = await worker.call(`/api/patterns/${ownPattern.id}/revisions`, {
+            as: user,
+          });
+          assert.equal(history.status, 200);
+          assert.equal(revisionListResponseSchema.parse(await history.json()).revisions.length, 2);
+        },
+      );
       const history = await worker.call(`/api/patterns/${pattern.id}/revisions`, { as: user });
       assert.equal(history.status, 200);
       assert.deepEqual(revisionListResponseSchema.parse(await history.json()), {
