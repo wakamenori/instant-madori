@@ -14,7 +14,7 @@ pstack の poteto-mode の Orchestrate に従い、各 PR は Autopilot-full の
 - 指揮役は、メインのチェックアウトで動く Claude Code の T3 スレッド一つ。コードも PR も作らない。
 - プログラムの状態は GitHub に置き、milestone、Issue、PR から読み直す。Orchestrate の `notes.md` と store は作らない。show-me-your-work の判断の記録は、Issue と PR のコメントに書く。
 - 担当は T3 のスレッドとして、検証役は指揮役のスレッドの子として立てる。cloud VM の代わりに、このマシンの worktree を使う。
-- 同時に動かす担当は五人まで。担当はこのマシンで、`pnpm dev` の固定のポート、CPU とメモリ、ディスクを共有するため。Rust の `target` は worktree ごとに持つので、担当と検証役は同時に cargo を使ってよい。
+- 同時に動かす担当は五人まで。担当はこのマシンで、`pnpm dev` の固定のポート、CPU とメモリ、ディスクを共有するため。その内側の枠は「次の Issue を選ぶ」にある。Rust の `target` は worktree ごとに持つので、担当と検証役は同時に cargo を使ってよい。
 - 検証は、head ごとに検証役一人で行う。Autopilot-full の swarm にはしない。
 - マージするかは指揮役が決める。コマンドも指揮役が打ってよい。
 - 着手する Issue の順は [scripts/rank-ready.mjs](scripts/rank-ready.mjs) で出す。依存の鎖の長さは手で数えられないため。ほかのスクリプトとポーリングのループは使わない。
@@ -41,6 +41,11 @@ pstack の poteto-mode の Orchestrate に従い、各 PR は Autopilot-full の
 2. 下書きを書いたのとは別のエージェントに、下書きを plan.md とコードに照らして確かめさせる。見るのは、計画の抜けと重複、下書き同士の食い違い、終わった証拠を実行できるか、依存の向き、人の判断が要る項目。plan.md がコードや決めたことと食い違っていれば、正しい内容を決めて下書きをそれに合わせ、plan.md を直す Issue も作る。指摘を直してから次へ進む。
 3. 依存の先から順に Issue を作り、依存の欄の `#<id>` を実際の番号に置き換える。`blockedBy` の組は、GitHub の Issue の依存関係（blocked by）にも登録する。作った後は Issue を正とし、下書きを消す。
 
+依存には、先に閉じる必要がある Issue のほかに、次も入れる。下書きでも、作った後の Issue でも同じにする。
+
+- 同じファイルを触る Issue。先に進める方を依存の先にする。`README.md` と `docs/plan.md` は、同じ節を触るときだけ同じファイルと数える。ディレクトリで書いたパスは、その下のファイルをすべて触るものと数える。
+- 調べた結果が別の Issue の設計の前提になるとき、調べる Issue。
+
 ## 次の Issue を選ぶ
 
 着手できる Issue を、milestone の番号、後ろに続く依存の鎖の長さ、Issue の番号の順に並べる。開いた Issue に塞がれていないものだけが出る。
@@ -48,6 +53,25 @@ pstack の poteto-mode の Orchestrate に従い、各 PR は Autopilot-full の
 ```sh
 node .claude/skills/madori-coordinator/scripts/rank-ready.mjs
 ```
+
+出た候補から、担当のいる Issue と、次のどちらかに当たる Issue を除く。
+
+- 資源の枠を超える。
+- 動いている担当の Issue と同じファイルを触る。同じファイルの数え方は、「計画を Issue に分ける」の依存と同じにする。除いたら、動いている方を依存の先として、GitHub の依存と本文の依存の欄に登録する。
+
+### 資源の枠
+
+同時に動かす担当は五人までのまま、その内側で次を守る。
+
+- 「staging を占有する」Issue は、同時に一つまで。
+- 「`pnpm dev`」か「Docker の `pnpm check --full`」の Issue は、合わせて同時に二人まで。
+- 残りの枠は、上の二つの枠のどちらにも入らない Issue で埋める。「staging を読むだけ」は枠に数えない。
+
+資源は Issue の「使う共有資源」の欄で読む。値の意味は[テンプレート](../../../.github/ISSUE_TEMPLATE/unit.md)にある。欄の無い Issue は、本文の「触ってよいパス」と「終わった証拠」から、同じ意味で判断する。「直した場合」のように条件つきで使う資源とパスも、使うものと数える。担当は、マージの後の staging での確認を終えるまで数える。枠を超えて動いている担当は止めず、枠が空くまで、その資源を使う Issue を選ばない。
+
+### 順番
+
+除いた残りから、次の順で選ぶ。
 
 1. 開いている milestone のうち、最も前の段階から選ぶ。その段階に、担当のいない着手できる Issue が無いときだけ、次の段階から選ぶ。
 2. 同じ段階の中では、実環境での確認や試作のように、危険を早く明らかにする Issue を先に選ぶ。次に鎖の長い Issue を、それでも決まらなければ番号の小さい Issue を選ぶ。
@@ -89,11 +113,30 @@ node .claude/skills/madori-coordinator/scripts/rank-ready.mjs
 
 ## ブランチを staging で試す
 
-担当は staging へブランチを自分でデプロイしない。終わった証拠がマージの前の staging での確認を求めるときは、担当が指揮役に頼む。
+担当は staging へブランチを自分でデプロイしない。終わった証拠がマージの前の staging での確認を求めるときは、担当が指揮役に頼む。頼まれたら、その確認が読むだけか占有が要るかを、テンプレートの「使う共有資源」の意味で分ける。
 
-- 頼まれたら `gh workflow run deploy-staging.yml --ref <ブランチ>` で staging にデプロイし、終わったら担当に知らせる。
-- 担当が確かめ終わるまで、ほかの PR をマージしない。main へのデプロイが、ブランチを上書きするため。
+- 読むだけなら、デプロイも占有もせずに、担当に知らせる。
+- 占有が要るなら、staging が空いていることを確かめ、占有を始めてから、要れば `gh workflow run deploy-staging.yml --ref <ブランチ>` でデプロイする。終わったら担当に知らせる。
+- 空いていなければ、担当に待つよう知らせる。空いたら、この手順で受ける。
 - ブランチのマイグレーションは、この時点で staging の D1 に入る。入れてよいかを、頼まれたときに判断する。
+
+## staging の占有
+
+staging は一つしかなく、マージとデプロイのたびに DO と Container が入れ替わって、観測や試験が壊れる。staging を占有する担当は、同時に一人までにする。
+
+staging が空いているとは、占有している担当がおらず、先に始まったデプロイ（main へのマージの自動の実行と、そのやり直しを含む）がすべて終わっていることを言う。占有を始める前に、終わっていない実行を件数で切らずに全件出す。照会が成功して出力が空で、占有している担当もいないときだけ、占有を始める。`gh run list` は直近の数件しか見ず、前の実行のやり直しを見落とす。
+
+```sh
+gh api --paginate \
+  'repos/wakamenori/instant-madori/actions/workflows/deploy-staging.yml/runs?per_page=100' \
+  --jq '.workflow_runs[] | select(.status != "completed") | [.id,.status] | @tsv'
+```
+
+- 占有は次のどちらかで始まる。どちらも、staging が空いているときだけ始める。
+  - 占有の要る確認を担当から頼まれて、受けたとき（「ブランチを staging で試す」）。
+  - 「staging を占有する」Issue の PR をマージしたとき（「マージを決める」）。
+- 占有は、その担当が確かめ終わるまで続く。終えたことは、担当のスレッドを読んで確かめる。始めたときと終えたときに、その Issue にコメントで書く。
+- 占有の間は、マージも、デプロイ（`gh workflow run`、`gh run rerun`）もしない。ただし、ほかに占有している担当がいなければ、占有している担当の確認に要るデプロイ（頼まれたブランチのデプロイ、失敗したデプロイのやり直し）は、指揮役が行う。
 
 ## マージを決める
 
@@ -103,6 +146,7 @@ node .claude/skills/madori-coordinator/scripts/rank-ready.mjs
 - self-hosted runner の `check` が、同じ head で成功した。ブランチ保護が無いので、`gh pr checks` で自分で確かめる。
 - 自分で差分を読んだ。
 - D1 のマイグレーションを加える PR なら、今の main のマイグレーションと番号が衝突しない。PR の `check` は分岐点と比べるので、先に main へ入った同じ番号には、マージ後の main の `check` で初めて気づく。
+- staging が占有されていない（「staging の占有」）。「staging を占有する」Issue の PR なら、マージした時点でその担当の占有が始まる。
 
 ```sh
 gh pr merge <番号> --merge --match-head-commit <head>
@@ -111,7 +155,7 @@ gh pr merge <番号> --merge --match-head-commit <head>
 ## マージの後
 
 - main に入ると、staging へ自動でデプロイされる。結果は見回りで読む。
-- デプロイか疎通の確認が失敗したら、原因を確かめる。環境の問題なら `gh run rerun <run> --failed` でやり直す。コードの問題なら、直す担当をすぐに立てる。
+- デプロイか疎通の確認が失敗したら、原因を確かめる。環境の問題なら、「staging の占有」に従って `gh run rerun <run> --failed` でやり直す。コードの問題なら、直す担当をすぐに立てる。
 - Issue の終わった証拠に staging での確認があれば、その Issue の担当が確かめて、記録が要るなら記録の PR を作る。
 
 ## 記録と、見つかった問題の行き先
