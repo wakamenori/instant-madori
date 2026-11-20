@@ -1,13 +1,17 @@
 import { z } from "zod";
+import type { HttpMethod, RoutePath } from "./api/http.ts";
+import type { GeometryResult } from "./geometry/geometry-protocol.ts";
 
 const errorDescription: unique symbol = Symbol("ErrorDescription");
 const errorDescriptionSchema = z.string().brand(errorDescription);
 
+type FailedGeometry = Exclude<GeometryResult<unknown>, { kind: "ok" }>;
+
 export interface LogFields {
   traceId?: string;
   rayId?: string | undefined;
-  method?: string;
-  route?: string;
+  method?: HttpMethod | undefined;
+  route?: `${HttpMethod} ${RoutePath}` | "/api/health";
   userId?: string;
   status?: number;
   ms?: number;
@@ -21,65 +25,96 @@ export interface LogFields {
   jobState?: "cancelled" | "completed" | "failed";
   acceptance?: "applied" | "replayed";
   generation?: number;
-  step?: string;
+  step?:
+    | "render snapshot"
+    | "commit revision"
+    | "record failure"
+    | "wake pattern"
+    | "check test hold before render"
+    | "check test hold before commit";
   attempt?: number;
-  outcome?: string;
+  outcome?:
+    | "saved"
+    | "committed"
+    | "cancelled"
+    | "hold"
+    | "skip"
+    | "stopped"
+    | "already_finished"
+    | "not_committed"
+    | "failed"
+    | "not_running"
+    | "woken"
+    | "error"
+    | "idle"
+    | "claimed"
+    | "running";
   revisionId?: string;
   instance?: "created" | "existing";
   bytes?: number;
-  geometryStart?: "cold" | "warm";
+  geometryStart?: Extract<GeometryResult<unknown>, { kind: "ok" }>["start"];
   geometryMs?: number;
-  geometryFailure?: string;
+  geometryFailure?: FailedGeometry["reason"];
   geometryStatus?: number;
-  geometryViolation?: string;
-  reason?: string;
+  geometryViolation?: Extract<FailedGeometry, { reason: "protocol_violation" }>["violation"];
+  reason?:
+    | FailedGeometry["reason"]
+    | "execution_lost"
+    | "invalid_snapshot"
+    | "invalid_name"
+    | "retries_exhausted"
+    | "idle_timeout";
   why?: "stale_image" | "no_record";
   image?: string;
   mode?: "cold" | "adopted" | "reprobe";
 }
 
+type TypeofName<T> = [Exclude<T, undefined>] extends [number]
+  ? "number"
+  : [Exclude<T, undefined>] extends [string]
+    ? "string"
+    : never;
+
 const logKeys = {
-  traceId: true,
-  rayId: true,
-  method: true,
-  route: true,
-  userId: true,
-  status: true,
-  ms: true,
-  error: true,
-  requestId: true,
-  patternId: true,
-  jobId: true,
-  messageId: true,
-  messageNumber: true,
-  stop: true,
-  jobState: true,
-  acceptance: true,
-  generation: true,
-  step: true,
-  attempt: true,
-  outcome: true,
-  revisionId: true,
-  instance: true,
-  bytes: true,
-  geometryStart: true,
-  geometryMs: true,
-  geometryFailure: true,
-  geometryStatus: true,
-  geometryViolation: true,
-  reason: true,
-  why: true,
-  image: true,
-  mode: true,
-} satisfies Record<keyof LogFields, true>;
+  traceId: "string",
+  rayId: "string",
+  method: "string",
+  route: "string",
+  userId: "string",
+  status: "number",
+  ms: "number",
+  error: "string",
+  requestId: "string",
+  patternId: "string",
+  jobId: "string",
+  messageId: "string",
+  messageNumber: "number",
+  stop: "string",
+  jobState: "string",
+  acceptance: "string",
+  generation: "number",
+  step: "string",
+  attempt: "number",
+  outcome: "string",
+  revisionId: "string",
+  instance: "string",
+  bytes: "number",
+  geometryStart: "string",
+  geometryMs: "number",
+  geometryFailure: "string",
+  geometryStatus: "number",
+  geometryViolation: "string",
+  reason: "string",
+  why: "string",
+  image: "string",
+  mode: "string",
+} satisfies { [K in keyof LogFields]-?: TypeofName<LogFields[K]> };
+const typeofByKey = new Map(Object.entries(logKeys));
 
 /** Writes one structured log line; Workers Logs indexes the JSON fields. */
 export function logEvent(level: "info" | "error", event: string, fields: LogFields) {
   const allowed = Object.fromEntries(
-    Object.entries(fields).filter(
-      ([key, value]) =>
-        Object.hasOwn(logKeys, key) && (typeof value === "string" || typeof value === "number"),
-    ),
+    Object.entries(fields).filter(([key, value]) => typeof value === typeofByKey.get(key)),
   );
   const line = JSON.stringify({ level, event, ...allowed });
   if (level === "error") console.error(line);

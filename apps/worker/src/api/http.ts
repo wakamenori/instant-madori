@@ -16,6 +16,37 @@ const statusByCode = {
 
 const defaultMaxJsonBodyBytes = 16 * 1024;
 
+/** Request methods defined by RFC 9110 and RFC 5789. */
+const httpMethods = [
+  "GET",
+  "HEAD",
+  "POST",
+  "PUT",
+  "DELETE",
+  "CONNECT",
+  "OPTIONS",
+  "TRACE",
+  "PATCH",
+] as const;
+export type HttpMethod = (typeof httpMethods)[number];
+
+export function parseHttpMethod(method: string): HttpMethod | undefined {
+  return httpMethods.find((known) => known === method);
+}
+
+export type RoutePath =
+  | "/api/me"
+  | "/api/jobs/:jobId/stop"
+  | "/api/projects"
+  | "/api/projects/:projectId"
+  | "/api/projects/:projectId/patterns"
+  | "/api/patterns/:patternId"
+  | "/api/patterns/:patternId/messages"
+  | "/api/patterns/:patternId/state"
+  | "/api/patterns/:patternId/revisions"
+  | "/api/revisions/:revisionId/view"
+  | "/api/sample/display";
+
 /** An expected failure that ends the request with an API error code. */
 export class ApiFailure extends Error {
   readonly code: ApiErrorCode;

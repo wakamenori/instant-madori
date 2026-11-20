@@ -4,7 +4,7 @@ import { jobWorkflowDeps } from "../compose.ts";
 import { describeError, logEvent } from "../log.ts";
 import { systemRuntime } from "../runtime.ts";
 import { jobReferenceSchema, runJob } from "../services/jobs.ts";
-import type { JobEnd, JobExecutionReference, JobSteps } from "../services/jobs.ts";
+import type { JobEnd, JobExecutionReference, JobStepResult, JobSteps } from "../services/jobs.ts";
 
 export class JobWorkflow extends WorkflowEntrypoint<Env, JobExecutionReference> {
   override async run(
@@ -24,17 +24,14 @@ export class JobWorkflow extends WorkflowEntrypoint<Env, JobExecutionReference> 
         step.do(name, config, async ({ attempt }) => {
           try {
             const result = await body();
+            const settled: JobStepResult = result;
             logEvent("info", "job.step", {
               ...ids,
               step: name,
               attempt,
-              outcome: result.kind,
-              ...("reason" in result && typeof result.reason === "string"
-                ? { reason: result.reason }
-                : {}),
-              ...("revisionId" in result && typeof result.revisionId === "string"
-                ? { revisionId: result.revisionId }
-                : {}),
+              outcome: settled.kind,
+              ...("reason" in settled ? { reason: settled.reason } : {}),
+              ...("revisionId" in settled ? { revisionId: settled.revisionId } : {}),
             });
             return result;
           } catch (error) {

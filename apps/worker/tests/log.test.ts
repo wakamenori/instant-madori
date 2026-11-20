@@ -3,7 +3,30 @@ import { test } from "node:test";
 import { z } from "zod";
 import { describeError, logEvent } from "../src/log.ts";
 import type { LogFields } from "../src/log.ts";
-import type { GatewayEnvironment } from "../src/geometry/container-gateway.ts";
+import { parseHttpMethod } from "../src/api/http.ts";
+import type { HttpMethod, RoutePath } from "../src/api/http.ts";
+import type { GatewayEnvironment, UnavailableReason } from "../src/geometry/container-gateway.ts";
+import type { GeometryResult } from "../src/geometry/geometry-protocol.ts";
+
+type OpenStringKey =
+  | "traceId"
+  | "rayId"
+  | "userId"
+  | "requestId"
+  | "patternId"
+  | "jobId"
+  | "messageId"
+  | "revisionId"
+  | "image";
+type AcceptsAnyString = {
+  [K in keyof LogFields]-?: string extends LogFields[K] ? K : never;
+}[keyof LogFields];
+type Empty<T> = [T] extends [never] ? true : T;
+const openStringKeysArePinned: [
+  Empty<Exclude<AcceptsAnyString, OpenStringKey>>,
+  Empty<Exclude<OpenStringKey, AcceptsAnyString>>,
+] = [true, true];
+void openStringKeysArePinned;
 
 await test("request logs omit extra keys from nonliteral fields", (t) => {
   const lines: string[] = [];
@@ -72,6 +95,33 @@ await test("logs omit nonprimitive values without calling toJSON", (t) => {
     values.map(() => JSON.stringify({ level: "error", event: "api.request", status: 500 })),
   );
   assert.equal(conversions, 0);
+});
+
+await test("logs omit values whose primitive type differs from the key's", (t) => {
+  const lines: string[] = [];
+  t.mock.method(console, "log", (line: string) => {
+    lines.push(line);
+  });
+  const fields: LogFields = { status: 200 };
+  Object.assign(fields, { bytes: "test-only-token", route: 404, ms: 15 });
+  logEvent("info", "api.request", fields);
+  assert.deepEqual(lines, [
+    JSON.stringify({ level: "info", event: "api.request", status: 200, ms: 15 }),
+  ]);
+});
+
+await test("request logs name only standard HTTP methods", (t) => {
+  const lines: string[] = [];
+  t.mock.method(console, "log", (line: string) => {
+    lines.push(line);
+  });
+  for (const sent of ["PATCH", "patch", "PROPFIND", "x".repeat(5000)]) {
+    logEvent("info", "api.request", { method: parseHttpMethod(sent) });
+  }
+  assert.deepEqual(lines, [
+    JSON.stringify({ level: "info", event: "api.request", method: "PATCH" }),
+    ...Array.from({ length: 3 }, () => JSON.stringify({ level: "info", event: "api.request" })),
+  ]);
 });
 
 await test("logs omit prototype names even when supplied as own keys", (t) => {
@@ -145,7 +195,28 @@ await test("structured logs preserve allowed fields at both levels", (t) => {
     }),
   ]);
 
-  function typeChecks(environment: GatewayEnvironment) {
+  function typeChecks(environment: GatewayEnvironment, content: string) {
+    // @ts-expect-error A method is a standard HTTP method, not the client's token.
+    logEvent("info", "api.request", { method: content });
+    // @ts-expect-error A route names a method and a path template the API routes.
+    logEvent("info", "api.request", { route: content });
+    // @ts-expect-error A route cannot embed request content after a method.
+    logEvent("info", "api.request", { route: `GET ${content}` });
+    // @ts-expect-error A job step is one of the durable step names.
+    logEvent("info", "job.step", { step: content });
+    // @ts-expect-error An outcome is a result kind of a job step, job, stop, or pattern advance.
+    logEvent("info", "job.step", { outcome: content });
+    // @ts-expect-error A reason is a failure kind.
+    logEvent("error", "job.finished", { reason: content });
+    // @ts-expect-error A geometry failure is a geometry result reason.
+    logEvent("error", "api.request", { geometryFailure: content });
+    // @ts-expect-error A geometry violation is a protocol violation kind.
+    logEvent("error", "api.request", { geometryViolation: content });
+    // @ts-expect-error Gateway adapters also take only failure kinds as reasons.
+    environment.log("container.destroy_failed", { reason: content }, "error");
+    const routeLog: LogFields = {};
+    // @ts-expect-error Route handlers cannot write request content into the route.
+    routeLog.route = content;
     // @ts-expect-error Request content is not an allowed log field.
     logEvent("info", "api.request", { body: "private content" });
     // @ts-expect-error HTTP status is numeric.
@@ -178,6 +249,32 @@ await test("structured logs preserve allowed fields at both levels", (t) => {
     fields.status = "200";
   }
   void typeChecks;
+
+  function sourceValueChecks(
+    environment: GatewayEnvironment,
+    method: HttpMethod,
+    path: RoutePath,
+    geometry: Exclude<GeometryResult<unknown>, { kind: "ok" }>,
+    stopped: UnavailableReason,
+  ) {
+    logEvent("info", "api.request", { method, route: `${method} ${path}` });
+    logEvent("info", "api.request", { route: "/api/health" });
+    logEvent("error", "api.request", { geometryFailure: geometry.reason, reason: geometry.reason });
+    if (geometry.reason === "protocol_violation") {
+      logEvent("error", "api.request", { geometryViolation: geometry.violation });
+    }
+    environment.log("container.destroy_failed", { reason: stopped }, "error");
+    environment.log("container.destroy_failed", { reason: "idle_timeout" }, "error");
+    logEvent("info", "job.step", {
+      step: "commit revision",
+      outcome: "not_committed",
+      reason: "invalid_name",
+    });
+    logEvent("info", "pattern.advanced", { outcome: "claimed" });
+    logEvent("info", "api.request", { outcome: "stopped", jobState: "cancelled" });
+    logEvent("info", "job.step", { step: "check test hold before render", outcome: "hold" });
+  }
+  void sourceValueChecks;
 });
 
 await test("an unexpected error is logged with everything it wraps", () => {

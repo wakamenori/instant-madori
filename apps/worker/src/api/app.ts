@@ -6,7 +6,7 @@ import type { Runtime } from "../services/deps.ts";
 import { resolveUser } from "../services/users.ts";
 import { verifyAccessToken } from "./access.ts";
 import { loadConfig } from "./config.ts";
-import { ApiFailure, errorResponse } from "./http.ts";
+import { ApiFailure, errorResponse, parseHttpMethod } from "./http.ts";
 import { jobRoutes } from "./jobs.ts";
 import { meRoutes } from "./me.ts";
 import { messageRoutes } from "./messages.ts";
@@ -49,7 +49,7 @@ export async function handleApi(
   const log: LogFields = {
     traceId,
     rayId: rayIdPattern.test(rayId) ? rayId : undefined,
-    method: request.method,
+    method: parseHttpMethod(request.method),
   };
   let response: Response;
   try {
