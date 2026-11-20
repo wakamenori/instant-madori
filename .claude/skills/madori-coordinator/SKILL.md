@@ -58,7 +58,12 @@ node .claude/skills/madori-coordinator/scripts/rank-ready.mjs
 ## 担当を立てる
 
 - Issue の「人の判断」が決まっていなければ、担当を立てずにユーザーに聞く。
-- Issue 一つにつき、担当のスレッドを一つ立てる。`t3_thread_launch` で worktree を origin/main から作り、Claude Code の Opus で動かす。題は `#<番号> <Issue の題>` にする。
+- Issue 一つにつき、担当のスレッドを一つ立てる。`t3_thread_launch` で worktree を origin/main から作る。題は `#<番号> <Issue の題>` にする。
+- `modelSelection` を `{instanceId: "claudeAgent", model: "claude-opus-5-5", options: [{id: "effort", value: <effort>}]}` にし、effort を省かない。effort は次で決める。
+  - 基準は high。
+  - 「PRで決めること」がある Issue と、AGENTS.md が Docker での `pnpm check --full` を求める経路（Container・表示データ）を触る Issue は xhigh。
+  - 判断がほとんど要らない機械的な Issue は medium。
+- 応答の `modelSelection` に選んだ effort が返ったことを確かめ、その effort と理由を Issue にコメントする。
 - 最初の指示は次の一行にする。`<threadId>` は指揮役のスレッドの ID で、担当はそこへ報告する。
 
   ```text
@@ -74,7 +79,10 @@ node .claude/skills/madori-coordinator/scripts/rank-ready.mjs
 
 担当から報告が来たら、PR の今の状態を `gh pr view` と `gh pr checks` で確かめてから、検証役を立てる。
 
-- 検証役は、差分の大部分を書いた系統と別の系統のモデルにする。実装は Codex が書くので、普段は Claude Code の Opus にする。差分の大部分を Claude が書いた PR は、Codex に確かめさせる。Codex の立て方は pstack-models.md に従う。
+- 検証役は、差分の大部分を書いた系統と別の系統のモデルにする。実装は Codex が書くので、普段は Claude Code の Opus にする。差分の大部分を Claude が書いた PR は、Codex に確かめさせる。
+- `delegate_task` の `target` で、モデルと effort を明示する。effort は xhigh に固定し、Issue によって変えない。poteto-mode が検証を上げ下げの例外にしているため。
+  - Opus：`{providerInstanceId: "claudeAgent", model: "claude-opus-5-5", options: {effort: "xhigh"}}`
+  - Codex：`{providerInstanceId: "codex", model: <pstack-models.md の、PR の playbook の行のモデル>, options: {reasoningEffort: "xhigh"}}`
 - `delegate_task` に `isolation: "worktree"` を付けて、指揮役のスレッドの子として立てる。指示は [verifier-brief.md](verifier-brief.md) の `{…}` を埋めて渡す。
 - 検証役のスレッドには PR を紐付けない。
 - 判定を PR に書いたら、検証役のスレッドを `t3_thread_organize`（`action: "settle"`）で settled にする。見回りの片付けは、settled でないスレッドの worktree を残すため。
