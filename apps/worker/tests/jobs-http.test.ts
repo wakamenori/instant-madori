@@ -156,6 +156,7 @@ await test("Instruction acceptance through workerd and local D1", async (t) => {
         pattern,
         currentRevision: null,
         runningJob: null,
+        queueHold: null,
         queuedJobs: [],
         lastFinishedJob: { ...second.job, state: "failed" },
       });
@@ -302,7 +303,9 @@ await test("Instruction acceptance through workerd and local D1", async (t) => {
     assert.equal(response.status, 200);
     await response.arrayBuffer();
     assert.equal(jobIds.length, 9);
-    const settled = await settleJobs(worker, owner, boundaryPattern.id, jobIds);
+    const settled = await settleJobs(worker, owner, boundaryPattern.id, jobIds, undefined, {
+      resumeHolds: true,
+    });
     assert.equal(settled.runningJob, null);
     assert.deepEqual(settled.queuedJobs, []);
   });

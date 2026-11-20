@@ -36,6 +36,7 @@ const state: PatternStateResponse = {
   currentRevision: null,
   runningJob: null,
   queuedJobs: [],
+  queueHold: null,
   lastFinishedJob: null,
 };
 const completed = { ...job, state: "completed" as const, revision };

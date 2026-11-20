@@ -5,6 +5,12 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 
+await test("Queue hold migration preserves populated queues and previous Worker writes", async () => {
+  await promisify(execFile)(process.execPath, [
+    fileURLToPath(new URL("./rpc/queue-hold-migration-fixture.ts", import.meta.url)),
+  ]);
+});
+
 await test("Populated migration preserves bases and the previous Worker's storage operations", async () => {
   await promisify(execFile)(process.execPath, [
     fileURLToPath(new URL("./rpc/jobs-migration-fixture.ts", import.meta.url)),

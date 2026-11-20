@@ -35,7 +35,13 @@ export function patternCoordinatorDeps(
 ): PatternCoordinatorDeps {
   const { jobs } = createStore(d1(env.DB), r2(env.BLOBS));
   return {
-    store: { jobs: { claim: jobs.claim, activeReference: jobs.activeReference } },
+    store: {
+      jobs: {
+        claim: jobs.claim,
+        activeReference: jobs.activeReference,
+        holdingJob: jobs.holdingJob,
+      },
+    },
     jobRuns: jobRuns(workflow),
     runtime,
   };
@@ -52,7 +58,7 @@ export function jobWorkflowDeps(
         restore: jobs.restore,
         check: jobs.check,
         complete: jobs.complete,
-        fail: jobs.fail,
+        failAndHoldQueue: jobs.failAndHoldQueue,
         ownedBySubject: jobs.ownedBySubject,
       },
       snapshots: { write: snapshots.write },

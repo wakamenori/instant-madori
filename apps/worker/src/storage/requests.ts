@@ -127,6 +127,13 @@ function recordedBy(key: RequestKey): SqlPart {
 /** Tables that once-only operations may change. Names are code constants, never input. */
 type OnceTable = "projects" | "patterns" | "jobs";
 
+/** Companions must leave every row and column read by the main precondition intact. */
+export interface OnceCompanion {
+  table: OnceTable;
+  set: SqlPart;
+  where: SqlPart;
+}
+
 interface BatchParts {
   before: readonly SqlPart[];
   record: SqlPart;
@@ -224,7 +231,7 @@ class OnceBatch {
     this: void,
     inputKey: RequestKey,
     createdAt: string,
-    update: { table: OnceTable; set: SqlPart; where: SqlPart; result: SqlPart },
+    update: OnceCompanion & { result: SqlPart; companions?: readonly OnceCompanion[] },
   ): OnceBatch {
     const key = copyKey(inputKey);
     const { table, set, where, result } = update;
@@ -241,6 +248,20 @@ class OnceBatch {
       }),
     );
     const recorded = recordedBy(key);
+    const companions = Array.from(update.companions ?? [], ({ table: target, set, where }) => {
+      const companionSet = copyStatement(set);
+      const companionWhere = copyStatement(where);
+      return copyStatement({
+        sql: `UPDATE ${target} SET ${companionSet.sql} WHERE (${companionWhere.sql})
+          AND EXISTS (SELECT 1 FROM ${table} WHERE (${wherePart.sql})) AND ${recorded.sql}`,
+        bindings: [
+          ...companionSet.bindings,
+          ...companionWhere.bindings,
+          ...wherePart.bindings,
+          ...recorded.bindings,
+        ],
+      });
+    });
     const statement = copyStatement({
       sql: `UPDATE ${table} SET ${setPart.sql}
        WHERE (${wherePart.sql}) AND ${recorded.sql}`,
@@ -249,7 +270,7 @@ class OnceBatch {
     return new OnceBatch(batchToken, key, {
       before: Object.freeze([]),
       record,
-      after: Object.freeze([statement]),
+      after: Object.freeze([...companions, statement]),
     });
   }
 }

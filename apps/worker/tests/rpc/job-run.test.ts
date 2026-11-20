@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import {
   acceptInstruction,
@@ -15,7 +14,7 @@ import type { GeometryResult, DisplayArtifact } from "../../src/geometry/geometr
 import { requestKey } from "../../src/services/requests.ts";
 import { jobTestHoldSettingSchema } from "../../src/services/job-test-hold.ts";
 import { jobInstanceId, jobRuns } from "../../src/workflows/job-runs.ts";
-import { jobMigration, openJobDatabase, now } from "./jobs-support.ts";
+import { applyJobMigrations, openJobDatabase, now } from "./jobs-support.ts";
 
 function plain(value: unknown): void {
   if (value === null || typeof value !== "object") return;
@@ -60,7 +59,7 @@ function stepEngine({ rerun, loseResults }: { rerun?: string; loseResults?: stri
 await test("Job runs restore D1 execution rights across retries and lost responses", async (t) => {
   const db = await openJobDatabase();
   t.after(() => db.dispose());
-  await db.apply(await readFile(jobMigration, "utf8"));
+  await applyJobMigrations(db);
   const ownerId = await db.owner("job-run");
   const base = {
     testHold: null,
@@ -231,9 +230,9 @@ await test("Job runs restore D1 execution rights across retries and lost respons
           ...f.deps.store,
           jobs: {
             ...db.store.jobs,
-            async fail(right, time) {
+            async failAndHoldQueue(right, time) {
               await stop(f.job.jobId);
-              return db.store.jobs.fail(right, time);
+              return db.store.jobs.failAndHoldQueue(right, time);
             },
           },
         },

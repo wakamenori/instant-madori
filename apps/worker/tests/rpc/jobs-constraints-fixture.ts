@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { jobStateSchema, holdingJobStates } from "../../src/storage/job-states.ts";
 import { test } from "node:test";
-import { openJobDatabase, jobMigration, now } from "./jobs-support.ts";
+import { openJobDatabase, applyJobMigrations, now } from "./jobs-support.ts";
 
 await test("Job, message, and revision constraints on D1", async (t) => {
   const db = await openJobDatabase();
   t.after(() => db.dispose());
-  await db.apply(await readFile(jobMigration, "utf8"));
+  await applyJobMigrations(db);
   await db.apply(`
     INSERT INTO users VALUES ('u1','https://a.invalid','s1','a@example.test','${now}'),
       ('u2','https://a.invalid','s2','b@example.test','${now}');
@@ -48,6 +48,23 @@ await test("Job, message, and revision constraints on D1", async (t) => {
       .bind(id, pattern, owner, messageId, state, base, now, now)
       .run();
   }
+  await t.test("hold CHECK matches state roles and one job per pattern may hold", async () => {
+    await job("holder");
+    for (const state of jobStateSchema.options) {
+      const update = db.raw
+        .prepare("UPDATE jobs SET state = ?, holds_queue = 1 WHERE id = 'holder'")
+        .bind(state);
+      if (holdingJobStates.includes(`'${state}'`)) await update.run();
+      else await assert.rejects(update.run(), /CHECK constraint/);
+    }
+    await job("second-holder", "failed");
+    await assert.rejects(
+      db.raw.prepare("UPDATE jobs SET holds_queue = 1 WHERE id = 'second-holder'").run(),
+      /UNIQUE constraint/,
+    );
+    await job("foreign-holder", "failed", "t2", "u1", "r3");
+    await db.raw.prepare("UPDATE jobs SET holds_queue = 1 WHERE id = 'foreign-holder'").run();
+  });
   const revision = (
     id: string,
     jobId: string,

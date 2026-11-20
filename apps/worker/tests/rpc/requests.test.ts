@@ -95,6 +95,41 @@ void test("once-only batches preserve their private protocol on real D1", async 
         .bind(request.ownerId, request.requestId)
         .first("result");
 
+    await t.test("companions follow the main condition on application and replay", async () => {
+      const main = creation();
+      const companion = creation();
+      await runOnce(db, schema, main.batch);
+      await runOnce(db, schema, companion.batch);
+      const request = key();
+      const update = (id: string) =>
+        updateOnceStatements(request, now, {
+          table: "projects",
+          set: { sql: "name = 'updated'", bindings: [] },
+          where: { sql: "id = ?", bindings: [id] },
+          companions: [
+            {
+              table: "projects",
+              set: { sql: "version = version + 1", bindings: [] },
+              where: { sql: "id = ?", bindings: [companion.input.id] },
+            },
+          ],
+          result: { sql: "SELECT json_object('name', 'updated')", bindings: [] },
+        });
+      const version = () =>
+        raw
+          .prepare("SELECT version FROM projects WHERE id = ?")
+          .bind(companion.input.id)
+          .first("version");
+      const missing = crypto.randomUUID();
+      assert.equal((await runOnce(db, schema, update(missing))).kind, "not_applied");
+      assert.equal(await version(), 1);
+      assert.equal((await runOnce(db, schema, update(main.input.id))).kind, "applied");
+      for (const target of [main.input.id, missing]) {
+        assert.equal((await runOnce(db, schema, update(target))).kind, "replayed");
+        assert.equal(await version(), 2);
+      }
+    });
+
     await t.test(
       "Object.assign between genuine batches preserves the original private payload and key",
       async () => {

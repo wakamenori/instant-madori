@@ -7,6 +7,7 @@ import { resolveUser } from "../services/users.ts";
 import { verifyAccessToken } from "./access.ts";
 import { loadConfig } from "./config.ts";
 import { ApiFailure, errorResponse, parseHttpMethod } from "./http.ts";
+import { queueRoutes } from "./queue.ts";
 import { jobRoutes } from "./jobs.ts";
 import { meRoutes } from "./me.ts";
 import { messageRoutes } from "./messages.ts";
@@ -18,6 +19,7 @@ import { sampleRoutes } from "./sample.ts";
 
 const routes = [
   ...meRoutes,
+  ...queueRoutes,
   ...jobRoutes,
   ...messageRoutes,
   ...projectRoutes,

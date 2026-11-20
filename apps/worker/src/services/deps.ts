@@ -49,15 +49,16 @@ export interface JobSteps {
 }
 
 export type PatternAdvance =
+  | { kind: "queue_held"; heldBy: string }
   | { kind: "idle" }
   | { kind: "claimed" | "running"; job: JobExecutionReference; instance: "created" | "existing" };
 
-export type PatternCoordinatorDeps = StoreDeps<"jobs", "claim" | "activeReference"> &
+export type PatternCoordinatorDeps = StoreDeps<"jobs", "claim" | "activeReference" | "holdingJob"> &
   Pick<ServiceDeps, "runtime"> & { jobRuns: JobRuns };
 
 export type JobWorkflowDeps = StoreDeps<
   "jobs",
-  "restore" | "check" | "complete" | "fail" | "ownedBySubject"
+  "restore" | "check" | "complete" | "failAndHoldQueue" | "ownedBySubject"
 > &
   StoreDeps<"snapshots", "write"> &
   Pick<ServiceDeps, "geometry" | "runtime" | "wakePattern"> & { testHold: JobTestHold | null };
