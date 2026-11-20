@@ -22,7 +22,7 @@
 - 第三者の著作権表示とライセンスを保持する。GPL、LGPL、AGPLの依存を追加しない。他の製品のコードや資産を写さない。
 - ローカルの検査とテストに、本番の認証情報を持ち込まない。秘密の値を表示しない。
 
-- 補助スクリプトは、目的に合う `scripts/check/`・`scripts/dev/`・`scripts/generate/`・`scripts/build/`・`scripts/upstream/`・`scripts/deploy/` に置く。複数の目的から使う部品だけを `scripts/shared/` に置き、テストは対象のファイルと同じフォルダーに置く。当てはまる目的がなければ、目的を表す名前のフォルダーを許可なしで足してよく、足したらこの一覧に加える。一度限りの検証スクリプトは `scripts/` に置かない。
+- 補助スクリプトは、目的に合う `scripts/check/`・`scripts/dev/`・`scripts/generate/`・`scripts/build/`・`scripts/upstream/`・`scripts/deploy/`・`scripts/measure/` に置く。複数の目的から使う部品だけを `scripts/shared/` に置き、テストは対象のファイルと同じフォルダーに置く。当てはまる目的がなければ、目的を表す名前のフォルダーを許可なしで足してよく、足したらこの一覧に加える。一度限りの検証スクリプトは `scripts/` に置かない。
 
 ## 検査と引き継ぎ
 

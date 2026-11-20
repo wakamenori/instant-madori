@@ -271,6 +271,7 @@ instant-madori/
 │   ├── build/
 │   ├── upstream/
 │   ├── deploy/
+│   ├── measure/
 │   └── shared/
 ├── .github/
 │   ├── workflows/
@@ -301,7 +302,7 @@ instant-madori/
 | packages/contracts/       | 通信スキーマと共有型。Rust側の定義から生成した型・スキーマの受け渡し先                                                                         |
 | third_party/solidcraft/   | 固定した版のSolidCraft一式。SolidCraft自体に必要な修正もこの領域で行う                                                                         |
 | third_party/solidcraft.md | 取り込み元、採用コミット、独自変更の理由、更新手順。subtreeの外に置く                                                                          |
-| docs/・scripts/           | サービスの計画・検証記録。scripts/はcheck・dev・generate・build・upstream・deployに分け、複数の目的で使う部品はsharedに置く                    |
+| docs/・scripts/           | サービスの計画・検証記録。scripts/はcheck・dev・generate・build・upstream・deploy・measureに分け、複数の目的で使う部品はsharedに置く           |
 | .github/workflows/        | PRの検査（check.yml）とstagingへのデプロイ（deploy-staging.yml）。開発用Macのself-hosted runnerで動く                                          |
 | .github/ISSUE_TEMPLATE/   | 作業の単位（Issue）のテンプレート                                                                                                              |
 | .github/dependabot.yml    | npm・Cargoの依存関係の更新提案                                                                                                                 |
