@@ -114,6 +114,7 @@ for (const source of [
   "const sql = `INSERT ${conflict} INTO requests (request_id, result) VALUES (?, '{}')`;",
   "const sql = `UPDATE ${conflict} requests SET result = '{}' WHERE request_id = ?`;",
   "const sql = `${prefix}INSERT INTO requests (request_id, result) VALUES (?, '{}')`;",
+  "const sql = `${a}INSERT${b} INTO requests (request_id, result) VALUES (?, '{}')`;",
   "const sql = `UPDATE ${schema}.requests SET result = '{}' WHERE request_id = ?`;",
   "const sql = `INSERT${x} INTO requests (request_id, result) VALUES (?, '{}')`;",
   'const sql = `INSERT${ignore ? " OR IGNORE" : ""} INTO requests (request_id, result) VALUES (?, \'{}\')`;',
