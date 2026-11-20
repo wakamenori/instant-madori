@@ -28,7 +28,7 @@ Preconditions:
 - **拒否。** `curl -sS -o "$D/reject.json" -w '%{http_code}\n' http://127.0.0.1:8787/api/me`。`401` で、本文が `{"error":"unauthenticated"}`。
 - **Origin の無い書き込み。** `curl -sS -o "$D/no-origin.json" -w '%{http_code}\n' -X POST http://127.0.0.1:5173/api/projects -H "$J" -d "{\"requestId\":\"$(uuidgen)\"}"`。`403` で、本文が `{"error":"forbidden"}`。
 - **経路。** `curl -sS -o /dev/null -w '%{http_code}\n' -X POST http://127.0.0.1:8787/api/health` が `405`。`curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:5173/api/missing` が `404`。
-- **別の利用者。** 先に [案件](./projects.md)の「作る」を済ませておく。片付けてから `MADORI_DEV_EMAIL=other@example.com` を付けて起動し直す。`curl -sS -o "$D/me-other.json" -w '%{http_code}\n' http://127.0.0.1:5173/api/me` の `user.email` が `other@example.com` で、`user.id` が `me.json` と違う。`/api/projects` は `{"projects":[],"nextCursor":null}`。前の利用者の案件のパターン一覧 `/api/projects/<その id>/patterns` は `404`。
+- **別の利用者。** 先に [案件](./projects.md)の「作る」を済ませておく。片付けてから `MADORI_DEV_EMAIL=other@example.com` を付けて起動し直す。`curl -sS -o "$D/me-other.json" -w '%{http_code}\n' http://127.0.0.1:5173/api/me` の `user.email` が `other@example.com` で、`user.id` が `me.json` と違う。`/api/projects` の `projects` は、起動の確認がこの利用者に作る「起動確認」の案件だけで、前の利用者の案件を含まない。前の利用者の案件のパターン一覧 `/api/projects/<その id>/patterns` は `404`。
 
 ## Gotchas
 

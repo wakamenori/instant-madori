@@ -2,21 +2,13 @@ import type { GeometryCall, GeometryResult, DisplayArtifact } from "./geometry-p
 export interface GeometryApi {
   sampleDisplay(call: GeometryCall): Promise<GeometryResult<DisplayArtifact>>;
 }
-export type GeometryInstance = { kind: "sample" } | { kind: "pattern"; patternId: string };
-function geometryInstanceName(key: GeometryInstance): string {
-  switch (key.kind) {
-    case "sample":
-      return "sample";
-    case "pattern":
-      return `pattern:${key.patternId}`;
-  }
-}
+export type GeometryInstance = { kind: "pattern"; patternId: string };
 export function geometryClient(
   getByName: (name: string) => GeometryApi,
 ): (key: GeometryInstance) => GeometryApi {
   return (key) => ({
     sampleDisplay: (call) =>
-      rpcGeometry(() => getByName(geometryInstanceName(key)).sampleDisplay(call)),
+      rpcGeometry(() => getByName(`pattern:${key.patternId}`).sampleDisplay(call)),
   });
 }
 async function rpcGeometry<T>(call: () => Promise<GeometryResult<T>>): Promise<GeometryResult<T>> {

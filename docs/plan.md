@@ -308,7 +308,7 @@ instant-madori/
 
 Workerの依存は、層に属さない `apps/worker/src/compose.ts` で構築する。APIは `serviceDeps(env, runtime)`、パターンのDOは `patternCoordinatorDeps(env, workflow, runtime)`、ジョブのWorkflowは `jobWorkflowDeps(env, runtime)` を使う。DOには、実行権の取得、activeなジョブの参照の読取り、Workflowの開始だけを渡す。Workflowには、実行権の復元と、実行権を受け取る確認・確定・失敗の記録・snapshotの保存、形状処理、パターンのDOを起こす関数だけを渡す。組み立て関数をimportできるのは `api/app.ts`・`objects/pattern-coordinator.ts`・`workflows/job-workflow.ts` だけで、この3つも元の層のimportの制限を受ける。サービスはDOのnamespaceではなく、型付き `GeometryInstance` を受けて `GeometryApi` を返す関数に依存する。インスタンス名の導出とRPCのretryable/overloaded例外からunavailableへの変換は `geometry/geometry-client.ts` に集める。サービス基盤のジョブは、パターンごとの接続用DOのインスタンス（キー `{ kind: "pattern", patternId }`、名前 `pattern:<パターンID>`）でContainerを呼ぶ。インスタンスのキーを加えるときも導出はこのファイルに置き、呼び出し側はDOの名前を組み立てない。
 
-内部ルートは `geometry/` の `callGeometry` で呼び、成功のバイナリまたはJSON、エラー本文、ストリームのサイズ上限と中断を共通処理する。ルートとメソッドは生成された定義を使い、タイムアウトは同じモジュールの表で管理する。HTTPへのエラー変換とログ項目は `api/geometry.ts` が受け持つ。
+内部ルートは `geometry/` の `callGeometry` で呼び、成功のバイナリまたはJSON、エラー本文、ストリームのサイズ上限と中断を共通処理する。ルートとメソッドは生成された定義を使い、タイムアウトは同じモジュールの表で管理する。形状処理の結果を再試行と失敗に振り分けるのは、ジョブが呼ぶ `services/geometry.ts` である。公開APIは形状処理を呼ばない。
 
 Workerの内部は、`api/` から `services/` を呼び、`services/` は外から渡された保存の操作（`storage/` が作る `Store`）または形状処理用の `geometry/` を呼ぶ。`services/` から `storage/` へのimportは型だけにする。`objects/` と `workflows/` は `services/` だけを呼び、`storage/` と `geometry/` は他の層をimportしない。`api/` から `geometry/` への型だけのimportを例外として許可する。許可先は `scripts/check/boundaries.ts` のWorker層の表で管理し、同じ層の内部とこの例外を除いて、表にない層間importを拒否する。`apps/worker/src/` 直下にディレクトリを追加するときは、この表にも層を宣言する。直下のファイルは層に含めない。`storage/` はHTTPの `Request`・`Response`・`fetch`・`Headers` を使わず、API応答の型・スキーマも使わない。
 
@@ -559,7 +559,6 @@ queueHoldは、待機列が保留中なら `{ job: { jobId, messageId, number, s
 | POST /api/jobs/:id/stop                     | 待機中・実行中の指示の停止                                                |
 | POST /api/patterns/:id/queue/resume・cancel | 保留指示の再開・取り消し                                                  |
 | POST /api/assets                            | 添付画像の登録・検査                                                      |
-| GET /api/sample/display                     | サンプルの3D表示データ。一時的なAPIで、案を作る経路ができたら削除         |
 | GET /api/revisions/:id/view                 | 2D・3D表示データと取得先。manifestの版1では3Dの表示データのバイト列を返す |
 | POST /api/revisions/:id/pick・sunlight      | 対象選択の確定と日差しの計算                                              |
 | GET /api/patterns/:id/events                | 途中経過と状態変更をSSEで配信                                             |
@@ -572,7 +571,7 @@ Containerの内部APIは、入力スナップショットと操作の一括を�
 
 ジョブを扱う要求にはjob ID、操作ID、実行世代、入力スナップショットを必須にする。要求ごとのSessionを分離し、完了した要求のCADを次の要求の前提にしない。停止は実行中の要求の停止tokenと世代の失効で扱い、遅れて届いた結果を確定しない。Containerのメモリを失った場合も保存済みの入力から再実行する。入力スナップショットの内容をキーにしたSessionキャッシュを要求間へ足すかは、Cloudflare上で住宅一軒と要求種別ごとの処理・メモリを測る#103の後に決める。
 
-内部APIは `/v1` のパスで版を識別し、`/healthz` もプロトコルの版を返す。DOは自分の扱える版だけを受け付ける。固定サンプルの `GET /v1/sample/display` はジョブの識別子を持たず、要求ごとのSessionで評価する。起動・接続失敗は公開APIの503 `service_unavailable` と `retry-after` に対応付け、形状生成の失敗と内部プロトコル違反は500にする。
+内部APIは `/v1` のパスで版を識別し、`/healthz` もプロトコルの版を返す。DOは自分の扱える版だけを受け付ける。固定サンプルの `GET /v1/sample/display` はジョブの識別子を持たず、要求ごとのSessionで評価する。公開APIはContainerを呼ばない。起動・接続の失敗、形状生成の失敗、内部プロトコル違反は、ジョブの `render snapshot` が `services/geometry.ts` の分類で段階の再試行かジョブの失敗にする（4.6「再試行と復帰」）。
 
 本文を持つ内部ルートは、ハンドラーの要求・応答型をルート表に結び付け、表の `request.max_bytes` からaxumの本文上限を適用する。axumの既定の2 MB上限には頼らず、ルートごとに適した上限を選ぶ。バイナリ要求はメディア型も検証する。413と422の拒否応答は、内部APIのErrorBodyのコードへ変換する。本文の上限と拒否応答の変換は、実際のルートで本文を転送するテストで確かめる。
 

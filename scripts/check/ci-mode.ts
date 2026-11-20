@@ -13,7 +13,6 @@ const fullCheckPrefixes = [
   "apps/worker/src/workflows/",
   "apps/worker/src/services/jobs.ts",
   "apps/worker/src/compose.ts",
-  "apps/worker/src/api/sample.ts",
   "apps/worker/src/services/geometry.ts",
   "apps/worker/wrangler.jsonc",
   "third_party/",

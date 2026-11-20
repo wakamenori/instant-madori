@@ -46,8 +46,7 @@ export type RoutePath =
   | "/api/patterns/:patternId/queue/cancel"
   | "/api/patterns/:patternId/state"
   | "/api/patterns/:patternId/revisions"
-  | "/api/revisions/:revisionId/view"
-  | "/api/sample/display";
+  | "/api/revisions/:revisionId/view";
 
 /** An expected failure that ends the request with an API error code. */
 export class ApiFailure extends Error {
