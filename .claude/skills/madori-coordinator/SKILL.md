@@ -124,7 +124,13 @@ node .claude/skills/madori-coordinator/scripts/rank-ready.mjs
 
 staging は一つしかなく、マージとデプロイのたびに DO と Container が入れ替わって、観測や試験が壊れる。staging を占有する担当は、同時に一人までにする。
 
-staging が空いているとは、占有している担当がおらず、先に始まったデプロイ（main へのマージの自動の実行と、そのやり直しを含む）がすべて終わっていることを言う。占有を始める前に、`gh run list --workflow deploy-staging.yml --limit 5` で、終わっていない実行が無いことを確かめる。
+staging が空いているとは、占有している担当がおらず、先に始まったデプロイ（main へのマージの自動の実行と、そのやり直しを含む）がすべて終わっていることを言う。占有を始める前に、終わっていない実行を件数で切らずに全件出す。照会が成功して出力が空で、占有している担当もいないときだけ、占有を始める。`gh run list` は直近の数件しか見ず、前の実行のやり直しを見落とす。
+
+```sh
+gh api --paginate \
+  'repos/wakamenori/instant-madori/actions/workflows/deploy-staging.yml/runs?per_page=100' \
+  --jq '.workflow_runs[] | select(.status != "completed") | [.id,.status] | @tsv'
+```
 
 - 占有は次のどちらかで始まる。どちらも、staging が空いているときだけ始める。
   - 占有の要る確認を担当から頼まれて、受けたとき（「ブランチを staging で試す」）。
