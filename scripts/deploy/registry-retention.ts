@@ -254,10 +254,13 @@ function wranglerJson(output: string): unknown {
   }
 }
 
-function registryClient(credentials: z.infer<typeof registryCredentialsSchema>) {
+export function registryClient(
+  credentials: z.infer<typeof registryCredentialsSchema>,
+  fetchImpl: typeof fetch = fetch,
+) {
   const authorization = `Basic ${Buffer.from(`${credentials.username}:${credentials.password}`).toString("base64")}`;
   async function request(path: string, method: string) {
-    const response = await fetch(`https://registry.cloudflare.com/v2/${path}`, {
+    const response = await fetchImpl(`https://registry.cloudflare.com/v2/${path}`, {
       method,
       headers: {
         authorization,

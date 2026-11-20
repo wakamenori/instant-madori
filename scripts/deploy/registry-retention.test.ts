@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { test } from "node:test";
-import { collectVersions, runRetention, selectTags } from "./registry-retention.ts";
+import { collectVersions, registryClient, runRetention, selectTags } from "./registry-retention.ts";
 
 const account = "4a67230af28ec94d9c70ca48572d8e9f";
 const repository = "instant-madori-staging-geometrycontainer-geometry";
@@ -123,6 +123,75 @@ await test("keeps every version when the history is shorter than ten", () => {
   assert.deepEqual(plan.remove, []);
 });
 
+const credentials = {
+  account_id: account,
+  registry_host: "registry.cloudflare.com",
+  username: "test",
+  password: "test-password",
+} as const;
+const registryUrl = "https://registry.cloudflare.com/v2/";
+const manifestPath = `${account}/${repository}/manifests/tag-1`;
+
+for (const { operation, method, status, expected } of [
+  { operation: "delete", method: "DELETE", status: 202, expected: "deleted" },
+  { operation: "delete", method: "DELETE", status: 404, expected: "missing" },
+  {
+    operation: "delete",
+    method: "DELETE",
+    status: 403,
+    expected: /Registry DELETE failed \(403\)/u,
+  },
+  {
+    operation: "delete",
+    method: "DELETE",
+    status: 409,
+    expected: /Registry DELETE failed \(409\)/u,
+  },
+  {
+    operation: "delete",
+    method: "DELETE",
+    status: 500,
+    expected: /Registry DELETE failed \(500\)/u,
+  },
+  {
+    operation: "delete",
+    method: "DELETE",
+    status: 503,
+    expected: /Registry DELETE failed \(503\)/u,
+  },
+  { operation: "catalog", method: "GET", status: 403, expected: /Registry GET failed \(403\)/u },
+  { operation: "catalog", method: "GET", status: 500, expected: /Registry GET failed \(500\)/u },
+  { operation: "manifest", method: "GET", status: 404, expected: /Registry GET failed \(404\)/u },
+  { operation: "manifest", method: "GET", status: 500, expected: /Registry GET failed \(500\)/u },
+  { operation: "gc", method: "PUT", status: 500, expected: /Registry PUT failed \(500\)/u },
+] as const) {
+  await test(`registry ${operation} handles HTTP ${status}`, async () => {
+    const paths = {
+      delete: manifestPath,
+      manifest: manifestPath,
+      catalog: "_catalog?tags=true",
+      gc: "gc/layers",
+    };
+    const client = registryClient(credentials, (url, init) => {
+      const request = new Request(url, init);
+      assert.equal(request.url, registryUrl + paths[operation]);
+      assert.equal(request.method, method);
+      assert.equal(
+        request.headers.get("authorization"),
+        `Basic ${Buffer.from("test:test-password").toString("base64")}`,
+      );
+      const payload = status === 409 ? '{"code":"SINGLETON_ARTIFACT_EXISTS"}' : null;
+      return Promise.resolve(new Response(payload, { status }));
+    });
+    const result =
+      operation === "delete" || operation === "manifest"
+        ? client[operation](repository, "tag-1")
+        : client[operation]();
+    if (expected instanceof RegExp) await assert.rejects(result, expected);
+    else assert.equal(await result, expected);
+  });
+}
+
 function fixture() {
   const calls: string[][] = [];
   const logs: string[] = [];
@@ -159,12 +228,7 @@ function fixture() {
   function command(args: string[]) {
     calls.push(args);
     assert.deepEqual(args.slice(0, 3), ["containers", "registries", "credentials"]);
-    return JSON.stringify({
-      account_id: account,
-      registry_host: "registry.cloudflare.com",
-      username: "test",
-      password: "test-password",
-    });
+    return JSON.stringify(credentials);
   }
   const names = [digest(1), "tag-12", "tag-3", "tag-2", "tag-1"];
   const mutations: string[] = [];
@@ -236,6 +300,45 @@ await test("apply deletes named tags before digest entries and collects layers o
   assert(f.calls.flat().includes("--push"));
   assert(f.logs.some((s) => s.includes(`"deleted":"${tag(1).tag}"`)));
   assert(f.logs.some((s) => s.includes(`"missing":"${tag(1, digest(1)).tag}"`)));
+});
+
+function retentionFetch(deleteStatus: number, gcStatus: number): typeof fetch {
+  return (url, init) => {
+    const request = new Request(url, init);
+    switch (`${request.method} ${request.url}`) {
+      case `GET ${registryUrl}_catalog?tags=true`:
+        return Promise.resolve(
+          Response.json({ repositories: { [`${account}/${repository}`]: ["tag-1"] } }),
+        );
+      case `GET ${registryUrl}${manifestPath}`:
+        return Promise.resolve(
+          new Response(body(1), { headers: { "Docker-Content-Digest": digest(1) } }),
+        );
+      case `DELETE ${registryUrl}${manifestPath}`:
+        return Promise.resolve(new Response(null, { status: deleteStatus }));
+      case `PUT ${registryUrl}gc/layers`:
+        return Promise.resolve(new Response(null, { status: gcStatus }));
+      default:
+        throw new Error(`Unexpected registry request ${request.method} ${request.url}`);
+    }
+  };
+}
+
+await test("apply rejects a forbidden DELETE without logging a deletion", async () => {
+  const f = fixture();
+  const fakeFetch = retentionFetch(403, 200);
+  await assert.rejects(
+    runRetention({ ...f, apply: true, registry: (c) => registryClient(c, fakeFetch) }),
+    /Registry DELETE failed \(403\)/u,
+  );
+  assert(!f.logs.some((line) => line.includes('"deleted"')));
+});
+
+await test("apply logs a garbage collection warning when PUT returns 500", async () => {
+  const f = fixture();
+  const fakeFetch = retentionFetch(202, 500);
+  await runRetention({ ...f, apply: true, registry: (c) => registryClient(c, fakeFetch) });
+  assert(f.logs.includes("Warning: registry layer garbage collection failed"));
 });
 
 await test("a missing named tag stops deletion", async () => {
