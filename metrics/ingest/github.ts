@@ -39,11 +39,12 @@ const markers = {
   verdict_fail: /\bFAIL\b/u,
   merged: /マージしました|\bmerged\b/iu,
 };
+export const blockerSchema = reference.extend({ state: str });
 export function issueRecord(data: unknown, blockers: unknown[]) {
   const issue = issueSchema.parse(data);
   return candidate("github.issue", issue.number, issue.created_at, {
     ...issue,
-    blocked_by: z.array(reference.extend({ state: str })).parse(blockers),
+    blocked_by: z.array(blockerSchema).parse(blockers),
   });
 }
 export function prRecord(data: unknown) {

@@ -4,6 +4,7 @@ import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import {
+  blockerSchema,
   commentRecord,
   issueRecord,
   jobRecord,
@@ -18,7 +19,15 @@ const repo = "https://api.github.com/repos/wakamenori/instant-madori/";
 const first = "2026-11-01T00:00:00.000Z";
 const stateSchema = z.object({
   since: z.string(),
-  tags: z.record(z.string(), z.object({ etag: z.string(), next: z.string().nullable() })),
+  tags: z.record(
+    z.string(),
+    z.object({
+      etag: z.string(),
+      next: z.string().nullable(),
+      context: z.string().optional(),
+      cached: z.array(z.union([blockerSchema, runSchema])).optional(),
+    }),
+  ),
 });
 export class BudgetLimit extends Error {}
 async function authToken(signal: AbortSignal) {
@@ -59,11 +68,12 @@ export function githubPollers(home: string, tokenFor = authToken, request = fetc
           const now = Date.now(),
             records: RecordInput[] = [];
           pending = { since: new Date(now - 60_000).toISOString(), tags: { ...state.tags } };
-          async function page(url: string, conditional: boolean) {
+          async function page(url: string, context = "") {
             if (new URL(url).origin !== new URL(repo).origin)
               throw new Error("Unexpected pagination origin");
             if (remaining < 1500) throw new BudgetLimit();
-            const saved = conditional ? state.tags[url] : undefined;
+            const old = state.tags[url];
+            const saved = old && (old.context ?? "") === context ? old : undefined;
             const response = await request(url, {
               headers: saved ? { ...headers, "If-None-Match": saved.etag } : headers,
               signal: timeout(),
@@ -74,20 +84,29 @@ export function githubPollers(home: string, tokenFor = authToken, request = fetc
             if (!response.ok) throw new Error("GitHub HTTP " + response.status);
             const next = response.headers.get("link")?.match(/<([^>]+)>; rel="next"/u)?.[1] ?? null;
             const etag = response.headers.get("etag");
-            if (conditional && etag) pending.tags[url] = { etag, next };
+            if (etag) pending.tags[url] = { etag, next, context };
+            else delete pending.tags[url];
             return { data: await response.json(), next };
           }
-          async function pages(endpoint: string, key?: string, conditional = true) {
+          async function pages(endpoint: string, key?: string, context = "") {
             let url: string | null = repo + endpoint;
             const rows: unknown[] = [];
             while (url) {
-              const p = await page(url, conditional);
-              if (p.data !== null)
-                rows.push(
-                  ...z
-                    .array(z.unknown())
-                    .parse(key ? z.record(z.string(), z.unknown()).parse(p.data)[key] : p.data),
-                );
+              const p = await page(url, context);
+              const tag = pending.tags[url];
+              if (p.data === null) rows.push(...(tag?.cached ?? []));
+              else {
+                const values = z
+                  .array(z.unknown())
+                  .parse(key ? z.record(z.string(), z.unknown()).parse(p.data)[key] : p.data);
+                rows.push(...values);
+                if (tag && key === "workflow_runs")
+                  tag.cached = values
+                    .map((r) => runSchema.parse(r))
+                    .filter((r) => !r.conclusion || Date.parse(r.updated_at) >= now - 3600_000);
+                if (tag && endpoint.includes("/dependencies/blocked_by"))
+                  tag.cached = values.map((v) => blockerSchema.parse(v));
+              }
               url = p.next;
             }
             return rows;
@@ -106,6 +125,7 @@ export function githubPollers(home: string, tokenFor = authToken, request = fetc
                 )) {
                   const run = runSchema.parse(raw);
                   if (
+                    run.conclusion &&
                     state.since !== first &&
                     Date.parse(run.updated_at) < Math.min(Date.parse(state.since), now - 3600_000)
                   )
@@ -113,6 +133,7 @@ export function githubPollers(home: string, tokenFor = authToken, request = fetc
                   for (const job of await pages(
                     "actions/runs/" + run.id + "/jobs?filter=all&per_page=100",
                     "jobs",
+                    run.updated_at,
                   ))
                     records.push(jobRecord(job, run, workflow));
                 }
@@ -131,13 +152,11 @@ export function githubPollers(home: string, tokenFor = authToken, request = fetc
                 .parse(raw);
               if (Date.parse(issue.updated_at) < Date.parse(state.since)) continue;
               if (name === "github.pr" && issue.pull_request) {
-                const p = await page(repo + "pulls/" + issue.number, true);
+                const p = await page(repo + "pulls/" + issue.number);
                 if (p.data !== null) records.push(prRecord(p.data));
               } else if (name === "github.issue" && !issue.pull_request) {
                 const blockers = await pages(
                   "issues/" + issue.number + "/dependencies/blocked_by?per_page=100",
-                  undefined,
-                  false,
                 );
                 records.push(issueRecord(raw, blockers));
               }
