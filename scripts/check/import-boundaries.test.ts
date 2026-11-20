@@ -127,12 +127,25 @@ for (const [name, path] of [
   assert(path);
   symlinkSync(join(root, path), join(root, `node_modules/@madori/${name}`), "dir");
 }
-for (const path of Object.values(scopes)) write(path);
+for (const path of Object.values(scopes)) {
+  write(path);
+  write(path.replace(/\.ts$/u, ".test.ts"));
+}
+const storageExtensionFiles = ["ts", "tsx", "mts", "cts"].map(
+  (extension) => `apps/worker/src/storage/example-${extension}.${extension}`,
+);
+for (const path of storageExtensionFiles) write(path);
 for (const layer of Object.keys(workerLayers)) {
+  write(`apps/worker/src/${layer}/nested/source.ts`);
   for (const path of [`apps/worker/src/${layer}/x.ts`, `apps/worker/src/${layer}/nested/x.ts`])
     write(path);
 }
 for (const path of [
+  "apps/web/tests/example.ts",
+  "apps/web/src/viewer/nested/example.test.ts",
+  "apps/web/src/viewer/example.test.tsx",
+  "apps/worker/tests/example.ts",
+  "apps/worker/src/services/users.ts",
   "apps/web/src/index.ts",
   "apps/web/src/worker/pool.ts",
   "apps/web/src/style.css",
@@ -701,8 +714,7 @@ void test("tests preserve viewer and cross-layer exceptions", () => {
 });
 
 void test("every TypeScript extension retains boundaries and strict lint", async () => {
-  for (const extension of ["ts", "tsx", "mts", "cts"]) {
-    const from = scopes["worker-storage"].replace(/\.ts$/u, `.${extension}`);
+  for (const from of storageExtensionFiles) {
     assert(
       resolved(importType("../api/x.ts"), from).some(
         (diagnostic) => diagnostic.boundaryId === "worker-storage-layers",
