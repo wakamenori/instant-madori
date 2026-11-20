@@ -23,7 +23,7 @@ Preconditions:
 - [案件](./projects.md)の「作る」を済ませ、`PAT=$(jq -r .pattern.id "$EVIDENCE/projects/create.json")` を設定している。
 - `J='content-type: application/json'` と `O='origin: http://127.0.0.1:5173'` を設定している。
 - `API=http://127.0.0.1:5173/api` と `D="$EVIDENCE/instructions"` を設定し、`$D` がある。
-- 終わるまで待つ関数を定義している。`settle() { for i in $(seq 1 60); do curl -sS -o "$D/$1.json" "$API/patterns/$PAT/state"; jq -e '.runningJob == null and (.queuedJobs | length) == 0' "$D/$1.json" >/dev/null && return 0; sleep 5; done; return 1; }`
+- 終わるまで待つ関数を定義している。`settle() { for i in $(seq 1 60); do curl -sS -o "$D/${1}.json" "$API/patterns/$PAT/state"; jq -e '.runningJob == null and (.queuedJobs | length) == 0' "$D/${1}.json" >/dev/null && return 0; sleep 5; done; return 1; }`
 
 - **送る。** `RID=$(uuidgen)` で `curl -sS -o "$D/accept.json" -w '%{http_code}\n' -X POST "$API/patterns/$PAT/messages" -H "$J" -H "$O" -d "{\"requestId\":\"$RID\",\"body\":\"南向きの居間を広くしたい\"}"`。`202` で、`job.number` が `1`。
 - **送り直す。** 同じ `RID` と本文で、出力先を `"$D/replay.json"` にして送る。`202` で、`job.jobId` が `accept.json` と同じ。

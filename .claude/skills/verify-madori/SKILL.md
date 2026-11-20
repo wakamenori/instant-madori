@@ -43,7 +43,7 @@ gh pr view "$PR" --json headRefOid --jq .headRefOid
 メインのチェックアウトのビルド成果物をリンクしてから準備する。Rust を最初からビルドし直さずに済む。`pnpm setup` の最後の `lefthook install` は、全 worktree で共有の `.git/hooks/pre-commit` を、この worktree を指すように書き換える。準備の後、メインのチェックアウトで入れ直す。
 
 ```sh
-MAIN=$(git worktree list --porcelain | awk 'NR == 1 { print $2 }')
+MAIN=$(git worktree list --porcelain | sed -n '1s/^worktree //p')
 [ -e target ] || ln -s "$MAIN/target" target
 [ -e .tools ] || ln -s "$MAIN/.tools" .tools
 export CARGO_INCREMENTAL=0
@@ -87,7 +87,7 @@ curl -sS -o /dev/null -m 120 -w '%{http_code} %{content_type}\n' http://127.0.0.
 
 ```sh
 kill -0 -- "-$(cat "$EVIDENCE/dev.pgid")" && echo "dev: running" || echo "dev: stopped"
-lsof -nP -iTCP:8787 -iTCP:5173 -sTCP:LISTEN | awk 'NR > 1 { print $1, $2, $9 }'
+lsof -nP -iTCP:8787 -iTCP:5173 -sTCP:LISTEN | tail -n +2 | tr -s ' ' | cut -d ' ' -f 1,2,9
 curl -sS http://127.0.0.1:8787/api/health; echo
 curl -sS http://127.0.0.1:5173/api/me; echo
 git rev-parse HEAD

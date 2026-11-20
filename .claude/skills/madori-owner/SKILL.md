@@ -17,7 +17,7 @@ pstack の poteto-mode に従い、Issue に合う playbook で進める。多�
 4. それ以外は、cargo を使わずに準備する。cargo を使う操作（[madori-coordinator](../madori-coordinator/SKILL.md) の「pstack と違うところ」の一覧）を実行せず、cargo を使う検査は runner の `check` に任せる。`crates/viewer/pkg` は Git の追跡対象外なので、メインのチェックアウトの生成済みのものを写す。
 
    ```sh
-   MAIN=$(git worktree list --porcelain | awk 'NR == 1 { print $2 }')
+   MAIN=$(git worktree list --porcelain | sed -n '1s/^worktree //p')
    mise exec -- pnpm install --frozen-lockfile
    mise exec -- pnpm --filter @madori/worker types
    [ -e crates/viewer/pkg ] || command cp -R "$MAIN/crates/viewer/pkg" crates/viewer/pkg
