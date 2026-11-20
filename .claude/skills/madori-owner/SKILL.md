@@ -7,6 +7,12 @@ description: instant-madori の Issue 一つを担当として進める。自分
 
 pstack の poteto-mode に従い、Issue に合う playbook で進める。多くは Feature か Bug fix になる。このファイルには、このリポジトリと T3 で違うところと、指揮役との受け渡しだけを書く。
 
+poteto-mode は Skill ツールでは起動できない。Skill ツールを試さず、ほかの作業の前に、次のコマンドが出す `SKILL.md` を全部読んで従う。このコマンドは、pstack プラグインの版のうち最も新しいものを選ぶ。
+
+```sh
+ls -d ~/.claude/plugins/cache/*/pstack/*/skills/poteto-mode/SKILL.md | sort -V | tail -n 1
+```
+
 引数は、Issue の番号と、報告先である指揮役のスレッドの ID。
 
 ## 準備
