@@ -10,7 +10,7 @@ SELECT o.issue,w.title,w.ready_at,o.launch,c.pr,c.created_at pr_opened,c.merged_
  coalesce((SELECT max(end) FROM span s WHERE s.issue=o.issue AND kind='owner_turn'),o.launch) last_owner_activity,
  (SELECT count(*) FROM actor a WHERE a.issue=o.issue AND role='verifier') verifier_rounds,
  (SELECT count(*) FROM event e WHERE e.issue=o.issue AND kind='verdict' AND attributes->>'$.verdict'='FAIL') fails,
- (SELECT count(*) FROM issue_job j WHERE j.issue=o.issue) check_jobs,
+ (SELECT count(*) FROM issue_job j JOIN stg_actions_job a USING(id) WHERE j.issue=o.issue AND a.workflow='check') check_jobs,
  (SELECT count(*) FROM event e WHERE e.issue=o.issue AND kind='coordinator_message') coordinator_messages,
  (SELECT count(*) FROM event e WHERE e.issue=o.issue AND kind='owner_wake') owner_wakes,'1' definition_version
 FROM launches o LEFT JOIN work_item w USING(issue) LEFT JOIN changes c ON c.issue=o.issue AND c.rank=1;

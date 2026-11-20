@@ -21,3 +21,8 @@ SELECT natural_key AS id,
 FROM staging_record WHERE source='github.actions.job';
 
 CREATE TABLE stg_actions_job AS SELECT * FROM stg_actions_job_history WHERE valid_to IS NULL;
+
+CREATE VIEW stg_actions_step AS
+SELECT j.id job_id, s.key ordinal, s.value->>'$.name' name, s.value->>'$.conclusion' conclusion,
+       s.value->>'$.started_at' started_at, s.value->>'$.completed_at' completed_at
+FROM stg_actions_job j,json_each(j.steps) s;

@@ -138,6 +138,8 @@ export async function startReceiver(options: Options) {
       }
       if (proof && proof !== "foreign") ingest({ records: [proof], rejects: [], drops: [] });
     }
+    for (const row of store.health())
+      (sources[String(row.source)] ??= {}).held_now = Number(row.held_now);
     store.ingest(
       [
         {
@@ -289,11 +291,11 @@ export async function startReceiver(options: Options) {
         if (controller.signal.aborted) return;
         ingest({ records: [...records], rejects: [], drops: [] });
         p.committed?.();
-        (sources[p.name] ??= {}).last_poll = clock().toISOString();
       } catch (error) {
         count(p.name, error instanceof BudgetLimit ? "skipped_cycles" : "failed_cycles", 1);
         if (!(error instanceof BudgetLimit)) increment("poll_failures");
       } finally {
+        (sources[p.name] ??= {}).last_poll = clock().toISOString();
         active = false;
       }
     }

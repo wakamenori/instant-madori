@@ -1,11 +1,11 @@
 CREATE TABLE mart_ci_job AS
-SELECT id,run_id,workflow,created_at,started_at,completed_at,runner_name,conclusion,
+SELECT CAST(id AS INTEGER) job_id,run_id,workflow,created_at,started_at,completed_at,runner_name,conclusion,
  (julianday(started_at)-julianday(created_at))*1440 queue_minutes,
  (julianday(completed_at)-julianday(started_at))*1440 run_minutes,
  CASE WHEN workflow='check' THEN iif(EXISTS(SELECT 1 FROM json_each(steps)
  WHERE value->>'$.name' LIKE '%pnpm check%--full%'),'full','default') END mode,
  (SELECT json_group_array(json_object('name',value->>'$.name','minutes',
-  (julianday(value->>'$.completed_at')-julianday(value->>'$.started_at'))*1440)) FROM json_each(steps)) step_minutes,
+  (julianday(value->>'$.completed_at')-julianday(value->>'$.started_at'))*1440)) FROM json_each(steps)) steps,
  '1' definition_version FROM stg_actions_job;
 CREATE TABLE mart_runner_hour AS
 WITH RECURSIVE hours(t,last) AS (

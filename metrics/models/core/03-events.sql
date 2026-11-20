@@ -9,9 +9,7 @@ UNION ALL SELECT s.issue,'verdict',s.end,json_object('actor',s.actor,'pr',a.pr,'
  FROM span s JOIN actor a ON a.id=s.actor AND a.issue IS s.issue WHERE s.kind='verifier_run' AND s.end IS NOT NULL
 UNION ALL SELECT ic.issue,'pr_opened',c.created_at,json_object('pr',c.pr) FROM issue_change ic JOIN change c USING(pr)
 UNION ALL SELECT ic.issue,'merged',c.merged_at,json_object('pr',c.pr) FROM issue_change ic JOIN change c USING(pr) WHERE c.merged_at IS NOT NULL
-UNION ALL SELECT ic.issue,'deployed',min(j.completed_at),json_object('pr',c.pr) FROM issue_change ic JOIN change c USING(pr)
- JOIN stg_actions_job j ON j.workflow='deploy-staging' AND j.head_branch='main' AND j.run_created_at>=c.merged_at
- AND j.conclusion='success' AND j.run_conclusion='success' GROUP BY ic.issue,c.pr
+UNION ALL SELECT issue,'deployed',completed_at,json_object('pr',pr,'run_id',run_id) FROM issue_deploy
 UNION ALL SELECT o.issue,'owner_wake',r.started_at,json_object('wake_kind',CASE
  WHEN m.id IS NULL THEN 'unknown' WHEN a.role='coordinator' THEN 'coord_msg'
  WHEN m.creation_source IN ('web','mobile') THEN 'human' WHEN m.notification_kind='delegated_completion' THEN 'delegate_done'

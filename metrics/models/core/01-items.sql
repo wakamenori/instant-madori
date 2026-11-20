@@ -37,3 +37,21 @@ FROM stg_t3_subagent s LEFT JOIN owner o ON o.id=s.thread_id WHERE s.origin='pro
 CREATE TABLE issue_job AS
 SELECT DISTINCT ic.issue,j.id FROM issue_change ic JOIN change c USING(pr)
 JOIN stg_actions_job j ON j.workflow='check' AND (j.head_branch=c.head_ref OR EXISTS (SELECT 1 FROM json_each(j.pr_numbers) WHERE value=c.pr));
+
+CREATE TABLE issue_deploy AS
+WITH attempts AS (
+ SELECT run_id,run_attempt,run_created_at,max(completed_at) completed_at,
+        row_number() OVER(PARTITION BY run_id ORDER BY run_attempt DESC) latest,
+        min(run_conclusion='success') successful
+ FROM stg_actions_job WHERE workflow='deploy-staging' AND head_branch='main'
+ GROUP BY run_id,run_attempt
+), candidates AS (
+ SELECT ic.issue,c.pr,d.run_id,d.run_attempt,d.completed_at,
+        row_number() OVER(PARTITION BY ic.issue,c.pr ORDER BY d.completed_at,d.run_id) first
+ FROM issue_change ic JOIN change c USING(pr) JOIN attempts d
+ ON d.latest=1 AND d.successful AND d.run_created_at>=c.merged_at AND d.completed_at IS NOT NULL
+)
+SELECT issue,pr,run_id,run_attempt,completed_at FROM candidates WHERE first=1;
+
+INSERT INTO issue_job
+SELECT DISTINCT d.issue,j.id FROM issue_deploy d JOIN stg_actions_job j USING(run_id,run_attempt);

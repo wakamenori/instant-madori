@@ -13,3 +13,7 @@ SELECT natural_key AS id,
 FROM staging_record WHERE source='github.issue';
 
 CREATE TABLE stg_github_issue AS SELECT * FROM stg_github_issue_history WHERE valid_to IS NULL;
+
+CREATE VIEW stg_github_blocked_by AS
+SELECT i.number issue, b.value->>'$.number' blocker,b.value->>'$.state' state
+FROM stg_github_issue i,json_each(i.blocked_by) b;

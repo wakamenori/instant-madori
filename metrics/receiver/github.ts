@@ -21,7 +21,10 @@ const stateSchema = z.object({
   tags: z.record(z.string(), z.object({ etag: z.string(), next: z.string().nullable() })),
 });
 export class BudgetLimit extends Error {}
-export function githubPollers(home: string): Poller[] {
+async function authToken(signal: AbortSignal) {
+  return (await promisify(execFile)("gh", ["auth", "token"], { signal })).stdout.trim();
+}
+export function githubPollers(home: string, tokenFor = authToken, request = fetch): Poller[] {
   return (["github.issue", "github.pr", "github.comment", "github.actions.job"] as const).map(
     (name) => {
       const path = join(home, name + ".cursor.json");
@@ -41,11 +44,13 @@ export function githubPollers(home: string): Poller[] {
           state = pending;
         },
         async poll(signal) {
-          const token = (
-            await promisify(execFile)("gh", ["auth", "token"], { signal })
-          ).stdout.trim();
+          const token = await tokenFor(signal);
           const headers = { Authorization: "Bearer " + token };
-          const budget = await fetch("https://api.github.com/rate_limit", { headers, signal });
+          const timeout = () => AbortSignal.any([signal, AbortSignal.timeout(30_000)]);
+          const budget = await request("https://api.github.com/rate_limit", {
+            headers,
+            signal: timeout(),
+          });
           if (!budget.ok) throw new Error("Rate limit unavailable");
           let remaining = z
             .object({ resources: z.object({ core: z.object({ remaining: z.number() }) }) })
@@ -59,9 +64,9 @@ export function githubPollers(home: string): Poller[] {
               throw new Error("Unexpected pagination origin");
             if (remaining < 1500) throw new BudgetLimit();
             const saved = conditional ? state.tags[url] : undefined;
-            const response = await fetch(url, {
+            const response = await request(url, {
               headers: saved ? { ...headers, "If-None-Match": saved.etag } : headers,
-              signal,
+              signal: timeout(),
               redirect: "error",
             });
             remaining = Number(response.headers.get("x-ratelimit-remaining") ?? 0);
@@ -87,6 +92,8 @@ export function githubPollers(home: string): Poller[] {
             }
             return rows;
           }
+          // Reuse validators within a UTC day. The timestamp cursor still limits detail requests.
+          const sinceDay = state.since.slice(0, 10) + "T00:00:00Z";
           if (name === "github.actions.job") {
             for (const workflow of ["check", "deploy-staging"]) {
               // Partition the created filter to stay below the Actions search cap. Revisit older runs for reruns.
@@ -112,16 +119,17 @@ export function githubPollers(home: string): Poller[] {
               }
             }
           } else if (name === "github.comment") {
-            for (const raw of await pages("issues/comments?per_page=100&since=" + state.since))
+            for (const raw of await pages("issues/comments?per_page=100&since=" + sinceDay))
               records.push(commentRecord(raw));
           } else {
-            for (const raw of await pages("issues?state=all&per_page=100&since=" + state.since)) {
+            for (const raw of await pages("issues?state=all&per_page=100&since=" + sinceDay)) {
               const issue = reference
                 .extend({
+                  updated_at: z.string(),
                   pull_request: z.unknown().optional(),
-                  sub_issues_summary: z.unknown().optional(),
                 })
                 .parse(raw);
+              if (Date.parse(issue.updated_at) < Date.parse(state.since)) continue;
               if (name === "github.pr" && issue.pull_request) {
                 const p = await page(repo + "pulls/" + issue.number, true);
                 if (p.data !== null) records.push(prRecord(p.data));
@@ -137,7 +145,8 @@ export function githubPollers(home: string): Poller[] {
           }
           // Only stable URLs benefit from validators on the next cycle.
           for (const key of Object.keys(pending.tags))
-            if (key.includes("since=")) delete pending.tags[key];
+            if (key.includes("since=") && !decodeURIComponent(key).includes(sinceDay))
+              delete pending.tags[key];
           return records;
         },
       };
