@@ -122,7 +122,7 @@ node .claude/skills/madori-coordinator/scripts/rank-ready.mjs
 
 ## staging の占有
 
-staging は一つしかなく、マージとデプロイのたびに DO と Container が入れ替わって、観測や試験が壊れる。staging を占有する担当は、同時に一人までにする。
+staging は一つしかなく、デプロイのたびに DO と Container が入れ替わって、観測や試験が壊れる。staging を占有する担当は、同時に一人までにする。
 
 staging が空いているとは、占有している担当がおらず、先に始まったデプロイ（main へのマージの自動の実行と、そのやり直しを含む）がすべて終わっていることを言う。占有を始める前に、終わっていない実行を件数で切らずに全件出す。照会が成功して出力が空で、占有している担当もいないときだけ、占有を始める。`gh run list` は直近の数件しか見ず、前の実行のやり直しを見落とす。
 
@@ -136,7 +136,7 @@ gh api --paginate \
   - 占有の要る確認を担当から頼まれて、受けたとき（「ブランチを staging で試す」）。
   - 「staging を占有する」Issue の PR をマージしたとき（「マージを決める」）。
 - 占有は、その担当が確かめ終わるまで続く。終えたことは、担当のスレッドを読んで確かめる。始めたときと終えたときに、その Issue にコメントで書く。
-- 占有の間は、マージも、デプロイ（`gh workflow run`、`gh run rerun`）もしない。ただし、ほかに占有している担当がいなければ、占有している担当の確認に要るデプロイ（頼まれたブランチのデプロイ、失敗したデプロイのやり直し）は、指揮役が行う。
+- 占有の間は、デプロイを起こすマージも、デプロイ（`gh workflow run`、`gh run rerun`）もしない。デプロイを起こさないマージ（「マージを決める」）では staging が入れ替わらないので、占有の間もマージしてよい。ただし、ほかに占有している担当がいなければ、占有している担当の確認に要るデプロイ（頼まれたブランチのデプロイ、失敗したデプロイのやり直し）は、指揮役が行う。
 
 ## マージを決める
 
@@ -146,7 +146,18 @@ gh api --paginate \
 - self-hosted runner の `check` が、同じ head で成功した。ブランチ保護が無いので、`gh pr checks` で自分で確かめる。
 - 自分で差分を読んだ。
 - D1 のマイグレーションを加える PR なら、今の main のマイグレーションと番号が衝突しない。PR の `check` は分岐点と比べるので、先に main へ入った同じ番号には、マージ後の main の `check` で初めて気づく。
-- staging が占有されていない（「staging の占有」）。「staging を占有する」Issue の PR なら、マージした時点でその担当の占有が始まる。
+- staging が占有されていない（「staging の占有」）か、そのマージがデプロイを起こさない。「staging を占有する」Issue の PR なら、マージした時点でその担当の占有が始まる。
+
+占有の間にマージするときは、`--match-head-commit` に渡す head で、PR の変更のうち main の `deploy-staging.yml` の `paths-ignore` に入らないファイルを出す。一覧は毎回 main から読み、このスキルに写さない。
+
+```sh
+git fetch -q origin main "pull/<番号>/head" &&
+  { echo ':/'; git show origin/main:.github/workflows/deploy-staging.yml |
+    sed -n '/^    paths-ignore:$/,/^ \{0,5\}[^ #]/s/^      - "\(.*\)"$/:(top,glob,exclude)\1/p'; } |
+  xargs git diff --no-renames --name-only "origin/main...<head>" --
+```
+
+コマンドが成功して出力が空なら、デプロイを起こさないので占有の間もマージしてよい。ファイルが出たらデプロイを起こすので、占有が終わるまで待つ。一覧を読み取れないときは PR の変更ファイルがすべて出るため、デプロイを起こすマージとして扱う。
 
 ```sh
 gh pr merge <番号> --merge --match-head-commit <head>
