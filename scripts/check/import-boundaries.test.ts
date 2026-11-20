@@ -329,6 +329,9 @@ const syntaxCases: Record<string, BoundaryCases> = {
       'import { DatabaseSync } from "node:sqlite";',
       'import { execFileSync } from "node:child_process";',
       'void import("node:fs");',
+      'import {readFile} from "fs/promises";',
+      'export * from "node:http";',
+      'export {readFile} from "fs";',
     ],
     allowed: [
       'import { createHash } from "node:crypto";',
@@ -384,7 +387,11 @@ const importCases: Record<string, string[]> = {
     "metrics/receiver/t3.ts",
     "metrics/home.ts",
   ],
-  "metrics-ingest-layers": ["metrics/receiver/t3.ts", "metrics/l1/store.ts"],
+  "metrics-ingest-layers": [
+    "metrics/receiver/t3.ts",
+    "metrics/hook/spool.ts",
+    "metrics/l1/store.ts",
+  ],
   "metrics-l1-writer": ["metrics/l1/store.ts"],
 };
 const exceptedTargets: Record<string, string> = {
