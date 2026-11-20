@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { promisify } from "node:util";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -17,10 +18,16 @@ const imageRefSchema = z
       "u",
     ),
   );
+const entryNamePattern = "(?:[\\w][\\w.-]{0,127}|sha256:[a-f0-9]{64})";
+const entryNameSchema = z.string().regex(new RegExp(`^${entryNamePattern}$`, "u"));
 const tagSchema = z.object({
-  tag: z.string().regex(new RegExp(`^${repositoryPattern}:[\\w][\\w.-]{0,127}$`, "u")),
-  digest: digestSchema.nullable(),
+  tag: z.string().regex(new RegExp(`^${repositoryPattern}:${entryNamePattern}$`, "u")),
+  digest: digestSchema,
+  preparedFrom: digestSchema.nullable(),
 });
+function entryName(tag: string) {
+  return tag.slice(tag.indexOf(":") + 1);
+}
 const versionSchema = z.object({
   id: z.uuid(),
   createdOn: z.iso.datetime({ offset: true }),
@@ -42,7 +49,7 @@ function imageParts(ref: string) {
 export function selectTags(input: {
   versions: Version[];
   currentIds: ReadonlySet<string>;
-  tags: Tag[];
+  tags: (Omit<Tag, "digest"> & { digest: string | null })[];
   retain: number;
 }): RetentionPlan {
   const parsed = z
@@ -73,9 +80,11 @@ export function selectTags(input: {
   }
   if (
     new Set(tags.map(({ tag }) => tag)).size !== tags.length ||
-    tags.some(({ digest }) => digest === null)
+    tags.some(
+      ({ tag, digest }) => entryName(tag).startsWith("sha256:") && entryName(tag) !== digest,
+    )
   ) {
-    return blocked("Every tag must have one readable digest");
+    return blocked("Entry names must be unique and digest names must match their manifest");
   }
   const retained = versions.filter((v, i) => i < retain || input.currentIds.has(v.id));
   const repositories = new Set(
@@ -99,9 +108,10 @@ export function selectTags(input: {
   const remove: Tag[] = [];
   const unreferenced: Tag[] = [];
   for (const tag of tags) {
-    if (tag.tag.slice(0, tag.tag.lastIndexOf(":")) !== repository) continue;
-    if (tag.digest !== null && protectedDigests.has(tag.digest)) keep.push(tag);
-    else if (tag.digest !== null && knownDigests.has(tag.digest)) remove.push(tag);
+    if (!tag.tag.startsWith(`${repository}:`)) continue;
+    const image = tag.preparedFrom ?? tag.digest;
+    if (protectedDigests.has(image)) keep.push(tag);
+    else if (knownDigests.has(image)) remove.push(tag);
     else unreferenced.push(tag);
   }
   return { kind: "ready", repository, keep, remove, unreferenced };
@@ -146,9 +156,13 @@ const deploymentsSchema = z.object({
       .min(1),
   }),
 });
-const catalogSchema = z.array(
-  z.object({ name: z.string().min(1), tags: z.array(z.string().min(1)) }),
-);
+const catalogSchema = z.object({
+  repositories: z.record(z.string().min(1), z.array(z.string().min(1))),
+});
+const sourceAnnotation = "io.cloudflare.cloudchamber.image_digest";
+const manifestSchema = z.object({
+  annotations: z.object({ [sourceAnnotation]: digestSchema.optional() }).optional(),
+});
 const registryCredentialsSchema = z.object({
   account_id: z.literal(accountId),
   registry_host: z.literal("registry.cloudflare.com"),
@@ -214,9 +228,6 @@ async function wrangler(args: string[]) {
         maxBuffer: 10 * 1024 * 1024,
       },
     );
-    if (result.stderr.includes("garbage-collection request failed")) {
-      console.error("Wrangler deleted the tag, but its garbage-collection request failed");
-    }
     return result.stdout;
   } catch {
     // Child output can contain credentials, so it must not appear in an exception.
@@ -234,15 +245,50 @@ function wranglerJson(output: string): unknown {
   }
 }
 
+function registryClient(credentials: z.infer<typeof registryCredentialsSchema>) {
+  const authorization = `Basic ${Buffer.from(`${credentials.username}:${credentials.password}`).toString("base64")}`;
+  async function request(path: string, method: string) {
+    const response = await fetch(`https://registry.cloudflare.com/v2/${path}`, {
+      method,
+      headers: {
+        authorization,
+        accept:
+          "application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json",
+      },
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!response.ok && !(method === "DELETE" && response.status === 404))
+      throw new Error(`Registry ${method} failed (${response.status})`);
+    return response;
+  }
+  const path = (repo: string, name: string) => `${accountId}/${repo}/manifests/${name}`;
+  return {
+    async catalog() {
+      const response = await request("_catalog?tags=true", "GET");
+      return { body: await response.json(), hasLink: response.headers.has("Link") };
+    },
+    async manifest(repo: string, name: string) {
+      const response = await request(path(repo, name), "GET");
+      return {
+        digest: response.headers.get("Docker-Content-Digest"),
+        body: new Uint8Array(await response.arrayBuffer()),
+      };
+    },
+    async delete(repo: string, name: string): Promise<"missing" | "deleted"> {
+      const response = await request(path(repo, name), "DELETE");
+      return response.status === 404 ? "missing" : "deleted";
+    },
+    async gc() {
+      await request("gc/layers", "PUT");
+    },
+  };
+}
+
 export async function runRetention(options: {
   apply: boolean;
   json: (path: string) => Promise<unknown>;
   command: (args: string[]) => Promise<string>;
-  registryHead: (
-    repository: string,
-    tag: string,
-    credentials: z.infer<typeof registryCredentialsSchema>,
-  ) => Promise<string | null>;
+  registry: typeof registryClient;
   log: (message: string) => void;
 }) {
   const versions = await collectVersions(options.json);
@@ -252,12 +298,6 @@ export async function runRetention(options: {
   const currentIds = new Set(deployment.versions.map(({ version_id }) => version_id));
   const scope = selectTags({ versions, currentIds, tags: [], retain: 10 });
   if (scope.kind === "blocked") throw new Error(scope.reason);
-  const catalog = catalogSchema.parse(
-    wranglerJson(await options.command(["containers", "images", "list", "--json"])),
-  );
-  const entries = catalog.filter(({ name }) => name === scope.repository);
-  if (entries.length !== 1)
-    throw new Error("Target repository must appear exactly once in the registry catalog");
   const credentials = registryCredentialsSchema.parse(
     wranglerJson(
       await options.command([
@@ -266,18 +306,33 @@ export async function runRetention(options: {
         "credentials",
         "registry.cloudflare.com",
         "--pull",
+        ...(options.apply ? ["--push"] : []),
         "--json",
       ]),
     ),
   );
   if (process.env.GITHUB_ACTIONS === "true") options.log(`::add-mask::${credentials.password}`);
+  const registry = options.registry(credentials);
+  const catalog = await registry.catalog();
+  if (catalog.hasLink) throw new Error("Paginated registry catalog");
+  const { repositories } = catalogSchema.parse(catalog.body);
+  const target = `${accountId}/${scope.repository}`;
+  const names = repositories[target];
+  if (!names) throw new Error("Target repository must appear exactly once in the registry catalog");
   const tags: Tag[] = [];
-  for (const entry of entries) {
-    for (const tag of entry.tags) {
-      const parsedTag = tagSchema.parse({ tag: `${entry.name}:${tag}`, digest: null });
-      const digest = digestSchema.parse(await options.registryHead(entry.name, tag, credentials));
-      tags.push({ ...parsedTag, digest });
-    }
+  for (const name of names) {
+    entryNameSchema.parse(name);
+    const { body, digest } = await registry.manifest(scope.repository, name);
+    if (digest !== `sha256:${createHash("sha256").update(body).digest("hex")}`)
+      throw new Error("Manifest digest header missing or different from body hash");
+    const manifest = manifestSchema.parse(
+      JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(body)),
+    );
+    tags.push({
+      tag: `${scope.repository}:${name}`,
+      digest,
+      preparedFrom: manifest.annotations?.[sourceAnnotation] ?? null,
+    });
   }
   const plan = selectTags({ versions, currentIds, tags, retain: 10 });
   if (plan.kind === "blocked") throw new Error(plan.reason);
@@ -293,14 +348,26 @@ export async function runRetention(options: {
       retainedVersionIds: versions
         .filter((v, i) => i < 10 || currentIds.has(v.id))
         .map(({ id }) => id),
-      otherRepositories: catalog.filter(({ name }) => name !== plan.repository),
+      otherRepositories: Object.entries(repositories)
+        .filter(([key]) => key !== target)
+        .map(([key, tags]) => ({ name: key.replace(`${accountId}/`, ""), tags })),
       ...plan,
     }),
   );
   if (options.apply) {
-    for (const tag of plan.remove) {
-      await options.command(["containers", "images", "delete", tag.tag, "--skip-confirmation"]);
-      options.log(JSON.stringify({ deleted: tag.tag, digest: tag.digest }));
+    const isDigest = ({ tag }: Tag) => entryName(tag).startsWith("sha256:");
+    for (const tag of [
+      ...plan.remove.filter((tag) => !isDigest(tag)),
+      ...plan.remove.filter(isDigest),
+    ]) {
+      const result = await registry.delete(plan.repository, entryName(tag.tag));
+      if (result === "missing" && !isDigest(tag)) throw new Error(`Named tag missing: ${tag.tag}`);
+      options.log(JSON.stringify({ [result]: tag.tag, digest: tag.digest }));
+    }
+    try {
+      await registry.gc();
+    } catch {
+      options.log("Warning: registry layer garbage collection failed");
     }
   }
   return plan;
@@ -330,22 +397,7 @@ async function main() {
       return response.json();
     },
     command: wrangler,
-    async registryHead(repository, tag, credentials) {
-      const response = await fetch(
-        `https://registry.cloudflare.com/v2/${accountId}/${repository}/manifests/${tag}`,
-        {
-          method: "HEAD",
-          headers: {
-            authorization: `Basic ${Buffer.from(`${credentials.username}:${credentials.password}`).toString("base64")}`,
-            accept:
-              "application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json",
-          },
-          signal: AbortSignal.timeout(30_000),
-        },
-      );
-      if (!response.ok) throw new Error(`Registry HEAD failed (${response.status})`);
-      return response.headers.get("Docker-Content-Digest");
-    },
+    registry: registryClient,
     log: console.log,
   });
 }
