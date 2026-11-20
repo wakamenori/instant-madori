@@ -28,11 +28,16 @@ void test("import boundaries read TypeScript after ESLint fixes and formatting, 
     const commands: Command[] = [];
     const failure = new Error("step failed");
     await assert.rejects(
-      runChecks(mode, [], (_label, command, args) => {
-        const invoked = [command, ...args];
-        commands.push(invoked);
-        return typeCheck(invoked) ? Promise.reject(failure) : Promise.resolve();
-      }),
+      runChecks(
+        mode,
+        [],
+        (_label, command, args) => {
+          const invoked = [command, ...args];
+          commands.push(invoked);
+          return typeCheck(invoked) ? Promise.reject(failure) : Promise.resolve();
+        },
+        (stage) => stage(),
+      ),
       (error) => error === failure,
     );
     const checked = commands.findIndex(importBoundaries);
@@ -40,5 +45,42 @@ void test("import boundaries read TypeScript after ESLint fixes and formatting, 
     const shown = `${mode}:\n${commands.map((command) => command.join(" ")).join("\n")}`;
     assert(fixed >= 0 && checked > fixed, shown);
     assert(commands.slice(fixed + 1, checked).some(prettierWrite), shown);
+  }
+});
+
+void test("full checks hold one Docker slot across container integration and pruning", async () => {
+  mkdirSync("apps/worker/tests", { recursive: true });
+  writeFileSync("apps/worker/tests/container.e2e.ts", "");
+  writeFileSync("apps/worker/tests/example.test.ts", "");
+  for (const mode of modes) {
+    const commands: string[] = [];
+    await runChecks(
+      mode,
+      [],
+      (label, _command, args) => {
+        commands.push([label, ...args].join(" "));
+        return Promise.resolve();
+      },
+      async (stage) => {
+        commands.push("enter");
+        await stage();
+        commands.push("exit");
+      },
+    );
+    const markers = commands.filter((command) => command === "enter" || command === "exit");
+    if (mode !== "--full") {
+      assert.deepEqual(markers, []);
+      continue;
+    }
+    assert.deepEqual(markers, ["enter", "exit"]);
+    const end = commands.indexOf("exit");
+    assert.deepEqual(commands.slice(commands.indexOf("enter") + 1, end), [
+      "Container integration --test --test-reporter=spec apps/worker/tests/container.e2e.ts",
+      "Prune Docker build cache scripts/dev/prune-build-cache.ts",
+    ]);
+    assert.deepEqual(
+      commands.slice(end + 1).map((line) => line.split(" ").slice(0, 3).join(" ")),
+      ["JavaScript dependency licenses", "JavaScript vulnerability audit", "Rust dependency audit"],
+    );
   }
 });
