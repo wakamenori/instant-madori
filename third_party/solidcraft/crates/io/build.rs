@@ -25,6 +25,10 @@ const EVALUATION_TREES: [&str; 1] = ["solidcore"];
 const VENDOR_OUTSIDE: [&str; 2] = ["README.md", "egui-wgpu"];
 
 fn git(root: &Path, args: &[&str]) -> Option<String> {
+    // In a parent workspace, git describes the parent's checkout, not this source.
+    if cfg!(feature = "external-workspace") {
+        return None;
+    }
     let out = Command::new("git").arg("-C").arg(root).args(args).output().ok()?;
     out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned()).filter(|s| !s.trim().is_empty())
 }
@@ -84,7 +88,7 @@ fn main() {
     let root = crate_dir.join("../..");
     let commit = git(&crate_dir, &["rev-parse", "HEAD"]).map(|s| s.trim().to_string()).unwrap_or_else(|| "unknown".into());
     println!("cargo:rustc-env=SOLIDCRAFT_SOURCE_COMMIT={commit}");
-    let source = if cfg!(feature = "external-workspace") { None } else { evaluation_source(&root) }.unwrap_or_else(|| "unknown".into());
+    let source = evaluation_source(&root).unwrap_or_else(|| "unknown".into());
     println!("cargo:rustc-env=SOLIDCRAFT_EVALUATION_SOURCE={source}");
     println!("cargo:rustc-env=SOLIDCRAFT_EVALUATION_CRATES={}", EVALUATION_CRATES.join(","));
     // A new commit in this checkout (or worktree) restamps the build.
