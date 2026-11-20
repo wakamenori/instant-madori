@@ -162,6 +162,39 @@ mise exec -- node --env-file="$MAIN/.env" scripts/check/staging-smoke.ts
 
 `Staging smoke passed: <Origin>` が出れば通っている。staging の画面は Access のログインが要り、このスキルにはまだその手順が無い。画面の確認が要るときは、確かめられなかったこととして報告する。
 
+### 冷えた起動の Container のログを確かめる
+
+接続用 DO の呼び出しは、操作が終わると閉じる。Workers Logs は、呼び出しのログを呼び出しが終わってから載せる。そのため、冷えた起動の `container.started` と `container.ready` は、その描画が終わってから1分ほどで検索できる。休止（10分）の後まで見えなければ、呼び出しが閉じていない。
+
+パターンごとに接続用 DO と Container が分かれるので、新しいパターンへの最初の指示は必ず冷えた起動になる。検証用の利用者のジョブは描画の前に180秒待つので、終わるまでに4分ほどかかる。ログは Workers Logs の検索 API で読む。メインのチェックアウトの `.env` の `CLOUDFLARE_API_TOKEN` で読める。値は表示しない。下の各手順は一つのスクリプトで続けて実行する。
+
+```sh
+STG=https://instant-madori-staging.firpmnfiywl.workers.dev
+ACCOUNT=4a67230af28ec94d9c70ca48572d8e9f
+J='content-type: application/json'
+D="$EVIDENCE/staging-cold-logs"; mkdir -p "$D"
+HDRS=$(mise exec -- node --env-file="$MAIN/.env" -e 'process.stdout.write(`CF-Access-Client-Id: ${process.env.STAGING_ACCESS_CLIENT_ID}\nCF-Access-Client-Secret: ${process.env.STAGING_ACCESS_CLIENT_SECRET}\n`)')
+AUTH=$(mise exec -- node --env-file="$MAIN/.env" -e 'process.stdout.write(`Authorization: Bearer ${process.env.CLOUDFLARE_API_TOKEN}\n`)')
+c() { printf '%s\n' "$HDRS" | curl -sS -H @- "$@"; }
+logs() {
+  body=$(jq -n --arg k "$1" --arg v "$2" --argjson from "$(( (SENT - 60) * 1000 ))" --argjson to "$(( $(date +%s) * 1000 ))" \
+    '{queryId: "adhoc", dry: true, view: "events", limit: 100, timeframe: {from: $from, to: $to},
+      parameters: {filters: [{key: "$metadata.service", operation: "eq", type: "string", value: "instant-madori-staging"},
+        {key: $k, operation: "eq", type: "string", value: $v}]}}')
+  printf '%s\n' "$AUTH" | curl -sS -H @- -H 'content-type: application/json' -X POST \
+    "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT/workers/observability/telemetry/query" -d "$body"
+}
+```
+
+- **案件を得る。** 「検証用の利用者で指示を止める」と同じ作成の要求を、出力先を `"$D/project.json"` にして送る。`201`。`PID=$(jq -r .project.id "$D/project.json")` を設定する。
+- **パターンを足す。** `body=$(printf '{"requestId":"%s","name":"%s"}' "$(uuidgen)" "冷えた起動の確認")` で `c -o "$D/pattern.json" -w '%{http_code}\n' -X POST "$STG/api/projects/$PID/patterns" -H "$J" -H "origin: $STG" -d "$body"`。`201`。`PAT=$(jq -r .pattern.id "$D/pattern.json")` を設定する。
+- **送る。** `SENT=$(date +%s)` を設定し、`body=$(printf '{"requestId":"%s","body":"%s"}' "$(uuidgen)" "冷えた起動の確認")` で `c -o "$D/accept.json" -w '%{http_code}\n' -X POST "$STG/api/patterns/$PAT/messages" -H "$J" -H "origin: $STG" -d "$body"`。`202`。`JOB=$(jq -r .job.jobId "$D/accept.json")` を設定する。
+- **ジョブの完了を待つ。** `for i in $(seq 1 360); do c -o "$D/state.json" "$STG/api/patterns/$PAT/state"; jq -e --arg j "$JOB" '.lastFinishedJob.jobId == $j and .runningJob == null' "$D/state.json" >/dev/null && break; sleep 1; done; DONE=$(date +%s)`。`lastFinishedJob.state` が `completed`。
+- **ログが届くのを待つ。** `for i in $(seq 1 18); do logs traceId "$JOB" >| "$D/trace.json"; jq -e '[.result.events.events[] | select(.source.event? == "container.ready")] | length > 0' "$D/trace.json" >/dev/null && break; sleep 10; done; echo "$(( $(date +%s) - DONE )) s"`。3分以内に止まる。`jq -r '.result.events.events[] | [.source.event // "", .source.mode // ""] | @tsv' "$D/trace.json" | grep container` に、`container.started` と、`cold` の `container.ready` が出る。
+- **呼び出しの長さを読む。** `RID=$(jq -r '[.result.events.events[] | select(.source.event? == "container.ready")][0]["$metadata"].requestId' "$D/trace.json")` を設定し、`logs '$metadata.requestId' "$RID" >| "$D/invocation.json"; jq '[.result.events.events[] | select(.["$metadata"].type == "cf-worker-event")][0]["$workers"].wallTimeMs' "$D/invocation.json"`。数千 ms で、30,000 や 600,000 ではない。
+
+`container.ready` が3分で出なければ、描画の10分後より後にもう一度 `logs traceId "$JOB"` を読む。そこで初めて出て、呼び出しの `wallTimeMs` が休止時間に近ければ、呼び出しが Container の休止まで閉じていない。
+
 ### 検証用の利用者で指示を止める
 
 staging の `JOB_TEST_HOLD` は `before_render:180` なので、検証用の利用者（`staging:verifier`）のジョブは、実行権を取った後、描画の前に180秒待つ。ほかの利用者のジョブは待たない。検証用の利用者で指示の結果まで確かめる手順は、終わるまでに3分以上かかる。

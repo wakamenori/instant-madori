@@ -18,7 +18,6 @@ function fixture() {
   let starts = 0;
   let destroys = 0;
   let timeouts = 0;
-  let stop: () => void = () => undefined;
   const requests: Request[] = [];
   let healthy = true;
   let protocol = true;
@@ -26,9 +25,6 @@ function fixture() {
   let failStart = false;
   let failDestroy = false;
   let failFetch = false;
-  let failMonitor = false;
-  let delayExit = false;
-  const monitors: (() => void)[] = [];
   const container: ContainerHandle & { running: boolean } = {
     running: false,
     images: { geometry: "image-1" },
@@ -37,19 +33,11 @@ function fixture() {
       if (failStart) throw new Error("start");
       container.running = true;
     },
-    monitor: () =>
-      failMonitor
-        ? Promise.reject(new Error("exit during startup"))
-        : new Promise((resolve) => {
-            stop = resolve;
-            monitors.push(resolve);
-          }),
     async destroy() {
       await Promise.resolve();
       destroys++;
       if (failDestroy) throw new Error("destroy");
       container.running = false;
-      if (!delayExit) stop();
     },
     async setInactivityTimeout(ms) {
       inactivityTimeouts.push(ms);
@@ -65,7 +53,15 @@ function fixture() {
       return new Response("display", { status });
     },
   };
+  let stopRetryMs: number | undefined;
   const store = {
+    readStopRetry: () => stopRetryMs,
+    writeStopRetry: (ms: number) => {
+      stopRetryMs = ms;
+    },
+    clearStopRetry: () => {
+      stopRetryMs = undefined;
+    },
     readActivity: () => lastActivityAt,
     writeActivity: (at: number) => {
       lastActivityAt = at;
@@ -113,8 +109,19 @@ function fixture() {
     fields: LogFields;
     level: "info" | "error" | undefined;
   }[] = [];
+  const deadlines = new Map<AbortController, number>();
   const environment: GatewayEnvironment = {
     now: () => clock,
+    deadline: (ms: number) => {
+      const controller = new AbortController();
+      deadlines.set(controller, ms);
+      return {
+        signal: controller.signal,
+        clear: () => {
+          deadlines.delete(controller);
+        },
+      };
+    },
     sleep: async (ms: number) => {
       clock += ms;
       await Promise.resolve();
@@ -129,7 +136,7 @@ function fixture() {
     method: "GET",
     path: "/v1/sample/display",
     traceId: "trace-1",
-    timeoutMs: 100,
+    timeoutMs: 500,
   } as const;
   return {
     container,
@@ -140,24 +147,24 @@ function fixture() {
     call,
     requests,
     events,
-    monitors,
+    openDeadlines: () => [...deadlines.values()],
+    fireDeadlines: () => {
+      for (const controller of deadlines.keys()) {
+        controller.abort();
+        deadlines.delete(controller);
+      }
+    },
     inactivityTimeouts,
     alarm: () => alarm,
     alarmDeletes: () => alarmDeletes,
     at: (at: number) => {
       clock = at;
     },
-    delayExit: () => {
-      delayExit = true;
-    },
     recover: () => {
       healthy = true;
       status = 200;
       failFetch = false;
       failDestroy = false;
-    },
-    failMonitor: () => {
-      failMonitor = true;
     },
     counts: () => ({ starts, destroys, timeouts }),
     unhealthy: () => {
@@ -180,7 +187,6 @@ function fixture() {
     },
     exit: () => {
       container.running = false;
-      stop();
     },
   };
 }
@@ -191,9 +197,12 @@ void test("concurrent cold requests share startup; warm sends carry only the own
     gateway.run((send) => send(f.call)),
     gateway.run((send) => send(f.call)),
   ]);
+  assert.deepEqual(f.openDeadlines(), []);
   assert(results.every((r) => r.kind === "response" && r.start === "cold"));
   assert.equal(f.counts().starts, 1);
   const warm = await gateway.run((send) => send(f.call));
+  assert.deepEqual(f.openDeadlines(), []);
+  assert.deepEqual(f.inactivityTimeouts, [120_000, 120_000, 120_000, 120_000]);
   assert.equal(warm.kind === "response" && warm.start, "warm");
   assert.equal(f.requests.at(-1)?.headers.get("authorization"), "Bearer token-0");
   assert.equal(f.requests.at(-1)?.headers.get("x-trace"), "trace-1");
@@ -203,9 +212,11 @@ void test("DO restart adopts the stored token and rearms idle timeout; image ske
   await f.make().run((send) => send(f.call));
   const adopted = f.make();
   await adopted.resume();
-  await adopted.run((send) => send(f.call));
+  const result = await adopted.run((send) => send(f.call));
+  assert.equal(result.kind === "response" && result.start, "warm");
+  assert.deepEqual(f.openDeadlines(), []);
   assert.equal(f.counts().starts, 1);
-  assert.equal(f.counts().timeouts, 3);
+  assert.equal(f.counts().timeouts, 5);
   f.store.write({ token: "old", image: "old-image", startedAt: 0 });
   await f.make().run((send) => send(f.call));
   assert.equal(f.counts().starts, 2);
@@ -222,6 +233,7 @@ void test("unavailability clears failed starts and destroys unready or unauthori
     const f = fixture();
     f[cause]();
     const result = await f.make().run((send) => send(f.call));
+    assert.deepEqual(f.openDeadlines(), []);
     assert.deepEqual(result, { kind: "unavailable", reason });
     assert.equal(f.store.read(), undefined);
     assert.equal(f.container.running, false);
@@ -234,14 +246,17 @@ void test("missing record replaces an orphan; exit restarts; connection failure 
   await gateway.run((send) => send(f.call));
   assert.equal(f.counts().destroys, 1);
   f.exit();
-  await Promise.resolve();
-  await gateway.run((send) => send(f.call));
+  const next = await gateway.run((send) => send(f.call));
+  assert.equal(next.kind === "response" && next.start, "cold");
+  assert.equal(f.requests.at(-1)?.headers.get("authorization"), "Bearer token-1");
+  assert.equal(f.counts().destroys, 1);
   assert.equal(f.counts().starts, 2);
   f.failFetch();
   assert.deepEqual(await gateway.run((send) => send(f.call)), {
     kind: "unavailable",
     reason: "unreachable",
   });
+  assert.deepEqual(f.openDeadlines(), []);
   assert.deepEqual(
     await new ContainerGateway(undefined, f.store, f.settings, f.environment).run((send) =>
       send(f.call),
@@ -250,16 +265,32 @@ void test("missing record replaces an orphan; exit restarts; connection failure 
   );
 });
 
-void test("a rejected monitor during startup aborts readiness and clears its record", async () => {
-  const f = fixture();
-  f.failMonitor();
-  assert.deepEqual(await f.make().run((send) => send(f.call)), {
-    kind: "unavailable",
-    reason: "exited",
+for (const answer of ["throw", "healthy"] as const) {
+  void test(`exit during readiness clears the lifetime when the probe answers ${answer}`, async () => {
+    const f = fixture();
+    const gateway = f.make();
+    const fetchPort = f.container.fetchPort.bind(f.container);
+    f.container.fetchPort = async (request) => {
+      const response = await fetchPort(request);
+      f.container.running = false;
+      if (answer === "throw") throw new Error("exited");
+      return response;
+    };
+    assert.deepEqual(await gateway.run((send) => send(f.call)), {
+      kind: "unavailable",
+      reason: "exited",
+    });
+    assert.equal(f.store.read(), undefined);
+    assert.equal(
+      f.events.some((entry) => entry.event === "container.ready"),
+      false,
+    );
+    f.container.fetchPort = fetchPort;
+    const next = await gateway.run((send) => send(f.call));
+    assert.equal(next.kind === "response" && next.start, "cold");
+    assert.equal(f.requests.at(-1)?.headers.get("authorization"), "Bearer token-1");
   });
-  assert.equal(f.store.read(), undefined);
-  assert.equal(f.counts().destroys, 1);
-});
+}
 
 void test("failed readiness and token rejection restart; failed transport reprobes without replay", async () => {
   for (const cause of ["unhealthy", "reject"] as const) {
@@ -278,31 +309,11 @@ void test("failed readiness and token rejection restart; failed transport reprob
   assert.equal((await gateway.run((send) => send(f.call))).kind, "unavailable");
   const probes = f.requests.filter((r) => new URL(r.url).pathname === "/healthz").length;
   f.recover();
-  assert.equal((await gateway.run((send) => send(f.call))).kind, "response");
+  const reprobe = await gateway.run((send) => send(f.call));
+  assert.equal(reprobe.kind === "response" && reprobe.start, "warm");
   assert.equal(f.counts().starts, 1);
   assert.equal(f.requests.filter((r) => new URL(r.url).pathname === "/healthz").length, probes + 1);
 });
-void test("a delayed old monitor cannot erase a newer ready lifetime", async () => {
-  const f = fixture();
-  const gateway = f.make();
-  f.delayExit();
-  await gateway.run((send) => send(f.call));
-  const old = f.monitors[0];
-  assert(old);
-  f.reject();
-  await gateway.run((send) => send(f.call));
-  f.recover();
-  await gateway.run((send) => send(f.call));
-  old();
-  await Promise.resolve();
-  await Promise.resolve();
-  await Promise.resolve();
-  assert.equal(f.store.read()?.token, "token-1");
-  const warm = await gateway.run((send) => send(f.call));
-  assert.equal(warm.kind === "response" && warm.start, "warm");
-  assert.equal(f.counts().starts, 2);
-});
-
 void test("concurrent callers share a failed start and its cleanup", async () => {
   const f = fixture();
   f.failStart();
@@ -507,7 +518,7 @@ void test("resume preserves the stored deadline and the waking alarm; fallback h
   assert.equal(f.alarmDeletes(), deletes);
   assert.equal(f.alarm(), 60_000);
   assert.equal(f.store.readActivity(), 0);
-  assert.deepEqual(f.inactivityTimeouts, [120_000, 120_000]);
+  assert.deepEqual(f.inactivityTimeouts, [120_000, 120_000, 120_000]);
   await resumed.alarm();
   assert.equal(f.counts().destroys, 1);
 });
@@ -551,6 +562,7 @@ void test("a pending response body is protected; the idle window starts after co
   const f = fixture();
   const gateway = f.make();
   const fetchPort = f.container.fetchPort.bind(f.container);
+  let signal: AbortSignal | undefined;
   let finishBody: () => void = () => undefined;
   let reading: () => void = () => undefined;
   const entered = new Promise<void>((resolve) => {
@@ -558,6 +570,7 @@ void test("a pending response body is protected; the idle window starts after co
   });
   f.container.fetchPort = (request) => {
     if (new URL(request.url).pathname === "/healthz") return fetchPort(request);
+    signal = request.signal;
     return Promise.resolve(
       new Response(
         new ReadableStream<Uint8Array>({
@@ -579,6 +592,11 @@ void test("a pending response body is protected; the idle window starts after co
     assert.equal(await result.response.text(), "body");
   });
   await entered;
+  assert.deepEqual(f.openDeadlines(), [f.call.timeoutMs]);
+  assert(signal);
+  assert.equal(signal.aborted, false);
+  f.fireDeadlines();
+  assert.equal(signal.aborted, true);
   f.at(90_000);
   await gateway.alarm();
   assert.equal(f.counts().destroys, 0);
@@ -619,6 +637,7 @@ void test("overlapping operations record their actual completion order, includin
   f.at(100_000);
   release();
   await assert.rejects(first, /body failed/);
+  assert.deepEqual(f.openDeadlines(), []);
   assert.equal(f.store.readActivity(), 100_000);
   assert.equal(f.alarm(), 160_000);
 });
@@ -683,4 +702,95 @@ void test("a request arriving during idle destruction starts after all old clean
   await f.make().resume();
   await f.make().run((send) => send(f.call));
   assert.equal(f.counts().starts, 2);
+});
+
+void test("the alarm forgets an exited Container without destroying it", async () => {
+  const f = fixture();
+  const gateway = f.make();
+  await gateway.run((send) => send(f.call));
+  f.exit();
+  await gateway.alarm();
+  assert.equal(f.store.read(), undefined);
+  assert.equal(f.store.readActivity(), undefined);
+  assert.equal(f.alarm(), null);
+  assert.equal(f.counts().destroys, 0);
+});
+
+void test("an inactivity timeout failure preserves the response and idle alarm", async () => {
+  const f = fixture();
+  const gateway = f.make();
+  await gateway.run((send) => send(f.call));
+  f.container.setInactivityTimeout = () => Promise.reject(new Error("rearm failed"));
+  const result = await gateway.run(async (send) => {
+    const response = await send(f.call);
+    f.at(10_000);
+    return response;
+  });
+  assert.equal(result.kind === "response" && result.start, "warm");
+  assert.equal(f.alarm(), 70_000);
+  assert.deepEqual(
+    f.events.filter((e) => e.event === "container.inactivity_failed").map((e) => e.level),
+    ["error"],
+  );
+});
+
+void test("retry alarms double across DO restarts until an operation or successful stop", async () => {
+  const f = fixture();
+  await f.make().run((send) => send(f.call));
+  f.failDestroy();
+  let now = 60_000;
+  for (const delay of [1000, 2000, 4000, 8000, 16000, 32000, 60000, 60000]) {
+    f.at(now);
+    const restarted = f.make();
+    await restarted.resume();
+    await restarted.alarm();
+    now += delay;
+    assert.equal(f.alarm(), now);
+  }
+  await f.make().run((send) => send(f.call));
+  assert.equal(f.store.readStopRetry(), undefined);
+  f.at(now + 60_000);
+  await f.make().alarm();
+  assert.equal(f.store.readStopRetry(), 2000);
+  f.recover();
+  await f.make().alarm();
+  assert.equal(f.store.readStopRetry(), undefined);
+});
+
+void test("a response body the operation leaves unread is aborted when the operation settles", async () => {
+  const f = fixture();
+  const gateway = f.make();
+  const fetchPort = f.container.fetchPort.bind(f.container);
+  let signal: AbortSignal | undefined;
+  f.container.fetchPort = (request) => {
+    if (new URL(request.url).pathname === "/healthz") return fetchPort(request);
+    signal = request.signal;
+    return Promise.resolve(new Response(new ReadableStream<Uint8Array>()));
+  };
+  const result = await gateway.run((send) => send(f.call));
+  assert.equal(result.kind, "response");
+  assert(signal);
+  assert.equal(signal.aborted, true, "the unread body's request is aborted");
+  assert.deepEqual(f.openDeadlines(), []);
+});
+
+void test("a send the operation does not await cannot start a request after it settles", async () => {
+  const f = fixture();
+  const gateway = f.make();
+  let kept: ((request: typeof f.call) => Promise<unknown>) | undefined;
+  let inFlight: Promise<unknown> | undefined;
+  await gateway.run((send) => {
+    kept = send;
+    inFlight = send(f.call);
+    return Promise.resolve();
+  });
+  assert(kept && inFlight);
+  await assert.rejects(inFlight, /send after the operation settled/);
+  await assert.rejects(kept(f.call), /send after the operation settled/);
+  assert.equal(
+    f.requests.filter((r) => new URL(r.url).pathname === f.call.path).length,
+    0,
+    "no operation request reached the Container",
+  );
+  assert.deepEqual(f.openDeadlines(), []);
 });
