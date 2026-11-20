@@ -37,7 +37,7 @@ function localPackageDirs(root: string): string[] {
   return packages.filter((pkg) => pkg.source === null).map((pkg) => dirname(pkg.manifest_path));
 }
 
-function touchSources(root: string, dirs: string[]) {
+function markLocalCratesStale(root: string, dirs: string[]) {
   if (dirs.length === 0) return;
   const paths = git(root, [
     "ls-files",
@@ -101,8 +101,7 @@ export function prepareCheckout(
       } else {
         throw new Error(`Unsupported clone platform: ${process.platform}`);
       }
-      // Publish the clone only after Cargo can see our sources as newer than its fingerprints.
-      if (name === "target") touchSources(root, deps.localPackageDirs(root));
+      if (name === "target") markLocalCratesStale(root, deps.localPackageDirs(root));
       renameSync(tmp, dst);
     } catch (error) {
       rmSync(tmp, { recursive: true, force: true });
