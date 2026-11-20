@@ -1,9 +1,14 @@
 import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { setTimeout } from "node:timers/promises";
+import { jobTestHoldSettingSchema } from "../../apps/worker/src/services/job-test-hold.ts";
 import ts from "typescript";
 import { z } from "zod";
 import {
+  acceptInstructionResponseSchema,
+  cancelQueueResponseSchema,
+  patternStateResponseSchema,
   createProjectResponseSchema,
   displayContentType,
   meResponseSchema,
@@ -21,13 +26,19 @@ const createProject = {
   name: "Staging smoke",
 } satisfies CreateProjectRequest;
 const missingProjectId = "00000000-0000-4000-8000-000000000000";
-// Covers Container readiness (60s) and display generation (30s), with network headroom.
-const requestTimeoutMs = 120_000;
+// No request waits on the Container because the job does that work.
+const requestTimeoutMs = 30_000;
+// Covers cold Container readiness (60s), display generation (30s), and one render retry with headroom.
+const renderBudgetMs = 240_000;
+export type StagingTarget = { origin: string; jobTimeoutMs: number };
 
 export async function smokeStaging(
-  origin: string,
+  { origin, jobTimeoutMs }: StagingTarget,
   token: ServiceToken,
-  fetcher: typeof fetch = fetch,
+  {
+    fetcher = fetch,
+    pollIntervalMs = 2_000,
+  }: { fetcher?: typeof fetch; pollIntervalMs?: number } = {},
 ): Promise<void> {
   const withToken = {
     "CF-Access-Client-Id": token.clientId,
@@ -95,26 +106,80 @@ export async function smokeStaging(
   assert.equal(missing.status, 404, "a nonexistent project is not found");
   assert.deepEqual(await missing.json(), { error: "not_found" });
 
-  const display = await request("/api/sample/display");
-  assert.equal(display.status, 200, "the Container returns sample display data");
-  assert.equal(display.headers.get("content-type"), displayContentType);
+  const patternPath = `/api/patterns/${pattern.id}`;
+  const readState = async () => {
+    const response = await request(`${patternPath}/state`);
+    assert.equal(response.status, 200, "the verifier can read the pattern state");
+    return patternStateResponseSchema.parse(await response.json());
+  };
+  const before = await readState();
+  if (before.queueHold) {
+    const cancel = await request(`${patternPath}/queue/cancel`, {
+      method: "POST",
+      headers: mutationHeaders,
+      body: JSON.stringify({ requestId: randomUUID(), heldBy: before.queueHold.job.jobId }),
+    });
+    assert.equal(cancel.status, 200, "the verifier can release a previous job's queue hold");
+    cancelQueueResponseSchema.parse(await cancel.json());
+  }
+  const accepted = await request(`${patternPath}/messages`, {
+    method: "POST",
+    headers: mutationHeaders,
+    body: JSON.stringify({ requestId: randomUUID(), body: "疎通の確認" }),
+  });
+  assert.equal(accepted.status, 202, "the verifier's instruction is accepted");
+  const { job } = acceptInstructionResponseSchema.parse(await accepted.json());
+  const deadline = Date.now() + jobTimeoutMs;
+  let state = await readState();
+  while (state.lastFinishedJob?.jobId !== job.jobId) {
+    assert.ok(Date.now() < deadline, `the job finishes within ${jobTimeoutMs} ms`);
+    await setTimeout(pollIntervalMs);
+    state = await readState();
+  }
+  const finished = state.lastFinishedJob;
+  assert.equal(finished.state, "completed", "the accepted job completed");
+  assert.notEqual(
+    finished.revision.id,
+    before.currentRevision?.id,
+    "the job created a new revision",
+  );
+  assert.equal(
+    finished.revision.id,
+    state.currentRevision?.id,
+    "the completed revision is current",
+  );
+  const revisionId = finished.revision.id;
+  const display = await request(`/api/revisions/${revisionId}/view`);
+  assert.equal(display.status, 200, "the verifier can view the committed revision");
+  assert.equal(
+    display.headers.get("content-type"),
+    displayContentType,
+    "the revision returns display data",
+  );
+  assert.equal(
+    display.headers.get("x-revision-id"),
+    revisionId,
+    "the view identifies the committed revision",
+  );
   assert.ok((await display.arrayBuffer()).byteLength > 0, "display data is not empty");
 }
 
-export function stagingOrigin(wranglerJsonc: string): string {
+export function stagingTarget(wranglerJsonc: string): StagingTarget {
   const config = z
     .object({
-      env: z.object({ staging: z.object({ vars: z.object({ APP_ORIGINS: z.string() }) }) }),
+      env: z.object({ staging: z.object({ vars: z.looseObject({ APP_ORIGINS: z.string() }) }) }),
     })
     .parse(ts.parseConfigFileTextToJson("wrangler.jsonc", wranglerJsonc).config);
   const origins = config.env.staging.vars.APP_ORIGINS.split(/\s+/).filter(
     (origin) => origin !== "",
   );
   assert.equal(origins.length, 1, "staging serves one origin");
-  return z
+  const hold = jobTestHoldSettingSchema.parse(config.env.staging.vars);
+  const origin = z
     .url()
     .refine((value) => new URL(value).origin === value)
     .parse(origins[0]);
+  return { origin, jobTimeoutMs: (hold?.seconds ?? 0) * 1000 + renderBudgetMs };
 }
 
 if (import.meta.main) {
@@ -125,14 +190,14 @@ if (import.meta.main) {
         STAGING_ACCESS_CLIENT_SECRET: z.string().trim().min(1),
       })
       .parse(process.env);
-    const origin = stagingOrigin(
+    const target = stagingTarget(
       readFileSync(new URL("apps/worker/wrangler.jsonc", repositoryRoot), "utf8"),
     );
-    await smokeStaging(origin, {
+    await smokeStaging(target, {
       clientId: env.STAGING_ACCESS_CLIENT_ID,
       clientSecret: env.STAGING_ACCESS_CLIENT_SECRET,
     });
-    console.log(`Staging smoke passed: ${origin}`);
+    console.log(`Staging smoke passed: ${target.origin}`);
   } catch {
     // Responses and fetch errors can contain credentials; never dump them to deploy logs.
     console.error("Staging smoke failed");
