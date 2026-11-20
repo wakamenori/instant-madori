@@ -16,7 +16,7 @@ pstack の poteto-mode の Orchestrate に従い、各 PR は Autopilot-full の
 - 担当は T3 のスレッドとして、検証役は指揮役のスレッドの子として立てる。cloud VM の代わりに、このマシンの worktree を使う。
 - 同時に動かす担当は五人まで。担当はこのマシンで、Rust の `target`、`pnpm dev` の固定のポート、CPU とメモリ、ディスクを共有するため。
 - cargo を使うのは、担当と検証役を合わせて同時に一人まで。全 worktree が Rust の `target` を共有し、同時にビルドすると別の worktree の Wasm を使うおそれがあるため。#292 が取り違えを防ぐ仕組みを入れたら、この決まりを外す。
-  - cargo を使う操作には、`pnpm setup`、`pnpm dev`、`pnpm check`（どのモードも）、`pnpm build` を含める。検証役は verify-madori の準備で cargo を使うので、数に入れる。
+  - cargo を使う操作には、`pnpm setup`、`pnpm dev`、`pnpm check`（どのモードも）、`pnpm build` を含める。検証役は、アプリを動かすか Rust を検査するときだけ数に入れる。
   - 担当は、報告を送ったら cargo の枠を空ける。直しで cargo が要る担当には、もう一度頼ませる。検証役は、判定を出したら枠を空ける。
   - cargo を使わない担当は、madori-owner の「準備」の cargo を使わない準備で進め、cargo を使う検査を runner の `check` に任せる。
 - 検証は、head ごとに検証役一人で行う。Autopilot-full の swarm にはしない。
@@ -82,8 +82,10 @@ node .claude/skills/madori-coordinator/scripts/rank-ready.mjs
 
 ## 検証役を立てる
 
-担当から報告が来たら、PR の今の状態を `gh pr view` と `gh pr checks` で確かめてから、検証役を立てる。ほかに cargo を使っている担当か検証役がいれば、空くまで立てない。
+担当から報告が来たら、PR の今の状態を `gh pr view` と `gh pr checks` で確かめてから、検証役を立てる。
 
+- 検証役がアプリを動かすか Rust を検査する PR では、ほかに cargo を使っている担当か検証役がいれば、空くまで立てない。
+- 文書だけの PR のように cargo を使わずに確かめられる PR では、待たずに立てる。指示の最後に「cargo を使わず、madori-owner の『準備』にある cargo を使わない準備で準備する。」と足す。
 - 検証役は、差分の大部分を書いた系統と別の系統のモデルにする。実装は Codex が書くので、普段は Claude Code の Opus にする。差分の大部分を Claude が書いた PR は、Codex に確かめさせる。
 - `delegate_task` の `target` で、モデルと effort を明示する。effort は xhigh に固定し、Issue によって変えない。poteto-mode が検証を上げ下げの例外にしているため。
   - Opus：`{providerInstanceId: "claudeAgent", model: "claude-opus-5-5", options: {effort: "xhigh"}}`
