@@ -13,17 +13,7 @@ pstack の poteto-mode に従い、Issue に合う playbook で進める。多�
 
 1. T3 が origin/main から作った、自分の worktree で作業する。ほかのブランチや Issue に触らない。
 2. Issue をコメントまで読み（`gh issue view <番号> --json title,body,comments`）、それが指す plan.md の節を読む。依存の欄の Issue がすべて閉じているか確かめる。開いていれば、指揮役に報告して止まる。
-3. 指揮役が Issue の本文かコメントで cargo を使ってよいとしたときだけ、[verify-madori](../verify-madori/SKILL.md) の「準備」のとおりに準備する。ディスクが足りずにビルドが失敗したら、worktree の外を消さずに指揮役に報告する。
-4. それ以外は、cargo を使わずに準備する。cargo を使う操作（[madori-coordinator](../madori-coordinator/SKILL.md) の「pstack と違うところ」の一覧）を実行せず、cargo を使う検査は runner の `check` に任せる。`crates/viewer/pkg` は Git の追跡対象外なので、メインのチェックアウトの生成済みのものを写す。
-
-   ```sh
-   MAIN=$(git worktree list --porcelain | sed -n '1s/^worktree //p')
-   mise exec -- pnpm install --frozen-lockfile
-   mise exec -- pnpm --filter @madori/worker types
-   [ -e crates/viewer/pkg ] || command cp -R "$MAIN/crates/viewer/pkg" crates/viewer/pkg
-   ```
-
-   この準備で、`pnpm exec tsc -p scripts/tsconfig.json` と `pnpm --filter @madori/web typecheck` が通る。verify-madori でアプリを動かすときを含め、cargo を使う必要が出たら、指揮役に頼み、許されてから 3 の準備をする。
+3. [verify-madori](../verify-madori/SKILL.md) の「準備」のとおりに準備する。ディスクが足りずにビルドが失敗したら、worktree の外を消さずに指揮役に報告する。
 
 ## 設計を決める
 

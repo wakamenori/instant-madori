@@ -1,0 +1,97 @@
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { test, type TestContext } from "node:test";
+import { findCheckout, prepareCheckout } from "./prepare-checkout.ts";
+
+function fixture(t: TestContext) {
+  const parent = realpathSync(mkdtempSync(join(tmpdir(), "prepare-checkout-")));
+  t.after(() => rmSync(parent, { recursive: true, force: true }));
+  const main = join(parent, "main");
+  const root = join(parent, "linked");
+  mkdirSync(main);
+  const git = (...args: string[]) =>
+    execFileSync("git", ["-c", "core.hooksPath=/dev/null", "-c", "commit.gpgSign=false", ...args], {
+      cwd: main,
+    });
+  git("init", "--quiet");
+  mkdirSync(join(main, "pkg/src"), { recursive: true });
+  writeFileSync(join(main, "pkg/src/lib.rs"), "");
+  git("add", "pkg");
+  git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "fixture");
+  git("worktree", "add", "--quiet", "--detach", root);
+  mkdirSync(join(main, "target/x"), { recursive: true });
+  writeFileSync(join(main, "target/x/y.txt"), "cached");
+  mkdirSync(join(main, ".tools/bin"), { recursive: true });
+  writeFileSync(join(main, ".tools/bin/tool"), "tool");
+  const source = join(root, "pkg/src/lib.rs");
+  const old = new Date("2000-01-01T00:00:00Z");
+  utimesSync(source, old, old);
+  const hooks: string[] = [];
+  const prepare = (cwd: string) =>
+    prepareCheckout(findCheckout(cwd), {
+      localPackageDirs: (checkout) => [join(checkout, "pkg")],
+      installHooks: (checkout) => hooks.push(checkout),
+    });
+  return { main, root, source, old, hooks, prepare };
+}
+
+void test("main installs shared hooks and leaves the linked checkout alone", (t) => {
+  const f = fixture(t);
+  f.prepare(f.main);
+  assert.deepEqual(f.hooks, [f.main]);
+  assert(!existsSync(join(f.root, "target")));
+  assert(!existsSync(join(f.root, ".tools")));
+});
+
+void test("linked checkout clones both caches and refreshes tracked local sources", (t) => {
+  const f = fixture(t);
+  const start = Date.now();
+  f.prepare(f.root);
+  assert.deepEqual(f.hooks, []);
+  for (const path of ["target/x/y.txt", ".tools/bin/tool"]) {
+    assert.deepEqual(readFileSync(join(f.root, path)), readFileSync(join(f.main, path)));
+  }
+  const mtime = statSync(f.source).mtimeMs;
+  assert(mtime >= start - 1 && mtime <= Date.now() + 1);
+});
+
+void test("replaces a shared target symlink while preserving its source", (t) => {
+  const f = fixture(t);
+  symlinkSync(join(f.main, "target"), join(f.root, "target"));
+  f.prepare(f.root);
+  assert(lstatSync(join(f.root, "target")).isDirectory());
+  assert.equal(readFileSync(join(f.root, "target/x/y.txt"), "utf8"), "cached");
+  assert.equal(readFileSync(join(f.main, "target/x/y.txt"), "utf8"), "cached");
+});
+
+void test("an existing target skips cloning and source refresh", (t) => {
+  const f = fixture(t);
+  mkdirSync(join(f.root, "target"));
+  f.prepare(f.root);
+  assert(!existsSync(join(f.root, "target/x")));
+  assert.equal(statSync(f.source).mtimeMs, f.old.getTime());
+});
+
+void test("an absent main target leaves the linked target absent", (t) => {
+  const f = fixture(t);
+  rmSync(join(f.main, "target"), { recursive: true });
+  f.prepare(f.root);
+  assert(!existsSync(join(f.root, "target")));
+  assert.equal(statSync(f.source).mtimeMs, f.old.getTime());
+  assert.equal(readFileSync(join(f.root, ".tools/bin/tool"), "utf8"), "tool");
+});

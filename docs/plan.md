@@ -604,9 +604,11 @@ SolidCraft一式を保持することと、通常のビルド・テスト対象�
 
 開発ツールの版を固定し、検査はローカルの `pnpm check` にまとめる。先にPrettier・rustfmt・ESLint・Clippyで自動修正できるものを直し、型付きlint・型確認・未使用検査・秘密情報・テストを実行する。RustはnativeとWasmを検査する。作業中の `--fast` はテスト実行とアプリのビルドを省き、`--full` はWasmの再生成、全ビルド、接続確認、JS/Rustのライセンス・取得元・脆弱性監査まで行う。初回以外はビルドキャッシュを再利用し、各工程の時間を表示する。コミット前フックはステージ対象ファイルの整形・lint、ステージ対象のTypeScriptファイルのimport境界、ステージ済み差分の秘密情報を検査し、作業ツリーやステージ内容を書き換えない。具体的なコマンド、検査範囲、PRでの検査は[README](../README.md)にまとめる。
 
+git worktreeで並行して開発するときは、worktreeごとにRustの `target/` を持つ。Cargoはpath依存のクレートの新しさをソースの更新時刻だけで判断し、クレートのハッシュもworkspaceからの相対パスで作る。そのため、`target/` を共有すると、古いチェックアウトのworktreeが別のworktreeのコンパイルしたクレートを再利用する。worktreeの `pnpm setup` は、メインのチェックアウトの `target/` をcopy-on-writeで複製し、自作のクレートのソースの更新時刻を進める。外部のクレートは複製を再利用し、自作のクレートだけを各worktreeでビルドし直す。Gitのフックは全worktreeで共有なので、メインのチェックアウトでだけ登録する。
+
 サービスの依存解決はルートのCargo.lockとpnpm-lock.yamlで固定する。Cargoのプロファイル・依存パッチは利用側ルートで必要な設定を管理し、SolidCraft側の設定が自動で引き継がれるとは仮定しない。キャッシュを利用する場合は、識別値に実際の依存解決とビルド条件を反映する。誤った再利用を避けるため、サービスから使うSolidCraftの評価キャッシュを無効にする。
 
-配信するWasmはreleaseプロファイルでビルドする。`pnpm setup`・`pnpm dev`・`pnpm build`・`pnpm check --full` は同じ生成スクリプトを使い、開発・検査・配信のWasmをそろえる。スクリプト内の一つのプロファイル値からCargoの `--profile` とwasm-bindgenの入力先を導き、`target/wasm32-unknown-unknown/release/` の出力からバインディングを生成する。プロファイルと入力先をログへ出す。初回はdebugよりコンパイルに時間がかかり、再ビルドでは依存のキャッシュを再利用する。RustのテストとClippyはdebugのままにする。通常・軽い検査は生成済みの型定義を使い、全体検査はreleaseのWasmを再生成して、ローカル配信と実Containerの接続を確かめる。
+配信するWasmはreleaseプロファイルでビルドする。`pnpm setup`・`pnpm dev`・`pnpm build`・`pnpm check --full` は同じ生成スクリプトを使い、開発・検査・配信のWasmをそろえる。スクリプト内の一つのプロファイル値からCargoの `--profile` とwasm-bindgenの入力先を導き、`target/wasm32-unknown-unknown/release/` の出力からバインディングを生成する。プロファイルと入力先をログへ出す。バインディングを生成する前に、Wasmに入る自作のクレートがすべてそのチェックアウトの `target/` でコンパイルされたことを、rustcがクレートごとに書くdep-infoで確かめ、違えば止める。初回はdebugよりコンパイルに時間がかかり、再ビルドでは依存のキャッシュを再利用する。RustのテストとClippyはdebugのままにする。通常・軽い検査は生成済みの型定義を使い、全体検査はreleaseのWasmを再生成して、ローカル配信と実Containerの接続を確かめる。
 
 開発では `pnpm dev` がWeb画面、Worker・D1、Wasmと、`wrangler dev` 経由のDocker Containerを接続する。画面だけを扱うときは `MADORI_DEV_CONTAINERS=0` でContainerを無効にする。`pnpm check --full` はDockerイメージをビルドし、実Containerとの接続も検査する。Dockerはビルドプラットフォーム上のRustからLinux amd64向けにコンパイルし、Cargoのキャッシュを再利用する。テスト用と本番用の認証設定・DB・R2・秘密情報は分離する。
 

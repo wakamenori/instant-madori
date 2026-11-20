@@ -40,19 +40,16 @@ test "$(git rev-parse HEAD)" = "$HEAD_SHA" || exit 1
 gh pr view "$PR" --json headRefOid --jq .headRefOid
 ```
 
-メインのチェックアウトのビルド成果物をリンクしてから準備する。Rust を最初からビルドし直さずに済む。`pnpm setup` の最後の `lefthook install` は、全 worktree で共有の `.git/hooks/pre-commit` を、この worktree を指すように書き換える。準備の後、メインのチェックアウトで入れ直す。
+`pnpm setup` は、worktree に `target` と `.tools` が無ければ、メインのチェックアウトのものを copy-on-write で複製し、自作の crate だけをこの worktree でビルドし直す（README「開発を始める」）。worktree ごとに `target` を持つので、ほかの worktree と同時に cargo を使ってよい。Git のフックはメインのチェックアウトでだけ登録されるので、入れ直さない。
 
 ```sh
 MAIN=$(git worktree list --porcelain | sed -n '1s/^worktree //p')
-[ -e target ] || ln -s "$MAIN/target" target
-[ -e .tools ] || ln -s "$MAIN/.tools" .tools
 export CARGO_INCREMENTAL=0
 mise exec -- pnpm install --frozen-lockfile
 mise exec -- pnpm setup
-(cd "$MAIN" && mise exec -- pnpm exec lefthook install)
 ```
 
-ディスクの空きを 20 GiB 以上に保つ（`df -h /`）。ほかにビルドの置き場を作らない。
+ディスクの空きを 20 GiB 以上に保つ（`df -h /`）。複製した `target` は、`du` では複製元と同じ大きさに見える。空きは `df` で確かめる。
 
 ## 起動
 
