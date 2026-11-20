@@ -29,6 +29,8 @@ const tag = (n: number, name = `tag-${n}`, repo = repository) => ({
   preparedFrom: null,
 });
 const versions = Array.from({ length: 12 }, (_, i) => version(12 - i));
+const withUnreadable = (n: number) =>
+  versions.map((v) => (v.id === id(n) ? { ...v, imageRefs: "unreadable" as const } : v));
 const input = {
   versions,
   currentIds: new Set([id(12)]),
@@ -119,6 +121,14 @@ for (const [name, overrides] of [
     "two retained repositories",
     { versions: [version(12, [ref(12), ref(12, other)]), ...versions.slice(1)] },
   ],
+  [
+    "two retained repositories with an unreadable version",
+    { versions: [version(12, [ref(12), ref(12, other)]), ...withUnreadable(11).slice(1)] },
+  ],
+  [
+    "no readable retained repository with an unreadable version",
+    { versions: [version(12, []), ...withUnreadable(11).slice(1, 2)] },
+  ],
   ["no retained repository", { versions: versions.map((v) => ({ ...v, imageRefs: [] })) }],
   ["unknown current version", { currentIds: new Set([id(99)]) }],
   ["missing deployment versions", { currentIds: new Set<string>() }],
@@ -139,6 +149,31 @@ for (const [name, overrides] of [
     assert.deepEqual(plan.remove, []);
   });
 }
+
+for (const [where, overrides] of [
+  ["inside the latest ten", { versions: withUnreadable(11) }],
+  [
+    "in the current deployment outside the latest ten",
+    { versions: withUnreadable(1), currentIds: new Set([id(12), id(1)]) },
+  ],
+] satisfies [string, object][]) {
+  await test(`defers with an empty deletion list on an unreadable version ${where}`, () => {
+    const plan = selectTags({ ...input, ...overrides });
+    assert.equal(plan.kind, "deferred");
+    assert.deepEqual(plan.remove, []);
+  });
+}
+
+await test("an unreadable version outside the retained window only moves its tags to unreferenced", () => {
+  assert.deepEqual(selectTags({ ...input, versions: withUnreadable(1) }), {
+    kind: "ready",
+    repository,
+    keep: [tag(12), tag(3)],
+    remove: [tag(2)],
+    prepared: [],
+    unreferenced: [tag(1)],
+  });
+});
 
 await test("keeps every version when the history is shorter than ten", () => {
   const plan = selectTags({ ...input, versions: [version(12)], tags: [tag(12), tag(1)] });
@@ -303,6 +338,7 @@ await test("reads every version page and detail", async () => {
 await test("dry-run reports candidates without deleting or reading other repositories' manifests", async () => {
   const f = fixture();
   const result = await runRetention(f);
+  assert(result.kind === "ready");
   assert.deepEqual(result.keep, [tag(12), tag(3)]);
   assert.deepEqual(result.remove, [tag(1, digest(1)), tag(2), tag(1)]);
   assert(!f.calls.flat().includes("--push"));
@@ -411,6 +447,7 @@ await test("manifest annotation protects the runtime artifact of a retained imag
   const f = fixture();
   const name = await addPreparedArtifact(f, 12);
   const plan = await runRetention(f);
+  assert(plan.kind === "ready");
   assert(plan.keep.some((entry) => entry.digest === name && entry.preparedFrom === digest(12)));
 });
 
@@ -461,7 +498,7 @@ for (const name of [
   "repeated page",
   "changing total",
   "missing item",
-  "unreadable detail",
+  "detail read error",
   "deployment changed",
   "new version",
 ]) {
@@ -477,7 +514,7 @@ for (const name of [
           result: { deployments: [{ id: id(51), versions: [{ version_id: id(12) }] }] },
         };
       }
-      if (name === "unreadable detail" && path === `/versions/${id(1)}`)
+      if (name === "detail read error" && path === `/versions/${id(1)}`)
         throw new Error("detail unavailable");
       if (path.includes("page=1&")) {
         pageOneReads++;
@@ -546,6 +583,58 @@ for (const [name, answers, kind, mutations] of [
       f.logs.some((line) => line.startsWith("::warning") && line.includes(id(11))),
       mutations.length === 0,
     );
+  });
+}
+
+for (const [name, path, answer, expected] of [
+  [
+    "a version 404 with another error code",
+    `/versions/${id(11)}`,
+    () =>
+      Response.json(
+        { success: false, errors: [{ code: 10007, message: "Not found" }] },
+        { status: 404 },
+      ),
+    { name: "ZodError" },
+  ],
+  [
+    "a version 404 with an additional error after 100146",
+    `/versions/${id(11)}`,
+    () =>
+      Response.json(
+        { success: false, errors: [...versionMissing.errors, { code: 10007 }] },
+        { status: 404 },
+      ),
+    { name: "ZodError" },
+  ],
+  [
+    "a version 404 with duplicate 100146 errors",
+    `/versions/${id(11)}`,
+    () =>
+      Response.json(
+        { success: false, errors: [...versionMissing.errors, ...versionMissing.errors] },
+        { status: 404 },
+      ),
+    { name: "ZodError" },
+  ],
+  [
+    "a version detail 500",
+    `/versions/${id(11)}`,
+    () => Response.json(versionMissing, { status: 500 }),
+    /failed \(500\)/u,
+  ],
+  [
+    "a version page 404",
+    "/versions?page=2&per_page=10",
+    () => Response.json(versionMissing, { status: 404 }),
+    /failed \(404\)/u,
+  ],
+] satisfies [string, string, () => Response, RegExp | object][]) {
+  await test(`${name} fails before deleting`, async () => {
+    const f = fixture();
+    const json = workersApi("token", workersFetch(f, { [path]: answer }));
+    await assert.rejects(runRetention({ ...f, apply: true, json }), expected);
+    assert.deepEqual(f.mutations, []);
   });
 }
 

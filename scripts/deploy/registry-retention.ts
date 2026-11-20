@@ -31,9 +31,11 @@ function entryName(tag: string) {
 const versionSchema = z.object({
   id: z.uuid(),
   createdOn: z.iso.datetime({ offset: true }),
-  imageRefs: z.array(imageRefSchema),
+  imageRefs: z.union([z.array(imageRefSchema), z.literal("unreadable")]),
 });
 type Version = z.infer<typeof versionSchema>;
+type ReadableVersion = Version & { imageRefs: string[] };
+const isReadable = (v: Version): v is ReadableVersion => v.imageRefs !== "unreadable";
 type Tag = z.infer<typeof tagSchema>;
 type RetentionPlan =
   | {
@@ -44,6 +46,7 @@ type RetentionPlan =
       prepared: Tag[];
       unreferenced: Tag[];
     }
+  | { kind: "deferred"; reason: string; unreadable: string[]; remove: [] }
   | { kind: "blocked"; reason: string; remove: [] };
 
 function imageParts(ref: string) {
@@ -95,12 +98,23 @@ export function selectTags(input: {
   }
   const retained = versions.filter((v, i) => i < retain || input.currentIds.has(v.id));
   const repositories = new Set(
-    retained.flatMap(({ imageRefs }) => imageRefs.map((ref) => imageParts(ref).repository)),
+    retained
+      .filter(isReadable)
+      .flatMap(({ imageRefs }) => imageRefs.map((ref) => imageParts(ref).repository)),
   );
   const [repository] = repositories;
   if (repositories.size !== 1 || !repository)
     return blocked("Retained versions must reference exactly one repository");
-  const digests = (items: Version[]) =>
+  if (!retained.every(isReadable)) {
+    return {
+      kind: "deferred",
+      reason:
+        "A retained Worker version is not readable yet, so the images it references are unknown",
+      unreadable: retained.filter((v) => !isReadable(v)).map(({ id }) => id),
+      remove: [],
+    };
+  }
+  const digests = (items: ReadableVersion[]) =>
     new Set(
       items.flatMap(({ imageRefs }) =>
         imageRefs
@@ -110,7 +124,7 @@ export function selectTags(input: {
       ),
     );
   const protectedDigests = digests(retained);
-  const knownDigests = digests(versions);
+  const knownDigests = digests(versions.filter(isReadable));
   const keep: Tag[] = [];
   const remove: Tag[] = [];
   const prepared: Tag[] = [];
@@ -151,6 +165,10 @@ const versionDetailSchema = z.object({
       }),
     }),
   }),
+});
+const versionMissingSchema = z.object({
+  success: z.literal(false),
+  errors: z.tuple([z.object({ code: z.literal(100146) })]),
 });
 const deploymentsSchema = z.object({
   success: z.literal(true),
@@ -207,14 +225,19 @@ export async function collectVersions(json: (path: string) => Promise<unknown>) 
   }
   const versions: Version[] = [];
   for (const summary of summaries) {
-    const detail = versionDetailSchema.parse(await json(`/versions/${summary.id}`)).result;
-    if (detail.id !== summary.id) throw new Error("Version detail ID mismatch");
+    const detail = z
+      .discriminatedUnion("success", [versionDetailSchema, versionMissingSchema])
+      .parse(await json(`/versions/${summary.id}`));
+    if (detail.success && detail.result.id !== summary.id)
+      throw new Error("Version detail ID mismatch");
     versions.push({
       id: summary.id,
       createdOn: summary.metadata.created_on,
-      imageRefs: detail.resources.script_runtime.containers.flatMap(({ images }) =>
-        Object.values(images),
-      ),
+      imageRefs: detail.success
+        ? detail.result.resources.script_runtime.containers.flatMap(({ images }) =>
+            Object.values(images),
+          )
+        : "unreadable",
     });
   }
   return versions;
@@ -260,7 +283,9 @@ export function workersApi(token: string, fetchImpl: typeof fetch = fetch) {
       `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/scripts/${scriptName}${path}`,
       { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(30_000) },
     );
-    if (!response.ok) throw new Error(`Workers API ${path} failed (${response.status})`);
+    // Cloudflare can answer 404 for a version it already lists, right after the upload.
+    if (!response.ok && !(response.status === 404 && path.startsWith("/versions/")))
+      throw new Error(`Workers API ${path} failed (${response.status})`);
     return response.json();
   };
 }
@@ -321,6 +346,12 @@ export async function runRetention(options: {
   const currentIds = new Set(deployment.versions.map(({ version_id }) => version_id));
   const scope = selectTags({ versions, currentIds, tags: [], retain: 10 });
   if (scope.kind === "blocked") throw new Error(scope.reason);
+  if (scope.kind === "deferred") {
+    options.log(
+      `::warning title=registry retention deferred::${scope.reason} (${scope.unreadable.join(", ")}); no tags deleted. A later run reclaims them once the version reads.`,
+    );
+    return scope;
+  }
   const credentials = registryCredentialsSchema.parse(
     wranglerJson(
       await options.command([
@@ -358,7 +389,7 @@ export async function runRetention(options: {
     });
   }
   const plan = selectTags({ versions, currentIds, tags, retain: 10 });
-  if (plan.kind === "blocked") throw new Error(plan.reason);
+  if (plan.kind !== "ready") throw new Error(plan.reason);
   const current = deploymentsSchema.parse(await options.json("/deployments")).result.deployments[0];
   const newest = versionsPageSchema.parse(await options.json("/versions?page=1&per_page=10")).result
     .items[0];
