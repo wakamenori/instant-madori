@@ -3,7 +3,9 @@ import { hash, canonical, type Json, type Obj } from "../l1/envelope.ts";
 import { object, telemetry } from "../l1/privacy.ts";
 import type { Parsed } from "../l1/sources.ts";
 const obj = z.record(z.string(), z.json());
-const resource = { resource: obj.optional() };
+const resource = {
+  resource: obj.and(z.object({ attributes: z.array(z.json()).optional() })).optional(),
+};
 const logs = z.object({
   resourceLogs: z.array(
     z.object({
@@ -58,7 +60,7 @@ function attr(o: Obj, key: string) {
 function instant(v: Json | undefined) {
   if (typeof v !== "string") return null;
   const ms = /^\d+$/u.test(v) ? Number(v) / 1e6 : Date.parse(v);
-  return ms >= Date.UTC(2020, 0) && ms <= 8.64e15 ? new Date(ms).toISOString() : null;
+  return ms >= Date.UTC(2020, 0) && ms < Date.UTC(10000, 0) ? new Date(ms).toISOString() : null;
 }
 export function parseOtlp(signal: "logs" | "metrics", bytes: Buffer): Parsed {
   const out: Parsed = { records: [], rejects: [], drops: [] };

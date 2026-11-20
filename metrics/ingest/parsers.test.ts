@@ -92,3 +92,18 @@ void test("a body without an event name never becomes a natural key", () => {
   assert.ok(result.records[0]);
   assert.doesNotMatch(result.records[0].naturalKey, /free form body/u);
 });
+void test("hook privacy keeps validated prompt facts across replays", () => {
+  const payload = registry["claude.hook"].sanitize({
+    input: {
+      prompt: "/madori-owner #31 private words",
+      last_assistant_message: "検証役 PASS",
+      session_crons: [1, 2],
+    },
+  });
+  const text = JSON.stringify(payload);
+  assert.match(text, /madori-owner/u);
+  assert.match(text, /"refs":\[31\]/u);
+  assert.match(text, /"session_crons_count":2/u);
+  assert.doesNotMatch(text, /private words/u);
+  assert.deepEqual(registry["claude.hook"].sanitize(payload), payload);
+});

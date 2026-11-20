@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { dirname, join, resolve, isAbsolute, basename } from "node:path";
-import { hash } from "../l1/envelope.ts";
+import { hash, type Obj } from "../l1/envelope.ts";
 import type { Parsed } from "../l1/sources.ts";
 const project = z.object({
   dir: z.string().refine(isAbsolute),
@@ -32,19 +32,31 @@ function commonDir(p: z.infer<typeof project>) {
 }
 export function parseHook(bytes: Buffer, identity: string): Parsed {
   const out: Parsed = { records: [], rejects: [], drops: [] };
+  let safeContent: Obj | null = null;
   try {
     const r = spool.parse(JSON.parse(bytes.toString()));
     if (commonDir(r.project) !== identity) {
       out.drops.push({ source: "claude.hook", reason: "foreign" });
       return out;
     }
-    const input = hook.parse(JSON.parse(r.stdin));
+    const raw: unknown = JSON.parse(r.stdin);
+    const fields = z.record(z.string(), z.json()).safeParse(raw);
+    if (fields.success)
+      safeContent = {
+        v: r.v,
+        id: r.id,
+        at: r.at,
+        project: r.project,
+        env: r.env,
+        input: fields.data,
+      };
+    const input = hook.parse(raw);
     out.records.push({
       source: "claude.hook",
-      sourceVersion: "1",
+      sourceVersion: "spool-1",
       scope: { kind: "proof", subject: "claude.session:" + input.session_id },
       naturalKey: [input.session_id, input.hook_event_name, r.id].join("/"),
-      occurredAt: r.at,
+      occurredAt: new Date(r.at).toISOString(),
       payload: { v: r.v, id: r.id, at: r.at, project: r.project, env: r.env, input },
     });
   } catch {
@@ -52,7 +64,7 @@ export function parseHook(bytes: Buffer, identity: string): Parsed {
       source: "claude.hook",
       reason: "invalid_hook",
       unitHash: hash(bytes),
-      content: null,
+      content: safeContent,
     });
   }
   return out;

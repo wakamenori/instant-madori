@@ -125,6 +125,38 @@ function walk(value: Json): Json {
 export function telemetry(payload: Obj) {
   return object(walk(payload));
 }
+const markers = [
+  "madori-coordinator",
+  "madori-owner",
+  "verify-madori",
+  "指揮役",
+  "担当",
+  "検証役",
+  "実装役",
+  "相談役",
+  "見回り",
+  "合格",
+  "不合格",
+  "PASS",
+  "FAIL",
+] as const;
+const digestSchema = z.object({
+  v: z.literal(1),
+  length: z.int().nonnegative(),
+  lines: z.int().positive(),
+  command: z
+    .string()
+    .regex(/^[a-z0-9:_-]+$/u)
+    .nullable(),
+  relay_from_thread: z.uuid().nullable(),
+  leading_tag: z
+    .string()
+    .regex(/^[a-z-]+$/u)
+    .nullable(),
+  refs: z.array(z.int().nonnegative()),
+  uuids: z.array(z.string().regex(/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/iu)),
+  markers: z.array(z.enum(markers)),
+});
 function digest(text: string) {
   const uuid = /\b[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\b/giu;
   return {
@@ -141,21 +173,7 @@ function digest(text: string) {
       ...new Set([...text.matchAll(/(?:#|\/(?:issues|pull)\/)(\d+)/gu)].map((m) => Number(m[1]))),
     ].sort((a, b) => a - b),
     uuids: [...new Set(text.match(uuid) ?? [])].sort(),
-    markers: [
-      "madori-coordinator",
-      "madori-owner",
-      "verify-madori",
-      "指揮役",
-      "担当",
-      "検証役",
-      "実装役",
-      "相談役",
-      "見回り",
-      "合格",
-      "不合格",
-      "PASS",
-      "FAIL",
-    ].filter((k) =>
+    markers: markers.filter((k) =>
       /^[\w-]+$/u.test(k) ? new RegExp("\\b" + k + "\\b", "u").test(text) : text.includes(k),
     ),
   };
@@ -182,10 +200,24 @@ export function hookPrivacy(p: Obj) {
       "reason",
       "stop_hook_active",
     ]);
-  for (const key of ["prompt", "last_assistant_message"])
-    if (typeof input[key] === "string") facts[key + "_digest"] = digest(input[key]);
-  for (const key of ["background_tasks", "session_crons"])
-    if (Array.isArray(input[key])) facts[key + "_count"] = input[key].length;
+  for (const key of ["prompt", "last_assistant_message"]) {
+    const name = key + "_digest";
+    if (typeof input[key] === "string") facts[name] = digest(input[key]);
+    else {
+      const stored = digestSchema.safeParse(input[name]);
+      if (stored.success) facts[name] = stored.data;
+    }
+  }
+  for (const key of ["background_tasks", "session_crons"]) {
+    const name = key + "_count";
+    if (Array.isArray(input[key])) facts[name] = input[key].length;
+    else if (
+      typeof input[name] === "number" &&
+      Number.isSafeInteger(input[name]) &&
+      input[name] >= 0
+    )
+      facts[name] = input[name];
+  }
   return telemetry({
     v: 1,
     ...pick(p, ["id", "at"]),
