@@ -41,25 +41,29 @@ function duration(ms: number) {
   return `${s}s`;
 }
 
-function describe(directory: string, name: string, busy = false) {
+function readHolder(path: string) {
   try {
-    const parsed = holder.safeParse(
-      JSON.parse(readFileSync(join(directory, name + ".lock"), "utf8")),
-    );
-    if (parsed.success) {
-      const { pid, purpose, cwd, since } = parsed.data;
-      try {
-        process.kill(pid, 0);
-      } catch (error) {
-        if (!(error instanceof Error && "code" in error && error.code === "EPERM")) throw error;
-      }
-      const path = cwd === home || cwd.startsWith(home + "/") ? "~" + cwd.slice(home.length) : cwd;
-      return `${name}: ${purpose} (pid ${pid}, ${duration(Date.now() - Date.parse(since))}, ${path})`;
-    }
+    return holder.parse(JSON.parse(readFileSync(path, "utf8")));
   } catch {
-    /* A missing or partially written record cannot identify the holder. */
+    return undefined;
   }
-  return `${name}: ${busy ? "held (starting)" : "free"}`;
+}
+
+function isAlive(pid: number) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error instanceof Error && "code" in error && error.code === "EPERM";
+  }
+}
+
+function describe(directory: string, name: string, busy = false) {
+  const record = readHolder(join(directory, name + ".lock"));
+  if (!record || !isAlive(record.pid)) return `${name}: ${busy ? "held (starting)" : "free"}`;
+  const { pid, purpose, cwd, since } = record;
+  const path = cwd === home || cwd.startsWith(home + "/") ? "~" + cwd.slice(home.length) : cwd;
+  return `${name}: ${purpose} (pid ${pid}, ${duration(Date.now() - Date.parse(since))}, ${path})`;
 }
 
 function tryLock(path: string) {
