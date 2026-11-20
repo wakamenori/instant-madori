@@ -50,6 +50,14 @@ Containerを使うローカルセッション（実Containerテスト、別workt
 
 Rustサービスだけを反復する場合は `MADORI_INTERNAL_TOKEN=local cargo run -p madori-geometry` で起動します。`http://127.0.0.1:3001/healthz` は認証不要、`/v1/sample/display` は `authorization: Bearer local` が必要です。このプロセスをWorkerが呼ぶことはありません。
 
+5分ごとのCron Triggerが、受付または実行権の取得から5分を超えたジョブのパターンDOを起こします。保留中の待機列は再開しません。ローカルでは次のコマンドで同じ定期処理を呼べます。
+
+```sh
+curl http://127.0.0.1:8787/cdn-cgi/local/scheduled
+```
+
+ローカルのWorkerを再読込または再起動したあと、Workflowがrunningのまま再開しない場合は、そのジョブを停止してください。
+
 ### ローカルでのログイン
 
 ローカルではCloudflare Accessの代わりに、生成した開発用の鍵を使います。`pnpm dev`は初回に鍵を `.local/access-key.json` に作り、Workerの設定 `apps/worker/.dev.vars` をそこから生成します。どちらもGitの追跡対象外です。`.dev.vars` は毎回生成し直すので、手で編集しないでください。この仕組み以外で作った `.dev.vars` があると、上書きせずに停止します。
