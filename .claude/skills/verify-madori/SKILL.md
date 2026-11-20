@@ -44,7 +44,6 @@ gh pr view "$PR" --json headRefOid --jq .headRefOid
 
 ```sh
 MAIN=$(git worktree list --porcelain | sed -n '1s/^worktree //p')
-export CARGO_INCREMENTAL=0
 mise exec -- pnpm install --frozen-lockfile
 mise exec -- pnpm setup
 ```

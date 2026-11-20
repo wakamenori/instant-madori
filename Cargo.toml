@@ -44,6 +44,8 @@ unimplemented = "deny"
 
 [profile.dev]
 debug = 0
+# CARGO_INCREMENTAL overrides this, and the flag is part of each unit's hash. False keeps unset and =0 runs on one artifact set.
+incremental = false
 
 [profile.release]
 lto = "thin"
