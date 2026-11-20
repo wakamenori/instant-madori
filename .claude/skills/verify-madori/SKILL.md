@@ -144,3 +144,25 @@ mise exec -- node --env-file="$MAIN/.env" scripts/check/staging-smoke.ts
 ```
 
 `Staging smoke passed: <Origin>` が出れば通っている。staging の画面は Access のログインが要り、このスキルにはまだその手順が無い。画面の確認が要るときは、確かめられなかったこととして報告する。
+
+### 検証用の利用者で指示を止める
+
+staging の `JOB_TEST_HOLD` は `before_render:180` なので、検証用の利用者（`staging:verifier`）のジョブは、実行権を取った後、描画の前に180秒待つ。ほかの利用者のジョブは待たない。検証用の利用者で指示の結果まで確かめる手順は、終わるまでに3分以上かかる。
+
+この待ちの間に止めて、案が増えないことと、state の `lastFinishedJob` が `cancelled` を返すことを確かめる。service token の値を表示せず、コマンドの引数にもファイルにも出さないよう、ヘッダーはシェルの変数に持ち、組み込みの `printf` から curl の `-H @-` へ標準入力で渡す。シェルの関数と変数は、道具の呼び出しをまたいで残らないことがあるので、下の各手順は一つのスクリプトで続けて実行する。案件は、疎通の確認と同じ作成の要求を送り直して得る。疎通の確認は検証用の利用者の案件が一件であることを確かめるので、新しい案件は作らない。
+
+```sh
+STG=https://instant-madori-staging.firpmnfiywl.workers.dev
+J='content-type: application/json'
+D="$EVIDENCE/staging-stop"; mkdir -p "$D"
+HDRS=$(mise exec -- node --env-file="$MAIN/.env" -e 'process.stdout.write(`CF-Access-Client-Id: ${process.env.STAGING_ACCESS_CLIENT_ID}\nCF-Access-Client-Secret: ${process.env.STAGING_ACCESS_CLIENT_SECRET}\n`)')
+c() { printf '%s\n' "$HDRS" | curl -sS -H @- "$@"; }
+```
+
+- **案件を得る。** `c -o "$D/project.json" -w '%{http_code}\n' -X POST "$STG/api/projects" -H "$J" -H "origin: $STG" -d '{"requestId":"7e54d9ae-4fd0-4c26-8c90-3c18ce1c64d5","name":"Staging smoke"}'`。`201`。`PID=$(jq -r .project.id "$D/project.json")` を設定する。
+- **パターンを足す。** `body=$(printf '{"requestId":"%s","name":"%s"}' "$(uuidgen)" "停止の確認")` で `c -o "$D/pattern.json" -w '%{http_code}\n' -X POST "$STG/api/projects/$PID/patterns" -H "$J" -H "origin: $STG" -d "$body"`。`201`。`PAT=$(jq -r .pattern.id "$D/pattern.json")` を設定する。
+- **送る。** `body=$(printf '{"requestId":"%s","body":"%s"}' "$(uuidgen)" "停止の確認")` で `c -o "$D/accept.json" -w '%{http_code}\n' -X POST "$STG/api/patterns/$PAT/messages" -H "$J" -H "origin: $STG" -d "$body"`。`202`。`JOB=$(jq -r .job.jobId "$D/accept.json")` を設定する。
+- **待ちに入るのを待つ。** `for i in $(seq 1 60); do c -o "$D/state-0.json" "$STG/api/patterns/$PAT/state"; jq -e --arg j "$JOB" '.runningJob.jobId == $j' "$D/state-0.json" >/dev/null && break; sleep 1; done`。`runningJob.jobId` が `$JOB`。
+- **止める。** `body=$(printf '{"requestId":"%s"}' "$(uuidgen)")` で `c -o "$D/stop.json" -w '%{http_code}\n' -X POST "$STG/api/jobs/$JOB/stop" -H "$J" -H "origin: $STG" -d "$body"`。`200` で、`outcome` が `stopped`、`job.state` が `cancelled`。同じ `$body` で出力先を `"$D/stop-replay.json"` にして送り直すと `200` で、`cmp "$D/stop.json" "$D/stop-replay.json"` が何も出さない。
+- **state を読む。** `c -o "$D/state-1.json" "$STG/api/patterns/$PAT/state"`。`runningJob` と `currentRevision` が `null`、`lastFinishedJob.jobId` が `$JOB` で、`lastFinishedJob.state` が `cancelled`。
+- **待ちが明けた後に読む。** 200秒おいて、state を `"$D/state-2.json"` に読み直し、`c -o "$D/revisions.json" -w '%{http_code}\n' "$STG/api/patterns/$PAT/revisions"` を実行する。state は `state-1` と同じで、`revisions` が `[]`。
