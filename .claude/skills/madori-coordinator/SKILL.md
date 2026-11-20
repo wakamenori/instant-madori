@@ -48,7 +48,7 @@ pstack の poteto-mode の Orchestrate に従い、各 PR は Autopilot-full の
 
 ## 次の Issue を選ぶ
 
-着手できる Issue を、milestone の番号、後ろに続く依存の鎖の長さ、Issue の番号の順に並べる。開いた Issue に塞がれていないものだけが出る。
+着手できる Issue を、milestone の番号、後ろに続く依存の鎖の長さ、Issue の番号の順に並べる。開いた Issue に塞がれていないものだけが、件数で切られずにすべて出る。「順番」の規則は、鎖の長さが同じで番号の大きい Issue も比べるので、出た候補を上から数件だけで決めない。
 
 ```sh
 node .claude/skills/madori-coordinator/scripts/rank-ready.mjs
