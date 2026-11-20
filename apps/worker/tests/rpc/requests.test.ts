@@ -606,6 +606,41 @@ void test("once-only batches preserve their private protocol on real D1", async 
     );
 
     await t.test(
+      "update bindings are iterated once, so the record and the update see the same rows",
+      async () => {
+        const target = creation();
+        const decoy = creation();
+        await runOnce(db, schema, target.batch);
+        await runOnce(db, schema, decoy.batch);
+        let iterations = 0;
+        class Shifting extends Array<unknown> {
+          override *[Symbol.iterator]() {
+            yield* ++iterations === 1 ? [target.input.id, ownerA] : [decoy.input.id, ownerA];
+          }
+        }
+        const request = key();
+        request.operation = "project.rename";
+        const batch = updateOnceStatements(request, now, {
+          table: "projects",
+          set: { sql: "name = ?, version = version + 1", bindings: ["renamed"] },
+          where: {
+            sql: "id = ? AND owner_id = ?",
+            bindings: Shifting.from([target.input.id, ownerA]),
+          },
+          result: { sql: "SELECT json_object('name', ?)", bindings: ["renamed"] },
+        });
+        assert.deepEqual(await runOnce(db, schema, batch), {
+          kind: "applied",
+          result: { name: "renamed" },
+        });
+        const row = (id: string) =>
+          raw.prepare("SELECT name, version FROM projects WHERE id = ?").bind(id).first();
+        assert.deepEqual(await row(target.input.id), { name: "renamed", version: 2 });
+        assert.deepEqual(await row(decoy.input.id), { name: "original", version: 1 });
+      },
+    );
+
+    await t.test(
       "updates snapshot every SQL part and replay using the captured request key",
       async () => {
         const made = creation();
