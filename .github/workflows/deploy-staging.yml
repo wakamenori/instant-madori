@@ -53,7 +53,7 @@ jobs:
           fi
           printf '::add-mask::%s\n' "$STAGING_ACCESS_CLIENT_ID"
           pnpm exec wrangler d1 migrations apply DB --remote --env staging
-          pnpm exec wrangler deploy --env staging --var "ACCESS_VERIFIER_CLIENT_ID:$STAGING_ACCESS_CLIENT_ID"
+          pnpm exec node ../../scripts/deploy/wrangler-deploy.ts --env staging --var "ACCESS_VERIFIER_CLIENT_ID:$STAGING_ACCESS_CLIENT_ID"
       - name: Smoke test through Access
         run: |
           STAGING_ACCESS_CLIENT_ID="$(sed -n 's/^STAGING_ACCESS_CLIENT_ID=//p' "$MADORI_ENV_FILE")"
