@@ -1,0 +1,171 @@
+{
+  "resourceLogs": [
+    {
+      "resource": {
+        "attributes": [
+          {
+            "key": "host.arch",
+            "value": {
+              "stringValue": "fake-host-arch"
+            }
+          },
+          {
+            "key": "os.type",
+            "value": {
+              "stringValue": "fake-os-type"
+            }
+          },
+          {
+            "key": "os.version",
+            "value": {
+              "stringValue": "fake-os-version"
+            }
+          },
+          {
+            "key": "service.name",
+            "value": {
+              "stringValue": "claude-code"
+            }
+          },
+          {
+            "key": "service.version",
+            "value": {
+              "stringValue": "fake-service-version"
+            }
+          }
+        ],
+        "droppedAttributesCount": 0
+      },
+      "scopeLogs": [
+        {
+          "scope": {
+            "name": "fake-name",
+            "version": "fake-version"
+          },
+          "logRecords": [
+            {
+              "timeUnixNano": "1760000000000000000",
+              "observedTimeUnixNano": "1760000000000000000",
+              "body": {
+                "stringValue": "fake-body"
+              },
+              "attributes": [
+                {
+                  "key": "user.id",
+                  "value": {
+                    "stringValue": "fake-user-id"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "fake-session-id"
+                  }
+                },
+                {
+                  "key": "organization.id",
+                  "value": {
+                    "stringValue": "fake-organization-id"
+                  }
+                },
+                {
+                  "key": "user.email",
+                  "value": {
+                    "stringValue": "fake-user-email"
+                  }
+                },
+                {
+                  "key": "user.account_uuid",
+                  "value": {
+                    "stringValue": "fake-user-account_uuid"
+                  }
+                },
+                {
+                  "key": "user.account_id",
+                  "value": {
+                    "stringValue": "fake-user-account_id"
+                  }
+                },
+                {
+                  "key": "anthropic.provider",
+                  "value": {
+                    "stringValue": "fake-anthropic-provider"
+                  }
+                },
+                {
+                  "key": "anthropic.custom_base_url",
+                  "value": {
+                    "boolValue": false
+                  }
+                },
+                {
+                  "key": "anthropic.plan",
+                  "value": {
+                    "stringValue": "fake-anthropic-plan"
+                  }
+                },
+                {
+                  "key": "terminal.type",
+                  "value": {
+                    "stringValue": "fake-terminal-type"
+                  }
+                },
+                {
+                  "key": "event.name",
+                  "value": {
+                    "stringValue": "fake-event-name"
+                  }
+                },
+                {
+                  "key": "event.timestamp",
+                  "value": {
+                    "stringValue": "fake-event-timestamp"
+                  }
+                },
+                {
+                  "key": "event.sequence",
+                  "value": {
+                    "intValue": 0
+                  }
+                },
+                {
+                  "key": "managed_settings.trigger",
+                  "value": {
+                    "stringValue": "fake-managed_settings-trigger"
+                  }
+                },
+                {
+                  "key": "managed_settings.sources",
+                  "value": {
+                    "arrayValue": {
+                      "values": []
+                    }
+                  }
+                },
+                {
+                  "key": "managed_settings.source_behavior",
+                  "value": {
+                    "stringValue": "fake-managed_settings-source_behavior"
+                  }
+                },
+                {
+                  "key": "managed_settings.helper.state",
+                  "value": {
+                    "stringValue": "fake-managed_settings-helper-state"
+                  }
+                },
+                {
+                  "key": "managed_settings.helper.applied",
+                  "value": {
+                    "stringValue": "fake-managed_settings-helper-applied"
+                  }
+                }
+              ],
+              "droppedAttributesCount": 0
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
