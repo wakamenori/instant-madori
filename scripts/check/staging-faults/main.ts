@@ -152,6 +152,7 @@ export async function runFaultJourney(
     records.push({
       outcome,
       name,
+      patternId: pattern.id,
       delta: delta ?? { adds },
       before,
       after: after ?? null,
@@ -329,6 +330,7 @@ export async function runFaultJourney(
           : [];
     records.push({
       name: "log evidence",
+      patternId: pattern.id,
       start: logStart,
       end: clock.now(),
       jobIds: { ...ids },
