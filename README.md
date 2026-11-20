@@ -35,7 +35,7 @@ Containerを使うローカルセッション（実Containerテスト、別workt
 
 Dockerを使う重い作業は、マシン全体で共有する「Dockerの枠」を一つ取ってから始まります。枠を取るのは、`pnpm check --full` の実Containerの接続検査とビルドキャッシュの回収の間と、Containerを有効にした `pnpm dev` の起動から終了までです。枠は開発用に二つ、self-hosted runner用に一つあります。runnerはGitHub Actionsが設定する `GITHUB_ACTIONS=true` で見分け、開発用の枠が埋まっていても待ちません。枠が埋まっていれば空くまで待ち、待ち始めとその後の一分ごとに、各枠を持つプロセスの目的、pid、経過時間、チェックアウトを `[docker-slot]` の行に表示します。待っている間のCtrl-Cで、`pnpm check` は中断して終了コード1で、`pnpm dev` は通常の停止として終了コード0で終わります。
 
-枠の実体は、`~/.local/state/instant-madori/docker-slots/` のファイルにかけるflockです。枠は取ったプロセスだけが持ち、プロセスが終わると、`kill -9` で止めた場合もOSが外します。子プロセスは枠を持ちません。そのため、`kill -9` で止めると、そのプロセスが起動した `wrangler dev` やDockerのビルドが動き続けていても枠は空きます。止めるときは、Ctrl-Cか `kill`（SIGTERM）を使ってください。
+枠はmacOSでだけ働きます。Linuxでは枠を取らずに実行し、そのことを `[docker-slot]` の行に一行表示します。枠の実体は、`~/.local/state/instant-madori/docker-slots/` のファイルにかけるflockです。枠は取ったプロセスだけが持ち、プロセスが終わると、`kill -9` で止めた場合もOSが外します。子プロセスは枠を持ちません。そのため、`kill -9` で止めると、そのプロセスが起動した `wrangler dev` やDockerのビルドが動き続けていても枠は空きます。止めるときは、Ctrl-Cか `kill`（SIGTERM）を使ってください。
 
 `node scripts/shared/docker-slots.ts status` で各枠を持つプロセスを表示します。`pnpm check --full` と `pnpm dev` の外でDockerの重い作業をするときは、`node scripts/shared/docker-slots.ts run -- <コマンド>` で枠を取ってから実行してください。実Containerの試験を直接動かす場合や、キャッシュなしでイメージをビルドする場合が当たります。`run` の中で `pnpm check --full` や `pnpm dev` を起動すると、二つ目の枠を待たずに失敗します。`pnpm dev` は動いている間ずっと枠を一つ持つので、使い終わったら止めてください。
 
