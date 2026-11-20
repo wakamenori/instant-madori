@@ -1,11 +1,15 @@
 import { execFileSync } from "node:child_process";
 
+// Issues labeled metrics belong to the metrics thread (metrics/README.md), not to the coordinator.
+const excludedLabels = new Set(["metrics"]);
+
 const query = `query($cursor: String) {
   repository(owner: "wakamenori", name: "instant-madori") {
     issues(states: OPEN, first: 100, after: $cursor) {
       pageInfo { hasNextPage endCursor }
       nodes {
         number title milestone { number title }
+        labels(first: 20) { nodes { name } }
         blockedBy(first: 50) { nodes { number state } }
         blocking(first: 50) { nodes { number state } }
       }
@@ -20,7 +24,10 @@ do {
   if (cursor) args.push("-f", `cursor=${cursor}`);
   const output = execFileSync("gh", args, { encoding: "utf8", maxBuffer: 64 << 20 });
   const page = JSON.parse(output).data.repository.issues;
-  for (const issue of page.nodes) issues.set(issue.number, issue);
+  for (const issue of page.nodes) {
+    if (issue.labels.nodes.some((label) => excludedLabels.has(label.name))) continue;
+    issues.set(issue.number, issue);
+  }
   cursor = page.pageInfo.hasNextPage ? page.pageInfo.endCursor : null;
 } while (cursor);
 

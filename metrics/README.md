@@ -87,12 +87,18 @@ L4は、L3から指標を計算する。指標の定義はコードとして版�
 - 流れ全体は、WIP（担当の枠の埋まり具合）、スループット、flow efficiencyを持つ。flow efficiencyは、作業していた時間を全体の時間で割った値である。
 - 計測の仕組みの健康状態は、出どころごとの最後の取り込み、取り込みの遅れ、隔離した件数を持つ。
 
-## 記録は四つの部品で取り込む
+## 記録は三つの部品で取り込む
 
-- 受け口は、launchdで常駐し、OTLP/HTTP、hook、CLIの記録を受ける。L1に書くのは受け口だけにして、書き手を一つにする。受け口が止まっている間は、hookが一時ファイルに書き、受け口が戻ったときに取り込む。受け口のポートは、`pnpm dev` が使う5173と8787を避ける。
+- 受け口は、launchdで常駐し、OTLP/HTTPとhookの記録を受ける。L1に書くのは受け口だけにして、書き手を一つにする。受け口が止まっている間は、hookが一時ファイルに書き、受け口が戻ったときに取り込む。受け口のポートは、`pnpm dev` が使う5173と8787を避ける。
 - ポーラーは、GitHub（Issue、依存、PR、コメント、Actionsのjobとstep）を数分ごとに、T3のDBを1分ごとに読む。T3のDBは読み取り専用で開く。
-- hookは、`.claude/settings.json` と `.codex/hooks.json` に置く。hookは受け口へ送るか一時ファイルに追記するだけで、どの場合も終了コード0で終わる。
-- 工程のCLIは、指揮役の判断を記録する。対象は、staging占有の開始と終了、マージを止めた理由、検証の判定である。
+- hookは、リポジトリの `.claude/settings.json` に置き、SessionStart、UserPromptSubmit、Stopの三つだけを使う。SessionStartは、`session_id` とT3のスレッド（`T3CODE_THREAD_ID`）とcwdを結ぶ。UserPromptSubmitとStopは、ターンの始まりと終わりを記録する。ツールとモデルの時間はOTelが出すので、ツールを呼ぶたびに動くhookは使わない。
+
+OTelは、リポジトリではなくこのマシンの設定で有効にする。Claude Codeは、プロジェクトの `.claude/settings.json` の `env` に書いたテレメトリーの設定を使わないためである。
+
+- Claude Codeは、`~/.claude_personal/settings.json` の `env` で有効にする。T3は、このフォルダーを `CLAUDE_CONFIG_DIR` としてClaude Codeを起動する。
+- Codexは、`~/.codex/config.toml` の `[otel]` で有効にする。Codexのプロジェクトのhookは、`hooks.json` の絶対パスごとに信頼の登録が要り、Issueごとに作るworktreeでは動かないので使わない。
+
+どちらもこのマシンのすべてのセッションに効く。受け口は、SessionStartでこのリポジトリと結べたセッションと、T3のDBでこのリポジトリのスレッドと結べたCodexの会話だけをL1に書き、ほかは捨てる。
 
 過去の分は、T3のDB、会話ログ、GitHubから一度だけ取り込む。取り込んだ記録の `source` には、これからの記録と区別できる出どころの名前を付ける。
 
@@ -106,15 +112,22 @@ L4は、L3から指標を計算する。指標の定義はコードとして版�
 
 L1は直さない約束なので、入れた記録を後から消すのは難しい。そのため、入れるものを次のように決める。
 
-- 指示の本文（ユーザーと指揮役が書いた文）は入れない。
+- 指示の本文（ユーザーと指揮役が書いた文）は入れない。UserPromptSubmitの本文からは、役割、Issue、PR、ターンを起こしたものの種類だけを取り出し、本文は捨てる。Stopの `last_assistant_message` も捨てる。
+- 利用者を示す属性は入れない。OTelの記録にある `user.email`、`user.id`、`user.account_uuid`、`user.account_id`、`organization.id` は、受け口で捨てる。
 - コマンドの文字列は入れる。後で分類を変えたときに、集め直さずに済むためである。既知の形のトークンは、受け口で伏せる。
 - DBは、このマシンの外に出さない。
 
-## サービスと指揮役の流れから切り離す
+## 指揮役は計測を意識しない
 
+指揮役、担当、検証役は、計測のために何もしない。計測は、指揮役、担当、検証役がすでに残すもの（T3のDB、GitHub、OTel、hook）だけから組み立てる。計測の仕組みが止まっても壊れても、三者の作業は変わらない。
+
+- 工程の出来事は、すでにある記録から導く。staging占有の開始と終了は、指揮役がIssueに書くコメントから読む。判定は、検証役の最後のメッセージとPRのコメントから読む。マージを止めた理由は、PASSからマージまでの間に重なったstaging占有、実行中のデプロイ、衝突から推定する。導けない出来事は、指揮役に記録を頼まずに、推定できないものとしてL4に出す。
+- hookは、すべての担当、検証役、指揮役のセッションで動く。そのため、受け口が無くても速く終わり、何も出力せず、どの場合も終了コード0で終わる。
+- 計測のIssueとPRには、ラベル `metrics` を付ける。指揮役の `rank-ready.mjs` は `metrics` のIssueを候補に出さず、指揮役が開いているPRを一覧するコマンドは `metrics` のPRを除く。計測のIssueとPRは、計測のスレッドが作り、確かめ、マージする。
+- `metrics/` だけの変更では、stagingへデプロイしない。そのため、計測のPRのマージは、staging占有に関わらず行える。
+- ポーラーは、GitHub APIの上限を指揮役と分け合う。条件付きリクエストを使い、残りが一定の数を下回ったら次の周期まで待つ。
+- 計測の健康状態は、viewerにだけ出す。指揮役の見回りには出さない。
 - `metrics/` は、`apps/`、`crates/`、`packages/` をimportしない。サービスも `metrics/` をimportしない。`metrics/` にコードを置くときに、この向きを `scripts/check/boundaries.ts` の表に加えて検査する。
-- `metrics/` だけの変更では、stagingへデプロイしない。
-- hookは、すべての担当、検証役、指揮役のセッションで動く。そのため、hookは受け口が無くても速く終わり、失敗しない。
 
 ## フォルダーの構成
 
@@ -129,14 +142,17 @@ metrics/
 
 ## 設計が頼る前提
 
-確かめた前提は次の二つである。
+試作で確かめた前提は次のとおり。
 
-- T3は、起動するClaude Codeのプロセスに `T3CODE_THREAD_ID` を渡す。
-- CodexはT3のすべてのスレッドで一つの `codex app-server` を共有するので、環境変数ではスレッドを見分けられない。Codexの記録は、セッションとcwdで担い手に結ぶ。
+- T3は、起動するClaude Codeのプロセスに `T3CODE_THREAD_ID` を渡す。T3が起動したセッションで、プロジェクトの `.claude/settings.json` のhookが動き、その入力に `session_id`、`prompt_id`、cwdが入る。
+- Claude CodeのOTelは、モデルの呼び出しごと（`api_request`）に時間、最初のトークンまでの時間、トークン、費用、モデル、effortを出す。ツールの呼び出しごと（`tool_result`）に、ツール名、時間、成否、コマンドを出す。OTelの `session.id` は、hookの `session_id` と同じ値である。
+- プロジェクトの `.claude/settings.json` の `env` に書いたOTelの設定は、T3でもコマンドラインでも効かない。プロセスの環境変数とフラグの設定では効く。
+- CodexのOTelは、`conversation.id`、トークン、最初のトークンまでの時間、effort、ツールの判定を出す。
+- CodexはT3のすべてのスレッドで一つの `codex app-server` を共有するので、環境変数ではスレッドを見分けられない。
+- launchdで動くプロセスから、`gh` の認証、`git` のリモートへの接続、T3のDBの読み取りが使える。
 
-まだ確かめていない前提は次の四つである。
+まだ確かめていない前提は次のとおり。
 
-- T3が起動したClaude Codeで、プロジェクトの `.claude/settings.json` のhookとOTelの環境変数が効く。
-- Claude CodeのOTelが、ツールの時間と、モデルの呼び出しの時間、トークン、費用を出す。
-- T3が起動したCodexで、プロジェクトの `.codex/hooks.json` が動く。
-- launchdで動く受け口とポーラーから、`gh` の認証が使える。
+- `~/.claude_personal/settings.json` の `env` に書いたOTelの設定が、T3が起動したClaude Codeで効く。
+- `~/.codex/config.toml` の `[otel]` が、T3の `codex app-server` で効く。
+- 受け口が止まっているとき、OTelの送信の失敗が、担当、検証役、指揮役のセッションに何も表示しない。
