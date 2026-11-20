@@ -34,9 +34,11 @@ await test("HTTP surface", async (t) => {
   await t.test(
     "unknown API routes return a JSON 404 even when the browser accepts HTML",
     async () => {
-      const response = await worker.navigate("/api/missing");
-      assert.equal(response.status, 404);
-      assert.deepEqual(apiErrorSchema.parse(JSON.parse(response.body)), { error: "not_found" });
+      for (const path of ["/missing", "/sample/display"]) {
+        const response = await worker.navigate(`/api${path}`);
+        assert.equal(response.status, 404);
+        assert.deepEqual(apiErrorSchema.parse(JSON.parse(response.body)), { error: "not_found" });
+      }
     },
   );
 

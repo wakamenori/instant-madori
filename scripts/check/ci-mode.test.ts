@@ -16,7 +16,6 @@ void test("Container, display, dependency, upstream and CI changes need the full
     "crates/modeling/src/lib.rs",
     "crates/viewer/src/lib.rs",
     "apps/worker/src/geometry/geometry-client.ts",
-    "apps/worker/src/api/sample.ts",
     "apps/worker/wrangler.jsonc",
     "apps/web/package.json",
     "crates/housing/Cargo.toml",

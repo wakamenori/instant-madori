@@ -15,7 +15,6 @@ import { patternRoutes } from "./patterns.ts";
 import { projectRoutes } from "./projects.ts";
 import { matchRoute } from "./router.ts";
 import { revisionRoutes } from "./revisions.ts";
-import { sampleRoutes } from "./sample.ts";
 
 const routes = [
   ...meRoutes,
@@ -24,7 +23,6 @@ const routes = [
   ...messageRoutes,
   ...projectRoutes,
   ...patternRoutes,
-  ...sampleRoutes,
   ...revisionRoutes,
 ];
 
