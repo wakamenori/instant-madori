@@ -83,7 +83,8 @@ await test("digest entries follow their prepared source or their own digest", ()
     kind: "ready",
     repository,
     keep: [tags[0], tags[3]],
-    remove: [tags[1], tags[4]],
+    remove: [tags[4]],
+    prepared: [tags[1]],
     unreferenced: [tags[2]],
   });
 });
@@ -254,10 +255,9 @@ await test("garbage collection failure is reported as a warning", async () => {
   assert(f.logs.some((s) => s.includes("Warning") && s.includes("garbage collection")));
 });
 
-await test("manifest annotation protects the runtime artifact of a retained image", async () => {
-  const f = fixture();
+async function addPreparedArtifact(f: ReturnType<typeof fixture>, source: number) {
   const artifact = new TextEncoder().encode(
-    JSON.stringify({ annotations: { "io.cloudflare.cloudchamber.image_digest": digest(12) } }),
+    JSON.stringify({ annotations: { "io.cloudflare.cloudchamber.image_digest": digest(source) } }),
   );
   const name = hash(artifact);
   const catalog = await f.registry().catalog();
@@ -265,6 +265,25 @@ await test("manifest annotation protects the runtime artifact of a retained imag
   const manifest = f.registry().manifest;
   f.registry().manifest = (repo, ref) =>
     ref === name ? Promise.resolve({ digest: name, body: artifact }) : manifest(repo, ref);
+  return name;
+}
+
+await test("apply reports the prepared artifact of an old image without deleting it", async () => {
+  const f = fixture();
+  const name = await addPreparedArtifact(f, 1);
+  await runRetention({ ...f, apply: true });
+  assert.deepEqual(f.mutations, ["tag-2", "tag-1", digest(1), "gc"]);
+  const loggedPlan = f.logs.find((line) => line.startsWith("{"));
+  assert(loggedPlan);
+  assert.partialDeepStrictEqual(JSON.parse(loggedPlan), {
+    mode: "apply",
+    prepared: [{ tag: `${repository}:${name}`, digest: name, preparedFrom: digest(1) }],
+  });
+});
+
+await test("manifest annotation protects the runtime artifact of a retained image", async () => {
+  const f = fixture();
+  const name = await addPreparedArtifact(f, 12);
   const plan = await runRetention(f);
   assert(plan.keep.some((entry) => entry.digest === name && entry.preparedFrom === digest(12)));
 });

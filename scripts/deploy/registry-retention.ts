@@ -36,7 +36,14 @@ const versionSchema = z.object({
 type Version = z.infer<typeof versionSchema>;
 type Tag = z.infer<typeof tagSchema>;
 type RetentionPlan =
-  | { kind: "ready"; repository: string; keep: Tag[]; remove: Tag[]; unreferenced: Tag[] }
+  | {
+      kind: "ready";
+      repository: string;
+      keep: Tag[];
+      remove: Tag[];
+      prepared: Tag[];
+      unreferenced: Tag[];
+    }
   | { kind: "blocked"; reason: string; remove: [] };
 
 function imageParts(ref: string) {
@@ -106,15 +113,17 @@ export function selectTags(input: {
   const knownDigests = digests(versions);
   const keep: Tag[] = [];
   const remove: Tag[] = [];
+  const prepared: Tag[] = [];
   const unreferenced: Tag[] = [];
   for (const tag of tags) {
     if (!tag.tag.startsWith(`${repository}:`)) continue;
     const image = tag.preparedFrom ?? tag.digest;
     if (protectedDigests.has(image)) keep.push(tag);
-    else if (knownDigests.has(image)) remove.push(tag);
-    else unreferenced.push(tag);
+    else if (!knownDigests.has(image)) unreferenced.push(tag);
+    else if (tag.preparedFrom !== null) prepared.push(tag);
+    else remove.push(tag);
   }
-  return { kind: "ready", repository, keep, remove, unreferenced };
+  return { kind: "ready", repository, keep, remove, prepared, unreferenced };
 }
 
 const versionSummarySchema = z.object({
