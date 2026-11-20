@@ -233,6 +233,6 @@ Worker と DO が再起動しても、待たせている指示は完了し、案
   3. そろったら版を見る。`pattern.advanced` が一つの版だけなら、DO の版の切り替えを確かめられなかったので、新しいパターンでこの節をやり直す。動いている DO が新しい版に移るまでには、待ちの180秒より長くかかることがある。
   4. 二つの版があれば、次のすべてを満たすと合格、一つでも欠ければ不合格である。
   - 最初の `pattern.advanced` は古い版の `claimed`、最後は新しい版の `idle`。
-  - 新しい版の `pattern.advanced` は `running` で `instanceStatus` を持ち、約30秒ごとに出る。
+  - 待ちの間（新しい版の最初の `pattern.advanced` から最後の `idle` の前まで）に、新しい版で `outcome` が `running` で `instanceStatus` を持つ `pattern.advanced` が約30秒ごとに出る。最後の `idle` の行は `instanceStatus` を持たない。
   - `job.step` の `check test hold before render` は、新しい版の最初の `pattern.advanced` より前にある。
   - `job.step` と `job.finished` は待ちを始めた古い版のままである。`idle` と `job.finished` の前後は問わない。
