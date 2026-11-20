@@ -153,7 +153,7 @@ gh api --paginate \
 ```sh
 git fetch -q origin main "pull/<番号>/head" &&
   { echo ':/'; git show origin/main:.github/workflows/deploy-staging.yml |
-    sed -n '/^    paths-ignore:$/,/^ \{0,5\}[^ ]/s/^      - "\(.*\)"$/:(top,glob,exclude)\1/p'; } |
+    sed -n '/^    paths-ignore:$/,/^ \{0,5\}[^ #]/s/^      - "\(.*\)"$/:(top,glob,exclude)\1/p'; } |
   xargs git diff --no-renames --name-only "origin/main...<head>" --
 ```
 

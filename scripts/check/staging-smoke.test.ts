@@ -409,7 +409,7 @@ function deployPathsIgnore(workflow: string): string[] {
   ];
   const entries: string[] = [];
   for (const line of lines.slice(start + 1)) {
-    if (/^ {0,5}\S/.test(line)) break;
+    if (/^ {0,5}[^\s#]/.test(line)) break;
     const entry = /^ {6}- "([A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)*(?:\/\*\*)?)"$/.exec(line)?.[1];
     assert.ok(entry, `invalid paths-ignore line: ${JSON.stringify(line)}`);
     assert.ok(!entry.split("/").some((segment) => segment === "." || segment === ".."), entry);
@@ -442,9 +442,13 @@ void test("deploy skips only documents and agent instructions that the coordinat
 
   const header = "    paths-ignore:";
   const docs = '      - "docs/**"';
+  const last = '      - "README.md"';
   for (const [original, replacement] of [
     [docs, docs + '\n\n      - "apps/**"'],
     [docs, docs + "\n      # x"],
+    [last, last + '\n# note\n      - "apps/**"'],
+    [last, last + '\n  # pins\n      - "pnpm-lock.yaml"'],
+    [last, last + '\n    # rest\n      - "**"'],
     [docs, "      - docs/**"],
     [header, '    paths-ignore: ["docs/**"]'],
     [header, header + "\n" + header],
