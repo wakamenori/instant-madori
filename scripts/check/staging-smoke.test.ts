@@ -391,3 +391,82 @@ void test("deployment rejects a missing or blank Client ID before migration and 
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+function deployPathsIgnore(workflow: string): string[] {
+  const lines = workflow.split("\n");
+  const header = "    paths-ignore:";
+  const start = lines.indexOf(header);
+  assert.ok(start >= 0 && start === lines.lastIndexOf(header), "expected one paths-ignore block");
+
+  const roots = [
+    "apps/",
+    "crates/",
+    "packages/",
+    "scripts/",
+    "third_party/",
+    ".cargo/",
+    ".github/workflows/",
+  ];
+  const entries: string[] = [];
+  for (const line of lines.slice(start + 1)) {
+    if (/^ {0,5}[^\s#]/.test(line)) break;
+    const entry = /^ {6}- "([A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)*(?:\/\*\*)?)"$/.exec(line)?.[1];
+    assert.ok(entry, `invalid paths-ignore line: ${JSON.stringify(line)}`);
+    assert.ok(!entry.split("/").some((segment) => segment === "." || segment === ".."), entry);
+    const directory = entry.endsWith("/**");
+    assert.ok(directory || entry.endsWith(".md"), entry);
+    const prefix = directory ? entry.slice(0, -2) : entry;
+    assert.ok(
+      !roots.some((root) => prefix.startsWith(root) || (directory && root.startsWith(prefix))),
+      `deploy reads ${entry}`,
+    );
+    entries.push(entry);
+  }
+  assert.ok(entries.length > 0, "expected at least one ignored path");
+  return entries;
+}
+
+void test("deploy skips only documents and agent instructions that the coordinator can match", () => {
+  const workflow = readFileSync(
+    new URL(".github/workflows/deploy-staging.yml", repositoryRoot),
+    "utf8",
+  );
+  assert.deepEqual(deployPathsIgnore(workflow), [
+    ".claude/**",
+    ".github/ISSUE_TEMPLATE/**",
+    "docs/**",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "README.md",
+  ]);
+
+  const header = "    paths-ignore:";
+  const docs = '      - "docs/**"';
+  const last = '      - "README.md"';
+  for (const [original, replacement] of [
+    [docs, docs + '\n\n      - "apps/**"'],
+    [docs, docs + "\n      # x"],
+    [last, last + '\n# note\n      - "apps/**"'],
+    [last, last + '\n  # pins\n      - "pnpm-lock.yaml"'],
+    [last, last + '\n    # rest\n      - "**"'],
+    [docs, "      - docs/**"],
+    [header, '    paths-ignore: ["docs/**"]'],
+    [header, header + "\n" + header],
+    ...[
+      "apps/**",
+      "apps/web/**",
+      "**/*.md",
+      "apps+/**",
+      String.raw`\x61pps/**`,
+      String.raw`apps\/**`,
+      "package.json",
+      "apps/web/README.md",
+      "third_party/solidcraft/README.md",
+      "./apps/**",
+      "docs/../apps/**",
+      ".github/**",
+    ].map((entry) => [docs, `      - "${entry}"`] as const),
+  ] as const) {
+    assert.throws(() => deployPathsIgnore(workflow.replace(original, replacement)), replacement);
+  }
+});

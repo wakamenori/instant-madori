@@ -2,10 +2,18 @@ name: deploy-staging
 on:
   push:
     branches: [main]
+    # Paths that no deploy input reads (README: stagingへデプロイする).
+    paths-ignore:
+      - ".claude/**"
+      - ".github/ISSUE_TEMPLATE/**"
+      - "docs/**"
+      - "AGENTS.md"
+      - "CLAUDE.md"
+      - "README.md"
   workflow_dispatch:
 permissions:
   contents: read
-# Never cancel a deploy midway; a newer push waits and then deploys the latest main.
+# Never cancel a running deploy; a newer run replaces the one pending run and later deploys its own commit.
 concurrency:
   group: deploy-staging
   cancel-in-progress: false

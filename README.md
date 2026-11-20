@@ -148,6 +148,8 @@ runnerでも `--full` の最後に、手元と同じ規則でDockerのビルド�
 
 runnerを入れ直すときは、[actions/runner](https://github.com/actions/runner/releases)のosx-arm64版を `~/actions-runner/instant-madori` に展開し、リポジトリの登録トークン（`gh api -X POST repos/wakamenori/instant-madori/actions/runners/registration-token`）で `./config.sh --labels madori` を実行します。mise・cargo・Dockerのある `PATH` で設定すると、runnerがその `PATH` を保存します。runnerの `.env` には、作業フォルダーを信頼する `MISE_TRUSTED_CONFIG_PATHS=<runnerのフォルダー>/_work` と、デプロイ用の認証情報を読む `MADORI_ENV_FILE=<リポジトリの .env の絶対パス>` を書きます。最後に `./svc.sh install` と `./svc.sh start` でlaunchdに常駐させます。外すときは `./svc.sh uninstall` の後に `./config.sh remove` を実行します。
 
+ワークフローは `mise exec -- actionlint` で検査します。actionlintはrunnerのラベル `madori` を `.github/actionlint.yaml` から読み込むので、ラベルを変更するときはこのファイルも更新します。
+
 VS Code向けの推奨拡張・保存時整形・ESLint自動修正・Rust Analyzer設定を `.vscode/` に用意しています。他のエディタやエージェントによる直接編集でも、同じ `pnpm check` を使えます。
 
 ## 依存とツールを更新する
@@ -185,13 +187,15 @@ Miniflareのsharp依存は、LGPLのlibvipsを含むため除外しています�
 
 ## SolidCraftの更新
 
-**upstreamの更新は原則取り込みます。** 住宅サービスへの影響を確認し、問題があれば調整するか、理由を記録して保留します。採用版は[solidcraft.json](third_party/solidcraft.json)、独自変更・更新手順・初回移行の記録は[solidcraft.md](third_party/solidcraft.md)を参照してください。
+**upstreamの更新は原則取り込みます。** 住宅サービスへの影響を確認し、問題があれば調整するか、理由を記録して保留します。採用版は[solidcraft.json](third_party/solidcraft.json)、独自変更・更新手順・初回移行の記録は[solidcraft.md](third_party/solidcraft.md)を参照してください。Containerのイメージのビルドは、取り込み領域のうちビルドが読まないデータを `.dockerignore` で除いて送ります。更新の後に `pnpm check --full` のDockerのビルドが除いたファイルを読めずに失敗したら、`.dockerignore` からそのパスの行を消します。
 
 SolidCraftの元のREADME・資料・ライセンスは取り込み領域に保持しています。[MITライセンス](third_party/solidcraft/LICENSE-MIT)、[Apacheライセンス](third_party/solidcraft/LICENSE-APACHE)、[NOTICE](third_party/solidcraft/NOTICE)、[資産と依存の帰属](third_party/solidcraft/ATTRIBUTION.md)を参照してください。
 
 ## stagingへデプロイする
 
-mainへのpushで、`.github/workflows/deploy-staging.yml` がself-hosted runnerでstagingへデプロイします。`pnpm check --full`、D1のマイグレーションの適用、`scripts/deploy/wrangler-deploy.ts` を通した `wrangler deploy --env staging` の順に進め、その後 `scripts/check/staging-smoke.ts` で、Accessを通した疎通を確かめます。デプロイは途中で止めず、後から来たpushは前のデプロイが終わってから最新のmainをデプロイします。マイグレーションはデプロイの前に適用するため、動いている前の版のWorkerと両立する形で書きます。mainに入ったマイグレーションは変更せず、修正は番号の大きいファイルを追加します。`pnpm check` の全モードがこの不変条件を検査します。pushによるデプロイは、`github.event.before` が指すpushの前のmainと比較します。force pushなどで、そのコミットがHEADの履歴に無ければ失敗します。手動の実行と、前のSHAが無いpushでは、`pnpm check` と同じく、mainはfirst parent、ブランチは `origin/main` との分岐点と比較します。
+mainへのpushで、`.github/workflows/deploy-staging.yml` がself-hosted runnerでstagingへデプロイします。`pnpm check --full`、D1のマイグレーションの適用、`scripts/deploy/wrangler-deploy.ts` を通した `wrangler deploy --env staging` の順に進め、その後 `scripts/check/staging-smoke.ts` で、Accessを通した疎通を確かめます。実行中のデプロイは最後まで続けます。待機できる実行は一つで、後から来たpushの実行が先に待っていた実行を取り消します。実行中のデプロイが終わると、最後に待っていたpushのコミットをデプロイします。マイグレーションはデプロイの前に適用するため、動いている前の版のWorkerと両立する形で書きます。mainに入ったマイグレーションは変更せず、修正は番号の大きいファイルを追加します。`pnpm check` の全モードがこの不変条件を検査します。pushによるデプロイは、`github.event.before` が指すpushの前のmainと比較します。force pushなどで、そのコミットがHEADの履歴に無ければ失敗します。手動の実行と、前のSHAが無いpushでは、`pnpm check` と同じく、mainはfirst parent、ブランチは `origin/main` との分岐点と比較します。
+
+GitHubはmainへのpushの前後のコミットを比較し、変更したファイルがすべてworkflowの `paths-ignore` に該当すればデプロイを起動しません。対象は `docs/`、`.claude/`、`.github/ISSUE_TEMPLATE/` の配下と、ルートの `README.md`、`AGENTS.md`、`CLAUDE.md` です。これらは文書とエージェント向けの指示で、Containerイメージのビルド、Workerと静的ファイルのビルド、マイグレーション、デプロイ、疎通確認では読みません。読むのは `pnpm check` の整形、ESLint、文書のパス検査、秘密情報の検査、テストだけで、マージ前にPRの `check` ですべて実行します。一覧の各項目はディレクトリ全体（`<ディレクトリ>/**`）か一つのMarkdownファイルです。この形式と、デプロイが読むディレクトリと重ならないことを `scripts/check/staging-smoke.test.ts` で確かめます。アプリ、クレート、パッケージ、スクリプト、upstream、マイグレーション、依存関係やツールのバージョン固定、このworkflow自体など、対象外のファイルを一つでも変えればデプロイします。ルートのREADMEだけを変えた場合も含め、対象の文書や指示だけのpushでは、stagingは直前にデプロイしたコミットのままで、そのpushのコミットにはdeploy-stagingの実行がありません。手動実行（`gh workflow run`）ではこの一覧を使いません。
 
 `wrangler deploy` は、Workerの新しい版を公開した後、その版を読んでContainerのアプリケーション設定を適用します。アップロードの直後は、Cloudflareの版のAPIがその版に404（コード100146）を返すことがあります。Wranglerはこの読み取りを500ミリ秒おきに5回だけ試し、読めなければ「The Worker version was deployed, but its Durable Object-managed Container application settings were not fully applied. Re-run the same \`wrangler deploy\` command to retry and finish deployment.」で失敗します。このとき新しい版は公開済みですが、Containerの設定とトリガーは適用されていません。Wrangler 4.160.0から4.165.0まで同じ動きなので、版を変えても直りません。
 
@@ -229,7 +233,9 @@ mise exec -- node --env-file=/path/to/.env scripts/check/staging-smoke.ts
 
 疎通とR2の確認が成功した後、stagingのレジストリから一覧を直接取得します。対象には、Wranglerの一覧に出ない `sha256:` で始まるダイジェスト名も含みます。Cloudflareがデプロイ時に作る実行用イメージ（prepared artifact）は、マニフェストの注釈が指す生成元と一緒に判定します。最新10版と現在のデプロイに含まれる全版が使うイメージは、別名も実行用イメージも残します。これらの版が直接使うマニフェストは、注釈が古い版だけの生成元を指していても残します。古い版だけが使うイメージについては、通常のタグと生成元のダイジェスト名を削除し、レジストリに未使用レイヤーの回収を依頼します。レジストリは実行用イメージの削除を409（`SINGLETON_ARTIFACT_EXISTS`）で拒否するため、古い版だけが生成元を使う実行用イメージは `prepared` に記録して残します。どの版からも参照されないものは `unreferenced` に記録して残します。他のリポジトリは対象外です。版の全件取得、対象リポジトリの特定、全マニフェストとダイジェストの検証が済んでから削除を始めます。
 
-手元から候補だけを見るには、staging用の `CLOUDFLARE_API_TOKEN` が入った `.env` を指定します。既定は表示だけです。出力の `keep` は最新10版または現在のデプロイが使う保持対象、`remove` は削除候補です。`prepared` は生成元を古い版だけが使う実行用イメージ、`unreferenced` はどの版からも参照されない保持対象です。トークンとレジストリのパスワードは出力しません。削除する `--apply` はworkflowが使います。
+`wrangler deploy` をやり直した実行では、失敗した試行の版の詳細に、Cloudflareの版のAPIが回収の時点でまだ404（コード100146）を返すことがあります。その版が最新10版か現在のデプロイに含まれるときは、その版が使うイメージが分からないため、回収はその実行で何も削除せず、レジストリにも触れずに、実行の概要に `registry retention deferred` の警告を残して成功で終わります。待って読み直すことはしません。版が読めるようになった後のデプロイの回収が、残ったイメージを削除します。保持対象より古い版が読めないときは回収を続け、その版だけが使うイメージは `unreferenced` に記録して残します。版の詳細のほかの404やほかの失敗では、何も消さずに失敗します。
+
+手元から候補だけを見るには、staging用の `CLOUDFLARE_API_TOKEN` が入った `.env` を指定します。既定は表示だけです。出力の `keep` は最新10版または現在のデプロイが使う保持対象、`remove` は削除候補です。`prepared` は生成元を古い版だけが使う実行用イメージ、`unreferenced` はどの版からも参照されない保持対象です。読めない版で回収を見送るときは、候補の代わりに、読めない版のIDを含む `registry retention deferred` の警告1行だけを出します。トークンとレジストリのパスワードは出力しません。削除する `--apply` はworkflowが使います。
 
 ```sh
 mise exec -- node --env-file=/path/to/.env scripts/deploy/registry-retention.ts --dry-run
