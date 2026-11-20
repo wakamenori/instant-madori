@@ -25,7 +25,7 @@ Issue の範囲に「PRで決めること」があれば、コードを書く前
 ## 実装を Codex に任せる
 
 - コードは Codex に書かせる。`delegate_task` の `target` を `{providerInstanceId: "codex", model: <モデル>, options: {reasoningEffort: <effort>}}` にし、`reasoningEffort` を省かない。自分の worktree で書かせ、`isolation` は付けない。
-- モデルと基準の effort は、[pstack-models.md](../../rules/pstack-models.md) のうち、進めている playbook の行（`feature, refactoring`、`bug-fix`、`perf-issue`、`hillclimb`）から取る。そこから poteto-mode の「Match the model to the job」で上げ下げする。込み入った設計、並行処理、微妙なアルゴリズムは一段上げ、定型の機械的な変更は下げる。
+- モデルと基準の effort は、[pstack-models.md](../../rules/pstack-models.md) のうち、進めている playbook の行（`feature, refactoring`、`bug-fix`、`perf-issue`、`hillclimb`）から取る。該当する playbook の行が無いときは、`feature, refactoring` の行を使う。そこから poteto-mode の「Match the model to the job」で上げ下げする。込み入った設計、並行処理、微妙なアルゴリズムは一段上げ、定型の機械的な変更は下げる。
 - 指示には、Issue の番号、範囲、触ってよいパス、決めたデータの形、終わった証拠を書く。
 - 書き終わったら、差分を自分で読む。範囲の外の変更は戻させる。
 
