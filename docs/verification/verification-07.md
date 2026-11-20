@@ -95,7 +95,13 @@ AIの操作は、場面に要った9種類だった（`addWallModifier`、`addSt
 
 ## 今のmainでの再実行
 
-`4ce035305` で三案をビルドし直し、実行した。
+`4ce035305` で三案をビルドし直し、実行した。記録ごとの合否の比較は [results/comparison.tsv](evidence/verification-07/results/comparison.tsv) にある。
+
+| 案 | 記録の数（5188e4050 → 4ce035305） | 合否が同じ記録 | 違う記録と理由 |
+| --- | --- | --- | --- |
+| A | 26 → 27 | 26 | なし。追従の設定で実行したN1が1件増えた（取り込みによる） |
+| B | 25 → 25 | 25 | なし。色を塗った面の代表点の座標だけが変わった（SolidCraftの更新） |
+| C | 26 → 26 | 26 | なし |
 
 - 案B。25の記録の合否は `5188e4050` と同じだった。違いは、色を塗った面の代表点として書き出す座標（`colors[].landedOn[].point`、142の値）だけだった。SolidCraftの更新で、面から選ぶ点が変わった。色が付いた面、広さ、立体は変わっていない。
 - 案C。26の記録の合否も数値も、相対誤差1e-6の範囲で同じだった。
@@ -116,7 +122,7 @@ AIの操作は、場面に要った9種類だった（`addWallModifier`、`addSt
 - `Cargo.toml` と `Cargo.lock` は、三案をまとめたワークスペースである。依存はリポジトリの `crates/modeling`、`crates/display`、SolidCraftの `doc` と `engine` を相対パスで指す。
 - `candidate-a/`、`candidate-b/`、`candidate-c/` は三案のコードである。案Aは取り込みを足した後のコードで、`--area-policy=refuse` を付けると取り込み前と同じ判定になる。案Cは、作業場所の絶対パスの定数だけを、自分の場所から求める形に直した。
 - `fixtures/house.json` は、検証6の住宅入力の写しで、内容は同じである。
-- `results/5188e4050/` と `results/4ce035305/` に、案ごとの `steps.jsonl` と実行のログがある。案Aの `results/4ce035305/` には、追従の設定（`steps.jsonl`）と拒否の設定（`steps-refuse.jsonl`）の両方がある。
+- `results/5188e4050/` と `results/4ce035305/` に、案ごとの `steps.jsonl` と実行のログがある。`results/comparison.tsv` は、記録ごとの合否の比較である。案Aの `results/4ce035305/` には、追従の設定（`steps.jsonl`）と拒否の設定（`steps-refuse.jsonl`）の両方がある。
 - `notes/` に、各案の試作役の報告がある。ファイルの置き場所の記述は、試作の作業場所での名前のままである。
 - `source-hashes.txt` は、上のファイルのSHA-256である。`shasum -a 256 -c source-hashes.txt` で確かめられる。
 
