@@ -118,7 +118,7 @@ export function selectTags(input: {
   for (const tag of tags) {
     if (!tag.tag.startsWith(`${repository}:`)) continue;
     const image = tag.preparedFrom ?? tag.digest;
-    if (protectedDigests.has(image)) keep.push(tag);
+    if (protectedDigests.has(tag.digest) || protectedDigests.has(image)) keep.push(tag);
     else if (!knownDigests.has(image)) unreferenced.push(tag);
     else if (tag.preparedFrom !== null) prepared.push(tag);
     else remove.push(tag);
