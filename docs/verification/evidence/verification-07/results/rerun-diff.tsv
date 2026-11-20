@@ -1,0 +1,1003 @@
+candidate	scenario	step	path	5188e4050	4ce035305
+A	S0	0	.cadDocBytes	45024	45252
+A	S0	0	.obs.bodies.wall:south[0].volume_mm3	5496000000.000001	5496000000.0
+A	S0	0	.obs.colors[0].faces[0].normal[2]	1.7763568394002505e-17	0.0
+A	S0	0	.obs.colors[0].faces[0].point[0]	3734.478162967497	11163.068333616517
+A	S0	0	.obs.colors[0].faces[0].point[2]	1615.521837032503	1260.3360225325316
+A	S0	0	.obs.colors[1].faces[0].point[1]	3429.5933367259736	3274.952677709077
+A	S0	0	.obs.colors[1].faces[0].point[2]	294.68342443743774	1611.134312556242
+A	S0	0	.obs.colors[2].area_mm2	7371000.000000001	7371000.0
+A	S0	0	.obs.colors[2].faces[0].area_mm2	7371000.000000001	7371000.0
+A	S0	0	.obs.colors[2].faces[0].point[1]	3209.321651664754	3274.952677709077
+A	S0	0	.obs.colors[2].faces[0].point[2]	1181.4132376093864	1611.134312556242
+A	S0	0	.obs.displayBytes	36080	15616
+A	S0	0	.obs.rooms[0].areaHousing_mm2	"<absent>"	14745600.0
+A	S0	0	.obs.rooms[0].areaSource	"<absent>"	"housing"
+A	S0	0	.obs.rooms[0].outlineEdits	"<absent>"	[]
+A	S0	0	.obs.rooms[0].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [2020.0, 2020.0], "z": 0}
+A	S0	0	.obs.rooms[1].areaHousing_mm2	"<absent>"	14899200.0
+A	S0	0	.obs.rooms[1].areaSource	"<absent>"	"housing"
+A	S0	0	.obs.rooms[1].outlineEdits	"<absent>"	[]
+A	S0	0	.obs.rooms[1].projection	"<absent>"	{"area_mm2": 14899200.0, "deviation_mm2": 0.0, "seed": [6000.0, 2020.0], "z": 0}
+A	S0	0	.obs.rooms[2].areaHousing_mm2	"<absent>"	14745600.0
+A	S0	0	.obs.rooms[2].areaSource	"<absent>"	"housing"
+A	S0	0	.obs.rooms[2].outlineEdits	"<absent>"	[]
+A	S0	0	.obs.rooms[2].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [9980.0, 2020.0], "z": 0}
+A	S0	0	.obs.rooms[3].areaHousing_mm2	"<absent>"	14745600.0
+A	S0	0	.obs.rooms[3].areaSource	"<absent>"	"housing"
+A	S0	0	.obs.rooms[3].outlineEdits	"<absent>"	[]
+A	S0	0	.obs.rooms[3].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [2020.0, 5980.0], "z": 0}
+A	S0	0	.obs.rooms[4].areaHousing_mm2	"<absent>"	14899200.0
+A	S0	0	.obs.rooms[4].areaSource	"<absent>"	"housing"
+A	S0	0	.obs.rooms[4].outlineEdits	"<absent>"	[]
+A	S0	0	.obs.rooms[4].projection	"<absent>"	{"area_mm2": 14899200.0, "deviation_mm2": 0.0, "seed": [6000.0, 5980.0], "z": 0}
+A	S0	0	.obs.rooms[5].areaHousing_mm2	"<absent>"	14745600.0
+A	S0	0	.obs.rooms[5].areaSource	"<absent>"	"housing"
+A	S0	0	.obs.rooms[5].outlineEdits	"<absent>"	[]
+A	S0	0	.obs.rooms[5].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [9980.0, 5980.0], "z": 0}
+A	S1	1	.bodies.wall:south[0].volume_mm3	5496000000.000001	5496000000.0
+A	S1	1	.bodies.wall:v1-lower[0].bbox.max[0]	4060.000000000001	4060.0000000000005
+A	S1	1	.bodies.wall:v1-lower[0].bbox.min[0]	3939.999999999999	3939.9999999999995
+A	S1	1	.bodies.wall:v1-lower[0].volume_mm3	651949649.2684414	651949649.258884
+A	S1	1	.cadDocBytes	48232	48460
+A	S1	1	.colors[0].faces[0].normal[2]	1.7763568394002505e-17	0.0
+A	S1	1	.colors[0].faces[0].point[0]	3734.478162967497	11163.068333616517
+A	S1	1	.colors[0].faces[0].point[2]	1615.521837032503	1260.3360225325316
+A	S1	1	.colors[1].area_mm2	5437651.584509175	5437651.584509173
+A	S1	1	.colors[1].faces[0].area_mm2	5437651.584509175	5437651.584509173
+A	S1	1	.colors[1].faces[0].point[1]	359.75047493685156	485.4030924335964
+A	S1	1	.colors[1].faces[0].point[2]	2020.2850970417533	1836.6004609662064
+A	S1	1	.colors[2].area_mm2	5437651.584509174	5437651.584509173
+A	S1	1	.colors[2].faces[0].area_mm2	5437651.584509174	5437651.584509173
+A	S1	1	.colors[2].faces[0].point[1]	359.7504749368516	485.40309243359627
+A	S1	1	.colors[2].faces[0].point[2]	2020.285097041754	1836.6004609662064
+A	S1	1	.displayBytes	39296	19360
+A	S1	1	.rooms[0].areaHousing_mm2	"<absent>"	14745600.0
+A	S1	1	.rooms[0].areaSource	"<absent>"	"housing"
+A	S1	1	.rooms[0].outlineEdits	"<absent>"	[]
+A	S1	1	.rooms[0].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [2020.0, 2020.0], "z": 0}
+A	S1	1	.rooms[1].areaHousing_mm2	"<absent>"	14899200.0
+A	S1	1	.rooms[1].areaSource	"<absent>"	"housing"
+A	S1	1	.rooms[1].outlineEdits	"<absent>"	[]
+A	S1	1	.rooms[1].projection	"<absent>"	{"area_mm2": 14899200.0, "deviation_mm2": 0.0, "seed": [6000.0, 2020.0], "z": 0}
+A	S1	1	.rooms[2].areaHousing_mm2	"<absent>"	14745600.0
+A	S1	1	.rooms[2].areaSource	"<absent>"	"housing"
+A	S1	1	.rooms[2].outlineEdits	"<absent>"	[]
+A	S1	1	.rooms[2].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [9980.0, 2020.0], "z": 0}
+A	S1	1	.rooms[3].areaHousing_mm2	"<absent>"	14745600.0
+A	S1	1	.rooms[3].areaSource	"<absent>"	"housing"
+A	S1	1	.rooms[3].outlineEdits	"<absent>"	[]
+A	S1	1	.rooms[3].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [2020.0, 5980.0], "z": 0}
+A	S1	1	.rooms[4].areaHousing_mm2	"<absent>"	14899200.0
+A	S1	1	.rooms[4].areaSource	"<absent>"	"housing"
+A	S1	1	.rooms[4].outlineEdits	"<absent>"	[]
+A	S1	1	.rooms[4].projection	"<absent>"	{"area_mm2": 14899200.0, "deviation_mm2": 0.0, "seed": [6000.0, 5980.0], "z": 0}
+A	S1	1	.rooms[5].areaHousing_mm2	"<absent>"	14745600.0
+A	S1	1	.rooms[5].areaSource	"<absent>"	"housing"
+A	S1	1	.rooms[5].outlineEdits	"<absent>"	[]
+A	S1	1	.rooms[5].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [9980.0, 5980.0], "z": 0}
+A	S1	2	.bodies.wall:south[0].volume_mm3	5496000000.000001	5496000000.0
+A	S1	2	.bodies.wall:v1-lower[0].bbox.min[0]	4439.999999999998	4439.999999999999
+A	S1	2	.bodies.wall:v1-lower[0].volume_mm3	651949649.2684414	651949649.258884
+A	S1	2	.cadDocBytes	48232	48460
+A	S1	2	.colors[0].faces[0].normal[2]	1.7763568394002505e-17	0.0
+A	S1	2	.colors[0].faces[0].point[0]	3734.478162967497	11163.068333616517
+A	S1	2	.colors[0].faces[0].point[2]	1615.521837032503	1260.3360225325316
+A	S1	2	.colors[1].area_mm2	5437651.584509175	5437651.584509173
+A	S1	2	.colors[1].faces[0].area_mm2	5437651.584509175	5437651.584509173
+A	S1	2	.colors[1].faces[0].point[1]	359.75047493685156	485.4030924335964
+A	S1	2	.colors[1].faces[0].point[2]	2020.2850970417533	1836.6004609662064
+A	S1	2	.colors[2].area_mm2	5437651.584509174	5437651.584509173
+A	S1	2	.colors[2].faces[0].area_mm2	5437651.584509174	5437651.584509173
+A	S1	2	.colors[2].faces[0].point[1]	359.7504749368516	485.40309243359627
+A	S1	2	.colors[2].faces[0].point[2]	2020.285097041754	1836.6004609662064
+A	S1	2	.displayBytes	39296	19360
+A	S1	2	.rooms[0].areaHousing_mm2	"<absent>"	16665600.0
+A	S1	2	.rooms[0].areaSource	"<absent>"	"housing"
+A	S1	2	.rooms[0].outlineEdits	"<absent>"	[]
+A	S1	2	.rooms[0].projection	"<absent>"	{"area_mm2": 16665600.0, "deviation_mm2": 0.0, "seed": [2270.0, 2020.0], "z": 0}
+A	S1	2	.rooms[1].areaHousing_mm2	"<absent>"	12979200.0
+A	S1	2	.rooms[1].areaSource	"<absent>"	"housing"
+A	S1	2	.rooms[1].outlineEdits	"<absent>"	[]
+A	S1	2	.rooms[1].projection	"<absent>"	{"area_mm2": 12979200.0, "deviation_mm2": 0.0, "seed": [6250.0, 2020.0], "z": 0}
+A	S1	2	.rooms[2].areaHousing_mm2	"<absent>"	14745600.0
+A	S1	2	.rooms[2].areaSource	"<absent>"	"housing"
+A	S1	2	.rooms[2].outlineEdits	"<absent>"	[]
+A	S1	2	.rooms[2].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [9980.0, 2020.0], "z": 0}
+A	S1	2	.rooms[3].areaHousing_mm2	"<absent>"	16665600.0
+A	S1	2	.rooms[3].areaSource	"<absent>"	"housing"
+A	S1	2	.rooms[3].outlineEdits	"<absent>"	[]
+A	S1	2	.rooms[3].projection	"<absent>"	{"area_mm2": 16665600.0, "deviation_mm2": 0.0, "seed": [2270.0, 5980.0], "z": 0}
+A	S1	2	.rooms[4].areaHousing_mm2	"<absent>"	12979200.0
+A	S1	2	.rooms[4].areaSource	"<absent>"	"housing"
+A	S1	2	.rooms[4].outlineEdits	"<absent>"	[]
+A	S1	2	.rooms[4].projection	"<absent>"	{"area_mm2": 12979200.0, "deviation_mm2": 0.0, "seed": [6250.0, 5980.0], "z": 0}
+A	S1	2	.rooms[5].areaHousing_mm2	"<absent>"	14745600.0
+A	S1	2	.rooms[5].areaSource	"<absent>"	"housing"
+A	S1	2	.rooms[5].outlineEdits	"<absent>"	[]
+A	S1	2	.rooms[5].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [9980.0, 5980.0], "z": 0}
+A	S1	3	.bodies.wall:south[0].volume_mm3	5496000000.000001	5496000000.0
+A	S1	3	.cadDocBytes	39228	39456
+A	S1	3	.colors[0].faces[0].normal[2]	1.7763568394002505e-17	0.0
+A	S1	3	.colors[0].faces[0].point[0]	3734.478162967497	11163.068333616517
+A	S1	3	.colors[0].faces[0].point[2]	1615.521837032503	1260.3360225325316
+A	S1	3	.displayBytes	32104	13960
+A	S1	3	.rooms[0].areaHousing_mm2	"<absent>"	14745600.0
+A	S1	3	.rooms[0].areaSource	"<absent>"	"housing"
+A	S1	3	.rooms[0].outlineEdits	"<absent>"	[]
+A	S1	3	.rooms[0].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [9980.0, 2020.0], "z": 0}
+A	S1	3	.rooms[1].areaHousing_mm2	"<absent>"	16665600.0
+A	S1	3	.rooms[1].areaSource	"<absent>"	"housing"
+A	S1	3	.rooms[1].outlineEdits	"<absent>"	[]
+A	S1	3	.rooms[1].projection	"<absent>"	{"area_mm2": 16665600.0, "deviation_mm2": 0.0, "seed": [2270.0, 5980.0], "z": 0}
+A	S1	3	.rooms[2].areaHousing_mm2	"<absent>"	12979200.0
+A	S1	3	.rooms[2].areaSource	"<absent>"	"housing"
+A	S1	3	.rooms[2].outlineEdits	"<absent>"	[]
+A	S1	3	.rooms[2].projection	"<absent>"	{"area_mm2": 12979200.0, "deviation_mm2": 0.0, "seed": [6250.0, 5980.0], "z": 0}
+A	S1	3	.rooms[3].areaHousing_mm2	"<absent>"	14745600.0
+A	S1	3	.rooms[3].areaSource	"<absent>"	"housing"
+A	S1	3	.rooms[3].outlineEdits	"<absent>"	[]
+A	S1	3	.rooms[3].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [9980.0, 5980.0], "z": 0}
+A	S1	3	.rooms[4].areaHousing_mm2	"<absent>"	30105600.0
+A	S1	3	.rooms[4].areaSource	"<absent>"	"housing"
+A	S1	3	.rooms[4].outlineEdits	"<absent>"	[]
+A	S1	3	.rooms[4].projection	"<absent>"	{"area_mm2": 30105600.0, "deviation_mm2": 0.0, "seed": [4020.0, 2020.0], "z": 0}
+A	S2	1	.bodies.wall:north[0].volume_mm3	5375900000.000001	5375900000.0
+A	S2	1	.bodies.wall:south[0].volume_mm3	5496000000.000001	5496000000.0
+A	S2	1	.cadDocBytes	47455	47683
+A	S2	1	.colors[0].faces[0].normal[2]	1.7763568394002505e-17	0.0
+A	S2	1	.colors[0].faces[0].point[0]	3734.478162967497	11163.068333616517
+A	S2	1	.colors[0].faces[0].point[2]	1615.521837032503	1260.3360225325316
+A	S2	1	.colors[1].faces[0].point[1]	3429.5933367259736	3274.952677709077
+A	S2	1	.colors[1].faces[0].point[2]	294.68342443743774	1611.134312556242
+A	S2	1	.colors[2].area_mm2	7371000.000000001	7371000.0
+A	S2	1	.colors[2].faces[0].area_mm2	7371000.000000001	7371000.0
+A	S2	1	.colors[2].faces[0].point[1]	3209.321651664754	3274.952677709077
+A	S2	1	.colors[2].faces[0].point[2]	1181.4132376093864	1611.134312556242
+A	S2	1	.displayBytes	36256	15600
+A	S2	1	.rooms[0].areaHousing_mm2	"<absent>"	14745600.0
+A	S2	1	.rooms[0].areaSource	"<absent>"	"housing"
+A	S2	1	.rooms[0].outlineEdits	"<absent>"	[]
+A	S2	1	.rooms[0].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [2020.0, 2020.0], "z": 0}
+A	S2	1	.rooms[1].areaHousing_mm2	"<absent>"	14899200.0
+A	S2	1	.rooms[1].areaSource	"<absent>"	"housing"
+A	S2	1	.rooms[1].outlineEdits	"<absent>"	[]
+A	S2	1	.rooms[1].projection	"<absent>"	{"area_mm2": 14899200.0, "deviation_mm2": 0.0, "seed": [6000.0, 2020.0], "z": 0}
+A	S2	1	.rooms[2].areaHousing_mm2	"<absent>"	14745600.0
+A	S2	1	.rooms[2].areaSource	"<absent>"	"housing"
+A	S2	1	.rooms[2].outlineEdits	"<absent>"	[]
+A	S2	1	.rooms[2].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [9980.0, 2020.0], "z": 0}
+A	S2	1	.rooms[3].areaHousing_mm2	"<absent>"	14745600.0
+A	S2	1	.rooms[3].areaSource	"<absent>"	"housing"
+A	S2	1	.rooms[3].check3d.section.area_m2	14.745600000000003	14.7456
+A	S2	1	.rooms[3].check3d.section.centroidOffset_mm	9.094947017729282e-13	0.0
+A	S2	1	.rooms[3].check3d.section.deviation_mm2	3.725290298461914e-09	0.0
+A	S2	1	.rooms[3].outlineEdits	"<absent>"	[]
+A	S2	1	.rooms[3].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [2020.0, 5980.0], "z": 0}
+A	S2	1	.rooms[4].areaHousing_mm2	"<absent>"	14899200.0
+A	S2	1	.rooms[4].areaSource	"<absent>"	"housing"
+A	S2	1	.rooms[4].check3d.section.area_m2	14.8992	14.899199999999995
+A	S2	1	.rooms[4].check3d.section.centroidOffset_mm	0.0	9.094947017729282e-13
+A	S2	1	.rooms[4].check3d.section.deviation_mm2	0.0	-5.587935447692871e-09
+A	S2	1	.rooms[4].outlineEdits	"<absent>"	[]
+A	S2	1	.rooms[4].projection	"<absent>"	{"area_mm2": 14899200.0, "deviation_mm2": 0.0, "seed": [6000.0, 5980.0], "z": 0}
+A	S2	1	.rooms[5].areaHousing_mm2	"<absent>"	14745600.0
+A	S2	1	.rooms[5].areaSource	"<absent>"	"housing"
+A	S2	1	.rooms[5].outlineEdits	"<absent>"	[]
+A	S2	1	.rooms[5].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [9980.0, 5980.0], "z": 0}
+A	S2	2	.bodies.wall:north[0].volume_mm3	5663900000.000002	5663900000.0
+A	S2	2	.cadDocBytes	47455	47683
+A	S2	2	.colors[0].area_mm2	29400000.0	29400000.000000004
+A	S2	2	.colors[0].faces[0].area_mm2	29400000.0	29400000.000000004
+A	S2	2	.colors[0].faces[0].normal[2]	1.7763568394002505e-17	0.0
+A	S2	2	.colors[0].faces[0].point[0]	3900.0	11749.522969599273
+A	S2	2	.colors[0].faces[0].point[2]	1600.0	1256.9776142420778
+A	S2	2	.colors[1].faces[0].point[1]	3429.5933367259736	3274.952677709077
+A	S2	2	.colors[1].faces[0].point[2]	294.68342443743774	1611.134312556242
+A	S2	2	.colors[2].area_mm2	7371000.000000001	7371000.0
+A	S2	2	.colors[2].faces[0].area_mm2	7371000.000000001	7371000.0
+A	S2	2	.colors[2].faces[0].point[1]	3209.321651664754	3274.952677709077
+A	S2	2	.colors[2].faces[0].point[2]	1181.4132376093864	1611.134312556242
+A	S2	2	.displayBytes	36336	15824
+A	S2	2	.rooms[0].areaHousing_mm2	"<absent>"	14745600.0
+A	S2	2	.rooms[0].areaSource	"<absent>"	"housing"
+A	S2	2	.rooms[0].outlineEdits	"<absent>"	[]
+A	S2	2	.rooms[0].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [2020.0, 2020.0], "z": 0}
+A	S2	2	.rooms[1].areaHousing_mm2	"<absent>"	14899200.0
+A	S2	2	.rooms[1].areaSource	"<absent>"	"housing"
+A	S2	2	.rooms[1].outlineEdits	"<absent>"	[]
+A	S2	2	.rooms[1].projection	"<absent>"	{"area_mm2": 14899200.0, "deviation_mm2": 0.0, "seed": [6000.0, 2020.0], "z": 0}
+A	S2	2	.rooms[2].areaHousing_mm2	"<absent>"	17049600.0
+A	S2	2	.rooms[2].areaSource	"<absent>"	"housing"
+A	S2	2	.rooms[2].outlineEdits	"<absent>"	[]
+A	S2	2	.rooms[2].projection	"<absent>"	{"area_mm2": 17049600.0, "deviation_mm2": 0.0, "seed": [10280.0, 2020.0], "z": 0}
+A	S2	2	.rooms[3].areaHousing_mm2	"<absent>"	14745600.0
+A	S2	2	.rooms[3].areaSource	"<absent>"	"housing"
+A	S2	2	.rooms[3].outlineEdits	"<absent>"	[]
+A	S2	2	.rooms[3].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [2020.0, 5980.0], "z": 0}
+A	S2	2	.rooms[4].areaHousing_mm2	"<absent>"	14899200.0
+A	S2	2	.rooms[4].areaSource	"<absent>"	"housing"
+A	S2	2	.rooms[4].outlineEdits	"<absent>"	[]
+A	S2	2	.rooms[4].projection	"<absent>"	{"area_mm2": 14899200.0, "deviation_mm2": 0.0, "seed": [6000.0, 5980.0], "z": 0}
+A	S2	2	.rooms[5].areaHousing_mm2	"<absent>"	17049600.0
+A	S2	2	.rooms[5].areaSource	"<absent>"	"housing"
+A	S2	2	.rooms[5].outlineEdits	"<absent>"	[]
+A	S2	2	.rooms[5].projection	"<absent>"	{"area_mm2": 17049600.000000004, "deviation_mm2": 3.725290298461914e-09, "seed": [10280.0, 5980.0], "z": 0}
+A	S3	1	.bodies.wall:south[0].volume_mm3	5496000000.000001	5496000000.0
+A	S3	1	.cadDocBytes	45023	45251
+A	S3	1	.colors[0].faces[0].normal[2]	1.7763568394002505e-17	0.0
+A	S3	1	.colors[0].faces[0].point[0]	3734.478162967497	11163.068333616517
+A	S3	1	.colors[0].faces[0].point[2]	1615.521837032503	1260.3360225325316
+A	S3	1	.colors[1].faces[0].point[1]	3429.5933367259736	3274.952677709077
+A	S3	1	.colors[1].faces[0].point[2]	294.68342443743774	1611.134312556242
+A	S3	1	.colors[2].area_mm2	7371000.000000001	7371000.0
+A	S3	1	.colors[2].faces[0].area_mm2	7371000.000000001	7371000.0
+A	S3	1	.colors[2].faces[0].point[1]	3209.321651664754	3274.952677709077
+A	S3	1	.colors[2].faces[0].point[2]	1181.4132376093864	1611.134312556242
+A	S3	1	.displayBytes	36080	15616
+A	S3	1	.reason	"blue on x=3940 -X faces only: true; 1 face piece(s), area 7371000.0 (want 7371000); r2 side keeps #329966 on 7371000.000000001 (want 7371000): true"	"blue on x=3940 -X faces only: true; 1 face piece(s), area 7371000.0 (want 7371000); r2 side keeps #329966 on 7371000 (want 7371000): true"
+A	S3	1	.rooms[0].areaHousing_mm2	"<absent>"	14745600.0
+A	S3	1	.rooms[0].areaSource	"<absent>"	"housing"
+A	S3	1	.rooms[0].outlineEdits	"<absent>"	[]
+A	S3	1	.rooms[0].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [2020.0, 2020.0], "z": 0}
+A	S3	1	.rooms[1].areaHousing_mm2	"<absent>"	14899200.0
+A	S3	1	.rooms[1].areaSource	"<absent>"	"housing"
+A	S3	1	.rooms[1].outlineEdits	"<absent>"	[]
+A	S3	1	.rooms[1].projection	"<absent>"	{"area_mm2": 14899200.0, "deviation_mm2": 0.0, "seed": [6000.0, 2020.0], "z": 0}
+A	S3	1	.rooms[2].areaHousing_mm2	"<absent>"	14745600.0
+A	S3	1	.rooms[2].areaSource	"<absent>"	"housing"
+A	S3	1	.rooms[2].outlineEdits	"<absent>"	[]
+A	S3	1	.rooms[2].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [9980.0, 2020.0], "z": 0}
+A	S3	1	.rooms[3].areaHousing_mm2	"<absent>"	14745600.0
+A	S3	1	.rooms[3].areaSource	"<absent>"	"housing"
+A	S3	1	.rooms[3].outlineEdits	"<absent>"	[]
+A	S3	1	.rooms[3].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [2020.0, 5980.0], "z": 0}
+A	S3	1	.rooms[4].areaHousing_mm2	"<absent>"	14899200.0
+A	S3	1	.rooms[4].areaSource	"<absent>"	"housing"
+A	S3	1	.rooms[4].outlineEdits	"<absent>"	[]
+A	S3	1	.rooms[4].projection	"<absent>"	{"area_mm2": 14899200.0, "deviation_mm2": 0.0, "seed": [6000.0, 5980.0], "z": 0}
+A	S3	1	.rooms[5].areaHousing_mm2	"<absent>"	14745600.0
+A	S3	1	.rooms[5].areaSource	"<absent>"	"housing"
+A	S3	1	.rooms[5].outlineEdits	"<absent>"	[]
+A	S3	1	.rooms[5].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [9980.0, 5980.0], "z": 0}
+A	S3	2	.bodies.wall:south[0].volume_mm3	5496000000.000001	5496000000.0
+A	S3	2	.cadDocBytes	45023	45251
+A	S3	2	.colors[0].faces[0].normal[2]	1.7763568394002505e-17	0.0
+A	S3	2	.colors[0].faces[0].point[0]	3734.478162967497	11163.068333616517
+A	S3	2	.colors[0].faces[0].point[2]	1615.521837032503	1260.3360225325316
+A	S3	2	.colors[1].faces[0].point[1]	3429.5933367259736	3274.952677709077
+A	S3	2	.colors[1].faces[0].point[2]	294.68342443743774	1611.134312556242
+A	S3	2	.colors[2].area_mm2	7371000.000000001	7371000.0
+A	S3	2	.colors[2].faces[0].area_mm2	7371000.000000001	7371000.0
+A	S3	2	.colors[2].faces[0].point[1]	3209.321651664754	3274.952677709077
+A	S3	2	.colors[2].faces[0].point[2]	1181.4132376093864	1611.134312556242
+A	S3	2	.displayBytes	36080	15616
+A	S3	2	.reason	"blue on x=4440 -X faces only: true; 1 face piece(s), area 7371000.0 (want 7371000); r2 side keeps #329966 on 7371000.000000001 (want 7371000): true"	"blue on x=4440 -X faces only: true; 1 face piece(s), area 7371000.0 (want 7371000); r2 side keeps #329966 on 7371000 (want 7371000): true"
+A	S3	2	.rooms[0].areaHousing_mm2	"<absent>"	16665600.0
+A	S3	2	.rooms[0].areaSource	"<absent>"	"housing"
+A	S3	2	.rooms[0].outlineEdits	"<absent>"	[]
+A	S3	2	.rooms[0].projection	"<absent>"	{"area_mm2": 16665600.0, "deviation_mm2": 0.0, "seed": [2270.0, 2020.0], "z": 0}
+A	S3	2	.rooms[1].areaHousing_mm2	"<absent>"	12979200.0
+A	S3	2	.rooms[1].areaSource	"<absent>"	"housing"
+A	S3	2	.rooms[1].outlineEdits	"<absent>"	[]
+A	S3	2	.rooms[1].projection	"<absent>"	{"area_mm2": 12979200.0, "deviation_mm2": 0.0, "seed": [6250.0, 2020.0], "z": 0}
+A	S3	2	.rooms[2].areaHousing_mm2	"<absent>"	14745600.0
+A	S3	2	.rooms[2].areaSource	"<absent>"	"housing"
+A	S3	2	.rooms[2].outlineEdits	"<absent>"	[]
+A	S3	2	.rooms[2].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [9980.0, 2020.0], "z": 0}
+A	S3	2	.rooms[3].areaHousing_mm2	"<absent>"	16665600.0
+A	S3	2	.rooms[3].areaSource	"<absent>"	"housing"
+A	S3	2	.rooms[3].outlineEdits	"<absent>"	[]
+A	S3	2	.rooms[3].projection	"<absent>"	{"area_mm2": 16665600.0, "deviation_mm2": 0.0, "seed": [2270.0, 5980.0], "z": 0}
+A	S3	2	.rooms[4].areaHousing_mm2	"<absent>"	12979200.0
+A	S3	2	.rooms[4].areaSource	"<absent>"	"housing"
+A	S3	2	.rooms[4].outlineEdits	"<absent>"	[]
+A	S3	2	.rooms[4].projection	"<absent>"	{"area_mm2": 12979200.0, "deviation_mm2": 0.0, "seed": [6250.0, 5980.0], "z": 0}
+A	S3	2	.rooms[5].areaHousing_mm2	"<absent>"	14745600.0
+A	S3	2	.rooms[5].areaSource	"<absent>"	"housing"
+A	S3	2	.rooms[5].outlineEdits	"<absent>"	[]
+A	S3	2	.rooms[5].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [9980.0, 5980.0], "z": 0}
+A	S3	3	.bodies.wall:south[0].volume_mm3	5496000000.000001	5496000000.0
+A	S3	3	.cadDocBytes	47869	48097
+A	S3	3	.colors[0].faces[0].normal[2]	1.7763568394002505e-17	0.0
+A	S3	3	.colors[0].faces[0].point[0]	3734.478162967497	11163.068333616517
+A	S3	3	.colors[0].faces[0].point[2]	1615.521837032503	1260.3360225325316
+A	S3	3	.colors[1].area_mm2	5525999.999999999	5526000.0
+A	S3	3	.colors[1].faces[0].area_mm2	5525999.999999999	5526000.0
+A	S3	3	.colors[1].faces[0].point[1]	359.75047493685156	485.4030924335964
+A	S3	3	.colors[1].faces[0].point[2]	2020.2850970417533	1836.6004609662064
+A	S3	3	.colors[2].faces[0].point[1]	359.7504749368516	485.40309243359627
+A	S3	3	.colors[2].faces[0].point[2]	2020.285097041754	1836.6004609662064
+A	S3	3	.displayBytes	37280	16448
+A	S3	3	.reason	"blue on x=4440 -X faces only: true; 1 face piece(s), area 5525999.999999999 (want 5526000); r2 side keeps #329966 on 5526000 (want 5526000): true"	"blue on x=4440 -X faces only: true; 1 face piece(s), area 5526000.0 (want 5526000); r2 side keeps #329966 on 5526000 (want 5526000): true"
+A	S3	3	.rooms[0].areaHousing_mm2	"<absent>"	16665600.0
+A	S3	3	.rooms[0].areaSource	"<absent>"	"housing"
+A	S3	3	.rooms[0].outlineEdits	"<absent>"	[]
+A	S3	3	.rooms[0].projection	"<absent>"	{"area_mm2": 16665600.0, "deviation_mm2": 0.0, "seed": [2270.0, 2020.0], "z": 0}
+A	S3	3	.rooms[1].areaHousing_mm2	"<absent>"	12979200.0
+A	S3	3	.rooms[1].areaSource	"<absent>"	"housing"
+A	S3	3	.rooms[1].outlineEdits	"<absent>"	[]
+A	S3	3	.rooms[1].projection	"<absent>"	{"area_mm2": 12979200.0, "deviation_mm2": 0.0, "seed": [6250.0, 2020.0], "z": 0}
+A	S3	3	.rooms[2].areaHousing_mm2	"<absent>"	14745600.0
+A	S3	3	.rooms[2].areaSource	"<absent>"	"housing"
+A	S3	3	.rooms[2].outlineEdits	"<absent>"	[]
+A	S3	3	.rooms[2].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [9980.0, 2020.0], "z": 0}
+A	S3	3	.rooms[3].areaHousing_mm2	"<absent>"	16665600.0
+A	S3	3	.rooms[3].areaSource	"<absent>"	"housing"
+A	S3	3	.rooms[3].outlineEdits	"<absent>"	[]
+A	S3	3	.rooms[3].projection	"<absent>"	{"area_mm2": 16665600.0, "deviation_mm2": 0.0, "seed": [2270.0, 5980.0], "z": 0}
+A	S3	3	.rooms[4].areaHousing_mm2	"<absent>"	12979200.0
+A	S3	3	.rooms[4].areaSource	"<absent>"	"housing"
+A	S3	3	.rooms[4].outlineEdits	"<absent>"	[]
+A	S3	3	.rooms[4].projection	"<absent>"	{"area_mm2": 12979200.0, "deviation_mm2": 0.0, "seed": [6250.0, 5980.0], "z": 0}
+A	S3	3	.rooms[5].areaHousing_mm2	"<absent>"	14745600.0
+A	S3	3	.rooms[5].areaSource	"<absent>"	"housing"
+A	S3	3	.rooms[5].outlineEdits	"<absent>"	[]
+A	S3	3	.rooms[5].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [9980.0, 5980.0], "z": 0}
+A	S3	4	.bodies.wall:south[0].volume_mm3	5496000000.000001	5496000000.0
+A	S3	4	.cadDocBytes	50338	50566
+A	S3	4	.colors[0].faces[0].normal[2]	1.7763568394002505e-17	0.0
+A	S3	4	.colors[0].faces[0].point[0]	3734.478162967497	11163.068333616517
+A	S3	4	.colors[0].faces[0].point[2]	1615.521837032503	1260.3360225325316
+A	S3	4	.colors[1].faces[0].point[1]	346.8698035106115	441.64308475055094
+A	S3	4	.colors[1].faces[0].point[2]	2039.1146406714267	1900.570804330773
+A	S3	4	.colors[1].faces[1].point[1]	3720.0	3770.8991914547278
+A	S3	4	.colors[1].faces[1].point[2]	137.3284936000891	730.8991914547278
+A	S3	4	.colors[1].faces[2].point[1]	2250.0	2370.087712549569
+A	S3	4	.colors[1].faces[2].point[2]	171.1793319829981	670.087712549569
+A	S3	4	.colors[1].faces[3].point[1]	550.0	736.3961030678928
+A	S3	4	.colors[1].faces[3].point[2]	186.39610306789274	636.3961030678928
+A	S3	4	.colors[2].faces[0].point[1]	359.7504749368516	485.40309243359627
+A	S3	4	.colors[2].faces[0].point[2]	2020.285097041754	1836.6004609662064
+A	S3	4	.displayBytes	39992	18968
+A	S3	4	.rooms[0].areaHousing_mm2	"<absent>"	16665600.0
+A	S3	4	.rooms[0].areaSource	"<absent>"	"housing"
+A	S3	4	.rooms[0].outlineEdits	"<absent>"	[]
+A	S3	4	.rooms[0].projection	"<absent>"	{"area_mm2": 16665600.0, "deviation_mm2": 0.0, "seed": [2270.0, 2020.0], "z": 0}
+A	S3	4	.rooms[1].areaHousing_mm2	"<absent>"	12979200.0
+A	S3	4	.rooms[1].areaSource	"<absent>"	"housing"
+A	S3	4	.rooms[1].outlineEdits	"<absent>"	[]
+A	S3	4	.rooms[1].projection	"<absent>"	{"area_mm2": 12979200.0, "deviation_mm2": 0.0, "seed": [6250.0, 2020.0], "z": 0}
+A	S3	4	.rooms[2].areaHousing_mm2	"<absent>"	14745600.0
+A	S3	4	.rooms[2].areaSource	"<absent>"	"housing"
+A	S3	4	.rooms[2].outlineEdits	"<absent>"	[]
+A	S3	4	.rooms[2].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [9980.0, 2020.0], "z": 0}
+A	S3	4	.rooms[3].areaHousing_mm2	"<absent>"	16665600.0
+A	S3	4	.rooms[3].areaSource	"<absent>"	"housing"
+A	S3	4	.rooms[3].outlineEdits	"<absent>"	[]
+A	S3	4	.rooms[3].projection	"<absent>"	{"area_mm2": 16665600.0, "deviation_mm2": 0.0, "seed": [2270.0, 5980.0], "z": 0}
+A	S3	4	.rooms[4].areaHousing_mm2	"<absent>"	12979200.0
+A	S3	4	.rooms[4].areaSource	"<absent>"	"housing"
+A	S3	4	.rooms[4].outlineEdits	"<absent>"	[]
+A	S3	4	.rooms[4].projection	"<absent>"	{"area_mm2": 12979200.0, "deviation_mm2": 0.0, "seed": [6250.0, 5980.0], "z": 0}
+A	S3	4	.rooms[5].areaHousing_mm2	"<absent>"	14745600.0
+A	S3	4	.rooms[5].areaSource	"<absent>"	"housing"
+A	S3	4	.rooms[5].outlineEdits	"<absent>"	[]
+A	S3	4	.rooms[5].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [9980.0, 5980.0], "z": 0}
+A	S4	1	.bodies.stair:s1[0].volume_mm3	3510000000.0000005	3510000000.0
+A	S4	1	.bodies.wall:south[0].volume_mm3	5496000000.000001	5496000000.0
+A	S4	1	.cadDocBytes	54467	54695
+A	S4	1	.colors[0].faces[0].normal[2]	1.7763568394002505e-17	0.0
+A	S4	1	.colors[0].faces[0].point[0]	3734.478162967497	11163.068333616517
+A	S4	1	.colors[0].faces[0].point[2]	1615.521837032503	1260.3360225325316
+A	S4	1	.colors[1].faces[0].point[1]	3429.5933367259736	3274.952677709077
+A	S4	1	.colors[1].faces[0].point[2]	294.68342443743774	1611.134312556242
+A	S4	1	.colors[2].area_mm2	7371000.000000001	7371000.0
+A	S4	1	.colors[2].faces[0].area_mm2	7371000.000000001	7371000.0
+A	S4	1	.colors[2].faces[0].point[1]	3209.321651664754	3274.952677709077
+A	S4	1	.colors[2].faces[0].point[2]	1181.4132376093864	1611.134312556242
+A	S4	1	.displayBytes	45104	21104
+A	S4	1	.rooms[0].areaHousing_mm2	"<absent>"	14745600.0
+A	S4	1	.rooms[0].areaSource	"<absent>"	"housing"
+A	S4	1	.rooms[0].outlineEdits	"<absent>"	[]
+A	S4	1	.rooms[0].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [2020.0, 2020.0], "z": 0}
+A	S4	1	.rooms[1].areaHousing_mm2	"<absent>"	14899200.0
+A	S4	1	.rooms[1].areaSource	"<absent>"	"housing"
+A	S4	1	.rooms[1].outlineEdits	"<absent>"	[]
+A	S4	1	.rooms[1].projection	"<absent>"	{"area_mm2": 14899200.0, "deviation_mm2": 0.0, "seed": [6000.0, 2020.0], "z": 0}
+A	S4	1	.rooms[2].areaHousing_mm2	"<absent>"	14745600.0
+A	S4	1	.rooms[2].areaSource	"<absent>"	"housing"
+A	S4	1	.rooms[2].outlineEdits	"<absent>"	[]
+A	S4	1	.rooms[2].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [9980.0, 2020.0], "z": 0}
+A	S4	1	.rooms[3].areaHousing_mm2	"<absent>"	14745600.0
+A	S4	1	.rooms[3].areaSource	"<absent>"	"housing"
+A	S4	1	.rooms[3].outlineEdits	"<absent>"	[]
+A	S4	1	.rooms[3].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [2020.0, 5980.0], "z": 0}
+A	S4	1	.rooms[4].areaHousing_mm2	"<absent>"	14899200.0
+A	S4	1	.rooms[4].areaSource	"<absent>"	"housing"
+A	S4	1	.rooms[4].outlineEdits	"<absent>"	[]
+A	S4	1	.rooms[4].projection	"<absent>"	{"area_mm2": 14899200.0, "deviation_mm2": 0.0, "seed": [6000.0, 5980.0], "z": 0}
+A	S4	1	.rooms[5].areaHousing_mm2	"<absent>"	14745600.0
+A	S4	1	.rooms[5].areaSource	"<absent>"	"housing"
+A	S4	1	.rooms[5].outlineEdits	"<absent>"	[]
+A	S4	1	.rooms[5].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [9980.0, 5980.0], "z": 0}
+A	S4	2	.bodies.stair:s1[0].volume_mm3	3519720000.0000005	3519720000.0
+A	S4	2	.bodies.wall:south[0].volume_mm3	5496000000.000001	5496000000.0
+A	S4	2	.cadDocBytes	85198	85426
+A	S4	2	.colors[0].faces[0].normal[2]	1.7763568394002505e-17	0.0
+A	S4	2	.colors[0].faces[0].point[0]	3734.478162967497	11163.068333616517
+A	S4	2	.colors[0].faces[0].point[2]	1615.521837032503	1260.3360225325316
+A	S4	2	.colors[1].faces[0].point[1]	3429.5933367259736	3274.952677709077
+A	S4	2	.colors[1].faces[0].point[2]	294.68342443743774	1611.134312556242
+A	S4	2	.colors[2].area_mm2	7371000.000000001	7371000.0
+A	S4	2	.colors[2].faces[0].area_mm2	7371000.000000001	7371000.0
+A	S4	2	.colors[2].faces[0].point[1]	3209.321651664754	3274.952677709077
+A	S4	2	.colors[2].faces[0].point[2]	1181.4132376093864	1611.134312556242
+A	S4	2	.displayBytes	51856	26096
+A	S4	2	.rooms[0].areaHousing_mm2	"<absent>"	14745600.0
+A	S4	2	.rooms[0].areaSource	"<absent>"	"housing"
+A	S4	2	.rooms[0].outlineEdits	"<absent>"	[]
+A	S4	2	.rooms[0].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [2020.0, 2020.0], "z": 0}
+A	S4	2	.rooms[1].areaHousing_mm2	"<absent>"	14899200.0
+A	S4	2	.rooms[1].areaSource	"<absent>"	"housing"
+A	S4	2	.rooms[1].outlineEdits	"<absent>"	[]
+A	S4	2	.rooms[1].projection	"<absent>"	{"area_mm2": 14899200.0, "deviation_mm2": 0.0, "seed": [6000.0, 2020.0], "z": 0}
+A	S4	2	.rooms[2].areaHousing_mm2	"<absent>"	14745600.0
+A	S4	2	.rooms[2].areaSource	"<absent>"	"housing"
+A	S4	2	.rooms[2].outlineEdits	"<absent>"	[]
+A	S4	2	.rooms[2].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [9980.0, 2020.0], "z": 0}
+A	S4	2	.rooms[3].areaHousing_mm2	"<absent>"	14745600.0
+A	S4	2	.rooms[3].areaSource	"<absent>"	"housing"
+A	S4	2	.rooms[3].outlineEdits	"<absent>"	[]
+A	S4	2	.rooms[3].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [2020.0, 5980.0], "z": 0}
+A	S4	2	.rooms[4].areaHousing_mm2	"<absent>"	14899200.0
+A	S4	2	.rooms[4].areaSource	"<absent>"	"housing"
+A	S4	2	.rooms[4].outlineEdits	"<absent>"	[]
+A	S4	2	.rooms[4].projection	"<absent>"	{"area_mm2": 14899200.0, "deviation_mm2": 0.0, "seed": [6000.0, 5980.0], "z": 0}
+A	S4	2	.rooms[5].areaHousing_mm2	"<absent>"	14745600.0
+A	S4	2	.rooms[5].areaSource	"<absent>"	"housing"
+A	S4	2	.rooms[5].outlineEdits	"<absent>"	[]
+A	S4	2	.rooms[5].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [9980.0, 5980.0], "z": 0}
+A	S4	3	.bodies.stair:s1[0].volume_mm3	3519720000.0000005	3519720000.0
+A	S4	3	.bodies.wall:south[0].volume_mm3	5496000000.000001	5496000000.0
+A	S4	3	.cadDocBytes	85198	85426
+A	S4	3	.colors[0].faces[0].normal[2]	1.7763568394002505e-17	0.0
+A	S4	3	.colors[0].faces[0].point[0]	3734.478162967497	11163.068333616517
+A	S4	3	.colors[0].faces[0].point[2]	1615.521837032503	1260.3360225325316
+A	S4	3	.colors[1].faces[0].point[1]	3429.5933367259736	3274.952677709077
+A	S4	3	.colors[1].faces[0].point[2]	294.68342443743774	1611.134312556242
+A	S4	3	.colors[2].area_mm2	7371000.000000001	7371000.0
+A	S4	3	.colors[2].faces[0].area_mm2	7371000.000000001	7371000.0
+A	S4	3	.colors[2].faces[0].point[1]	3209.321651664754	3274.952677709077
+A	S4	3	.colors[2].faces[0].point[2]	1181.4132376093864	1611.134312556242
+A	S4	3	.displayBytes	51856	26096
+A	S4	3	.rooms[0].areaHousing_mm2	"<absent>"	14745600.0
+A	S4	3	.rooms[0].areaSource	"<absent>"	"housing"
+A	S4	3	.rooms[0].outlineEdits	"<absent>"	[]
+A	S4	3	.rooms[0].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [2020.0, 2020.0], "z": 0}
+A	S4	3	.rooms[1].areaHousing_mm2	"<absent>"	14899200.0
+A	S4	3	.rooms[1].areaSource	"<absent>"	"housing"
+A	S4	3	.rooms[1].outlineEdits	"<absent>"	[]
+A	S4	3	.rooms[1].projection	"<absent>"	{"area_mm2": 14899200.0, "deviation_mm2": 0.0, "seed": [6000.0, 2020.0], "z": 0}
+A	S4	3	.rooms[2].areaHousing_mm2	"<absent>"	14745600.0
+A	S4	3	.rooms[2].areaSource	"<absent>"	"housing"
+A	S4	3	.rooms[2].outlineEdits	"<absent>"	[]
+A	S4	3	.rooms[2].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [9980.0, 2020.0], "z": 0}
+A	S4	3	.rooms[3].areaHousing_mm2	"<absent>"	14745600.0
+A	S4	3	.rooms[3].areaSource	"<absent>"	"housing"
+A	S4	3	.rooms[3].outlineEdits	"<absent>"	[]
+A	S4	3	.rooms[3].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [2020.0, 5980.0], "z": 0}
+A	S4	3	.rooms[4].areaHousing_mm2	"<absent>"	14899200.0
+A	S4	3	.rooms[4].areaSource	"<absent>"	"housing"
+A	S4	3	.rooms[4].outlineEdits	"<absent>"	[]
+A	S4	3	.rooms[4].projection	"<absent>"	{"area_mm2": 14899200.0, "deviation_mm2": 0.0, "seed": [6000.0, 5980.0], "z": 0}
+A	S4	3	.rooms[5].areaHousing_mm2	"<absent>"	14745600.0
+A	S4	3	.rooms[5].areaSource	"<absent>"	"housing"
+A	S4	3	.rooms[5].outlineEdits	"<absent>"	[]
+A	S4	3	.rooms[5].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [9980.0, 5980.0], "z": 0}
+A	S5	1	.bodies.object:chair1[0].volume_mm3	18878342.91748853	18878342.917352885
+A	S5	1	.bodies.wall:south[0].volume_mm3	5496000000.000001	5496000000.0
+A	S5	1	.cadDocBytes	48722	48950
+A	S5	1	.colors[0].faces[0].normal[2]	1.7763568394002505e-17	0.0
+A	S5	1	.colors[0].faces[0].point[0]	3734.478162967497	11163.068333616517
+A	S5	1	.colors[0].faces[0].point[2]	1615.521837032503	1260.3360225325316
+A	S5	1	.colors[1].faces[0].point[1]	3429.5933367259736	3274.952677709077
+A	S5	1	.colors[1].faces[0].point[2]	294.68342443743774	1611.134312556242
+A	S5	1	.colors[2].area_mm2	7371000.000000001	7371000.0
+A	S5	1	.colors[2].faces[0].area_mm2	7371000.000000001	7371000.0
+A	S5	1	.colors[2].faces[0].point[1]	3209.321651664754	3274.952677709077
+A	S5	1	.colors[2].faces[0].point[2]	1181.4132376093864	1611.134312556242
+A	S5	1	.displayBytes	47368	24312
+A	S5	1	.reason	"chair bbox min x 1500, room Some(\"r1\"), volume 18878342.91748853"	"chair bbox min x 1500, room Some(\"r1\"), volume 18878342.917352885"
+A	S5	1	.rooms[0].areaHousing_mm2	"<absent>"	14745600.0
+A	S5	1	.rooms[0].areaSource	"<absent>"	"housing"
+A	S5	1	.rooms[0].outlineEdits	"<absent>"	[]
+A	S5	1	.rooms[0].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [2020.0, 2020.0], "z": 0}
+A	S5	1	.rooms[1].areaHousing_mm2	"<absent>"	14899200.0
+A	S5	1	.rooms[1].areaSource	"<absent>"	"housing"
+A	S5	1	.rooms[1].outlineEdits	"<absent>"	[]
+A	S5	1	.rooms[1].projection	"<absent>"	{"area_mm2": 14899200.0, "deviation_mm2": 0.0, "seed": [6000.0, 2020.0], "z": 0}
+A	S5	1	.rooms[2].areaHousing_mm2	"<absent>"	14745600.0
+A	S5	1	.rooms[2].areaSource	"<absent>"	"housing"
+A	S5	1	.rooms[2].outlineEdits	"<absent>"	[]
+A	S5	1	.rooms[2].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [9980.0, 2020.0], "z": 0}
+A	S5	1	.rooms[3].areaHousing_mm2	"<absent>"	14745600.0
+A	S5	1	.rooms[3].areaSource	"<absent>"	"housing"
+A	S5	1	.rooms[3].outlineEdits	"<absent>"	[]
+A	S5	1	.rooms[3].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [2020.0, 5980.0], "z": 0}
+A	S5	1	.rooms[4].areaHousing_mm2	"<absent>"	14899200.0
+A	S5	1	.rooms[4].areaSource	"<absent>"	"housing"
+A	S5	1	.rooms[4].outlineEdits	"<absent>"	[]
+A	S5	1	.rooms[4].projection	"<absent>"	{"area_mm2": 14899200.0, "deviation_mm2": 0.0, "seed": [6000.0, 5980.0], "z": 0}
+A	S5	1	.rooms[5].areaHousing_mm2	"<absent>"	14745600.0
+A	S5	1	.rooms[5].areaSource	"<absent>"	"housing"
+A	S5	1	.rooms[5].outlineEdits	"<absent>"	[]
+A	S5	1	.rooms[5].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [9980.0, 5980.0], "z": 0}
+A	S5	2	.bodies.object:chair1[0].volume_mm3	18878342.91748853	18878342.917352885
+A	S5	2	.bodies.object:shelf1[0].volume_mm3	44582399.99999936	44582399.999999925
+A	S5	2	.bodies.wall:south[0].volume_mm3	5496000000.000001	5496000000.0
+A	S5	2	.cadDocBytes	51813	52041
+A	S5	2	.colors[0].faces[0].normal[2]	1.7763568394002505e-17	0.0
+A	S5	2	.colors[0].faces[0].point[0]	3734.478162967497	11163.068333616517
+A	S5	2	.colors[0].faces[0].point[2]	1615.521837032503	1260.3360225325316
+A	S5	2	.colors[1].faces[0].point[1]	3429.5933367259736	3274.952677709077
+A	S5	2	.colors[1].faces[0].point[2]	294.68342443743774	1611.134312556242
+A	S5	2	.colors[2].area_mm2	7371000.000000001	7371000.0
+A	S5	2	.colors[2].faces[0].area_mm2	7371000.000000001	7371000.0
+A	S5	2	.colors[2].faces[0].point[1]	3209.321651664754	3274.952677709077
+A	S5	2	.colors[2].faces[0].point[2]	1181.4132376093864	1611.134312556242
+A	S5	2	.displayBytes	55664	27808
+A	S5	2	.rooms[0].areaHousing_mm2	"<absent>"	14745600.0
+A	S5	2	.rooms[0].areaSource	"<absent>"	"housing"
+A	S5	2	.rooms[0].outlineEdits	"<absent>"	[]
+A	S5	2	.rooms[0].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [2020.0, 2020.0], "z": 0}
+A	S5	2	.rooms[1].areaHousing_mm2	"<absent>"	14899200.0
+A	S5	2	.rooms[1].areaSource	"<absent>"	"housing"
+A	S5	2	.rooms[1].outlineEdits	"<absent>"	[]
+A	S5	2	.rooms[1].projection	"<absent>"	{"area_mm2": 14899200.0, "deviation_mm2": 0.0, "seed": [6000.0, 2020.0], "z": 0}
+A	S5	2	.rooms[2].areaHousing_mm2	"<absent>"	14745600.0
+A	S5	2	.rooms[2].areaSource	"<absent>"	"housing"
+A	S5	2	.rooms[2].outlineEdits	"<absent>"	[]
+A	S5	2	.rooms[2].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [9980.0, 2020.0], "z": 0}
+A	S5	2	.rooms[3].areaHousing_mm2	"<absent>"	14745600.0
+A	S5	2	.rooms[3].areaSource	"<absent>"	"housing"
+A	S5	2	.rooms[3].outlineEdits	"<absent>"	[]
+A	S5	2	.rooms[3].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [2020.0, 5980.0], "z": 0}
+A	S5	2	.rooms[4].areaHousing_mm2	"<absent>"	14899200.0
+A	S5	2	.rooms[4].areaSource	"<absent>"	"housing"
+A	S5	2	.rooms[4].outlineEdits	"<absent>"	[]
+A	S5	2	.rooms[4].projection	"<absent>"	{"area_mm2": 14899200.0, "deviation_mm2": 0.0, "seed": [6000.0, 5980.0], "z": 0}
+A	S5	2	.rooms[5].areaHousing_mm2	"<absent>"	14745600.0
+A	S5	2	.rooms[5].areaSource	"<absent>"	"housing"
+A	S5	2	.rooms[5].outlineEdits	"<absent>"	[]
+A	S5	2	.rooms[5].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [9980.0, 5980.0], "z": 0}
+A	S5	3	.bodies.object:chair1[0].volume_mm3	18878342.91748853	18878342.917352885
+A	S5	3	.bodies.object:shelf1[0].volume_mm3	44582399.999998584	44582399.999999925
+A	S5	3	.bodies.wall:south[0].volume_mm3	5496000000.000001	5496000000.0
+A	S5	3	.cadDocBytes	51813	52041
+A	S5	3	.colors[0].faces[0].normal[2]	1.7763568394002505e-17	0.0
+A	S5	3	.colors[0].faces[0].point[0]	3734.478162967497	11163.068333616517
+A	S5	3	.colors[0].faces[0].point[2]	1615.521837032503	1260.3360225325316
+A	S5	3	.colors[1].faces[0].point[1]	3429.5933367259736	3274.952677709077
+A	S5	3	.colors[1].faces[0].point[2]	294.68342443743774	1611.134312556242
+A	S5	3	.colors[2].area_mm2	7371000.000000001	7371000.0
+A	S5	3	.colors[2].faces[0].area_mm2	7371000.000000001	7371000.0
+A	S5	3	.colors[2].faces[0].point[1]	3209.321651664754	3274.952677709077
+A	S5	3	.colors[2].faces[0].point[2]	1181.4132376093864	1611.134312556242
+A	S5	3	.displayBytes	55664	27808
+A	S5	3	.rooms[0].areaHousing_mm2	"<absent>"	16665600.0
+A	S5	3	.rooms[0].areaSource	"<absent>"	"housing"
+A	S5	3	.rooms[0].outlineEdits	"<absent>"	[]
+A	S5	3	.rooms[0].projection	"<absent>"	{"area_mm2": 16665600.0, "deviation_mm2": 0.0, "seed": [2270.0, 2020.0], "z": 0}
+A	S5	3	.rooms[1].areaHousing_mm2	"<absent>"	12979200.0
+A	S5	3	.rooms[1].areaSource	"<absent>"	"housing"
+A	S5	3	.rooms[1].outlineEdits	"<absent>"	[]
+A	S5	3	.rooms[1].projection	"<absent>"	{"area_mm2": 12979200.0, "deviation_mm2": 0.0, "seed": [6250.0, 2020.0], "z": 0}
+A	S5	3	.rooms[2].areaHousing_mm2	"<absent>"	14745600.0
+A	S5	3	.rooms[2].areaSource	"<absent>"	"housing"
+A	S5	3	.rooms[2].outlineEdits	"<absent>"	[]
+A	S5	3	.rooms[2].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [9980.0, 2020.0], "z": 0}
+A	S5	3	.rooms[3].areaHousing_mm2	"<absent>"	16665600.0
+A	S5	3	.rooms[3].areaSource	"<absent>"	"housing"
+A	S5	3	.rooms[3].outlineEdits	"<absent>"	[]
+A	S5	3	.rooms[3].projection	"<absent>"	{"area_mm2": 16665600.0, "deviation_mm2": 0.0, "seed": [2270.0, 5980.0], "z": 0}
+A	S5	3	.rooms[4].areaHousing_mm2	"<absent>"	12979200.0
+A	S5	3	.rooms[4].areaSource	"<absent>"	"housing"
+A	S5	3	.rooms[4].outlineEdits	"<absent>"	[]
+A	S5	3	.rooms[4].projection	"<absent>"	{"area_mm2": 12979200.0, "deviation_mm2": 0.0, "seed": [6250.0, 5980.0], "z": 0}
+A	S5	3	.rooms[5].areaHousing_mm2	"<absent>"	14745600.0
+A	S5	3	.rooms[5].areaSource	"<absent>"	"housing"
+A	S5	3	.rooms[5].outlineEdits	"<absent>"	[]
+A	S5	3	.rooms[5].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [9980.0, 5980.0], "z": 0}
+A	S5	4	.bodies.object:chair1[0].volume_mm3	18878342.91748853	18878342.917352885
+A	S5	4	.bodies.object:shelf1[0].volume_mm3	44582399.999998584	44582399.999999925
+A	S5	4	.bodies.wall:south[0].volume_mm3	5496000000.000001	5496000000.0
+A	S5	4	.cadDocBytes	46017	46245
+A	S5	4	.colors[0].faces[0].normal[2]	1.7763568394002505e-17	0.0
+A	S5	4	.colors[0].faces[0].point[0]	3734.478162967497	11163.068333616517
+A	S5	4	.colors[0].faces[0].point[2]	1615.521837032503	1260.3360225325316
+A	S5	4	.displayBytes	51688	26152
+A	S5	4	.rooms[0].areaHousing_mm2	"<absent>"	14745600.0
+A	S5	4	.rooms[0].areaSource	"<absent>"	"housing"
+A	S5	4	.rooms[0].outlineEdits	"<absent>"	[]
+A	S5	4	.rooms[0].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [9980.0, 2020.0], "z": 0}
+A	S5	4	.rooms[1].areaHousing_mm2	"<absent>"	16665600.0
+A	S5	4	.rooms[1].areaSource	"<absent>"	"housing"
+A	S5	4	.rooms[1].outlineEdits	"<absent>"	[]
+A	S5	4	.rooms[1].projection	"<absent>"	{"area_mm2": 16665600.0, "deviation_mm2": 0.0, "seed": [2270.0, 5980.0], "z": 0}
+A	S5	4	.rooms[2].areaHousing_mm2	"<absent>"	12979200.0
+A	S5	4	.rooms[2].areaSource	"<absent>"	"housing"
+A	S5	4	.rooms[2].outlineEdits	"<absent>"	[]
+A	S5	4	.rooms[2].projection	"<absent>"	{"area_mm2": 12979200.0, "deviation_mm2": 0.0, "seed": [6250.0, 5980.0], "z": 0}
+A	S5	4	.rooms[3].areaHousing_mm2	"<absent>"	14745600.0
+A	S5	4	.rooms[3].areaSource	"<absent>"	"housing"
+A	S5	4	.rooms[3].outlineEdits	"<absent>"	[]
+A	S5	4	.rooms[3].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [9980.0, 5980.0], "z": 0}
+A	S5	4	.rooms[4].areaHousing_mm2	"<absent>"	30105600.0
+A	S5	4	.rooms[4].areaSource	"<absent>"	"housing"
+A	S5	4	.rooms[4].outlineEdits	"<absent>"	[]
+A	S5	4	.rooms[4].projection	"<absent>"	{"area_mm2": 30105600.0, "deviation_mm2": 0.0, "seed": [4020.0, 2020.0], "z": 0}
+A	N	1	.bodies.wall:south[0].volume_mm3	5496000000.000001	5496000000.0
+A	N	1	.errors	["room r1: housing area 14745600 vs 3D section 14733600", "room r2: housing area 14899200 vs 3D section 14887200"]	["room r1: housing area 14745600 vs 3D projection 14733600", "room r1: reported area 14745600 vs 3D section 14733600", "room r2: housing area 14899200 vs 3D projection 14887200", "room r2: reported area 14899200 vs 3D section 14887200"]
+A	N	1	.policy	"<absent>"	"RefuseOutlineEdits"
+A	N	1	.rooms[0].areaHousing_mm2	"<absent>"	14745600.0
+A	N	1	.rooms[0].areaSource	"<absent>"	"housing"
+A	N	1	.rooms[0].outlineEdits	"<absent>"	["bulge1"]
+A	N	1	.rooms[0].projection	"<absent>"	{"area_mm2": 14733600.0, "deviation_mm2": -12000.0, "seed": [2020.0, 2020.0], "z": 0}
+A	N	1	.rooms[1].areaHousing_mm2	"<absent>"	14899200.0
+A	N	1	.rooms[1].areaSource	"<absent>"	"housing"
+A	N	1	.rooms[1].outlineEdits	"<absent>"	["bulge1"]
+A	N	1	.rooms[1].projection	"<absent>"	{"area_mm2": 14887200.0, "deviation_mm2": -12000.0, "seed": [6000.0, 2020.0], "z": 0}
+A	N	1	.rooms[2].areaHousing_mm2	"<absent>"	14745600.0
+A	N	1	.rooms[2].areaSource	"<absent>"	"housing"
+A	N	1	.rooms[2].outlineEdits	"<absent>"	[]
+A	N	1	.rooms[2].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [9980.0, 2020.0], "z": 0}
+A	N	1	.rooms[3].areaHousing_mm2	"<absent>"	14745600.0
+A	N	1	.rooms[3].areaSource	"<absent>"	"housing"
+A	N	1	.rooms[3].outlineEdits	"<absent>"	[]
+A	N	1	.rooms[3].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [2020.0, 5980.0], "z": 0}
+A	N	1	.rooms[4].areaHousing_mm2	"<absent>"	14899200.0
+A	N	1	.rooms[4].areaSource	"<absent>"	"housing"
+A	N	1	.rooms[4].outlineEdits	"<absent>"	[]
+A	N	1	.rooms[4].projection	"<absent>"	{"area_mm2": 14899200.0, "deviation_mm2": 0.0, "seed": [6000.0, 5980.0], "z": 0}
+A	N	1	.rooms[5].areaHousing_mm2	"<absent>"	14745600.0
+A	N	1	.rooms[5].areaSource	"<absent>"	"housing"
+A	N	1	.rooms[5].outlineEdits	"<absent>"	[]
+A	N	1	.rooms[5].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [9980.0, 5980.0], "z": 0}
+A	N	2	.bodies.wall:south[0].volume_mm3	5496000000.000001	5496000000.0
+A	N	2	.errors	["modifier miss1 changed nothing on v1-lower"]	["modifier miss1 changed nothing on v1-lower", "warning Extrude18: the cut removes no material; check where its profile lies, the direction and the distance"]
+A	N	2	.policy	"<absent>"	"RefuseOutlineEdits"
+A	N	2	.rooms[0].areaHousing_mm2	"<absent>"	14745600.0
+A	N	2	.rooms[0].areaSource	"<absent>"	"housing"
+A	N	2	.rooms[0].outlineEdits	"<absent>"	[]
+A	N	2	.rooms[0].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [2020.0, 2020.0], "z": 0}
+A	N	2	.rooms[1].areaHousing_mm2	"<absent>"	14899200.0
+A	N	2	.rooms[1].areaSource	"<absent>"	"housing"
+A	N	2	.rooms[1].outlineEdits	"<absent>"	[]
+A	N	2	.rooms[1].projection	"<absent>"	{"area_mm2": 14899200.0, "deviation_mm2": 0.0, "seed": [6000.0, 2020.0], "z": 0}
+A	N	2	.rooms[2].areaHousing_mm2	"<absent>"	14745600.0
+A	N	2	.rooms[2].areaSource	"<absent>"	"housing"
+A	N	2	.rooms[2].outlineEdits	"<absent>"	[]
+A	N	2	.rooms[2].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [9980.0, 2020.0], "z": 0}
+A	N	2	.rooms[3].areaHousing_mm2	"<absent>"	14745600.0
+A	N	2	.rooms[3].areaSource	"<absent>"	"housing"
+A	N	2	.rooms[3].outlineEdits	"<absent>"	[]
+A	N	2	.rooms[3].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [2020.0, 5980.0], "z": 0}
+A	N	2	.rooms[4].areaHousing_mm2	"<absent>"	14899200.0
+A	N	2	.rooms[4].areaSource	"<absent>"	"housing"
+A	N	2	.rooms[4].outlineEdits	"<absent>"	[]
+A	N	2	.rooms[4].projection	"<absent>"	{"area_mm2": 14899200.0, "deviation_mm2": 0.0, "seed": [6000.0, 5980.0], "z": 0}
+A	N	2	.rooms[5].areaHousing_mm2	"<absent>"	14745600.0
+A	N	2	.rooms[5].areaSource	"<absent>"	"housing"
+A	N	2	.rooms[5].outlineEdits	"<absent>"	[]
+A	N	2	.rooms[5].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [9980.0, 5980.0], "z": 0}
+A	N	3	.bodies.unmapped:v1-lower (1)[0].volume_mm3	469800000.0	469800000.0000001
+A	N	3	.bodies.wall:south[0].volume_mm3	5496000000.000001	5496000000.0
+A	N	3	.errors	["unmapped body v1-lower (1)"]	["unmapped body v1-lower (1)", "room r1: housing area 14745600 vs 3D projection 29968800", "room r2: housing area 14899200 vs 3D projection 29968800"]
+A	N	3	.policy	"<absent>"	"RefuseOutlineEdits"
+A	N	3	.rooms[0].areaHousing_mm2	"<absent>"	14745600.0
+A	N	3	.rooms[0].areaSource	"<absent>"	"housing"
+A	N	3	.rooms[0].outlineEdits	"<absent>"	[]
+A	N	3	.rooms[0].projection	"<absent>"	{"area_mm2": 29968800.0, "deviation_mm2": 15223200.0, "seed": [2020.0, 2020.0], "z": 0}
+A	N	3	.rooms[1].areaHousing_mm2	"<absent>"	14899200.0
+A	N	3	.rooms[1].areaSource	"<absent>"	"housing"
+A	N	3	.rooms[1].outlineEdits	"<absent>"	[]
+A	N	3	.rooms[1].projection	"<absent>"	{"area_mm2": 29968800.0, "deviation_mm2": 15069600.0, "seed": [6000.0, 2020.0], "z": 0}
+A	N	3	.rooms[2].areaHousing_mm2	"<absent>"	14745600.0
+A	N	3	.rooms[2].areaSource	"<absent>"	"housing"
+A	N	3	.rooms[2].outlineEdits	"<absent>"	[]
+A	N	3	.rooms[2].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [9980.0, 2020.0], "z": 0}
+A	N	3	.rooms[3].areaHousing_mm2	"<absent>"	14745600.0
+A	N	3	.rooms[3].areaSource	"<absent>"	"housing"
+A	N	3	.rooms[3].outlineEdits	"<absent>"	[]
+A	N	3	.rooms[3].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [2020.0, 5980.0], "z": 0}
+A	N	3	.rooms[4].areaHousing_mm2	"<absent>"	14899200.0
+A	N	3	.rooms[4].areaSource	"<absent>"	"housing"
+A	N	3	.rooms[4].outlineEdits	"<absent>"	[]
+A	N	3	.rooms[4].projection	"<absent>"	{"area_mm2": 14899200.0, "deviation_mm2": 0.0, "seed": [6000.0, 5980.0], "z": 0}
+A	N	3	.rooms[5].areaHousing_mm2	"<absent>"	14745600.0
+A	N	3	.rooms[5].areaSource	"<absent>"	"housing"
+A	N	3	.rooms[5].outlineEdits	"<absent>"	[]
+A	N	3	.rooms[5].projection	"<absent>"	{"area_mm2": 14745600.0, "deviation_mm2": 0.0, "seed": [9980.0, 5980.0], "z": 0}
+A	N	4	.policy	"<absent>"	"RefuseOutlineEdits"
+A	N	5	.policy	"<absent>"	"RefuseOutlineEdits"
+A	N	6	.policy	"<absent>"	"RefuseOutlineEdits"
+A	N	7	.policy	"<absent>"	"RefuseOutlineEdits"
+A	N	8	.policy	"<absent>"	"RefuseOutlineEdits"
+B	S0	0-original	.colors[0].landedOn[0].point[1]	2628.6914368465887	3274.952677709077
+B	S0	0-original	.colors[0].landedOn[0].point[2]	1342.9779349520654	1611.134312556242
+B	S0	0-original	.colors[1].landedOn[0].point[1]	2718.6744246628573	3274.952677709077
+B	S0	0-original	.colors[1].landedOn[0].point[2]	2005.8302584042626	1611.134312556242
+B	S0	0-original	.colors[2].landedOn[0].point[0]	9834.478162967498	11163.068333616517
+B	S0	0-original	.colors[2].landedOn[0].point[2]	1615.521837032503	1260.3360225325323
+B	S0	0-original	.notes[0]	"buildMs 94.8"	"buildMs 104.4"
+B	S0	0-original	.savedBytes	29605	29833
+B	S1	1-arch	.bodies.wall.v1-lower[0].bbox.max[0]	4060.000000000001	4060.0000000000005
+B	S1	1-arch	.bodies.wall.v1-lower[0].bbox.min[0]	3939.999999999999	3939.9999999999995
+B	S1	1-arch	.colors[0].landedOn[0].point[1]	359.75047493685156	485.4030924335964
+B	S1	1-arch	.colors[0].landedOn[0].point[2]	2020.2850970417533	1836.6004609662064
+B	S1	1-arch	.colors[1].landedOn[0].point[1]	359.7504749368516	485.40309243359627
+B	S1	1-arch	.colors[1].landedOn[0].point[2]	2020.285097041754	1836.6004609662064
+B	S1	1-arch	.colors[2].landedOn[0].point[0]	9834.478162967498	11163.068333616517
+B	S1	1-arch	.colors[2].landedOn[0].point[2]	1615.521837032503	1260.3360225325323
+B	S1	1-arch	.expected.reason	"v1-lower volume 651949649 = wall - door - arch; arch curved face centred at [4000.000000000002,2950.0000000000014,2084.48037773518]"	"v1-lower volume 651949649 = wall - door - arch; arch curved face centred at [4000.000000000001,2950.000000000001,2084.4803777351804]"
+B	S1	1-arch	.notes[0]	"arch curved-face centroid: [4000.000000000002,2950.0000000000014,2084.48037773518]"	"arch curved-face centroid: [4000.000000000001,2950.000000000001,2084.4803777351804]"
+B	S1	1-arch	.savedBytes	32703	32931
+B	S1	2-split-4500	.bodies.wall.v1-lower[0].bbox.min[0]	4439.999999999998	4439.999999999999
+B	S1	2-split-4500	.colors[0].landedOn[0].point[1]	359.75047493685156	485.4030924335964
+B	S1	2-split-4500	.colors[0].landedOn[0].point[2]	2020.2850970417533	1836.6004609662064
+B	S1	2-split-4500	.colors[1].landedOn[0].point[1]	359.7504749368516	485.40309243359627
+B	S1	2-split-4500	.colors[1].landedOn[0].point[2]	2020.285097041754	1836.6004609662064
+B	S1	2-split-4500	.colors[2].landedOn[0].point[0]	9834.478162967498	11163.068333616517
+B	S1	2-split-4500	.colors[2].landedOn[0].point[2]	1615.521837032503	1260.3360225325323
+B	S1	2-split-4500	.expected.reason	"arch curved face moved to [4500.000000000003,2950.0000000000014,2084.4803777351804]; volume unchanged 651949649; r1/r2 areas follow split"	"arch curved face moved to [4500.0,2950.000000000002,2084.48037773518]; volume unchanged 651949649; r1/r2 areas follow split"
+B	S1	2-split-4500	.notes[0]	"arch curved-face centroid: [4500.000000000003,2950.0000000000014,2084.4803777351804]"	"arch curved-face centroid: [4500.0,2950.000000000002,2084.48037773518]"
+B	S1	2-split-4500	.savedBytes	32703	32931
+B	S1	3-delete-v1-lower	.colors[0].landedOn[0].point[0]	9834.478162967498	11163.068333616517
+B	S1	3-delete-v1-lower	.colors[0].landedOn[0].point[2]	1615.521837032503	1260.3360225325323
+B	S1	3-delete-v1-lower	.savedBytes	26057	26285
+B	S2	1-slope-north	.colors[0].landedOn[0].point[1]	2628.6914368465887	3274.952677709077
+B	S2	1-slope-north	.colors[0].landedOn[0].point[2]	1342.9779349520654	1611.134312556242
+B	S2	1-slope-north	.colors[1].landedOn[0].point[1]	2718.6744246628573	3274.952677709077
+B	S2	1-slope-north	.colors[1].landedOn[0].point[2]	2005.8302584042626	1611.134312556242
+B	S2	1-slope-north	.colors[2].landedOn[0].point[0]	9834.478162967498	11163.068333616517
+B	S2	1-slope-north	.colors[2].landedOn[0].point[2]	1615.521837032503	1260.3360225325323
+B	S2	1-slope-north	.notes[0]	"north sloped face: {\"area\":417612.26035642216,\"centroid\":[11099.999999999996,8000.0,2100.0],\"name\":\"F27:blend:F4:side:l3|F4:top\",\"normal\":[0.28734788556634494,0.0,0.9578262852211515]}"	"north sloped face: {\"area\":417612.260356422,\"centroid\":[11099.999999999998,8000.0,2100.0000000000005],\"name\":\"F27:blend(F4:side:l3|F4:top)\",\"normal\":[0.2873478855663452,0.0,0.9578262852211514]}"
+B	S2	1-slope-north	.savedBytes	30362	30590
+B	S2	2-east-+600	.colors[0].landedOn[0].point[1]	2628.6914368465887	3274.952677709077
+B	S2	2-east-+600	.colors[0].landedOn[0].point[2]	1342.9779349520654	1611.134312556242
+B	S2	2-east-+600	.colors[1].landedOn[0].point[1]	2718.6744246628573	3274.952677709077
+B	S2	2-east-+600	.colors[1].landedOn[0].point[2]	2005.8302584042626	1611.134312556242
+B	S2	2-east-+600	.colors[2].landedOn[0].point[0]	10300.0	11749.522969599273
+B	S2	2-east-+600	.colors[2].landedOn[0].point[2]	1600.0	1256.9776142420778
+B	S2	2-east-+600	.notes[0]	"north sloped face: {\"area\":417612.2603564277,\"centroid\":[11699.999999999998,8000.000000000002,2100.0],\"name\":\"F27:blend:F4:side:l3|F4:top\",\"normal\":[0.2873478855663454,0.0,0.9578262852211514]}"	"north sloped face: {\"area\":417612.2603564277,\"centroid\":[11699.999999999998,8000.000000000002,2100.0],\"name\":\"F27:blend(F4:side:l3|F4:top)\",\"normal\":[0.2873478855663454,0.0,0.9578262852211514]}"
+B	S2	2-east-+600	.savedBytes	30362	30590
+B	S3	1-blue-r1-side	.colors[0].landedOn[0].point[1]	2628.6914368465887	3274.952677709077
+B	S3	1-blue-r1-side	.colors[0].landedOn[0].point[2]	1342.9779349520654	1611.134312556242
+B	S3	1-blue-r1-side	.colors[1].landedOn[0].point[1]	2718.6744246628573	3274.952677709077
+B	S3	1-blue-r1-side	.colors[1].landedOn[0].point[2]	2005.8302584042626	1611.134312556242
+B	S3	1-blue-r1-side	.colors[2].landedOn[0].point[0]	9834.478162967498	11163.068333616517
+B	S3	1-blue-r1-side	.colors[2].landedOn[0].point[2]	1615.521837032503	1260.3360225325323
+B	S3	1-blue-r1-side	.savedBytes	29604	29832
+B	S3	2-split-4500	.colors[0].landedOn[0].point[1]	2628.6914368465887	3274.952677709077
+B	S3	2-split-4500	.colors[0].landedOn[0].point[2]	1342.9779349520654	1611.134312556242
+B	S3	2-split-4500	.colors[1].landedOn[0].point[1]	2718.6744246628573	3274.952677709077
+B	S3	2-split-4500	.colors[1].landedOn[0].point[2]	2005.8302584042626	1611.134312556242
+B	S3	2-split-4500	.colors[2].landedOn[0].point[0]	9834.478162967498	11163.068333616517
+B	S3	2-split-4500	.colors[2].landedOn[0].point[2]	1615.521837032503	1260.3360225325323
+B	S3	2-split-4500	.savedBytes	29604	29832
+B	S3	3-door-on-face	.colors[0].landedOn[0].point[1]	359.75047493685156	485.4030924335964
+B	S3	3-door-on-face	.colors[0].landedOn[0].point[2]	2020.2850970417533	1836.6004609662064
+B	S3	3-door-on-face	.colors[1].landedOn[0].point[1]	359.7504749368516	485.40309243359627
+B	S3	3-door-on-face	.colors[1].landedOn[0].point[2]	2020.285097041754	1836.6004609662064
+B	S3	3-door-on-face	.colors[2].landedOn[0].point[0]	9834.478162967498	11163.068333616517
+B	S3	3-door-on-face	.colors[2].landedOn[0].point[2]	1615.521837032503	1260.3360225325323
+B	S3	3-door-on-face	.savedBytes	30017	30245
+B	S4	1-stair-r4	.colors[0].landedOn[0].point[1]	2628.6914368465887	3274.952677709077
+B	S4	1-stair-r4	.colors[0].landedOn[0].point[2]	1342.9779349520654	1611.134312556242
+B	S4	1-stair-r4	.colors[1].landedOn[0].point[1]	2718.6744246628573	3274.952677709077
+B	S4	1-stair-r4	.colors[1].landedOn[0].point[2]	2005.8302584042626	1611.134312556242
+B	S4	1-stair-r4	.colors[2].landedOn[0].point[0]	9834.478162967498	11163.068333616517
+B	S4	1-stair-r4	.colors[2].landedOn[0].point[2]	1615.521837032503	1260.3360225325323
+B	S4	1-stair-r4	.savedBytes	40871	41099
+B	S4	2-nosing	.colors[0].landedOn[0].point[1]	2628.6914368465887	3274.952677709077
+B	S4	2-nosing	.colors[0].landedOn[0].point[2]	1342.9779349520654	1611.134312556242
+B	S4	2-nosing	.colors[1].landedOn[0].point[1]	2718.6744246628573	3274.952677709077
+B	S4	2-nosing	.colors[1].landedOn[0].point[2]	2005.8302584042626	1611.134312556242
+B	S4	2-nosing	.colors[2].landedOn[0].point[0]	9834.478162967498	11163.068333616517
+B	S4	2-nosing	.colors[2].landedOn[0].point[2]	1615.521837032503	1260.3360225325323
+B	S4	2-nosing	.savedBytes	60285	60513
+B	S4	3-move-+600	.colors[0].landedOn[0].point[1]	2628.6914368465887	3274.952677709077
+B	S4	3-move-+600	.colors[0].landedOn[0].point[2]	1342.9779349520654	1611.134312556242
+B	S4	3-move-+600	.colors[1].landedOn[0].point[1]	2718.6744246628573	3274.952677709077
+B	S4	3-move-+600	.colors[1].landedOn[0].point[2]	2005.8302584042626	1611.134312556242
+B	S4	3-move-+600	.colors[2].landedOn[0].point[0]	9834.478162967498	11163.068333616517
+B	S4	3-move-+600	.colors[2].landedOn[0].point[2]	1615.521837032503	1260.3360225325323
+B	S4	3-move-+600	.savedBytes	60285	60513
+B	S5	1-chair-r1	.colors[0].landedOn[0].point[1]	2628.6914368465887	3274.952677709077
+B	S5	1-chair-r1	.colors[0].landedOn[0].point[2]	1342.9779349520654	1611.134312556242
+B	S5	1-chair-r1	.colors[1].landedOn[0].point[1]	2718.6744246628573	3274.952677709077
+B	S5	1-chair-r1	.colors[1].landedOn[0].point[2]	2005.8302584042626	1611.134312556242
+B	S5	1-chair-r1	.colors[2].landedOn[0].point[0]	9834.478162967498	11163.068333616517
+B	S5	1-chair-r1	.colors[2].landedOn[0].point[2]	1615.521837032503	1260.3360225325323
+B	S5	1-chair-r1	.savedBytes	32043	32271
+B	S5	2-shelf-v1-upper	.colors[0].landedOn[0].point[1]	2628.6914368465887	3274.952677709077
+B	S5	2-shelf-v1-upper	.colors[0].landedOn[0].point[2]	1342.9779349520654	1611.134312556242
+B	S5	2-shelf-v1-upper	.colors[1].landedOn[0].point[1]	2718.6744246628573	3274.952677709077
+B	S5	2-shelf-v1-upper	.colors[1].landedOn[0].point[2]	2005.8302584042626	1611.134312556242
+B	S5	2-shelf-v1-upper	.colors[2].landedOn[0].point[0]	9834.478162967498	11163.068333616517
+B	S5	2-shelf-v1-upper	.colors[2].landedOn[0].point[2]	1615.521837032503	1260.3360225325323
+B	S5	2-shelf-v1-upper	.savedBytes	32876	33104
+B	S5	3-split-4500	.colors[0].landedOn[0].point[1]	2628.6914368465887	3274.952677709077
+B	S5	3-split-4500	.colors[0].landedOn[0].point[2]	1342.9779349520654	1611.134312556242
+B	S5	3-split-4500	.colors[1].landedOn[0].point[1]	2718.6744246628573	3274.952677709077
+B	S5	3-split-4500	.colors[1].landedOn[0].point[2]	2005.8302584042626	1611.134312556242
+B	S5	3-split-4500	.colors[2].landedOn[0].point[0]	9834.478162967498	11163.068333616517
+B	S5	3-split-4500	.colors[2].landedOn[0].point[2]	1615.521837032503	1260.3360225325323
+B	S5	3-split-4500	.savedBytes	32876	33104
+B	S5	4-delete-v1-lower	.colors[0].landedOn[0].point[0]	9834.478162967498	11163.068333616517
+B	S5	4-delete-v1-lower	.colors[0].landedOn[0].point[2]	1615.521837032503	1260.3360225325323
+B	S5	4-delete-v1-lower	.savedBytes	29328	29556
+B	X	X1-abs-shelf-then-split	.colors[0].landedOn[0].point[1]	2628.6914368465887	3274.952677709077
+B	X	X1-abs-shelf-then-split	.colors[0].landedOn[0].point[2]	1342.9779349520654	1611.134312556242
+B	X	X1-abs-shelf-then-split	.colors[1].landedOn[0].point[1]	2718.6744246628573	3274.952677709077
+B	X	X1-abs-shelf-then-split	.colors[1].landedOn[0].point[2]	2005.8302584042626	1611.134312556242
+B	X	X1-abs-shelf-then-split	.colors[2].landedOn[0].point[0]	9834.478162967498	11163.068333616517
+B	X	X1-abs-shelf-then-split	.colors[2].landedOn[0].point[2]	1615.521837032503	1260.3360225325323
+B	X	X1-abs-shelf-then-split	.savedBytes	30011	30239
+B	X	X2a-porthole-by-edge-ref	.colors[0].landedOn[0].point[1]	3116.7602110769662	2976.1717518177275
+B	X	X2a-porthole-by-edge-ref	.colors[0].landedOn[0].point[2]	558.7898941920796	471.4662521444843
+B	X	X2a-porthole-by-edge-ref	.colors[1].landedOn[0].point[1]	2412.134537621947	2976.1717518177275
+B	X	X2a-porthole-by-edge-ref	.colors[1].landedOn[0].point[2]	610.8275564197736	471.4662521444843
+B	X	X2a-porthole-by-edge-ref	.colors[2].landedOn[0].point[0]	9834.478162967498	11163.068333616517
+B	X	X2a-porthole-by-edge-ref	.colors[2].landedOn[0].point[2]	1615.521837032503	1260.3360225325323
+B	X	X2a-porthole-by-edge-ref	.expected.reason	"v1-lower volume 869440355 (expected with porthole 869440355); porthole centre Some((4000.0000000000005, 3000.0, 1399.9999999999989)); errors []"	"v1-lower volume 869440355 (expected with porthole 869440355); porthole centre Some((4000.0, 3000.0000000000005, 1400.0000000000005)); errors []"
+B	X	X2a-porthole-by-edge-ref	.notes[0]	"porthole curved-face centroid: [4000.0000000000005,3000.0,1399.9999999999989]"	"porthole curved-face centroid: [4000.0,3000.0000000000005,1400.0000000000005]"
+B	X	X2a-porthole-by-edge-ref	.savedBytes	30322	30550
+B	X	X2b-split-4500	.colors[0].landedOn[0].point[1]	3116.7602110769662	2976.1717518177275
+B	X	X2b-split-4500	.colors[0].landedOn[0].point[2]	558.7898941920796	471.4662521444843
+B	X	X2b-split-4500	.colors[1].landedOn[0].point[1]	2412.134537621947	2976.1717518177275
+B	X	X2b-split-4500	.colors[1].landedOn[0].point[2]	610.8275564197736	471.4662521444843
+B	X	X2b-split-4500	.colors[2].landedOn[0].point[0]	9834.478162967498	11163.068333616517
+B	X	X2b-split-4500	.colors[2].landedOn[0].point[2]	1615.521837032503	1260.3360225325323
+B	X	X2b-split-4500	.expected.reason	"v1-lower volume 869440355 (expected with porthole 869440355); porthole centre Some((4499.999999999999, 2999.9999999999995, 1399.9999999999986)); errors []"	"v1-lower volume 869440355 (expected with porthole 869440355); porthole centre Some((4499.999999999999, 3000.000000000001, 1400.0000000000011)); errors []"
+B	X	X2b-split-4500	.notes[0]	"porthole curved-face centroid: [4499.999999999999,2999.9999999999995,1399.9999999999986]"	"porthole curved-face centroid: [4499.999999999999,3000.000000000001,1400.0000000000011]"
+B	X	X2b-split-4500	.savedBytes	30322	30550
+B	X	X2c-delete-door-d1	.colors[0].landedOn[0].point[1]	638.4871504372305	955.8445283064152
+B	X	X2c-delete-door-d1	.colors[0].landedOn[0].point[2]	1370.487150437231	855.8445283064152
+B	X	X2c-delete-door-d1	.colors[1].landedOn[0].point[1]	2942.487150437231	955.8445283064152
+B	X	X2c-delete-door-d1	.colors[1].landedOn[0].point[2]	1370.487150437231	855.8445283064152
+B	X	X2c-delete-door-d1	.colors[2].landedOn[0].point[0]	9834.478162967498	11163.068333616517
+B	X	X2c-delete-door-d1	.colors[2].landedOn[0].point[2]	1615.521837032503	1260.3360225325323
+B	X	X2c-delete-door-d1	.savedBytes	29909	30137
+B	X	X5a-blue-r1-side	.colors[0].landedOn[0].point[1]	2628.6914368465887	3274.952677709077
+B	X	X5a-blue-r1-side	.colors[0].landedOn[0].point[2]	1342.9779349520654	1611.134312556242
+B	X	X5a-blue-r1-side	.colors[1].landedOn[0].point[1]	2718.6744246628573	3274.952677709077
+B	X	X5a-blue-r1-side	.colors[1].landedOn[0].point[2]	2005.8302584042626	1611.134312556242
+B	X	X5a-blue-r1-side	.colors[2].landedOn[0].point[0]	9834.478162967498	11163.068333616517
+B	X	X5a-blue-r1-side	.colors[2].landedOn[0].point[2]	1615.521837032503	1260.3360225325323
+B	X	X5a-blue-r1-side	.savedBytes	29604	29832
+B	X	X5b-flush-beam-join	.colors[0].landedOn[0].point[1]	2828.687385628131	3227.739572920104
+B	X	X5b-flush-beam-join	.colors[0].landedOn[0].point[2]	602.9014764700344	1725.5121178315057
+B	X	X5b-flush-beam-join	.colors[1].landedOn[0].point[1]	2659.0331647762746	3227.7395729201044
+B	X	X5b-flush-beam-join	.colors[1].landedOn[0].point[2]	2111.380135276193	1725.512117831506
+B	X	X5b-flush-beam-join	.colors[2].landedOn[0].point[0]	9834.478162967498	11163.068333616517
+B	X	X5b-flush-beam-join	.colors[2].landedOn[0].point[2]	1615.521837032503	1260.3360225325323
+B	X	X5b-flush-beam-join	.savedBytes	30021	30249
+B	X	X5c-split-4500	.colors[0].landedOn[0].point[1]	2828.687385628131	3227.739572920104
+B	X	X5c-split-4500	.colors[0].landedOn[0].point[2]	602.9014764700344	1725.5121178315057
+B	X	X5c-split-4500	.colors[1].landedOn[0].point[1]	2659.0331647762746	3227.7395729201044
+B	X	X5c-split-4500	.colors[1].landedOn[0].point[2]	2111.380135276193	1725.512117831506
+B	X	X5c-split-4500	.colors[2].landedOn[0].point[0]	9834.478162967498	11163.068333616517
+B	X	X5c-split-4500	.colors[2].landedOn[0].point[2]	1615.521837032503	1260.3360225325323
+B	X	X5c-split-4500	.savedBytes	30021	30249
+B	X	X3-ai-adds-wall	.colors[0].landedOn[0].point[1]	2628.6914368465887	3274.952677709077
+B	X	X3-ai-adds-wall	.colors[0].landedOn[0].point[2]	1342.9779349520654	1611.134312556242
+B	X	X3-ai-adds-wall	.colors[1].landedOn[0].point[1]	2718.6744246628573	3274.952677709077
+B	X	X3-ai-adds-wall	.colors[1].landedOn[0].point[2]	2005.8302584042626	1611.134312556242
+B	X	X3-ai-adds-wall	.colors[2].landedOn[0].point[0]	9834.478162967498	11163.068333616517
+B	X	X3-ai-adds-wall	.colors[2].landedOn[0].point[2]	1615.521837032503	1260.3360225325323
+B	X	X3-ai-adds-wall	.savedBytes	30010	30238
+B	X	X4-delete-spine	.colors[0].landedOn[0].point[1]	2628.6914368465887	3274.952677709077
+B	X	X4-delete-spine	.colors[0].landedOn[0].point[2]	1342.9779349520654	1611.134312556242
+B	X	X4-delete-spine	.colors[1].landedOn[0].point[1]	2718.6744246628573	3274.952677709077
+B	X	X4-delete-spine	.colors[1].landedOn[0].point[2]	2005.8302584042626	1611.134312556242
+B	X	X4-delete-spine	.colors[2].landedOn[0].point[0]	9834.478162967498	11163.068333616517
+B	X	X4-delete-spine	.colors[2].landedOn[0].point[2]	1615.521837032503	1260.3360225325323
+B	X	X4-delete-spine	.savedBytes	26724	26952
+C	BASE	0	.savedBytes	9050	9236
+C	S1	1	.bodies[5].bodies[0].volume_mm3	651949649.255	651949649.259
+C	S1	1	.displayBytes	37848	19368
+C	S1	1	.reason	"v1-lower volume 651949649.255 vs expected 651949649.259 (base minus door minus arch); max |housing area - 3D section area| = 0 m2"	"v1-lower volume 651949649.259 vs expected 651949649.259 (base minus door minus arch); max |housing area - 3D section area| = 0 m2"
+C	S1	1	.savedBreakdown.solidcraftDocPretty	16909	17124
+C	S1	1	.savedBytes	12058	12231
+C	S1	2	.bodies[5].bodies[0].bbox.max[0]	4560.0	4560.000000000001
+C	S1	2	.bodies[5].bodies[0].volume_mm3	651949649.255	651949649.259
+C	S1	2	.displayBytes	37848	19368
+C	S1	2	.propagation.recomputed	15	6
+C	S1	2	.reason	"v1-lower min x 4440, volume 651949649.255 (arch still cut), r1 16.666 m2, r2 12.979 m2; max |housing area - 3D section area| = 0 m2"	"v1-lower min x 4440, volume 651949649.259 (arch still cut), r1 16.666 m2, r2 12.979 m2; max |housing area - 3D section area| = 0 m2"
+C	S1	2	.savedBreakdown.solidcraftDocPretty	16909	17124
+C	S1	2	.savedBytes	12058	12231
+C	S1	3	.displayBytes	30656	13968
+C	S1	3	.extra.archFacesBeforeDelete[0].point[0]	4503.982378512647	4501.997782702374
+C	S1	3	.extra.archFacesBeforeDelete[0].point[2]	1743.9823785126468	58.002217297625506
+C	S1	3	.extra.archFacesBeforeDelete[1].area_mm2	169011.4934244692	169011.4934244696
+C	S1	3	.extra.archFacesBeforeDelete[1].point[0]	4529.467237950312	4470.532762049689
+C	S1	3	.extra.archFacesBeforeDelete[1].point[1]	3289.0421316232923	3245.889224177452
+C	S1	3	.extra.archFacesBeforeDelete[1].point[2]	2095.8892241774515	2139.042131623292
+C	S1	3	.extra.archFacesBeforeDelete[2].point[0]	4503.982378512647	4501.997782702374
+C	S1	3	.extra.archFacesBeforeDelete[2].point[2]	56.017621487353324	1741.9977827023747
+C	S1	3	.extra.topologyChangeProbe.pieces[0].measure.bbox.max[0]	4560.0	4560.000000000001
+C	S1	3	.extra.topologyChangeProbe.pieces[0].measure.volume_mm3	354949649.256	354949649.259
+C	S1	3	.savedBreakdown.solidcraftDocPretty	8020	8248
+C	S1	3	.savedBytes	7659	7845
+C	S2	1	.displayBytes	34888	15608
+C	S2	1	.savedBreakdown.solidcraftDocPretty	12097	12325
+C	S2	1	.savedBytes	10322	10508
+C	S2	2	.displayBytes	34888	15832
+C	S2	2	.extra.slopedFaceBeforeMove.normal[1]	1.4390917973189765e-15	0.0
+C	S2	2	.propagation.recomputed	20	11
+C	S2	2	.savedBreakdown.solidcraftDocPretty	12097	12325
+C	S2	2	.savedBytes	10322	10508
+C	S3	1	.displayBytes	34616	15624
+C	S3	1	.savedBreakdown.solidcraftDocPretty	9503	9731
+C	S3	1	.savedBytes	9049	9235
+C	S3	2	.displayBytes	34616	15624
+C	S3	2	.propagation.recomputed	13	4
+C	S3	2	.savedBreakdown.solidcraftDocPretty	9503	9731
+C	S3	2	.savedBytes	9049	9235
+C	S3	3	.displayBytes	35816	16456
+C	S3	3	.savedBreakdown.solidcraftDocPretty	9906	10134
+C	S3	3	.savedBytes	9403	9589
+C	S4	1	.displayBytes	79272	25144
+C	S4	1	.savedBreakdown.solidcraftDocPretty	14698	14926
+C	S4	1	.savedBytes	12286	12472
+C	S4	2	.displayBytes	85992	30136
+C	S4	2	.savedBreakdown.solidcraftDocPretty	19634	19862
+C	S4	2	.savedBytes	15492	15678
+C	S4	3	.displayBytes	85992	30136
+C	S4	3	.savedBreakdown.solidcraftDocPretty	19634	19862
+C	S4	3	.savedBytes	15492	15678
+C	S5	1	.displayBytes	45904	24320
+C	S5	1	.savedBreakdown.solidcraftDocPretty	12545	12773
+C	S5	1	.savedBytes	10774	10960
+C	S5	2	.displayBytes	55152	27808
+C	S5	2	.savedBreakdown.solidcraftDocPretty	22899	23127
+C	S5	2	.savedBytes	14912	15098
+C	S5	3	.displayBytes	55152	27808
+C	S5	3	.propagation.recomputed	22	6
+C	S5	3	.savedBreakdown.solidcraftDocPretty	22899	23127
+C	S5	3	.savedBytes	14912	15098
+C	S5	4	.displayBytes	51192	26152
+C	S5	4	.savedBreakdown.solidcraftDocPretty	21415	21643
+C	S5	4	.savedBytes	13521	13707
+C	X1	1	.displayBytes	34616	15624
+C	X1	1	.savedBreakdown.solidcraftDocPretty	9504	9732
+C	X1	1	.savedBytes	9050	9236
+C	X1	2	.displayBytes	34616	15624
+C	X1	2	.savedBreakdown.solidcraftDocPretty	9504	9732
+C	X1	2	.savedBytes	9050	9236
+C	X2	1	.bodies[5].bodies[0].volume_mm3	651949649.255	651949649.259
+C	X2	1	.displayBytes	37848	19368
+C	X2	1	.savedBreakdown.solidcraftDocPretty	16909	17124
+C	X2	1	.savedBytes	12058	12231
+C	X2	2	.bodies[5].bodies[0].volume_mm3	651518063.784	651518063.392
+C	X2	2	.displayBytes	59448	36936
+C	X2	2	.reason	"v1-lower volume 651518063.784; max |housing area - 3D section area| = 0 m2"	"v1-lower volume 651518063.392; max |housing area - 3D section area| = 0 m2"
+C	X2	2	.savedBreakdown.solidcraftDocPretty	17607	17822
+C	X2	2	.savedBytes	12577	12750
+C	X2	3	.bodies[5].bodies[0].volume_mm3	651518063.784	651518063.392
+C	X2	3	.displayBytes	59448	36936
+C	X2	3	.savedBreakdown.solidcraftDocPretty	17607	17822
+C	X2	3	.savedBytes	12577	12750
+C	X3	1	.displayBytes	34888	15608
+C	X3	1	.savedBreakdown.solidcraftDocPretty	11803	12031
+C	X3	1	.savedBytes	10201	10387
+C	X3	2	.displayBytes	35256	16024
+C	X3	2	.propagation.recomputed	20	10
+C	X3	2	.savedBreakdown.solidcraftDocPretty	11803	12031
+C	X3	2	.savedBytes	10201	10387
+C	X4	1	.bodies[5].bodies[0].volume_mm3	651949649.255	651949649.259
+C	X4	1	.displayBytes	37848	19368
+C	X4	1	.savedBreakdown.solidcraftDocPretty	16909	17124
+C	X4	1	.savedBytes	12058	12231
+C	X4	2	.bodies[5].bodies[0].volume_mm3	798818861.623	798818861.627
+C	X4	2	.colors[2].landedOn[0].normal[2]	0.0	4.17342320448904e-15
+C	X4	2	.displayBytes	36952	19128
+C	X4	2	.propagation.recomputed	10	3
+C	X4	2	.reason	"accepted with no error; v1-lower volume 798818861.623 vs 651949649.258884 if door and arch did not overlap: door and arch now merge into one irregular hole that neither the housing data nor the bindings describe; max |housing area - 3D section area| = 0 m2"	"accepted with no error; v1-lower volume 798818861.627 vs 651949649.258884 if door and arch did not overlap: door and arch now merge into one irregular hole that neither the housing data nor the bindings describe; max |housing area - 3D section area| = 0 m2"
+C	X4	2	.savedBreakdown.solidcraftDocPretty	16909	17124
+C	X4	2	.savedBytes	12058	12231
+C	X5	1	.displayBytes	34616	15624
+C	X5	1	.savedBreakdown.solidcraftDocPretty	9504	9732
+C	X5	1	.savedBytes	9050	9236
