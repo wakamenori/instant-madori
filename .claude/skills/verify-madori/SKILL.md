@@ -232,23 +232,23 @@ c() { printf '%s\n' "$HDRS" | curl -sS -H @- "$@"; }
 
 ### 検証用の利用者で再デプロイをまたいで指示を完了させる
 
-Worker と DO が再起動しても、待たせている指示は完了し、案は一件だけ増える。待ちの180秒の内に staging のデプロイが入るよう、同じ main の版を deploy-staging で起動し直し、その「Migrate and deploy」の段階が始まったときに送る。この段階は16〜31秒で終わった（2026-11 の15回の実行）。前の節と同じく、ヘッダーはシェルの変数に持ち、下の各手順は一つのスクリプトで続けて実行する。`STG`・`J`・`HDRS`・`c` は前の節のとおりに設定し、`D="$EVIDENCE/staging-redeploy"; mkdir -p "$D"` にする。
+Worker と DO が再起動しても、待たせている指示は完了し、案は一件だけ増える。待ちの180秒の内に staging のデプロイが入るよう、同じ main の版を deploy-staging で起動し直し、その「Migrate and deploy」の段階が始まったときに送る。この段階は16〜31秒で終わった（2026-11 の15回の実行）。再デプロイの後も、動いている Workflow のインスタンスは作られたときの版のコードで続き、パターンの DO だけが新しい版で動き直す。前の節と同じく、ヘッダーはシェルの変数に持ち、下の各手順は一つのスクリプトで続けて実行する。`STG`・`J`・`HDRS`・`c` は前の節のとおりに設定し、`D="$EVIDENCE/staging-redeploy"; mkdir -p "$D"` にする。
 
 - **案件を得る。** 前の節と同じ要求で `PID` を設定する。
 - **パターンを足す。** 前の節と同じ要求を、名前を `再デプロイの確認`、出力先を `"$D/pattern.json"` にして送る。`201`。`PAT` を設定する。
-- **デプロイを起動する。** `T0=$(date +%s)000` を設定し、`gh workflow run deploy-staging.yml --ref main`。10秒おいて `RUN=$(gh run list --workflow deploy-staging.yml --event workflow_dispatch --limit 1 --json databaseId,createdAt --jq '.[0].databaseId')` を設定し、`gh run view "$RUN" --json headSha,createdAt` の `headSha` が main の先頭であることを確かめる。
-- **段階が始まるのを待つ。** `for i in $(seq 1 900); do s=$(gh run view "$RUN" --json status,jobs --jq '[.status, (.jobs[0].steps[] | select(.name == "Migrate and deploy") | .status)] | join(" ")'); case "$s" in *" in_progress") break;; completed*) echo "run ended: $s"; break;; esac; sleep 2; done`。`in_progress` で抜ける。`run ended` で抜けたら、実行の失敗を報告して止まる。
+- **デプロイを起動する。** `T0=$(date +%s)000` を設定し、`gh workflow run deploy-staging.yml --ref main`。指揮役が打つときは、打つ前に `T0` を設定し、受け取った run の ID を `RUN` に設定して、次の `RUN=` の行を飛ばす。10秒おいて `RUN=$(gh run list --workflow deploy-staging.yml --event workflow_dispatch --limit 1 --json databaseId,createdAt --jq '.[0].databaseId')` を設定し、`gh run view "$RUN" --json headSha,createdAt` の `headSha` が main の先頭であることを確かめる。
+- **段階が始まるのを待つ。** `for i in $(seq 1 900); do s=$(gh run view "$RUN" --json status,jobs --jq '[.status, ((.jobs[0].steps // [])[] | select(.name == "Migrate and deploy") | .status)] | join(" ")'); case "$s" in *" in_progress") break;; completed*) echo "run ended: $s"; break;; esac; sleep 2; done`。`in_progress` で抜ける。`run ended` で抜けたら、実行の失敗を報告して止まる。
 - **送る。** 前の節の「送る」を、本文を `再デプロイの確認`、出力先を `"$D/accept.json"` にして送る。`202`。`JOB` を設定する。
-- **完了を待つ。** `for i in $(seq 1 600); do c -o "$D/state-1.json" "$STG/api/patterns/$PAT/state"; jq -e --arg j "$JOB" '.lastFinishedJob.jobId == $j and .runningJob == null' "$D/state-1.json" >/dev/null && break; sleep 1; done`。`lastFinishedJob.state` が `completed`。`c -o "$D/revisions.json" -w '%{http_code}\n' "$STG/api/patterns/$PAT/revisions"` は `200` で、`revisions` が一件、その `id` が `lastFinishedJob.revision.id`。`gh run view "$RUN" --json conclusion` が `success`。
-- **Workers Logs を読む。** `T1=$(date +%s)000` を設定し、Workers Logs の検索 API からこのパターンの行を版つきで取り出す。トークンの値は表示しない。
+- **完了を待つ。** `for i in $(seq 1 600); do c -o "$D/state-1.json" "$STG/api/patterns/$PAT/state"; jq -e --arg j "$JOB" '.lastFinishedJob.jobId == $j and .runningJob == null' "$D/state-1.json" >/dev/null && break; sleep 1; done`。`lastFinishedJob.state` が `completed`。`c -o "$D/revisions.json" -w '%{http_code}\n' "$STG/api/patterns/$PAT/revisions"` は `200` で、`revisions` が一件、その `id` が `lastFinishedJob.revision.id`。`gh run view "$RUN" --json conclusion` が `success`。終わりを確かめた時刻を `DONE=$(date +%s)` で残す。
+- **Workers Logs を読む。** Workers Logs の検索 API から、`T0` から今までのこのパターンの行を版つきで取り出す。トークンの値は表示しない。行は数分遅れて出るので、1分おきに読み直し、読むたびに下の順で判断する。読み直しの期限は `DONE` から10分とする。ふつうは確定の数秒後に `job.finished` と DO の `idle` が書かれるが、`wake pattern` の段階が再試行を使い切るまでには約7分かかり、#41 の確認では Workers Logs の行が2〜3分遅れて出たためである。
 
   ```sh
-  T0=$T0 T1=$T1 PAT=$PAT mise exec -- node --env-file="$MAIN/.env" -e '
+  T0=$T0 PAT=$PAT mise exec -- node --env-file="$MAIN/.env" -e '
     const res = await fetch("https://api.cloudflare.com/client/v4/accounts/4a67230af28ec94d9c70ca48572d8e9f/workers/observability/telemetry/query", {
       method: "POST",
       headers: { authorization: `Bearer ${process.env.CLOUDFLARE_API_TOKEN}`, "content-type": "application/json" },
       body: JSON.stringify({ queryId: "adhoc", dry: true, view: "events", limit: 2000,
-        timeframe: { from: Number(process.env.T0), to: Number(process.env.T1) }, parameters: {} }),
+        timeframe: { from: Number(process.env.T0), to: Date.now() }, parameters: {} }),
     });
     const body = await res.json();
     if (!body.success) { console.error(JSON.stringify(body.errors)); process.exit(1); }
@@ -260,4 +260,11 @@ Worker と DO が再起動しても、待たせている指示は完了し、案
     }' >| "$D/logs.jsonl"
   ```
 
-  `$JOB` の `job.step` の `check test hold before render` と `render snapshot` は、違う `version` を持つ。前が古い版、後が新しい版である。新しい版の `pattern.advanced` が一行以上あり、その `outcome` は `running` か `claimed` で、`failed` は無い。`job.finished` の `outcome` が `committed`。二つの段階が同じ版なら、待ちがデプロイをまたいでいないので、新しいパターンでこの節をやり直す。
+  1. 失敗の行が一つでもあれば、ほかの条件は見ずに不合格とし、その行を記録して終える。失敗の行は、`pattern.advance_failed`、`outcome` が `failed` か `stalled` の `pattern.advanced`、`outcome` が `committed` でない `job.finished` である。照合はこれらの後も次のアラームを予約するので、照合が止まった証拠ではない。この確認が合格にならない証拠である。
+  2. `job.finished` と、`outcome` が `idle` の `pattern.advanced`（版は問わない）の両方がそろうまで読み直す。二つのどちらが先に届くかは決まっていない。期限を過ぎてもそろわなければ、足りない行を記録して不合格とする。たとえば、確定の後に `wake pattern` が再試行を使い切ると、Workflow は `job.finished` を書かずに終わる。
+  3. そろったら版を見る。`pattern.advanced` が一つの版だけなら、DO の版の切り替えを確かめられなかったので、新しいパターンでこの節をやり直す。動いている DO が新しい版に移るまでには、待ちの180秒より長くかかることがある。
+  4. 二つの版があれば、次のすべてを満たすと合格、一つでも欠ければ不合格である。
+  - 最初の `pattern.advanced` は古い版の `claimed`、最後は新しい版の `idle`。
+  - 待ちの間（新しい版の最初の `pattern.advanced` から最後の `idle` の前まで）に、新しい版で `outcome` が `running` で `instanceStatus` を持つ `pattern.advanced` が約30秒ごとに出る。最後の `idle` の行は `instanceStatus` を持たない。
+  - `job.step` の `check test hold before render` は、新しい版の最初の `pattern.advanced` より前にある。
+  - `job.step` と `job.finished` は待ちを始めた古い版のままである。`idle` と `job.finished` の前後は問わない。
