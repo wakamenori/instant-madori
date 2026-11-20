@@ -183,7 +183,13 @@ setTimeout(() => process.exit(1), 10000);
     process.execPath,
     [fileURLToPath(new URL("./check.ts", import.meta.url)), "--fast"],
     {
-      env: { ...process.env, PATH: directory + ":" + process.env["PATH"], STEP_PID: pidFile },
+      env: {
+        ...process.env,
+        PATH: directory + ":" + process.env["PATH"],
+        STEP_PID: pidFile,
+        // The outer pnpm check is writing its own results while this test runs.
+        MADORI_TEST_RESULTS_DIR: join(directory, "results"),
+      },
       stdio: ["ignore", "pipe", "pipe"],
       timeout: 10000,
       killSignal: "SIGKILL",
@@ -202,6 +208,7 @@ setTimeout(() => process.exit(1), 10000);
       await sleep(10);
     }
     const pid = Number(readFileSync(pidFile, "utf8"));
+    assert(existsSync(join(directory, "results")), "check used the given results directory");
     check.kill("SIGINT");
     while (!existsSync(pidFile + ".stopping")) {
       assert(Date.now() < deadline, "pnpm stub did not receive SIGTERM");
