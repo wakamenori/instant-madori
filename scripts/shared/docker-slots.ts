@@ -14,13 +14,17 @@ import { z } from "zod";
 import { start, stop } from "./processes.ts";
 
 const poolSizes = { development: 2, runner: 1 } as const;
-export type DockerSlots = { directory: string; pool: keyof typeof poolSizes };
+export type DockerSlots =
+  | { kind: "flock"; directory: string; pool: keyof typeof poolSizes }
+  | { kind: "none"; platform: NodeJS.Platform };
 const slots = Object.entries(poolSizes).flatMap(([pool, size]) =>
   Array.from({ length: size }, (_, i) => ({ pool, name: `${pool}-${i + 1}` })),
 );
 const home = userInfo().homedir;
-export function machineSlots(env = process.env): DockerSlots {
+export function machineSlots(env = process.env, platform = process.platform): DockerSlots {
+  if (platform !== "darwin") return { kind: "none", platform };
   return {
+    kind: "flock",
     directory: join(home, ".local/state/instant-madori/docker-slots"),
     pool: env["GITHUB_ACTIONS"] === "true" ? "runner" : "development",
   };
@@ -94,26 +98,30 @@ type SlotRequest = {
 };
 
 export async function withDockerSlot<T>(
-  { directory, pool }: DockerSlots,
+  config: DockerSlots,
   {
     purpose,
     signal,
     log = console.log,
     pace = { pollMs: 1000, reportEveryMs: 60000 },
   }: SlotRequest,
-  work: (slotName: string) => Promise<T>,
+  work: (slotName: string | undefined) => Promise<T>,
 ): Promise<T> {
+  const report = (message: string) =>
+    log(`[docker-slot] ${new Date().toTimeString().slice(0, 8)} ${message}`);
+  if (config.kind === "none") {
+    report(`Docker slots work only on macOS; running without a slot on ${config.platform}`);
+    return await work(undefined);
+  }
+  const { directory, pool } = config;
   const inherited = process.env["MADORI_DOCKER_SLOT"];
   if (inherited !== undefined)
     throw new Error(
       `Already inside Docker slot ${inherited}; do not wrap pnpm check --full or pnpm dev in docker-slots run`,
     );
-  if (process.platform !== "darwin") throw new Error("Docker slots require macOS");
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   const started = Date.now();
   let nextReport = started;
-  const report = (message: string) =>
-    log(`[docker-slot] ${new Date().toTimeString().slice(0, 8)} ${message}`);
   while (!signal.aborted) {
     for (const slot of slots) {
       if (slot.pool !== pool) continue;
@@ -164,7 +172,8 @@ async function main(args: string[]) {
   const [action, separator, command, ...rest] = args;
   const config = machineSlots();
   if (action === "status" && args.length === 1) {
-    for (const slot of slots) console.log(describe(config.directory, slot.name));
+    if (config.kind === "none") console.log(`Docker slots work only on macOS (${config.platform})`);
+    else for (const slot of slots) console.log(describe(config.directory, slot.name));
     return 0;
   }
   if (action !== "run" || separator !== "--" || !command) {
@@ -186,7 +195,11 @@ async function main(args: string[]) {
       config,
       { purpose: [command, ...rest].join(" "), signal: controller.signal },
       async (name) => {
-        child = start(command, rest, { env: { ...process.env, MADORI_DOCKER_SLOT: name } });
+        child = start(
+          command,
+          rest,
+          name === undefined ? {} : { env: { ...process.env, MADORI_DOCKER_SLOT: name } },
+        );
         const result = await child.finished;
         await stopping;
         if (result.kind === "error") throw result.error;
