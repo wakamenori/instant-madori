@@ -756,3 +756,41 @@ void test("retry alarms double across DO restarts until an operation or successf
   await f.make().alarm();
   assert.equal(f.store.readStopRetry(), undefined);
 });
+
+void test("a response body the operation leaves unread is aborted when the operation settles", async () => {
+  const f = fixture();
+  const gateway = f.make();
+  const fetchPort = f.container.fetchPort.bind(f.container);
+  let signal: AbortSignal | undefined;
+  f.container.fetchPort = (request) => {
+    if (new URL(request.url).pathname === "/healthz") return fetchPort(request);
+    signal = request.signal;
+    return Promise.resolve(new Response(new ReadableStream<Uint8Array>()));
+  };
+  const result = await gateway.run((send) => send(f.call));
+  assert.equal(result.kind, "response");
+  assert(signal);
+  assert.equal(signal.aborted, true, "the unread body's request is aborted");
+  assert.deepEqual(f.openDeadlines(), []);
+});
+
+void test("a send the operation does not await cannot start a request after it settles", async () => {
+  const f = fixture();
+  const gateway = f.make();
+  let kept: ((request: typeof f.call) => Promise<unknown>) | undefined;
+  let inFlight: Promise<unknown> | undefined;
+  await gateway.run((send) => {
+    kept = send;
+    inFlight = send(f.call);
+    return Promise.resolve();
+  });
+  assert(kept && inFlight);
+  await assert.rejects(inFlight, /send after the operation settled/);
+  await assert.rejects(kept(f.call), /send after the operation settled/);
+  assert.equal(
+    f.requests.filter((r) => new URL(r.url).pathname === f.call.path).length,
+    0,
+    "no operation request reached the Container",
+  );
+  assert.deepEqual(f.openDeadlines(), []);
+});

@@ -51,7 +51,7 @@ export interface GatewaySettings {
     intervalMs: number;
   };
 }
-export interface Deadline {
+interface Deadline {
   readonly signal: AbortSignal;
   clear(): void;
 }
@@ -83,6 +83,10 @@ type Unavailable = { kind: "unavailable"; reason: UnavailableReason };
 export type GatewayResult =
   { kind: "response"; response: Response; start: "cold" | "warm"; ms: number } | Unavailable;
 type Ready = { kind: "ready"; record: StartRecord; generation: number; start: "cold" | "warm" };
+interface SendScope {
+  readonly settled: AbortSignal;
+  readonly deadlines: Deadline[];
+}
 
 const startRecordSchema = z.object({
   token: z.string().min(1),
@@ -121,18 +125,19 @@ export class ContainerGateway {
     );
     await this.store.setAlarm(this.#activity() + this.settings.idleTimeoutMs);
   }
-  /** The operation awaits every send it starts and consumes or cancels each response body. */
   async run<T>(
     operation: (send: (request: GatewayRequest) => Promise<GatewayResult>) => Promise<T>,
   ): Promise<T> {
-    const deadlines: Deadline[] = [];
+    const settled = new AbortController();
+    const scope: SendScope = { settled: settled.signal, deadlines: [] };
     ++this.#active;
     try {
       while (this.#resetting) await this.#resetting;
       if (this.container) await this.#touch();
-      return await operation((request) => this.#send(request, deadlines));
+      return await operation((request) => this.#send(request, scope));
     } finally {
-      for (const deadline of deadlines) deadline.clear();
+      settled.abort();
+      for (const deadline of scope.deadlines) deadline.clear();
       while (this.#resetting) await this.#resetting;
       --this.#active;
       if (this.container?.running) {
@@ -220,24 +225,26 @@ export class ContainerGateway {
     this.store.clearStopRetry();
     await this.store.deleteAlarm();
   }
-  async #send(request: GatewayRequest, deadlines: Deadline[]): Promise<GatewayResult> {
+  async #send(request: GatewayRequest, scope: SendScope): Promise<GatewayResult> {
     const container = this.container;
     if (!container) return { kind: "unavailable", reason: "containers_disabled" };
+    if (scope.settled.aborted) throw new Error("send after the operation settled");
     const started = this.environment.now();
     const ready = await this.#ensure(container, request.traceId);
     if (ready.kind === "unavailable") return ready;
+    if (scope.settled.aborted) throw new Error("send after the operation settled");
     try {
       const headers = new Headers();
       headers.set(this.settings.authorizationHeader, `Bearer ${ready.record.token}`);
       headers.set(this.settings.traceHeader, request.traceId);
       if (request.contentType) headers.set("content-type", request.contentType);
       const deadline = this.environment.deadline(request.timeoutMs);
-      deadlines.push(deadline);
+      scope.deadlines.push(deadline);
       const response = await container.fetchPort(
         new Request(`http://container${request.path}`, {
           method: request.method,
           headers,
-          signal: deadline.signal,
+          signal: AbortSignal.any([deadline.signal, scope.settled]),
           ...(request.body === undefined ? {} : { body: request.body }),
         }),
       );
