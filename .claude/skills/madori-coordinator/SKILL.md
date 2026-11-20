@@ -124,6 +124,8 @@ node .claude/skills/madori-coordinator/scripts/rank-ready.mjs
 
 staging は一つしかなく、マージとデプロイのたびに DO と Container が入れ替わって、観測や試験が壊れる。staging を占有する担当は、同時に一人までにする。
 
+staging が空いているとは、占有している担当がおらず、先に始まったデプロイ（main へのマージの自動の実行と、そのやり直しを含む）がすべて終わっていることを言う。占有を始める前に、`gh run list --workflow deploy-staging.yml --limit 5` で、終わっていない実行が無いことを確かめる。
+
 - 占有は次のどちらかで始まる。どちらも、staging が空いているときだけ始める。
   - 占有の要る確認を担当から頼まれて、受けたとき（「ブランチを staging で試す」）。
   - 「staging を占有する」Issue の PR をマージしたとき（「マージを決める」）。
