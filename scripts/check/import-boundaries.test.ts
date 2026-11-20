@@ -127,12 +127,25 @@ for (const [name, path] of [
   assert(path);
   symlinkSync(join(root, path), join(root, `node_modules/@madori/${name}`), "dir");
 }
-for (const path of Object.values(scopes)) write(path);
+for (const path of Object.values(scopes)) {
+  write(path);
+  write(path.replace(/\.ts$/u, ".test.ts"));
+}
+const storageExtensionFiles = ["ts", "tsx", "mts", "cts"].map(
+  (extension) => `apps/worker/src/storage/example-${extension}.${extension}`,
+);
+for (const path of storageExtensionFiles) write(path);
 for (const layer of Object.keys(workerLayers)) {
+  write(`apps/worker/src/${layer}/nested/source.ts`);
   for (const path of [`apps/worker/src/${layer}/x.ts`, `apps/worker/src/${layer}/nested/x.ts`])
     write(path);
 }
 for (const path of [
+  "apps/web/tests/example.ts",
+  "apps/web/src/viewer/nested/example.test.ts",
+  "apps/web/src/viewer/example.test.tsx",
+  "apps/worker/tests/example.ts",
+  "apps/worker/src/services/users.ts",
   "apps/web/src/index.ts",
   "apps/web/src/worker/pool.ts",
   "apps/web/src/style.css",
@@ -569,6 +582,35 @@ void test("contracts public entry keeps its declared package spelling", () => {
   }
 });
 
+void test("storage response import names are case-sensitive", () => {
+  const from = scopes["worker-storage"];
+  assert(
+    resolved(importType("@madori/contracts", "ApiError"), from).some(
+      (diagnostic) => diagnostic.boundaryId === "storage-response",
+    ),
+  );
+  for (const name of ["apiError", "APIERROR"])
+    assert.deepEqual(resolved(importType("@madori/contracts", name), from), [], name);
+});
+
+for (const file of ["stray.ts", "nested/stray.ts"]) {
+  void test(`reports ${file} outside tsconfig before checking imports`, () => {
+    if (file === "nested/stray.ts") {
+      write("nested/tsconfig.json", JSON.stringify({ include: ["included.ts"] }));
+      write("nested/included.ts");
+    }
+    assert.deepEqual(resolved('import "./missing.ts";', file), [
+      {
+        file,
+        line: 1,
+        column: 1,
+        boundaryId: "outside-tsconfig",
+        message: "No tsconfig.json includes this file.",
+      },
+    ]);
+  });
+}
+
 void test("namespace, aliases and import qualifiers enforce response name restrictions", () => {
   for (const source of [
     'import type { ProjectResponse as Alias } from "@madori/contracts";',
@@ -672,8 +714,7 @@ void test("tests preserve viewer and cross-layer exceptions", () => {
 });
 
 void test("every TypeScript extension retains boundaries and strict lint", async () => {
-  for (const extension of ["ts", "tsx", "mts", "cts"]) {
-    const from = scopes["worker-storage"].replace(/\.ts$/u, `.${extension}`);
+  for (const from of storageExtensionFiles) {
     assert(
       resolved(importType("../api/x.ts"), from).some(
         (diagnostic) => diagnostic.boundaryId === "worker-storage-layers",

@@ -124,14 +124,15 @@ export function createImportBoundaryChecker(root: string) {
     manifests.set(dirname(absolute), manifest);
     if (manifest.name) workspaceNames.add(manifest.name);
   }
-  const configs = new Map<string, ts.ParsedCommandLine>();
+  type Project = { path: string; config: ts.ParsedCommandLine; files: Set<string> };
+  const projects = new Map<string, Project>();
   const ambientModules = new Map<string, ts.Symbol[]>();
   function project(file: string) {
     const path = ts.findConfigFile(dirname(file), (path) => ts.sys.fileExists(path));
-    if (!path) throw new Error(`No tsconfig.json for ${file}`);
-    let config = configs.get(path);
-    if (!config) {
-      config = ts.getParsedCommandLineOfConfigFile(
+    if (!path) return undefined;
+    let entry = projects.get(path);
+    if (!entry) {
+      const config = ts.getParsedCommandLineOfConfigFile(
         path,
         {},
         {
@@ -142,9 +143,10 @@ export function createImportBoundaryChecker(root: string) {
         },
       );
       if (!config || config.errors.length) throw new Error(`Invalid tsconfig: ${path}`);
-      configs.set(path, config);
+      entry = { path, config, files: new Set(config.fileNames.map(canonical)) };
+      projects.set(path, entry);
     }
-    return { path, config };
+    return entry.files.has(file) ? entry : undefined;
   }
   function declaredExternal(specifier: string, file: string) {
     const name = packageName(specifier);
@@ -164,13 +166,16 @@ export function createImportBoundaryChecker(root: string) {
       directory = parent;
     }
   }
-  function resolveReference(reference: Reference, file: ts.SourceFile): Resolution {
+  function resolveReference(
+    reference: Reference,
+    file: ts.SourceFile,
+    { path, config }: Project,
+  ): Resolution {
     const specifier = reference.specifier.replaceAll("\\", "/").replace(/[?#].*$/u, "");
     // Package imports maps begin with #; a leading # is not an asset fragment.
     const name = reference.specifier.startsWith("#")
       ? (reference.specifier.split("?")[0] ?? reference.specifier)
       : specifier;
-    const { path, config } = project(file.fileName);
     const target =
       reference.kind === "types"
         ? ts.resolveTypeReferenceDirective(
@@ -222,6 +227,17 @@ export function createImportBoundaryChecker(root: string) {
   return function checkFile(filename: string) {
     const file = canonical(resolve(root, filename));
     const from = relative(root, file).replaceAll("\\", "/");
+    const entry = project(file);
+    if (!entry)
+      return [
+        {
+          file: from,
+          line: 1,
+          column: 1,
+          boundaryId: "outside-tsconfig",
+          message: "No tsconfig.json includes this file.",
+        },
+      ];
     const scopes = Object.entries(typescriptScopes)
       .filter(
         ([, scope]) =>
@@ -236,7 +252,7 @@ export function createImportBoundaryChecker(root: string) {
         row.from.some((scope) => scopes.includes(scope)) &&
         (!isTest || row.appliesToTests),
     );
-    const { config } = project(file);
+    const { config } = entry;
     const source = ts.createSourceFile(
       file,
       readFileSync(file, "utf8"),
@@ -264,7 +280,7 @@ export function createImportBoundaryChecker(root: string) {
           message,
         });
       }
-      const resolved = resolveReference(reference, source);
+      const resolved = resolveReference(reference, source, entry);
       if (resolved.kind === "unresolved") {
         report("unresolved-import", `Cannot resolve ${JSON.stringify(reference.specifier)}.`);
         continue;
@@ -279,7 +295,7 @@ export function createImportBoundaryChecker(root: string) {
           continue;
         if (row.allowTypeImports && reference.usage === "type") continue;
         const namePattern = row.importNamePattern
-          ? new RegExp(row.importNamePattern, "iu")
+          ? new RegExp(row.importNamePattern, "u")
           : undefined;
         if (
           namePattern &&
