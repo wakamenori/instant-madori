@@ -14,5 +14,8 @@ FROM stg_actions_job j LEFT JOIN issue_job ij USING(id)
 UNION ALL SELECT c.id,c.issue_or_pr,'staging_occupancy',c.created_at,(
  SELECT min(e.created_at) FROM stg_github_comment e,json_each(e.markers) m
  WHERE m.value='staging_occupy_end' AND e.issue_or_pr=c.issue_or_pr AND e.created_at>=c.created_at)
-FROM stg_github_comment c,json_each(c.markers) m WHERE m.value='staging_occupy_start';
+FROM stg_github_comment c,json_each(c.markers) m WHERE m.value='staging_occupy_start'
+ -- The coordinator opens and closes occupancy on the Issue; its merge comment on the PR repeats the
+ -- opening line but never closes it.
+ AND c.issue_or_pr NOT IN (SELECT number FROM stg_github_pr);
 CREATE INDEX span_issue ON span(issue,kind,start);
