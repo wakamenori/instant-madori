@@ -14,11 +14,7 @@ pstack の poteto-mode の Orchestrate に従い、各 PR は Autopilot-full の
 - 指揮役は、メインのチェックアウトで動く Claude Code の T3 スレッド一つ。コードも PR も作らない。
 - プログラムの状態は GitHub に置き、milestone、Issue、PR から読み直す。Orchestrate の `notes.md` と store は作らない。show-me-your-work の判断の記録は、Issue と PR のコメントに書く。
 - 担当は T3 のスレッドとして、検証役は指揮役のスレッドの子として立てる。cloud VM の代わりに、このマシンの worktree を使う。
-- 同時に動かす担当は五人まで。担当はこのマシンで、Rust の `target`、`pnpm dev` の固定のポート、CPU とメモリ、ディスクを共有するため。
-- cargo を使うのは、担当と検証役を合わせて同時に一人まで。全 worktree が Rust の `target` を共有し、同時にビルドすると別の worktree の Wasm を使うおそれがあるため。#292 が取り違えを防ぐ仕組みを入れたら、この決まりを外す。
-  - cargo を使う操作には、`pnpm setup`、`pnpm dev`、`pnpm check`（どのモードも）、`pnpm build` を含める。検証役は、アプリを動かすか Rust を検査するときだけ数に入れる。
-  - 担当は、報告を送ったら cargo の枠を空ける。直しで cargo が要る担当には、もう一度頼ませる。検証役は、判定を出したら枠を空ける。
-  - cargo を使わない担当は、madori-owner の「準備」の cargo を使わない準備で進め、cargo を使う検査を runner の `check` に任せる。
+- 同時に動かす担当は五人まで。担当はこのマシンで、`pnpm dev` の固定のポート、CPU とメモリ、ディスクを共有するため。Rust の `target` は worktree ごとに持つので、担当と検証役は同時に cargo を使ってよい。
 - 検証は、head ごとに検証役一人で行う。Autopilot-full の swarm にはしない。
 - マージするかは指揮役が決める。コマンドも指揮役が打ってよい。
 - 着手する Issue の順は [scripts/rank-ready.mjs](scripts/rank-ready.mjs) で出す。依存の鎖の長さは手で数えられないため。ほかのスクリプトとポーリングのループは使わない。
@@ -67,8 +63,7 @@ node .claude/skills/madori-coordinator/scripts/rank-ready.mjs
   - 基準は high。
   - 「PRで決めること」がある Issue と、AGENTS.md が Docker での `pnpm check --full` を求める経路（Container・表示データ）を触る Issue は xhigh。
   - 判断がほとんど要らない機械的な Issue は medium。
-- その担当に cargo を使わせるかを決める。ほかに cargo を使っている担当か検証役がいれば、使わせない。
-- 応答の `modelSelection` に選んだ effort が返ったことを確かめ、その effort と理由、cargo を使わせるかを Issue にコメントする。
+- 応答の `modelSelection` に選んだ effort が返ったことを確かめ、その effort と理由を Issue にコメントする。
 - 最初の指示は次の一行にする。`<threadId>` は指揮役のスレッドの ID で、担当はそこへ報告する。
 
   ```text
@@ -84,8 +79,6 @@ node .claude/skills/madori-coordinator/scripts/rank-ready.mjs
 
 担当から報告が来たら、PR の今の状態を `gh pr view` と `gh pr checks` で確かめてから、検証役を立てる。
 
-- 検証役がアプリを動かすか Rust を検査する PR では、ほかに cargo を使っている担当か検証役がいれば、空くまで立てない。
-- 文書だけの PR のように cargo を使わずに確かめられる PR では、待たずに立てる。指示の最後に「cargo を使わず、madori-owner の『準備』にある cargo を使わない準備で準備する。」と足す。
 - 検証役は、差分の大部分を書いた系統と別の系統のモデルにする。実装は Codex が書くので、普段は Claude Code の Opus にする。差分の大部分を Claude が書いた PR は、Codex に確かめさせる。
 - `delegate_task` の `target` で、モデルと effort を明示する。effort は xhigh に固定し、Issue によって変えない。poteto-mode が検証を上げ下げの例外にしているため。
   - Opus：`{providerInstanceId: "claudeAgent", model: "claude-opus-5-5", options: {effort: "xhigh"}}`
