@@ -1,3 +1,6 @@
+import { z } from "zod";
+import type { Json, Obj } from "./envelope.ts";
+
 const toolInputAttributes: readonly string[] = ["tool_input", "tool_parameters", "arguments"];
 
 /**
@@ -46,8 +49,6 @@ const tokenShapes: readonly { readonly name: string; readonly pattern: RegExp }[
 
 /** Longer strings keep their head and `…[cut <n> chars]`. Heredoc commands can carry whole files. */
 const maxStringLength = 16_384;
-import { z } from "zod";
-import type { Json, Obj } from "./envelope.ts";
 export function object(value: Json | undefined): Obj {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
@@ -56,12 +57,13 @@ function redact(text: string) {
     text = text.replace(pattern, "[redacted:" + name + "]");
   return text.length > maxStringLength ? text.slice(0, maxStringLength) + "…[cut]" : text;
 }
+function identity(key: string) {
+  return /^(?:user\.|enduser\.)/u.test(key) || key === "host.name" || key === "organization.id";
+}
 function prose(key: string) {
   return (
-    /^(?:user\.|enduser\.)/u.test(key) ||
+    identity(key) ||
     [
-      "host.name",
-      "organization.id",
       "prompt",
       "prompt_text",
       "response",
@@ -73,12 +75,16 @@ function prose(key: string) {
 }
 function tool(value: Json, key: string): Json {
   if (typeof value === "string")
-    return toolInputStringKeys.includes(key) ? redact(value) : `[dropped ${value.length} chars]`;
+    return /^\[dropped \d+ chars\]$/u.test(value)
+      ? value
+      : toolInputStringKeys.includes(key)
+        ? redact(value)
+        : `[dropped ${value.length} chars]`;
   if (Array.isArray(value)) return value.map((v) => tool(v, key));
   if (value && typeof value === "object")
     return Object.fromEntries(
       Object.entries(value)
-        .filter(([k]) => !prose(k))
+        .filter(([k]) => !identity(k))
         .map(([k, v]) => [k, tool(v, k)]),
     );
   return value;
@@ -89,7 +95,9 @@ function reduced(value: Json): Json {
   try {
     return { stringValue: JSON.stringify(tool(z.json().parse(JSON.parse(text)), "")) };
   } catch {
-    return { stringValue: `[dropped ${text.length} chars]` };
+    return {
+      stringValue: /^\[dropped \d+ chars\]$/u.test(text) ? text : `[dropped ${text.length} chars]`,
+    };
   }
 }
 function walk(value: Json): Json {
@@ -147,7 +155,9 @@ function digest(text: string) {
       "不合格",
       "PASS",
       "FAIL",
-    ].filter((k) => text.includes(k)),
+    ].filter((k) =>
+      /^[\w-]+$/u.test(k) ? new RegExp("\\b" + k + "\\b", "u").test(text) : text.includes(k),
+    ),
   };
 }
 export function hookPrivacy(p: Obj) {

@@ -7,7 +7,7 @@ export type Registry = Record<
   string,
   { kind: "event" | "observation"; sanitize(payload: Obj): Obj }
 >;
-export type Scope =
+type Scope =
   { kind: "repo" } | { kind: "proof"; subject: string } | { kind: "gated"; subject: string };
 export type Candidate<R extends Registry> = {
   [S in keyof R]: {

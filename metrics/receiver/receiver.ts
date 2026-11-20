@@ -50,6 +50,12 @@ export async function startReceiver(options: Options) {
   }
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("Missing TCP address");
+  const runId = randomUUID(),
+    startedAt = clock().toISOString();
+  let windowStart = startedAt,
+    sequence = 0,
+    abandoned = 0;
+  const t3File = options.t3File ?? join(homedir(), ".t3/userdata/statev2.sqlite");
   let sources: Record<string, Obj> = {},
     failures: Record<string, number> = {};
   const increment = (key: string) => {
@@ -72,14 +78,7 @@ export async function startReceiver(options: Options) {
       const id = c.scope.subject.slice("codex.conversation:".length);
       if (!proofs.has(id)) {
         try {
-          proofs.set(
-            id,
-            codexProof(
-              options.t3File ?? join(homedir(), ".t3/userdata/statev2.sqlite"),
-              dirname(identity),
-              id,
-            ),
-          );
+          proofs.set(id, codexProof(t3File, dirname(identity), id));
         } catch {
           increment("t3_failures");
           proofs.set(id, null);
@@ -103,9 +102,14 @@ export async function startReceiver(options: Options) {
     for (const drop of parsed.drops) count(drop.source, "dropped_" + drop.reason, 1);
   }
   function drain() {
-    for (const name of readdirSync(home.tmp))
-      if (clock().getTime() - statSync(join(home.tmp, name)).mtimeMs > 3600_000)
-        unlinkSync(join(home.tmp, name));
+    for (const name of readdirSync(home.tmp)) {
+      const path = join(home.tmp, name);
+      const stat = statSync(path, { throwIfNoEntry: false });
+      if (stat && clock().getTime() - stat.mtimeMs > 3600_000) {
+        unlinkSync(path);
+        abandoned++;
+      }
+    }
     for (const name of readdirSync(home.ready).sort()) {
       const path = join(home.ready, name);
       ingest(parseHook(readFileSync(path), identity));
@@ -113,17 +117,18 @@ export async function startReceiver(options: Options) {
     }
   }
   function flush() {
-    drain();
+    try {
+      drain();
+    } catch {
+      increment("spool_failures");
+    }
+    const pending = readdirSync(home.ready).sort();
     const at = clock().toISOString();
     for (const row of store.expire(at)) count(String(row.source), "expired", 1);
     for (const id of store.pendingCodex()) {
       let proof;
       try {
-        proof = codexProof(
-          options.t3File ?? join(homedir(), ".t3/userdata/statev2.sqlite"),
-          dirname(identity),
-          id,
-        );
+        proof = codexProof(t3File, dirname(identity), id);
       } catch {
         increment("t3_failures");
         break;
@@ -135,14 +140,38 @@ export async function startReceiver(options: Options) {
         {
           source: "metrics.receiver",
           sourceVersion: "1",
-          naturalKey: randomUUID(),
+          naturalKey: runId + "/" + sequence,
           occurredAt: at,
           scope: { kind: "repo" },
-          payload: { sources, ...failures, spool_pending: readdirSync(home.ready).length },
+          payload: {
+            run_id: runId,
+            started_at: startedAt,
+            window: { from: windowStart, to: at },
+            sources,
+            t3_failures: failures.t3_failures ?? 0,
+            poll_failures: failures.poll_failures ?? 0,
+            spool_failures: failures.spool_failures ?? 0,
+            spool: {
+              pending: pending.length,
+              oldest_pending_at: pending[0]
+                ? statSync(join(home.ready, pending[0])).mtime.toISOString()
+                : null,
+              abandoned,
+            },
+            http: {
+              requests: failures.requests ?? 0,
+              unsupported_media_type: failures.unsupported_media ?? 0,
+              too_large: failures.too_large ?? 0,
+              store_failures: failures.store_failures ?? 0,
+            },
+          },
         },
       ],
       at,
     );
+    sequence++;
+    windowStart = at;
+    abandoned = 0;
     sources = {};
     failures = {};
   }
@@ -156,6 +185,7 @@ export async function startReceiver(options: Options) {
   }
   async function request(req: IncomingMessage, res: ServerResponse) {
     function reply(status: number, data: unknown = {}) {
+      if (status === 413) increment("too_large");
       res.writeHead(status, { "Content-Type": "application/json" });
       res.end(JSON.stringify(data));
     }
@@ -163,6 +193,7 @@ export async function startReceiver(options: Options) {
       if (req.method === "GET" && req.url === "/health") return reply(200, store.health());
       if (req.method !== "POST" || (req.url !== "/v1/logs" && req.url !== "/v1/metrics"))
         return reply(404);
+      increment("requests");
       if (req.headers["content-type"]?.split(";")[0] !== "application/json") {
         increment("unsupported_media");
         return reply(415);

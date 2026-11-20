@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { openL1Writer } from "./store.ts";
-import type { Candidate, Obj } from "./envelope.ts";
+import { hash, type Candidate, type Obj } from "./envelope.ts";
 void test("retries, state transitions, promotion and expiry survive reopening", (t) => {
   const file = join(mkdtempSync(join(tmpdir(), "metrics-")), "db");
   t.after(() => rmSync(join(file, ".."), { force: true, recursive: true }));
@@ -50,7 +50,51 @@ void test("retries, state transitions, promotion and expiry survive reopening", 
     0,
   );
   db.exec("PRAGMA foreign_keys=ON");
-  for (const table of ["l1_record", "l1_source", "admission"]) {
+  const reject = { source: "event", reason: "bad", unitHash: hash("bad unit"), content: null };
+  assert.deepEqual(store.ingest([], at, [reject, reject, { ...reject, unitHash: hash("other") }]), {
+    event: { quarantined: 2 },
+  });
+  assert.throws(() =>
+    store.ingest(
+      [
+        { ...obs, naturalKey: "rollback" },
+        { ...obs, naturalKey: "" },
+      ],
+      at,
+    ),
+  );
+  assert.equal(
+    db.prepare("SELECT count(*) AS n FROM l1_record WHERE natural_key='rollback'").get()?.n,
+    0,
+  );
+  const observation =
+    "INSERT INTO l1_record(source,kind,source_version,observed_at,natural_key,content_hash,payload,prev_ingest_id) VALUES ('state','observation','1',?,'x',?,'{}',?)";
+  const first = db
+    .prepare(
+      "SELECT ingest_id,content_hash FROM l1_record WHERE kind='observation' ORDER BY ingest_id LIMIT 1",
+    )
+    .get();
+  assert.ok(first);
+  assert.throws(() => db.prepare(observation).run(at, hash("four"), null), /UNIQUE/u);
+  assert.throws(
+    () => db.prepare(observation).run(at, hash("four"), first.ingest_id ?? null),
+    /UNIQUE/u,
+  );
+  assert.throws(
+    () => db.prepare(observation).run(at, first.content_hash ?? null, first.ingest_id ?? null),
+    /must change/u,
+  );
+  assert.throws(() => db.prepare(observation).run(at, hash("four"), 999), /must change/u);
+  for (const [table, column] of [
+    ["l1_record", "source"],
+    ["l1_source", "source"],
+    ["admission", "subject"],
+    ["l1_quarantine", "source"],
+  ] as const) {
+    assert.throws(
+      () => db.exec("UPDATE " + table + " SET " + column + "=" + column),
+      /append-only/u,
+    );
     assert.throws(() => db.exec("DELETE FROM " + table), /append-only/u);
   }
   for (const [col, value] of Object.entries({
@@ -81,6 +125,8 @@ void test("retries, state transitions, promotion and expiry survive reopening", 
       ),
     );
   }
-  assert.throws(() => db.exec("UPDATE l1_record SET payload='{}'"), /append-only/u);
+
   assert.throws(() => openL1Writer(file, { state: { kind: "event", sanitize } }), /kind changed/u);
+  db.exec("PRAGMA user_version=2");
+  assert.throws(() => openL1Writer(file, registry), /Unsupported/u);
 });

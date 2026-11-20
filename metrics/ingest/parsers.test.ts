@@ -54,3 +54,41 @@ void test("hook project proves its session and drops arbitrary input", () => {
   assert.equal(row.scope.kind, "proof");
   assert.doesNotMatch(JSON.stringify(registry[row.source].sanitize(row.payload)), /sensitive/u);
 });
+void test("sanitized tool inputs retain commands and discard briefs and tokens on replay", () => {
+  const secret = "gh" + "p_" + "a".repeat(36);
+  const payload = {
+    attributes: [
+      {
+        key: "tool_input",
+        value: {
+          stringValue: JSON.stringify({
+            command: "echo " + secret,
+            prompt: "private brief",
+            subagent_type: "owner",
+          }),
+        },
+      },
+      { key: "output", value: { stringValue: "private output" } },
+    ],
+  };
+  const scrubbed = telemetry(payload);
+  const text = JSON.stringify(scrubbed);
+  assert.doesNotMatch(text, /private|ghp_/u);
+  assert.match(text, /echo \[redacted:github\]/u);
+  assert.deepEqual(telemetry(scrubbed), scrubbed);
+});
+void test("a body without an event name never becomes a natural key", () => {
+  const resource = { attributes: [{ key: "service.name", value: { stringValue: "claude-code" } }] };
+  const log = {
+    attributes: [{ key: "session.id", value: { stringValue: "fake-session" } }],
+    body: { stringValue: "free form body" },
+  };
+  const result = parseOtlp(
+    "logs",
+    Buffer.from(
+      JSON.stringify({ resourceLogs: [{ resource, scopeLogs: [{ logRecords: [log] }] }] }),
+    ),
+  );
+  assert.ok(result.records[0]);
+  assert.doesNotMatch(result.records[0].naturalKey, /free form body/u);
+});
