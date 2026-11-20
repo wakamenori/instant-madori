@@ -140,6 +140,16 @@ Dependabotはnpm・Cargoの更新提案用に残し、upstream本体はsubtree�
 
 PRごとに `.github/workflows/check.yml` が、開発用Macのself-hosted runner（ラベル `madori`）で `pnpm setup` と `pnpm check` を実行します。変更したファイルから `scripts/check/ci-mode.ts` が `--full` を付けるかを決めます。最後に、自動修正で差分が出ていないことを確かめます。GitHubのrunnerは使いません。無料プランのprivateリポジトリでは2コア・ディスクの空き13 GBで、`--full` がディスク不足で失敗し、無料枠も足りないためです。
 
+`pnpm check` は試験ごとの結果を `target/test-results/` に書きます。保存先は `MADORI_TEST_RESULTS_DIR` で変更できます。`check` と `deploy-staging` は、失敗した回も含め、結果を成果物 `test-results-v1-<workflow>-<attempt>` として30日間保存します。取り消した回は保存しません。
+
+`node scripts/check/test-history.ts` で直近200件の成果物を集計し、試験ごとの失敗率を表示します。スキップは分母から除きます。`--last N` で件数を変えられます。`--all` は安定した試験も表示します。`--test <文字列>` は名前にその文字列を含む試験を表示します。判定は次の順です。
+
+- `flaky` は同じコミット、またはmainの実行で成功と失敗の両方を観測した試験です。
+- `failing` は集計期間に失敗だけを観測した試験です。
+- `suspect` は成功歴があり、複数のブランチで失敗した試験、またはmainで失敗して他のブランチでだけ成功した試験です。
+- `branch-local` は成功歴があり、失敗が一つのPRブランチに限られる試験です。
+- `stable` は成功だけを観測した試験です。
+
 checkoutは毎回clone直後と同じ状態から始めます。Rustの `target/` と `.tools/` だけは、`$RUNNER_TOOL_CACHE/madori` へのシンボリックリンクで実行の間に再利用します。runnerの `--full` は、手元の `pnpm dev` や `pnpm check --full` と同時に動いても衝突しません。
 
 runnerでも `--full` の最後に、手元と同じ規則でDockerのビルドキャッシュを回収します。cache mountは合計8 GiBまで、最近使ったregularとfrontendは別枠で合計4 GiBまで残します。使用中の記録はBuildKitが保持するため、並行するビルドの記録は消しません。使用中のcache mountの0バイトという報告値では実容量を把握できません。runnerの `target/` と `.tools/` はこの回収の対象にしません。

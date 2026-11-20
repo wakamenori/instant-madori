@@ -40,6 +40,14 @@ jobs:
       - run: pnpm check --full
         env:
           MADORI_MIGRATION_BASE: ${{ github.event.before }}
+          MADORI_TEST_RESULTS_DIR: ${{ runner.temp }}/test-results
+      - if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results-v1-${{ github.workflow }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/test-results/
+          retention-days: 30
+          if-no-files-found: ignore
       # Credentials come from the runner's MADORI_ENV_FILE (README: PRの検査); read only what each step needs.
       - name: Migrate and deploy
         working-directory: apps/worker

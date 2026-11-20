@@ -26,6 +26,8 @@
 
 ## 検査と引き継ぎ
 
+- 試験の失敗を判断する前に、`node scripts/check/test-history.ts` で失敗率を確認する。不安定と分かった試験は不具合のIssueにする。自動の再実行も手動の `gh run rerun <run> --failed` も、不安定なのか常に失敗するのかを見分けるためだけに使う。合格させるために再実行しない。試験を一時的に外すときは、外した箇所からそのIssueにリンクする。
+
 - miseで固定したツールと、READMEに書いたコマンドを使う。`pnpm check --fast` は、TypeScriptとRustを自動修正したうえで検査する。`pnpm check` は、それに加えて両方のテストを実行する。`pnpm check --full` は、ビルド、ローカルでの統合検査、依存関係の監査まで行う。依存関係、upstream、WasmのAPIを変更した後にも `--full` を使う。コミットの前に、変更に関係する検査を手元で実行する。PRの検査と、マージの前に確かめることは、README「PRの検査（self-hosted runner）」にある。実行していない検査を、実行したと書かない。
 - `apps/geometry`、Dockerfile、`crates/display`・`crates/geometry-api`・`crates/modeling`、Workerの `geometry/`・サンプルAPIと形状サービス、Containerの設定など、Containerまたは表示データの経路を変更した後は、Dockerを起動して `pnpm check --full` で実Containerとの接続を検査する。
 - TypeScriptのアプリとスクリプトには、型情報を使うESLintと厳格な型検査を適用し続ける。信頼できないJSONは、外から受け取る箇所でパースして検証する。依存関係のカタログとツールのバージョン固定を、互いに食い違わない状態に保つ。ロックファイルの変更は内容を確認する。
