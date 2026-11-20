@@ -14,12 +14,12 @@
 
 受け取った記録を書き換えずに溜める層と、それを解釈する層を分ける。解釈の規則を変えたときに、記録を集め直さずに計算し直すためである。
 
-| 層         | 置くもの                             | 書くもの             | 作り直し               |
-| ---------- | ------------------------------------ | -------------------- | ---------------------- |
-| L1 raw     | 受け取ったままの記録と、その出どころ | 受け口とポーラーだけ | 作り直さない。追記だけ |
-| L2 staging | ソースの単位で型を付けた表           | 変換                 | L1だけから作り直す     |
-| L3 core    | ファクトリーの領域モデル             | 変換                 | L1だけから作り直す     |
-| L4 marts   | 指標と、計測の仕組み自体の健康状態   | 変換                 | L1だけから作り直す     |
+| 層         | 置くもの                             | 書くもの   | 作り直し               |
+| ---------- | ------------------------------------ | ---------- | ---------------------- |
+| L1 raw     | 受け取ったままの記録と、その出どころ | 受け口だけ | 作り直さない。追記だけ |
+| L2 staging | ソースの単位で型を付けた表           | 変換       | L1だけから作り直す     |
+| L3 core    | ファクトリーの領域モデル             | 変換       | L1だけから作り直す     |
+| L4 marts   | 指標と、計測の仕組み自体の健康状態   | 変換       | L1だけから作り直す     |
 
 viewerはL4を読む。詳しく見るときはL3を読む。
 
@@ -36,18 +36,20 @@ viewerはL4を読む。詳しく見るときはL3を読む。
 L1の行は、どの出どころでも同じ列を持つ。
 
 - `ingest_id` は、取り込みごとの識別子である。
-- `source` は出どころで、例えば `claude.otel`、`claude.hook`、`codex.hook`、`t3.run`、`github.actions.job`、`factory.cli` である。
+- `source` は出どころで、例えば `claude.otel.log`、`claude.hook`、`codex.otel.log`、`t3.run`、`github.actions.job`、`factory.cli` である。
+- `kind` は出どころの種類で、出来事は `event`、状態の観測は `observation` とする。
+- `prev_ingest_id` は同じ対象の直前の観測を指す。
 - `source_version` は、出どころの形式の版である。
 - `observed_at` は取り込んだ時刻、`occurred_at` は出どころが言う発生時刻である。`occurred_at` は無ければ空にする。
 - `natural_key` は出どころの識別子、`content_hash` はpayloadの内容のハッシュである。
-- `payload` は、受け取ったままのJSONである。
+- `payload` は、保存前に下記のプライバシー規則を適用したJSONである。
 
 出どころには二つの種類がある。
 
 - 起きたことが一度だけ届くもの（OTel、hook、CLI）は、届いたまま追記する。
 - 今の状態を読みに行くもの（GitHubのPRとActionsのjob、T3のスレッドとターン）は、前回の観測と内容が違うときだけ、新しい観測として追記する。T3の表のように履歴を持たない出どころでも、いつ何が変わったかがL1に残る。
 
-重複は、`source`、`natural_key`、`content_hash` の組で除く。入口で検証するのは包みの形だけで、payloadはL2で解釈する。
+一度だけ届く出どころの重複は、`source`、`natural_key`、`content_hash` の組で除く。状態を読みに行く出どころは、同じものの最新の観測と内容が同じときだけ除く。A、B、Aと変わったときの二度目のAも残すためである。どちらの決まりも、L1の表の一意の索引が守る。入口で検証するのは包みの形だけで、payloadはL2で解釈する。
 
 ## L2は出どころの癖を吸収する
 
@@ -85,11 +87,17 @@ L4は、L3から指標を計算する。指標の定義はコードとして版�
 - マージの関門は、マージを待った時間を理由ごとに持つ。
 - 担い手は、役割とeffortごとに、モデルとツールの時間、トークン、費用を持つ。
 - 流れ全体は、WIP（担当の枠の埋まり具合）、スループット、flow efficiencyを持つ。flow efficiencyは、作業していた時間を全体の時間で割った値である。
-- 計測の仕組みの健康状態は、出どころごとの最後の取り込み、取り込みの遅れ、隔離した件数を持つ。
+- 計測の仕組みの健康状態は、出どころごとの最後の取り込み、取り込みの遅れ、隔離した件数を持つ。受け口は1分ごとに、出どころごとの件数（追記、重複、保留、期限切れ、L1に入れずに捨てた数）と最後に取り込んだ時刻を、出どころ `metrics.receiver` の記録としてL1に書く。そのため健康状態もL1だけから作り直せる。
 
 ## 記録は三つの部品で取り込む
 
-- 受け口は、launchdで常駐し、OTLP/HTTPとhookの記録を受ける。L1に書くのは受け口だけにして、書き手を一つにする。受け口が止まっている間は、hookが一時ファイルに書き、受け口が戻ったときに取り込む。受け口のポートは、`pnpm dev` が使う5173と8787を避ける。
+受け口は `node metrics/receiver/receiver.ts` で起動する。`127.0.0.1:4318` を確保してからDBを開き、spoolを取り込んでからHTTP要求を処理する。二つ目の受け口が同じポートを確保できなければ、DBを開く前に終了する。
+
+- ログは `POST /v1/logs`、メトリクスは `POST /v1/metrics` にOTLP/HTTP JSONで送る。ログは1件ずつ、メトリクスはデータ点ごとに所属を判定する。保留を含む書き込みが確定したら200、保存に失敗したら503を返す。
+- 検証に失敗した要求は、信号の種類、バイト数、SHA-256、検証エラーのパスだけを隔離する。JSONとして読めない要求は隔離して400を返す。
+- `GET /health` はSQLiteの `health_source` ビューを返す。出どころごとに最終受信時刻、過去24時間の件数と遅れ、隔離・期限切れの件数、現在の保留件数を読める。
+
+- 受け口は、launchdで常駐し、OTLP/HTTPとhookの記録を受ける。L1に書くのは受け口だけにして、書き手を一つにする。hookは受け口に送らず、いつも一時ファイル（spool）に書いて終わる。受け口は1秒ごとにspoolを取り込み、書き込みが成功した後にファイルを消す。受け口が止まっている間はspoolに溜まり、戻ったときに、OTLPを受け始める前に取り込む。受け口がこのマシンで一度も動いていなければ、hookは何も書かない。受け口のポートはOTLP/HTTPの既定の4318で、`pnpm dev` が使う5173と8787を避ける。
 - ポーラーは、GitHub（Issue、依存、PR、コメント、Actionsのjobとstep）を数分ごとに、T3のDBを1分ごとに読む。T3のDBは読み取り専用で開く。
 - hookは、リポジトリの `.claude/settings.json` に置き、SessionStart、UserPromptSubmit、Stopの三つだけを使う。SessionStartは、`session_id` とT3のスレッド（`T3CODE_THREAD_ID`）とcwdを結ぶ。UserPromptSubmitとStopは、ターンの始まりと終わりを記録する。ツールとモデルの時間はOTelが出すので、ツールを呼ぶたびに動くhookは使わない。
 
@@ -98,13 +106,13 @@ OTelは、リポジトリではなくこのマシンの設定で有効にする�
 - Claude Codeは、`~/.claude_personal/settings.json` の `env` で有効にする。T3は、このフォルダーを `CLAUDE_CONFIG_DIR` としてClaude Codeを起動する。
 - Codexは、`~/.codex/config.toml` の `[otel]` で有効にする。Codexのプロジェクトのhookは、`hooks.json` の絶対パスごとに信頼の登録が要り、Issueごとに作るworktreeでは動かないので使わない。
 
-どちらもこのマシンのすべてのセッションに効く。受け口は、SessionStartでこのリポジトリと結べたセッションと、T3のDBでこのリポジトリのスレッドと結べたCodexの会話だけをL1に書き、ほかは捨てる。
+どちらもこのマシンのすべてのセッションに効く。受け口は、hookの記録でこのリポジトリと結べたセッションと、T3のDBでこのリポジトリのスレッドと結べたCodexの会話だけをL1に書き、ほかは捨てる。hookは、セッションのプロジェクトの `.git` が何を指すかを書き、受け口はそれがこのリポジトリのgitの共通ディレクトリかを確かめる。本体のチェックアウトと、Claude CodeとT3が作るworktreeは、どれも同じ共通ディレクトリを持つ。Codexの `conversation.id` は、読み取り専用の `~/.t3/userdata/statev2.sqlite` でCodexスレッドの `nativeThreadRef.nativeId` と照合する。本体のチェックアウトがプロジェクトの `workspace_root` と一致したら、根拠を `t3.codex_link` としてL1に残す。照合に失敗した回数は受け口の健康記録に含める。結べるまでの記録はプライバシー規則を適用してSQLiteに保留し、24時間のうちに結べなければL1に入れずに捨てる。
 
 過去の分は、T3のDB、会話ログ、GitHubから一度だけ取り込む。取り込んだ記録の `source` には、これからの記録と区別できる出どころの名前を付ける。
 
 ## 保存はSQLite、変換はSQLで行う
 
-- DBは、Nodeに組み込みの `node:sqlite` で扱うSQLiteで、WALモードで開く。置き場所は `~/Library/Application Support/instant-madori/metrics.sqlite` で、リポジトリとworktreeの外である。
+- DBは、Nodeに組み込みの `node:sqlite` で扱うSQLiteで、WALモード、`synchronous=FULL` で開く。置き場所は `~/Library/Application Support/instant-madori/metrics.sqlite` で、リポジトリとworktreeの外である。`INSTANT_MADORI_METRICS_HOME` でDBとspoolの親ディレクトリを指定できる。
 - L2〜L4は、SQLファイルで書く。小さなTypeScriptの実行役が、それを依存の順に流して作る。
 - L2から上の計算が遅くなったら、L2から上をDuckDBに移す。DuckDBは書き手が一つのプロセスに限られるので、L1には使わない。
 
@@ -113,8 +121,9 @@ OTelは、リポジトリではなくこのマシンの設定で有効にする�
 L1は直さない約束なので、入れた記録を後から消すのは難しい。そのため、入れるものを次のように決める。
 
 - 指示の本文（ユーザーと指揮役が書いた文）は入れない。UserPromptSubmitの本文からは、役割、Issue、PR、ターンを起こしたものの種類だけを取り出し、本文は捨てる。Stopの `last_assistant_message` も捨てる。
-- 利用者を示す属性は入れない。OTelの記録にある `user.email`、`user.id`、`user.account_uuid`、`user.account_id`、`organization.id` は、受け口で捨てる。
+- 利用者を示す属性は入れない。OTelの記録にある `user.email`、`user.id`、`user.account_uuid`、`user.account_id`、`organization.id`、`host.name` は、受け口で捨てる。
 - コマンドの文字列は入れる。後で分類を変えたときに、集め直さずに済むためである。既知の形のトークンは、受け口で伏せる。
+- ツールの入力（OTelの `tool_input`、`tool_parameters`、Codexの `arguments`）は、コマンドと、ツールが働いた場所（ファイルのパス、パターン、URL）だけを残し、ほかの文字列は長さだけにする。サブエージェントへの指示やほかのスレッドへのメッセージは、指揮役と担当が書いた文だからである。ツールの出力（Codexの `output`）も入れない。
 - DBは、このマシンの外に出さない。
 
 ## 指揮役は計測を意識しない
@@ -127,14 +136,18 @@ L1は直さない約束なので、入れた記録を後から消すのは難し
 - `metrics/` だけの変更では、stagingへデプロイしない。そのため、計測のPRのマージは、staging占有に関わらず行える。
 - ポーラーは、GitHub APIの上限を指揮役と分け合う。条件付きリクエストを使い、残りが一定の数を下回ったら次の周期まで待つ。
 - 計測の健康状態は、viewerにだけ出す。指揮役の見回りには出さない。
-- `metrics/` は、`apps/`、`crates/`、`packages/` をimportしない。サービスも `metrics/` をimportしない。`metrics/` にコードを置くときに、この向きを `scripts/check/boundaries.ts` の表に加えて検査する。
+- `metrics/` は、`apps/`、`crates/`、`packages/`、`scripts/` をimportしない。サービスも `metrics/` をimportしない。hookはNodeの組み込み、`metrics/home.ts` とhook内だけを読み込み、取り込みのパーサーはI/Oを行わない。L1への書き込みを開始できるのは受け口だけである。各境界を `scripts/check/boundaries.ts` の表に加えて検査する。
 
 ## フォルダーの構成
 
 ```text
 metrics/
 ├── README.md   この設計
-├── ingest/     受け口、ポーラー、hookの送り先
+├── home.ts     DBとspoolの置き場所
+├── hook/       hookと、hookが受け口に渡すspoolの形式
+├── ingest/     OTLPとhookの解釈、所属の判定
+├── l1/         出どころの表、保存前のプライバシー規則、L1の書き込みとスキーマ
+├── receiver/   HTTP、spoolの取り込み、T3照合、ポーラーの起動
 ├── models/     L2〜L4のSQL（staging/、core/、marts/）
 ├── build/      変換の実行役
 └── viewer/     viewer
