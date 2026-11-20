@@ -75,13 +75,14 @@ try {
 
   const input = await z
     .object({
-      kind: z.enum(["seed", "overlap", "rows"]),
+      kind: z.enum(["seed", "overlap", "rows", "queued", "orphaned"]),
       ownerId: signedInOwner,
       patternId: z.uuid(),
     })
     .parseAsync(JSON.parse(process.argv[3] ?? ""));
+  const ageMs = input.kind === "queued" || input.kind === "orphaned" ? 600_000 : 0;
   const runtime: Runtime = {
-    now: () => new Date().toISOString(),
+    now: () => new Date(Date.now() - ageMs).toISOString(),
     newId: () => crypto.randomUUID(),
     newTraceId: () => crypto.randomUUID(),
   };
@@ -108,6 +109,11 @@ try {
       .bind(input.patternId)
       .all();
     console.log(JSON.stringify(rows.results));
+  } else if (input.kind === "queued" || input.kind === "orphaned") {
+    const job = await accept();
+    if (input.kind === "orphaned")
+      assert.equal((await claimNextJob(deps, { patternId: input.patternId })).kind, "claimed");
+    console.log(JSON.stringify(job));
   } else if (input.kind === "overlap") {
     const jobs = [await accept(), await accept()];
     assert.equal((await claimNextJob(deps, { patternId: input.patternId })).kind, "claimed");

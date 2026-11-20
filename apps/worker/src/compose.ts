@@ -8,6 +8,7 @@ import type { JobExecutionReference } from "./services/jobs.ts";
 import type {
   JobWorkflowDeps,
   PatternCoordinatorDeps,
+  StalledPatternSweepDeps,
   Runtime,
   ServiceDeps,
 } from "./services/deps.ts";
@@ -30,7 +31,7 @@ function patternWake(env: Pick<Env, "PATTERNS">): ServiceDeps["wakePattern"] {
 
 export function patternCoordinatorDeps(
   env: Pick<Env, "DB" | "BLOBS">,
-  workflow: Pick<Workflow<JobExecutionReference>, "createBatch">,
+  workflow: Pick<Workflow<JobExecutionReference>, "createBatch" | "get">,
   runtime: Runtime,
 ): PatternCoordinatorDeps {
   const { jobs } = createStore(d1(env.DB), r2(env.BLOBS));
@@ -38,12 +39,26 @@ export function patternCoordinatorDeps(
     store: {
       jobs: {
         claim: jobs.claim,
-        activeReference: jobs.activeReference,
+        restore: jobs.restore,
+        failAndHoldQueue: jobs.failAndHoldQueue,
+        activeJob: jobs.activeJob,
         holdingJob: jobs.holdingJob,
       },
     },
     jobRuns: jobRuns(workflow),
     runtime,
+  };
+}
+
+export function stalledPatternSweepDeps(
+  env: Pick<Env, "DB" | "BLOBS" | "PATTERNS">,
+  runtime: Runtime,
+): StalledPatternSweepDeps {
+  const { jobs } = createStore(d1(env.DB), r2(env.BLOBS));
+  return {
+    store: { jobs: { stalledPatterns: jobs.stalledPatterns } },
+    runtime,
+    wakePattern: patternWake(env),
   };
 }
 

@@ -7,7 +7,8 @@ import type {
   JobStepConfig,
   JobSteps,
   JobWorkflowDeps,
-  PatternAdvance,
+  Reconciliation,
+  StalledPatternSweepDeps,
   PatternCoordinatorDeps,
 } from "./deps.ts";
 import { instructionBodySchema, nameSchema } from "@madori/contracts";
@@ -126,11 +127,11 @@ export function readCurrentJobExecution(
   return store.jobs.restore(reference);
 }
 
-export function readActiveJobReference(
-  { store }: StoreDeps<"jobs", "activeReference">,
+export function readActiveJob(
+  { store }: StoreDeps<"jobs", "activeJob">,
   input: { patternId: string },
 ) {
-  return store.jobs.activeReference(input);
+  return store.jobs.activeJob(input);
 }
 
 export async function saveJobSnapshot(
@@ -196,19 +197,74 @@ export type JobEnd =
   | { kind: "not_running"; reason: JobFailureReason };
 export type JobStepResult = Saved | NotCommitted | JobEnd | TestHoldDecision | { kind: "woken" };
 
-export async function advancePattern(
+export const recovery = {
+  stalledRunGraceMs: 24 * 60 * 60 * 1000,
+  sweepUnchangedMs: 5 * 60 * 1000,
+  sweepLimit: 200,
+} as const;
+
+export async function reconcilePattern(
   deps: PatternCoordinatorDeps,
   input: { patternId: string },
-): Promise<PatternAdvance> {
+): Promise<Reconciliation> {
   const claim = await claimNextJob(deps, input);
-  const job =
-    claim.kind === "claimed" ? claim.right.reference : await readActiveJobReference(deps, input);
-  if (job === null) {
+  if (claim.kind === "claimed") {
+    const job = claim.right.reference;
+    await deps.jobRuns.observe(job);
+    return { kind: "claimed", job };
+  }
+  const active = await readActiveJob(deps, input);
+  if (!active) {
     const hold = await deps.store.jobs.holdingJob(input.patternId);
     return hold ? { kind: "queue_held", heldBy: hold.heldBy } : { kind: "idle" };
   }
-  const instance = await deps.jobRuns.start(job);
-  return { kind: claim.kind === "claimed" ? "claimed" : "running", job, instance };
+  const job = active.reference;
+  const run = await deps.jobRuns.observe(job);
+  if (run.kind === "started") return { kind: "run_restarted", job };
+  const { instanceStatus } = run;
+  if (run.kind === "progressing") return { kind: "running", job, instanceStatus };
+  if (
+    run.kind === "stalled" &&
+    Date.parse(deps.runtime.now()) - Date.parse(active.claimedAt) < recovery.stalledRunGraceMs
+  )
+    return { kind: "stalled", job, instanceStatus };
+  const execution = await readCurrentJobExecution(deps, job);
+  if (
+    execution.kind === "active" &&
+    (await recordJobFailure(deps, execution.right)).kind === "recorded"
+  )
+    return { kind: "failed_lost_run", job, instanceStatus };
+  return { kind: "settled_meanwhile", job };
+}
+
+const watchesAfter = {
+  claimed: true,
+  run_restarted: true,
+  running: true,
+  stalled: true,
+  failed_lost_run: true,
+  settled_meanwhile: true,
+  queue_held: false,
+  idle: false,
+} satisfies Record<Reconciliation["kind"], boolean>;
+
+export function keepsWatching(outcome: Reconciliation) {
+  return watchesAfter[outcome.kind];
+}
+
+export async function sweepStalledPatterns(deps: StalledPatternSweepDeps) {
+  const unchangedSince = new Date(
+    Date.parse(deps.runtime.now()) - recovery.sweepUnchangedMs,
+  ).toISOString();
+  const ids = await deps.store.jobs.stalledPatterns({ unchangedSince, limit: recovery.sweepLimit });
+  const wakes = await Promise.allSettled(ids.map(async (id) => deps.wakePattern(id)));
+  const wakeFailed = wakes.filter((wake) => wake.status === "rejected").length;
+  return {
+    found: ids.length,
+    woken: ids.length - wakeFailed,
+    wakeFailed,
+    truncated: ids.length === recovery.sweepLimit,
+  };
 }
 
 export const sampleRevisionName = "サンプルの形";

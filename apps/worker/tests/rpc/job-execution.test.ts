@@ -6,7 +6,7 @@ import {
   saveJobSnapshot,
   completeJob,
   recordJobFailure,
-  readActiveJobReference,
+  readActiveJob,
   readCurrentJobExecution,
 } from "../../src/services/jobs.ts";
 import type { JobExecutionRight as Right } from "../../src/storage/job-execution.ts";
@@ -347,10 +347,12 @@ await test("Job execution through services on real D1 and R2", async (t) => {
       const accepted = await accept(patternId);
       const zero = { patternId, jobId: accepted.job.id, generation: 0 };
       assert.deepEqual(await readCurrentJobExecution(deps, zero), { kind: "invalid" });
-      assert.equal(await readActiveJobReference(deps, { patternId }), null);
+      assert.equal(await readActiveJob(deps, { patternId }), null);
       await claimNextJob(deps, { patternId });
-      const reference = await readActiveJobReference(deps, { patternId });
-      assert(reference);
+      const active = await readActiveJob(deps, { patternId });
+      assert(active);
+      const { reference, claimedAt } = active;
+      assert.equal(claimedAt, now);
       assert.deepEqual(reference, { ...zero, generation: 1 });
       assert.deepEqual(await readCurrentJobExecution(deps, { ...reference, generation: 2 }), {
         kind: "invalid",
@@ -367,7 +369,7 @@ await test("Job execution through services on real D1 and R2", async (t) => {
         await count(),
         before.map((n) => Number(n) + 1),
       );
-      assert.equal(await readActiveJobReference(deps, { patternId }), null);
+      assert.equal(await readActiveJob(deps, { patternId }), null);
       for (const terminal of ["failed", "cancelled"] as const) {
         const next = await ready();
         const ref = next.right.reference;

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { setTimeout } from "node:timers/promises";
 import { promisify } from "node:util";
 import { test } from "node:test";
 import { z } from "zod";
@@ -35,20 +36,25 @@ await test(
       assert.equal(response.status, 201);
       return createProjectResponseSchema.parse(await response.json()).pattern;
     }
-    async function fixture(kind: "seed" | "rows" | "overlap", patternId: string): Promise<unknown> {
-      return worker.withPausedWorker(async (state) => {
-        const { stdout } = await execFileAsync(
-          process.execPath,
-          [
-            fileURLToPath(new URL("./rpc/job-workflow-fixture.ts", import.meta.url)),
-            state,
-            JSON.stringify({ kind, ownerId, patternId }),
-          ],
-          { timeout: 120_000, maxBuffer: 1024 * 1024 },
-        );
-        const result: unknown = JSON.parse(stdout.trim().split("\n").at(-1) ?? "");
-        return result;
-      });
+    async function fixtureInState(
+      state: string,
+      kind: "seed" | "rows" | "overlap" | "queued" | "orphaned",
+      patternId: string,
+    ): Promise<unknown> {
+      const { stdout } = await execFileAsync(
+        process.execPath,
+        [
+          fileURLToPath(new URL("./rpc/job-workflow-fixture.ts", import.meta.url)),
+          state,
+          JSON.stringify({ kind, ownerId, patternId }),
+        ],
+        { timeout: 120_000, maxBuffer: 1024 * 1024 },
+      );
+      const result: unknown = JSON.parse(stdout.trim().split("\n").at(-1) ?? "");
+      return result;
+    }
+    function fixture(kind: "seed" | "rows" | "overlap", patternId: string) {
+      return worker.withPausedWorker((state) => fixtureInState(state, kind, patternId));
     }
     async function accept(patternId: string) {
       const response = await worker.call(`/api/patterns/${patternId}/messages`, {
@@ -67,6 +73,47 @@ await test(
         holdsQueue: z.literal(0),
         updatedAt: z.iso.datetime(),
       }),
+    );
+    await t.test(
+      "a scheduled sweep recovers a missed wake and an orphaned claim after Worker restart",
+      async () => {
+        const queued = await create();
+        const orphaned = await create();
+        const [a, b] = await worker.withPausedWorker(
+          async (state) =>
+            [
+              acceptedJobSchema.parse(await fixtureInState(state, "queued", queued.id)),
+              acceptedJobSchema.parse(await fixtureInState(state, "orphaned", orphaned.id)),
+            ] as const,
+        );
+        await setTimeout(2000);
+        for (const [pattern, job, outcome] of [
+          [queued, a, "claimed"],
+          [orphaned, b, "running"],
+        ] as const) {
+          const response = await worker.call(`/api/patterns/${pattern.id}/state`, { as: owner });
+          const state = patternStateResponseSchema.parse(await response.json());
+          assert.deepEqual(outcome === "claimed" ? state.queuedJobs[0] : state.runningJob, job);
+        }
+        assert.equal((await fetch(`${worker.origin}/cdn-cgi/local/scheduled`)).status, 200);
+        for (const [pattern, job, outcome] of [
+          [queued, a, "claimed"],
+          [orphaned, b, "running"],
+        ] as const) {
+          const state = await settleJobs(worker, owner, pattern.id, [job.jobId]);
+          assert.equal(state.lastFinishedJob?.state, "failed");
+          assert.equal(
+            (await worker.logLine(job.jobId, "job.finished"))["reason"],
+            "containers_disabled",
+          );
+          const advance = await worker.logLine(job.jobId, "pattern.advanced");
+          assert.equal(advance["outcome"], outcome);
+          assert.equal(advance["instance"], "created");
+        }
+        assert(
+          worker.logEntries().some((line) => line["event"] === "jobs.swept" && line["woken"] === 2),
+        );
+      },
     );
     await t.test(
       "a job fails without retry and keeps the previous revision and history",

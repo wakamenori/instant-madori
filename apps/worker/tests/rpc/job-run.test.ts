@@ -2,13 +2,12 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   acceptInstruction,
-  advancePattern,
   claimNextJob,
   runJob,
   sampleRevisionName,
   jobReferenceSchema,
 } from "../../src/services/jobs.ts";
-import type { JobExecutionReference, JobSteps, JobStepConfig } from "../../src/services/jobs.ts";
+import type { JobExecutionReference } from "../../src/services/jobs.ts";
 import type { JobWorkflowDeps } from "../../src/services/deps.ts";
 import type { GeometryResult, DisplayArtifact } from "../../src/geometry/geometry-protocol.ts";
 import { requestKey } from "../../src/services/requests.ts";
@@ -16,46 +15,7 @@ import { jobTestHoldSettingSchema } from "../../src/services/job-test-hold.ts";
 import { jobInstanceId, jobRuns } from "../../src/workflows/job-runs.ts";
 import { applyJobMigrations, openJobDatabase, now } from "./jobs-support.ts";
 
-function plain(value: unknown): void {
-  if (value === null || typeof value !== "object") return;
-  const prototype: unknown = Object.getPrototypeOf(value);
-  assert(
-    prototype === Object.prototype || prototype === Array.prototype,
-    "step results are plain serializable data",
-  );
-  for (const child of Object.values(value)) plain(child);
-}
-function stepEngine({ rerun, loseResults }: { rerun?: string; loseResults?: string } = {}) {
-  const cache = new Map<string, unknown>();
-  const attempts: string[] = [];
-  const steps: JobSteps = {
-    sleep: async () => {},
-    async do<T extends Rpc.Serializable<T> & { kind: string }>(
-      name: string,
-      config: JobStepConfig,
-      body: () => Promise<T>,
-    ) {
-      if (cache.has(name)) return structuredClone(cache.get(name)) as T;
-      for (let attempt = 0; ; attempt++) {
-        attempts.push(name);
-        try {
-          if (name === rerun) {
-            plain(await body());
-          }
-          const result = await body();
-          plain(result);
-          if (name === loseResults) throw new Error("Step result lost");
-          cache.set(name, result);
-          return structuredClone(result);
-        } catch (error) {
-          if (attempt === config.retries.limit) throw error;
-        }
-      }
-    },
-  };
-  return { steps, cache, attempts };
-}
-
+import { stepEngine } from "./job-steps.ts";
 await test("Job runs restore D1 execution rights across retries and lost responses", async (t) => {
   const db = await openJobDatabase();
   t.after(() => db.dispose());
@@ -392,84 +352,6 @@ await test("Job runs restore D1 execution rights across retries and lost respons
     assert.equal(await f.snapshots(), 0);
     assert.deepEqual(f.wakes, [f.job.patternId]);
   });
-  await t.test("concurrent advances claim in order and reconcile the same generation", async () => {
-    const patternId = await pattern();
-    const a = await accept(patternId);
-    const b = await accept(patternId);
-    const starts: JobExecutionReference[] = [];
-    const deps = {
-      ...base,
-      jobRuns: {
-        start(job: JobExecutionReference) {
-          starts.push(job);
-          return Promise.resolve("created" as const);
-        },
-      },
-    };
-    const results = await Promise.all([
-      advancePattern(deps, { patternId }),
-      advancePattern(deps, { patternId }),
-    ]);
-    assert.deepEqual(results.map((result) => result.kind).sort(), ["claimed", "running"]);
-    assert.deepEqual(starts, [
-      { patternId, jobId: a.id, generation: 1 },
-      { patternId, jobId: a.id, generation: 1 },
-    ]);
-    assert.equal(
-      await db.raw
-        .prepare("SELECT count(*) AS n FROM jobs WHERE pattern_id = ? AND state = 'running'")
-        .bind(patternId)
-        .first("n"),
-      1,
-    );
-    assert.equal(
-      (
-        await runJob(
-          { ...base, geometry: () => ({ sampleDisplay: () => Promise.resolve(ok) }) },
-          jobReferenceSchema.parse(starts[0]),
-          stepEngine().steps,
-        )
-      ).kind,
-      "committed",
-    );
-    const next = await advancePattern(deps, { patternId });
-    assert(next.kind === "claimed");
-    assert.equal(next.job.jobId, b.id);
-    const empty = await pattern();
-    assert.deepEqual(await advancePattern(deps, { patternId: empty }), { kind: "idle" });
-  });
-  await t.test("a lost claim response reconciles generation one", async () => {
-    const patternId = await pattern();
-    const a = await accept(patternId);
-    let lose = true;
-    const deps = {
-      ...base,
-      store: {
-        jobs: {
-          ...db.store.jobs,
-          async claim(input: Parameters<typeof db.store.jobs.claim>[0]) {
-            const result = await db.store.jobs.claim(input);
-            if (lose) {
-              lose = false;
-              throw new Error("claim response lost");
-            }
-            return Promise.resolve(result);
-          },
-        },
-      },
-      jobRuns: {
-        start() {
-          return Promise.resolve("created" as const);
-        },
-      },
-    };
-    await assert.rejects(advancePattern(deps, { patternId }), /claim response lost/);
-    assert.deepEqual(await advancePattern(deps, { patternId }), {
-      kind: "running",
-      job: { patternId, jobId: a.id, generation: 1 },
-      instance: "created",
-    });
-  });
   await t.test(
     "acceptance wakes applied and replayed receipts and retries a lost wake",
     async () => {
@@ -510,7 +392,17 @@ void test("Workflow run IDs and createBatch classify duplicates without platform
   assert.equal(id, `job-${job.jobId}-g1`);
   assert.match(id, /^[a-zA-Z0-9_][a-zA-Z0-9-_]*$/u);
   assert(id.length <= 100);
-  for (const code of [0, 10405, 10415]) {
+  for (const [code, status, kind] of [
+    [0, "unused", "started"],
+    [10415, "unused", "reject"],
+    ...["queued", "running", "waiting", "rollingBack"].map(
+      (status) => [10405, status, "progressing"] as const,
+    ),
+    ...["paused", "waitingForPause", "unknown", "future", "unreadable"].map(
+      (status) => [10405, status, "stalled"] as const,
+    ),
+    ...["terminated", "complete", "errored"].map((status) => [10405, status, "ended"] as const),
+  ] as const) {
     const instance: WorkflowInstance = {
       id,
       pause: async () => {},
@@ -519,7 +411,10 @@ void test("Workflow run IDs and createBatch classify duplicates without platform
       restart: async () => {},
       delete: async () => {},
       sendEvent: async () => {},
-      status: () => Promise.resolve({ status: "queued" }),
+      status: () => {
+        if (status === "unreadable") return Promise.reject(new Error("unavailable"));
+        return Promise.resolve({ status: status as InstanceStatus["status"] });
+      },
       subscribe: () => Promise.reject(new Error("unused")),
     };
     function createBatch(
@@ -539,9 +434,20 @@ void test("Workflow run IDs and createBatch classify duplicates without platform
         errors: code === 0 ? [] : [{ index: 0, id, code, message: "fixture" }],
       });
     }
-    const runs = jobRuns({ createBatch });
-    if (code === 10415) await assert.rejects(runs.start(job), /10415/);
-    else assert.equal(await runs.start(job), code === 0 ? "created" : "existing");
+    const runs = jobRuns({
+      createBatch,
+      get: (requested) => {
+        assert.equal(requested, id);
+        assert.equal(code, 10405);
+        return Promise.resolve(instance);
+      },
+    });
+    if (code === 10415) await assert.rejects(runs.observe(job), /10415/);
+    else
+      assert.deepEqual(
+        await runs.observe(job),
+        code === 0 ? { kind } : { kind, instanceStatus: status },
+      );
   }
   assert.throws(() => jobReferenceSchema.parse({ ...job, generation: 0 }));
   assert.throws(() => jobReferenceSchema.parse({ ...job, extra: true }));

@@ -55,6 +55,24 @@ export function readHoldingJob(db: D1, patternId: string) {
   );
 }
 
+export function readStalledPatterns(db: D1, input: { unchangedSince: string; limit: number }) {
+  return db.all(
+    rows(
+      {
+        sql: `SELECT p.id AS patternId FROM patterns p
+      WHERE EXISTS (SELECT 1 FROM jobs a WHERE a.pattern_id = p.id
+        AND a.state IN (${activeJobStates}) AND a.updated_at < ?1)
+      OR (EXISTS (SELECT 1 FROM jobs q WHERE q.pattern_id = p.id AND q.state = 'queued' AND q.updated_at < ?1)
+        AND NOT EXISTS (SELECT 1 FROM jobs h WHERE h.pattern_id = p.id AND h.holds_queue = 1))
+      ORDER BY random() LIMIT ?2`,
+        bindings: [input.unchangedSince, input.limit],
+      },
+      z.object({ patternId: z.uuid() }).transform((row) => row.patternId),
+      "stalled patterns",
+    ),
+  );
+}
+
 interface QueueRelease {
   patternId: string;
   heldBy: string;
