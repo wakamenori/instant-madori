@@ -604,6 +604,8 @@ SolidCraft一式を保持することと、通常のビルド・テスト対象�
 
 開発ツールの版を固定し、検査はローカルの `pnpm check` にまとめる。先にPrettier・rustfmt・ESLint・Clippyで自動修正できるものを直し、型付きlint・型確認・未使用検査・秘密情報・テストを実行する。RustはnativeとWasmを検査する。作業中の `--fast` はテスト実行とアプリのビルドを省き、`--full` はWasmの再生成、全ビルド、接続確認、JS/Rustのライセンス・取得元・脆弱性監査まで行う。初回以外はビルドキャッシュを再利用し、各工程の時間を表示する。コミット前フックはステージ対象ファイルの整形・lint、ステージ対象のTypeScriptファイルのimport境界、ステージ済み差分の秘密情報を検査し、作業ツリーやステージ内容を書き換えない。具体的なコマンド、検査範囲、PRでの検査は[README](../README.md)にまとめる。
 
+Rustの版とWasmのターゲットは `rust-toolchain.toml` で固定し、rustupを通して使う。ほかのrustがPATHの前にある環境（T3のエージェントのシェルなど）でも、miseの実行では `mise.toml` が `$CARGO_HOME/bin` をPATHの先頭に置き、rustupのcargoを使う。`pnpm setup` は、cargoを使う前に、PATHで最初に見つかるcargoが同じフォルダーのrustupと同じ実行ファイル（rustupのproxy）かを確かめ、違えば理由と直し方を示して止まる。
+
 git worktreeで並行して開発するときは、worktreeごとにRustの `target/` を持つ。Cargoはpath依存のクレートの新しさをソースの更新時刻だけで判断し、クレートのハッシュもworkspaceからの相対パスで作る。そのため、`target/` を共有すると、古いチェックアウトのworktreeが別のworktreeのコンパイルしたクレートを再利用する。worktreeの `pnpm setup` は、メインのチェックアウトの `target/` をcopy-on-writeで複製し、自作のクレートのソースの更新時刻を進める。外部のクレートは複製を再利用し、自作のクレートだけを各worktreeでビルドし直す。Gitのフックは全worktreeで共有なので、メインのチェックアウトでだけ登録する。
 
 サービスの依存解決はルートのCargo.lockとpnpm-lock.yamlで固定する。Cargoのプロファイル・依存パッチは利用側ルートで必要な設定を管理し、SolidCraft側の設定が自動で引き継がれるとは仮定しない。キャッシュを利用する場合は、識別値に実際の依存解決とビルド条件を反映する。誤った再利用を避けるため、サービスから使うSolidCraftの評価キャッシュを無効にする。
