@@ -9,11 +9,13 @@ import {
   releaseQueueRequestSchema,
   createProjectRequestSchema,
   displayContentType,
+  patternStateResponseSchema,
   renameRequestSchema,
 } from "../../packages/contracts/src/index.ts";
 import type {
   AcceptedJob,
   FinishedJob,
+  PatternStateResponse,
   Revision,
   QueueHold,
 } from "../../packages/contracts/src/index.ts";
@@ -62,6 +64,9 @@ function stagingServer(
     const method = init?.method ?? "GET";
     assert.equal(init?.redirect, "manual", "redirects cannot hide failed authentication");
     assert.ok(init?.signal, "every request has a deadline");
+    const viewed = revisions.find(
+      (revision) => url.pathname === `/api/revisions/${revision.id}/view`,
+    );
     let response: Response;
     if (!headers.has("CF-Access-Client-Id")) {
       response = new Response(null, { status: 302 });
@@ -146,15 +151,9 @@ function stagingServer(
           queuedJobs: [],
           lastFinishedJob,
         });
-      } else if (
-        url.pathname === `/api/revisions/${revisions.at(-1)?.id}/view` &&
-        method === "GET"
-      ) {
+      } else if (viewed && method === "GET") {
         response = new Response(new Uint8Array([1, 2, 3]), {
-          headers: {
-            "content-type": displayContentType,
-            "x-revision-id": revisions.at(-1)?.id ?? "",
-          },
+          headers: { "content-type": displayContentType, "x-revision-id": viewed.id },
         });
       } else if (url.pathname.endsWith("/patterns")) {
         assert.notEqual(url.pathname, `/api/projects/${project.id}/patterns`);
@@ -252,6 +251,55 @@ void test("a non-200 view, wrong display media type, or empty view body fails", 
       path.endsWith("/view") ? broken(response) : response,
     );
     await assert.rejects(server.run(), failure);
+  }
+});
+
+function rewriteState(change: (state: PatternStateResponse) => PatternStateResponse): Rewrite {
+  return async (path, _method, response) =>
+    path.endsWith("/state")
+      ? Response.json(change(patternStateResponseSchema.parse(await response.json())))
+      : response;
+}
+
+void test("a reused revision, a stale current revision, or a mislabelled view fails", async () => {
+  for (const [label, rewrite, failure] of [
+    [
+      "the job reports the previous revision",
+      (previous: Revision) =>
+        rewriteState((state) =>
+          state.lastFinishedJob?.state === "completed"
+            ? {
+                ...state,
+                currentRevision: previous,
+                lastFinishedJob: { ...state.lastFinishedJob, revision: previous },
+              }
+            : state,
+        ),
+      /the job created a new revision/,
+    ],
+    [
+      "the state still shows the previous revision as current",
+      (previous: Revision) => rewriteState((state) => ({ ...state, currentRevision: previous })),
+      /the completed revision is current/,
+    ],
+    [
+      "the view names another revision",
+      (): Rewrite => (path, _method, response) => {
+        if (!path.endsWith("/view")) return response;
+        const headers = new Headers(response.headers);
+        headers.set("x-revision-id", crypto.randomUUID());
+        return new Response(response.body, { headers });
+      },
+      /the view identifies the committed revision/,
+    ],
+  ] as const) {
+    let active: Rewrite = (_path, _method, response) => response;
+    const server = stagingServer((path, method, response) => active(path, method, response));
+    await server.run();
+    const previous = server.revisions[0];
+    assert.ok(previous);
+    active = rewrite(previous);
+    await assert.rejects(server.run(), failure, label);
   }
 });
 
