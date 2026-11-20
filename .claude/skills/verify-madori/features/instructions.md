@@ -13,7 +13,7 @@
 
 ## How to get to it (user POV)
 
-- 画面はまだ無い。`POST /api/patterns/<id>/messages`、`GET /api/patterns/<id>/state`、`GET /api/patterns/<id>/revisions`、`GET /api/revisions/<id>/view` を使う。画面は今も `/api/sample/display` を描く。
+- 画面は、開発用の案件に指示を一件送り、確定した案を描く（[サンプルの住宅モデルを見る](./sample-view.md)）。この機能の手順では、`POST /api/patterns/<id>/messages`、`GET /api/patterns/<id>/state`、`GET /api/patterns/<id>/revisions`、`GET /api/revisions/<id>/view` を使う。
 
 ## Driving it with curl
 
