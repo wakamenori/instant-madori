@@ -1,0 +1,2 @@
+{"event":"container.adopted","jobId":null,"step":null,"outcome":null,"instanceStatus":null,"attempt":null,"reason":null,"revisionId":null,"image":null,"mode":null,"why":null,"at":1795212683875,"version":"a6a70806-3b20-4ea8-bdad-a4f160ae0d22","secondsSincePreviousRender":217.455}
+{"event":"container.ready","jobId":null,"step":null,"outcome":null,"instanceStatus":null,"attempt":null,"reason":null,"revisionId":null,"image":null,"mode":"adopted","why":null,"at":1795212683890,"version":"a6a70806-3b20-4ea8-bdad-a4f160ae0d22","secondsSincePreviousRender":217.47}
