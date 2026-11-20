@@ -254,6 +254,17 @@ function wranglerJson(output: string): unknown {
   }
 }
 
+export function workersApi(token: string, fetchImpl: typeof fetch = fetch) {
+  return async (path: string): Promise<unknown> => {
+    const response = await fetchImpl(
+      `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/scripts/${scriptName}${path}`,
+      { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(30_000) },
+    );
+    if (!response.ok) throw new Error(`Workers API ${path} failed (${response.status})`);
+    return response.json();
+  };
+}
+
 export function registryClient(
   credentials: z.infer<typeof registryCredentialsSchema>,
   fetchImpl: typeof fetch = fetch,
@@ -397,17 +408,7 @@ async function main() {
   }
   await runRetention({
     apply: args[0] === "--apply",
-    async json(path) {
-      const response = await fetch(
-        `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/scripts/${scriptName}${path}`,
-        {
-          headers: { authorization: `Bearer ${token}` },
-          signal: AbortSignal.timeout(30_000),
-        },
-      );
-      if (!response.ok) throw new Error(`Workers API ${path} failed (${response.status})`);
-      return response.json();
-    },
+    json: workersApi(token),
     command: wrangler,
     registry: registryClient,
     log: console.log,
