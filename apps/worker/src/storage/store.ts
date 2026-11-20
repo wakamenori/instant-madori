@@ -25,6 +25,8 @@ export function createStore(db: D1, bucket: R2) {
       ) => queue.cancelQueueOnce(db, key, input),
     },
     jobs: {
+      stalledPatterns: (input: Parameters<typeof queue.readStalledPatterns>[1]) =>
+        queue.readStalledPatterns(db, input),
       holdingJob: (patternId: string) => queue.readHoldingJob(db, patternId),
       ownedBySubject: (right: Parameters<typeof jobs.isJobOwnedBySubject>[1], subject: string) =>
         jobs.isJobOwnedBySubject(db, right, subject),
@@ -36,8 +38,8 @@ export function createStore(db: D1, bucket: R2) {
         execution.claimNextJob(db, input),
       restore: (reference: Parameters<typeof execution.readCurrentJobExecution>[1]) =>
         execution.readCurrentJobExecution(db, reference),
-      activeReference: (input: Parameters<typeof execution.readActiveJobReference>[1]) =>
-        execution.readActiveJobReference(db, input),
+      activeJob: (input: Parameters<typeof execution.readActiveJob>[1]) =>
+        execution.readActiveJob(db, input),
       check: (right: Parameters<typeof jobs.checkJobExecution>[1]) =>
         jobs.checkJobExecution(db, right),
       complete: (

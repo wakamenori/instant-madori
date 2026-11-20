@@ -9,6 +9,7 @@ import type { GatewayEnvironment, UnavailableReason } from "../src/geometry/cont
 import type { GeometryResult } from "../src/geometry/geometry-protocol.ts";
 
 type OpenStringKey =
+  | "instanceStatus"
   | "traceId"
   | "rayId"
   | "userId"

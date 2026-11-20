@@ -1,7 +1,11 @@
+import { sweepStalledPatterns } from "./objects/pattern-coordinator.ts";
 import { handleApi } from "./api/app.ts";
 import { systemRuntime } from "./runtime.ts";
 
 export default {
+  async scheduled(_controller, env) {
+    await sweepStalledPatterns(env);
+  },
   fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     // Matches `run_worker_first: ["/api/*"]` in wrangler.jsonc; other paths are static assets.

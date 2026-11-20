@@ -1,6 +1,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "instant-madori",
+  "triggers": { "crons": ["*/5 * * * *"] },
   "main": "src/index.ts",
   "compatibility_date": "2026-11-08",
   "workers_dev": false,

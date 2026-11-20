@@ -74,6 +74,16 @@ for (const name of ["a#b.txt", "a?b.txt", "a%20b.txt", "a#b?c%20.txt"]) {
   });
 }
 
+void test("staging inherits scheduled triggers", () => {
+  assert.doesNotThrow(() =>
+    assertStagingBindings({
+      ...bindings,
+      triggers: { crons: ["*/5 * * * *"] },
+      env: { staging: bindings },
+    }),
+  );
+});
+
 void test("only the top level declares secrets", () => {
   const secrets = { required: ["ACCESS_JWKS"] };
   assert.doesNotThrow(() =>

@@ -30,8 +30,11 @@ export type StoreDeps<K extends keyof Store, O extends keyof Store[K]> = {
   store: { [P in K]: Pick<Store[P], O> };
 };
 
+export type RunObservation =
+  { kind: "started" } | { kind: "progressing" | "stalled" | "ended"; instanceStatus: string };
+
 export interface JobRuns {
-  start(job: JobExecutionReference): Promise<"created" | "existing">;
+  observe(job: JobExecutionReference): Promise<RunObservation>;
 }
 
 export interface JobStepConfig {
@@ -48,12 +51,23 @@ export interface JobSteps {
   ): Promise<T>;
 }
 
-export type PatternAdvance =
+export type Reconciliation =
   | { kind: "queue_held"; heldBy: string }
   | { kind: "idle" }
-  | { kind: "claimed" | "running"; job: JobExecutionReference; instance: "created" | "existing" };
+  | { kind: "claimed" | "run_restarted" | "settled_meanwhile"; job: JobExecutionReference }
+  | {
+      kind: "running" | "stalled" | "failed_lost_run";
+      job: JobExecutionReference;
+      instanceStatus: string;
+    };
 
-export type PatternCoordinatorDeps = StoreDeps<"jobs", "claim" | "activeReference" | "holdingJob"> &
+export type StalledPatternSweepDeps = StoreDeps<"jobs", "stalledPatterns"> &
+  Pick<ServiceDeps, "runtime" | "wakePattern">;
+
+export type PatternCoordinatorDeps = StoreDeps<
+  "jobs",
+  "claim" | "activeJob" | "holdingJob" | "restore" | "failAndHoldQueue"
+> &
   Pick<ServiceDeps, "runtime"> & { jobRuns: JobRuns };
 
 export type JobWorkflowDeps = StoreDeps<

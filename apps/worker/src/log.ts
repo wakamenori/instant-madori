@@ -52,8 +52,14 @@ export interface LogFields {
     | "queue_held"
     | "idle"
     | "claimed"
+    | "stalled"
     | "running";
   revisionId?: string;
+  instanceStatus?: string;
+  found?: number;
+  woken?: number;
+  wakeFailed?: number;
+  truncated?: number;
   instance?: "created" | "existing";
   bytes?: number;
   geometryStart?: Extract<GeometryResult<unknown>, { kind: "ok" }>["start"];
@@ -103,6 +109,11 @@ const logKeys = {
   attempt: "number",
   outcome: "string",
   revisionId: "string",
+  instanceStatus: "string",
+  found: "number",
+  woken: "number",
+  wakeFailed: "number",
+  truncated: "number",
   instance: "string",
   bytes: "number",
   geometryStart: "string",

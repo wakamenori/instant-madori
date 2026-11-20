@@ -108,15 +108,17 @@ export const readJobExecutionRight = JobExecutionRight.read;
 export const claimNextJob = JobExecutionRight.claim;
 export const readCurrentJobExecution = JobExecutionRight.restore;
 
-export async function readActiveJobReference(db: D1, input: { patternId: string }) {
+export async function readActiveJob(db: D1, input: { patternId: string }) {
   return db.first(
     rows(
       {
-        sql: `SELECT pattern_id AS patternId, id AS jobId, generation FROM jobs
+        sql: `SELECT pattern_id AS patternId, id AS jobId, generation, updated_at AS claimedAt FROM jobs
       WHERE pattern_id = ? AND state IN (${activeJobStates})`,
         bindings: [input.patternId],
       },
-      referenceSchema,
+      referenceSchema
+        .extend({ claimedAt: z.iso.datetime() })
+        .transform(({ claimedAt, ...reference }) => ({ reference, claimedAt })),
       "active job reference",
     ),
   );

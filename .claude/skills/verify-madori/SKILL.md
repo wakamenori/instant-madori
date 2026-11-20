@@ -197,3 +197,35 @@ c() { printf '%s\n' "$HDRS" | curl -sS -H @- "$@"; }
 - **二件目が動かないことを確かめる。** 30秒おいて、state を `"$D/hold-2.json"` に読み直す。`runningJob`・`queuedJobs`・`queueHold` が `hold-1` と同じ。
 - **再開する。** `body=$(printf '{"requestId":"%s","heldBy":"%s"}' "$(uuidgen)" "$A")` で `c -o "$D/resume.json" -w '%{http_code}\n' -X POST "$STG/api/patterns/$PAT/queue/resume" -H "$J" -H "origin: $STG" -d "$body"`。`200` で、`jobs` が `$B` の一件。同じ `$body` で出力先を `"$D/resume-replay.json"` にして送り直すと `200` で、`cmp "$D/resume.json" "$D/resume-replay.json"` が何も出さない。
 - **二件目の完了を待つ。** `for i in $(seq 1 300); do c -o "$D/state-3.json" "$STG/api/patterns/$PAT/state"; jq -e --arg j "$B" '.lastFinishedJob.jobId == $j and .runningJob == null' "$D/state-3.json" >/dev/null && break; sleep 1; done`。`lastFinishedJob.state` が `completed`、`queueHold` が `null`、`queuedJobs` が `[]`。`c -o "$D/revisions.json" -w '%{http_code}\n' "$STG/api/patterns/$PAT/revisions"` は `200` で、`revisions` が一件、その `id` が `lastFinishedJob.revision.id`。
+
+### 検証用の利用者で再デプロイをまたいで指示を完了させる
+
+Worker と DO が再起動しても、待たせている指示は完了し、案は一件だけ増える。待ちの180秒の内に staging のデプロイが入るよう、同じ main の版を deploy-staging で起動し直し、その「Migrate and deploy」の段階が始まったときに送る。この段階は16〜31秒で終わった（2026-11 の15回の実行）。前の節と同じく、ヘッダーはシェルの変数に持ち、下の各手順は一つのスクリプトで続けて実行する。`STG`・`J`・`HDRS`・`c` は前の節のとおりに設定し、`D="$EVIDENCE/staging-redeploy"; mkdir -p "$D"` にする。
+
+- **案件を得る。** 前の節と同じ要求で `PID` を設定する。
+- **パターンを足す。** 前の節と同じ要求を、名前を `再デプロイの確認`、出力先を `"$D/pattern.json"` にして送る。`201`。`PAT` を設定する。
+- **デプロイを起動する。** `T0=$(date +%s)000` を設定し、`gh workflow run deploy-staging.yml --ref main`。10秒おいて `RUN=$(gh run list --workflow deploy-staging.yml --event workflow_dispatch --limit 1 --json databaseId,createdAt --jq '.[0].databaseId')` を設定し、`gh run view "$RUN" --json headSha,createdAt` の `headSha` が main の先頭であることを確かめる。
+- **段階が始まるのを待つ。** `for i in $(seq 1 900); do s=$(gh run view "$RUN" --json status,jobs --jq '[.status, (.jobs[0].steps[] | select(.name == "Migrate and deploy") | .status)] | join(" ")'); case "$s" in *" in_progress") break;; completed*) echo "run ended: $s"; break;; esac; sleep 2; done`。`in_progress` で抜ける。`run ended` で抜けたら、実行の失敗を報告して止まる。
+- **送る。** 前の節の「送る」を、本文を `再デプロイの確認`、出力先を `"$D/accept.json"` にして送る。`202`。`JOB` を設定する。
+- **完了を待つ。** `for i in $(seq 1 600); do c -o "$D/state-1.json" "$STG/api/patterns/$PAT/state"; jq -e --arg j "$JOB" '.lastFinishedJob.jobId == $j and .runningJob == null' "$D/state-1.json" >/dev/null && break; sleep 1; done`。`lastFinishedJob.state` が `completed`。`c -o "$D/revisions.json" -w '%{http_code}\n' "$STG/api/patterns/$PAT/revisions"` は `200` で、`revisions` が一件、その `id` が `lastFinishedJob.revision.id`。`gh run view "$RUN" --json conclusion` が `success`。
+- **Workers Logs を読む。** `T1=$(date +%s)000` を設定し、Workers Logs の検索 API からこのパターンの行を版つきで取り出す。トークンの値は表示しない。
+
+  ```sh
+  T0=$T0 T1=$T1 PAT=$PAT mise exec -- node --env-file="$MAIN/.env" -e '
+    const res = await fetch("https://api.cloudflare.com/client/v4/accounts/4a67230af28ec94d9c70ca48572d8e9f/workers/observability/telemetry/query", {
+      method: "POST",
+      headers: { authorization: `Bearer ${process.env.CLOUDFLARE_API_TOKEN}`, "content-type": "application/json" },
+      body: JSON.stringify({ queryId: "adhoc", dry: true, view: "events", limit: 2000,
+        timeframe: { from: Number(process.env.T0), to: Number(process.env.T1) }, parameters: {} }),
+    });
+    const body = await res.json();
+    if (!body.success) { console.error(JSON.stringify(body.errors)); process.exit(1); }
+    for (const e of body.result.events.events.sort((a, b) => a.timestamp - b.timestamp)) {
+      const s = typeof e.source === "object" ? e.source : {};
+      if (s.patternId !== process.env.PAT) continue;
+      console.log(JSON.stringify({ t: e.timestamp, version: e.$workers?.scriptVersion?.id ?? null,
+        event: s.event, step: s.step, outcome: s.outcome, instanceStatus: s.instanceStatus }));
+    }' >| "$D/logs.jsonl"
+  ```
+
+  `$JOB` の `job.step` の `check test hold before render` と `render snapshot` は、違う `version` を持つ。前が古い版、後が新しい版である。新しい版の `pattern.advanced` が一行以上あり、その `outcome` は `running` か `claimed` で、`failed` は無い。`job.finished` の `outcome` が `committed`。二つの段階が同じ版なら、待ちがデプロイをまたいでいないので、新しいパターンでこの節をやり直す。
