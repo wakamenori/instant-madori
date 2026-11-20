@@ -40,11 +40,24 @@ export async function stop(processes: ReturnType<typeof start>[]) {
       throw error;
     }
   }
-  await Promise.all(processes.map((run) => signal(run, "SIGTERM")));
-  const done = Promise.all(processes.map(({ finished }) => finished));
+  const failures: unknown[] = [];
+  async function signalAll(runs: typeof processes, name: NodeJS.Signals) {
+    const results = await Promise.allSettled(runs.map((run) => signal(run, name)));
+    return runs.filter((_, index) => {
+      const result = results[index];
+      if (result?.status === "rejected") {
+        failures.push(result.reason);
+        return false;
+      }
+      return true;
+    });
+  }
+  const terminated = await signalAll(processes, "SIGTERM");
+  const done = Promise.all(terminated.map(({ finished }) => finished));
   await Promise.race([done, grace]);
-  await Promise.all(processes.map((run) => signal(run, "SIGKILL")));
-  await done;
+  const killed = await signalAll(terminated, "SIGKILL");
+  await Promise.all(killed.map(({ finished }) => finished));
+  if (failures.length) throw failures[0];
 }
 
 /** Throws unless a finished child exited with status 0; `output` is appended if given. */

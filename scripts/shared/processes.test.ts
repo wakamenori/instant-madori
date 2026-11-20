@@ -169,3 +169,51 @@ await test(
     assert.equal(run.child.signalCode, null);
   },
 );
+
+async function startStopPair(t: TestContext, script: string) {
+  const a = start(process.execPath, ["-e", script], { stdio: "ignore" });
+  const b = start(
+    process.execPath,
+    ["-e", 'process.on("SIGTERM", () => {}); setInterval(() => {}, 1000); console.log("ready")'],
+    { stdio: ["ignore", "pipe", "ignore"] },
+  );
+  t.after(async () => {
+    a.child.kill("SIGKILL");
+    b.child.kill("SIGKILL");
+    await Promise.all([a.finished, b.finished]);
+  });
+  assert.ok(b.child.stdout);
+  await once(createInterface({ input: b.child.stdout }), "line");
+
+  assert.ok(a.child.pid);
+  const group = -a.child.pid;
+  const error = Object.assign(new Error("kill EPERM"), { code: "EPERM" });
+  const kill = process.kill.bind(process);
+  t.mock.method(process, "kill", (pid: number, signal?: NodeJS.Signals | number) => {
+    if (pid === group && (signal === "SIGTERM" || signal === "SIGKILL")) throw error;
+    return kill(pid, signal);
+  });
+  return { a, b, error };
+}
+
+await test(
+  "stop kills the other children before rejecting EPERM for a running child",
+  { timeout: 15_000 },
+  async (t) => {
+    const { a, b, error } = await startStopPair(t, "setInterval(() => {}, 1000)");
+    await assert.rejects(stop([a, b]), (actual: unknown) => actual === error);
+    assert.equal(b.child.signalCode, "SIGKILL");
+    assert.deepEqual(await b.finished, { kind: "exit", code: null, signal: "SIGKILL" });
+    assert.equal(a.child.exitCode, null);
+    assert.equal(a.child.signalCode, null);
+  },
+);
+
+await test("stop shares one grace deadline across children", { timeout: 15_000 }, async (t) => {
+  const { a, b } = await startStopPair(t, "setTimeout(() => {}, 3000)");
+  const started = performance.now();
+  await stop([a, b]);
+  const elapsed = performance.now() - started;
+  assert.ok(elapsed < 6000, `stop took ${elapsed.toFixed(0)} ms`);
+  assert.deepEqual(await b.finished, { kind: "exit", code: null, signal: "SIGKILL" });
+});
