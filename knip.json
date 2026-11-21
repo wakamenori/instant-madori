@@ -4,6 +4,7 @@
   "workspaces": {
     ".": {
       "entry": [
+        ".claude/skills/madori-coordinator/scripts/records.mjs",
         "scripts/check/check-doc-paths.ts",
         "scripts/check/check-layout.ts",
         "scripts/check/check-migrations.ts",

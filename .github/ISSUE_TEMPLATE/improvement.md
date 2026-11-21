@@ -1,9 +1,14 @@
 ---
-name: 作業の単位
-about: 一つのPRで終わる作業。計画の段階はmilestoneで表す
+name: 開発の改善
+about: 担当・検証・CI・道具・手順を良くする
 title: ""
-labels: []
+labels: "開発の改善"
 ---
+
+```yaml
+type: 開発の改善
+target: # 測れる項目の識別子。自動で測る手段がない場合は成功の条件
+```
 
 ## 目的
 
