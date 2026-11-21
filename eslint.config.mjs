@@ -98,7 +98,13 @@ const boundaryConfigs = Object.entries(typescriptScopes).flatMap(([scope, { file
   const testRows = rows.filter((row) => row.appliesToTests);
   // Tests read fixtures through import.meta.url and may cross boundaries anyway.
   return [
-    boundaryConfig(`boundaries/${scope}`, files, [...ignores, ...boundaryTestIgnores], rows),
+    boundaryConfig(
+      `boundaries/${scope}`,
+      files,
+      [...ignores, ...boundaryTestIgnores],
+      rows,
+      scope === "scripts",
+    ),
     boundaryConfig(
       `boundaries/${scope}/tests`,
       files.flatMap((file) => boundaryTestIgnores.map((test) => [file, test])),

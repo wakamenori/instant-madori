@@ -852,7 +852,11 @@ void test("source files retain computed-import, glob and URL restrictions", asyn
       assert((await diagnostics(source, from)).length > 0, `${from}: ${source}`);
     const source = 'new URL("./fixture", import.meta.url);';
     const isTest = /\.test\.|\/tests\//u.test(from);
-    assert.equal((await diagnostics(source, from)).length > 0, !isTest, from);
+    assert.equal(
+      (await diagnostics(source, from)).length > 0,
+      !isTest && from !== scopes.scripts,
+      from,
+    );
   }
   assert.deepEqual(await diagnostics('void import((("./x.ts")));', scopes.web), []);
   assert.deepEqual(
