@@ -21,6 +21,8 @@ import {
 import type { Poller } from "./poller.ts";
 import type { RecordInput } from "../l1/sources.ts";
 
+import { candidate } from "../ingest/polled.ts";
+
 const repo = "https://api.github.com/repos/wakamenori/instant-madori/";
 const first = "2026-11-01T00:00:00.000Z";
 const stateSchema = z.object({
@@ -41,6 +43,7 @@ async function authToken(signal: AbortSignal) {
 }
 export function githubPollers(home: string, tokenFor = authToken, request = fetch): Poller[] {
   const sources = [
+    "github.commit",
     "github.issue",
     "github.pr",
     "github.issue.timeline",
@@ -154,7 +157,14 @@ export function githubPollers(home: string, tokenFor = authToken, request = fetc
         }
         // Reuse validators within a UTC day. The timestamp cursor still limits detail requests.
         const sinceDay = state.since.slice(0, 10) + "T00:00:00Z";
-        if (name === "github.actions.job") {
+        if (name === "github.commit") {
+          for (const raw of await pages("commits?sha=main&per_page=100&since=" + sinceDay)) {
+            const { sha, parents } = z
+              .object({ sha: z.string(), parents: z.array(z.object({ sha: z.string() })) })
+              .parse(raw);
+            records.push(candidate(name, sha, null, { parent: parents[0]?.sha ?? null }));
+          }
+        } else if (name === "github.actions.job") {
           for (const workflow of ["check", "deploy-staging"]) {
             // Partition the created filter to stay below the Actions search cap. Revisit older runs for reruns.
             for (let start = Date.parse(first); start <= now; start += 7 * 86400_000) {

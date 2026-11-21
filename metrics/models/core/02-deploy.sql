@@ -14,13 +14,17 @@ SELECT p.number pr,CASE WHEN p.files_complete THEN EXISTS (
 ) END deployable FROM stg_github_pr p;
 
 CREATE TABLE deployment_delivery AS
-WITH matched AS (
+WITH RECURSIVE ancestry(head,sha) AS (
+ SELECT DISTINCT head_sha,head_sha FROM deploy_attempt WHERE conclusion='success'
+ UNION SELECT a.head,r.payload->>'$.parent' FROM ancestry a JOIN staging_record r
+ ON r.source='github.commit' AND r.natural_key=a.sha AND r.valid_to IS NULL WHERE r.payload->>'$.parent' IS NOT NULL
+), matched AS (
  SELECT c.pr,a.run_id,a.run_attempt,a.end delivered,
  iif(c.merge_commit_sha=a.head_sha,'direct','later_commit') method,
  row_number() OVER(PARTITION BY c.pr ORDER BY a.end,a.run_id,a.run_attempt) seq
- FROM change c JOIN deploy_scope scope USING(pr) LEFT JOIN main_commit merged ON merged.sha=c.merge_commit_sha
+ FROM change c JOIN deploy_scope scope USING(pr)
  JOIN deploy_attempt a ON a.conclusion='success' AND a.end>=c.merged_at
- LEFT JOIN main_commit deployed ON deployed.sha=a.head_sha
- WHERE c.merge_commit_sha=a.head_sha OR (scope.deployable IS NOT 0 AND deployed.position>merged.position)
+ JOIN ancestry ON ancestry.head=a.head_sha AND ancestry.sha=c.merge_commit_sha
+ WHERE c.merge_commit_sha=a.head_sha OR scope.deployable IS NOT 0
 )
 SELECT pr,run_id,run_attempt,delivered,method FROM matched WHERE seq=1;

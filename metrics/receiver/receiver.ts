@@ -6,6 +6,7 @@ import { homedir } from "node:os";
 import { join, dirname } from "node:path";
 import { gunzipSync } from "node:zlib";
 import { metricsHome } from "../home.ts";
+import { parseClassifications } from "../ingest/classification.ts";
 import { parseSlot } from "../ingest/docker-slot.ts";
 import { parseHook } from "../ingest/hook-record.ts";
 import { parseOtlp } from "../ingest/otlp.ts";
@@ -116,7 +117,11 @@ export async function startReceiver(options: Options) {
     }
     for (const name of readdirSync(home.ready).sort()) {
       const path = join(home.ready, name);
-      const parse = name.startsWith("docker-slot-") ? parseSlot : parseHook;
+      const parse = name.startsWith("classification-")
+        ? parseClassifications
+        : name.startsWith("docker-slot-")
+          ? parseSlot
+          : parseHook;
       ingest(parse(readFileSync(path), identity));
       unlinkSync(path);
     }

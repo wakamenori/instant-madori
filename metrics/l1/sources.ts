@@ -10,6 +10,8 @@ export const registry = {
   "claude.hook": { ...event, sanitize: hookPrivacy },
   "docker.slot": event,
   otlp: event,
+  "github.commit": event,
+  "classification.backfill": observation,
   "github.issue": observation,
   "github.issue.timeline": event,
   "github.actions.attempt": observation,

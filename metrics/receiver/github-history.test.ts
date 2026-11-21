@@ -138,6 +138,7 @@ void test("rebuilds closure labels, PR files and both deployment attempts from a
       data = { ...run, run_attempt: 1, conclusion: "failure" };
     else if (path === "actions/runs/42/attempts/1/jobs") data = { jobs: [job(1)] };
     else if (path === "actions/runs/42/attempts/2/jobs") data = { jobs: [job(2)] };
+    else if (path === "commits") data = [{ sha: "c", parents: [{ sha: "b" }] }];
     else throw new Error(path);
     return Promise.resolve(Response.json(data, { headers: { "x-ratelimit-remaining": "3000" } }));
   };
