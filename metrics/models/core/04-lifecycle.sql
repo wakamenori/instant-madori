@@ -21,7 +21,7 @@ WITH kinds AS (
  WHEN c.creator_type='Bot' THEN 'bypass'
  WHEN c.head_ref IN ('t3/issue-'||w.issue,'issue-'||w.issue) OR c.head_ref LIKE 't3/issue-'||w.issue||'-%' OR c.head_ref LIKE 'issue-'||w.issue||'-%' THEN 'missing_owner'
  ELSE 'bypass' END ownership
- FROM work_item w LEFT JOIN final_closure c USING(issue) LEFT JOIN (SELECT payload->>'$.issue' issue,payload->>'$.kind' kind FROM staging_record WHERE source='classification.backfill' AND valid_to IS NULL) b USING(issue) LEFT JOIN issue_kind bk ON bk.kind=b.kind
+ FROM work_item w LEFT JOIN final_closure c USING(issue) LEFT JOIN stg_classification_backfill b USING(issue) LEFT JOIN issue_kind bk ON bk.kind=b.kind
 ), classified AS (
 SELECT issue,pr,closed_at,merged_at,ownership,n label_count,
  CASE n WHEN 1 THEN kind WHEN 0 THEN iif(closed_at IS NOT NULL,backfill,NULL) END kind,

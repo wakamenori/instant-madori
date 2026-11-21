@@ -45,6 +45,13 @@ void test("quality follows the closing PR and active observation clock", (t) => 
  CREATE TABLE verification_decision(issue,pr,round,at,actor,verdict,failed_checks);
  INSERT INTO verification_decision VALUES(1,11,1,1,'x','FAIL','["検査"]'),(1,11,2,2,'y','PASS','[]'),
  (1,19,1,3,'z','PASS','[]'),(3,13,1,1,'u',NULL,NULL),(4,14,1,1,NULL,'PASS','[]');
+ ALTER TABLE stg_github_issue ADD COLUMN found_by;
+ ALTER TABLE stg_github_comment_block ADD COLUMN found_by;
+ ALTER TABLE issue_classification ADD COLUMN kind_source;
+ CREATE TABLE stg_classification_backfill(issue,kind,cause,found_at,plan_change,found_by);
+ INSERT INTO stg_classification_backfill VALUES(28,'開発の仕組みの不具合','#27','マージの後',NULL,'担当');
+ INSERT INTO issue_classification(issue,kind_source) VALUES(28,'backfill');
+ UPDATE stg_github_issue SET cause=NULL WHERE number=28;
  `);
   model(db, "marts/09-quality.sql");
   const rows = (sql: string) =>
@@ -63,6 +70,9 @@ void test("quality follows the closing PR and active observation clock", (t) => 
       [4, 1, 0, 0, 0, 1, 0],
     ],
   );
+  assert.deepEqual(rows("SELECT found_by FROM quality_discovery WHERE report_issue=28"), [
+    ["担当"],
+  ]);
   assert.deepEqual(
     rows("SELECT reworks,escapes,completed FROM mart_quality WHERE area='development'"),
     [[1, 2, 2]],

@@ -215,7 +215,19 @@ void test("hourly and eight active hour windows count releases, owner gaps and m
       fields: [{ started_at: at(603), ended_at: at(606) }],
     });
     const file = join(root, "backfill.json");
-    writeFileSync(file, JSON.stringify([{ issue: 2, kind: "開発の仕組みの改善" }]));
+    writeFileSync(
+      file,
+      JSON.stringify([
+        {
+          issue: 2,
+          kind: "開発の仕組みの作りの見直し",
+          found_at: "マージの後",
+          found_by: "検証役",
+          cause: "外の変化",
+          plan_change: "いいえ",
+        },
+      ]),
+    );
     for (const dir of ["tmp", "ready"]) mkdirSync(join(root, "spool", dir), { recursive: true });
     execFileSync(
       process.execPath,
@@ -269,6 +281,17 @@ void test("hourly and eight active hour windows count releases, owner gaps and m
       .prepare(sql)
       .all()
       .map((row) => ({ ...row }));
+  assert.deepEqual(
+    all("SELECT type,found_by,disposition,plan_change FROM quality_discovery WHERE report_issue=2"),
+    [
+      {
+        type: "開発の仕組みの作りの見直し",
+        found_by: "検証役",
+        disposition: "外の変化",
+        plan_change: "いいえ",
+      },
+    ],
+  );
   assert.deepEqual(all("SELECT DISTINCT shared_resources FROM issue_requirements WHERE issue=21"), [
     { shared_resources: '["staging を占有する"]' },
   ]);

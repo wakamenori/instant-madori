@@ -1,9 +1,11 @@
+import { z } from "zod";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve, join } from "node:path";
 import { test } from "node:test";
+import { parse } from "yaml";
 import { classifications } from "../ingest/classification.ts";
 import { issueFacts, commentFacts } from "../ingest/github-yaml.ts";
 
@@ -41,7 +43,12 @@ void test("coordinator CLI and ingestion recognize the same record shapes", (t) 
     ["確かめと判断：試作・計測・受け入れ・計画づくりで知る・決める", "", "\ntarget: activity.ci"],
   ] as const) {
     const type = label.split("：")[0];
-    assert.ok(classifications.safeParse([{ issue: 1, kind: type }]).success, label);
+    const history = fields.includes("found_at")
+      ? z.record(z.string(), z.string()).parse(parse(fields))
+      : {};
+    assert.ok(classifications.safeParse([{ issue: 1, kind: type, ...history }]).success, label);
+    if (fields.includes("found_at"))
+      assert.equal(classifications.safeParse([{ issue: 1, kind: type }]).success, false);
     for (const kind of ["issue", "addition"]) {
       records.push(
         [kind, fields, true, label],

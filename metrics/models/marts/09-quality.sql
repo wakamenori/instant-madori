@@ -1,7 +1,11 @@
 CREATE TABLE quality_discovery AS
 WITH reports AS (
- SELECT number report_issue,type,cause,found_at,plan_change,created_at at FROM stg_github_issue WHERE cause IS NOT NULL
- UNION ALL SELECT issue_or_pr,type,cause,found_at,plan_change,created_at FROM stg_github_comment_block WHERE cause IS NOT NULL
+ SELECT number report_issue,type,cause,found_at,found_by,plan_change,created_at at FROM stg_github_issue WHERE cause IS NOT NULL
+ UNION ALL SELECT issue_or_pr,type,cause,found_at,found_by,plan_change,created_at FROM stg_github_comment_block WHERE cause IS NOT NULL
+ UNION ALL SELECT b.issue,b.kind,b.cause,b.found_at,b.found_by,b.plan_change,i.created_at
+ FROM stg_classification_backfill b JOIN stg_github_issue i ON i.number=b.issue
+ JOIN issue_classification c ON c.issue=b.issue AND c.kind_source='backfill'
+ WHERE i.cause IS NULL AND b.cause IS NOT NULL
 ), causes AS (
  SELECT r.*,c.issue cause_issue,c.merged_at FROM reports r LEFT JOIN issue_classification c ON
  r.cause='#'||c.issue OR EXISTS(SELECT 1 FROM issue_change ic WHERE ic.issue=c.issue AND r.cause='PR #'||ic.pr)
