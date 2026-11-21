@@ -30,6 +30,29 @@ import type { ProcessOutcome } from "../../../../scripts/shared/processes.ts";
 const workerDirectory = fileURLToPath(new URL("../../", import.meta.url));
 const wrangler = join(workerDirectory, "node_modules/wrangler/bin/wrangler.js");
 
+/**
+ * Leads Wrangler's process group and stops Wrangler when its stdin pipe closes, which also
+ * happens when the test process is killed before any handler can run. It signals only the
+ * Wrangler bin: workerd must not get SIGTERM, because its own container removal makes
+ * Miniflare's session cleanup fail before it removes the `-proxy` sidecars.
+ */
+const lifeline = `
+  const { spawn } = require("node:child_process");
+  const child = spawn(process.execPath, process.argv.slice(1), {
+    stdio: ["ignore", "inherit", "inherit"],
+  });
+  process.stdin.on("end", () => child.kill("SIGTERM"));
+  process.stdin.resume();
+  child.on("exit", (code, signal) => {
+    if (signal) process.kill(process.pid, signal);
+    else process.exit(code);
+  });
+  child.on("error", (error) => {
+    console.error(error);
+    process.exit(1);
+  });
+`;
+
 export const testAppOrigin = "http://app.test";
 /** The stand-in SPA page served as static assets during tests. */
 export const testSpaHtml = "<!doctype html><title>test SPA</title>";
@@ -93,11 +116,14 @@ function outputTail(lines: readonly string[]): string {
 /** How long to wait for a stopped process's pipes to close before tearing them down. */
 const pipeCloseGraceMs = 2_000;
 
+/** How long Wrangler gets to clean up its Container session before its group is stopped. */
+const wranglerExitGraceMs = 10_000;
+
 function startWrangler(args: string[], onLine?: (line: string) => void): CapturedProcess {
-  const child = start(process.execPath, [wrangler, ...args], {
+  const child = start(process.execPath, ["-e", lifeline, wrangler, ...args], {
     cwd: workerDirectory,
     env: { ...process.env, CI: "1" },
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: ["pipe", "pipe", "pipe"],
   });
   const lines: string[] = [];
   for (const stream of [child.child.stdout, child.child.stderr]) {
@@ -121,6 +147,11 @@ function startWrangler(args: string[], onLine?: (line: string) => void): Capture
     outcome: child.finished,
     dispose() {
       disposing ??= (async () => {
+        child.child.stdin?.end();
+        await Promise.race([
+          child.finished,
+          setTimeout(wranglerExitGraceMs, undefined, { ref: false }),
+        ]);
         await stop([child]);
         const settled = await Promise.race([
           closed.then(() => true),
