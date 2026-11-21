@@ -302,3 +302,18 @@ void test(
     }
   },
 );
+
+void test(
+  "a broken spool preserves the work result and cancellation reason",
+  { skip: process.platform !== "darwin" },
+  async (t) => {
+    const { run, directory } = fixture(t);
+    mkdirSync(join(directory, "spool/ready"), { recursive: true });
+    assert.equal(await run("work", immediate), "development-1");
+    const reason = new Error("cancel");
+    await assert.rejects(
+      run("cancelled", immediate, "development", AbortSignal.abort(reason)),
+      (error) => error === reason,
+    );
+  },
+);

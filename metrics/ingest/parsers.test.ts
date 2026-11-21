@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { parseOtlp } from "./otlp.ts";
+import { parseSlot } from "./docker-slot.ts";
 import { parseHook } from "./hook-record.ts";
 import { registry } from "../l1/sources.ts";
 import { telemetry } from "../l1/privacy.ts";
@@ -153,4 +154,31 @@ void test("permission hook proves session membership with only request metadata"
     tool_name: "Bash",
     session_id: "s",
   });
+});
+
+void test("a runner checkout can prove its repository with an Actions run and attempt", () => {
+  const event = {
+    v: 1,
+    wait_id: randomUUID(),
+    phase: "acquired",
+    pool: "runner",
+    cwd: "/runner/work",
+    at: new Date().toISOString(),
+    project: { dir: "/runner/work", git: { kind: "directory" } },
+    repository: "wakamenori/instant-madori",
+    run_id: "123",
+    run_attempt: "2",
+  };
+  const parse = (overrides: object) =>
+    parseSlot(Buffer.from(JSON.stringify({ ...event, ...overrides })), "/main/.git");
+  assert.deepEqual(
+    parse({}).records.map((r) => [r.payload.run_id, r.payload.run_attempt]),
+    [["123", "2"]],
+  );
+  for (const override of [
+    { repository: "other/repo" },
+    { run_attempt: undefined },
+    { pool: "development" },
+  ])
+    assert.equal(parse(override).drops[0]?.reason, "foreign");
 });
