@@ -93,33 +93,41 @@ impl Checks {
     }
 
     fn number(&mut self, kind: Kind, id: &str, field: &str, value: f64, range: Range) -> bool {
-        let reason = if !value.is_finite() {
-            Reason::NotFinite {
-                field: field.into(),
-            }
-        } else if value.abs() > LIMIT_MM {
-            Reason::OutOfRange {
-                field: field.into(),
-                value,
-            }
+        if let Some(reason) = number_reason(field, value, range) {
+            self.reject(kind, id, reason);
+            false
         } else {
-            match range {
-                Range::Positive if value <= 0.0 => Reason::NotPositive {
-                    field: field.into(),
-                },
-                Range::Nonnegative if value < 0.0 => Reason::Negative {
-                    field: field.into(),
-                },
-                _ => return true,
-            }
-        };
-        self.reject(kind, id, reason);
-        false
+            true
+        }
     }
 }
 
+pub(crate) fn number_reason(field: &str, value: f64, range: Range) -> Option<Reason> {
+    let reason = if !value.is_finite() {
+        Reason::NotFinite {
+            field: field.into(),
+        }
+    } else if value.abs() > LIMIT_MM {
+        Reason::OutOfRange {
+            field: field.into(),
+            value,
+        }
+    } else {
+        match range {
+            Range::Positive if value <= 0.0 => Reason::NotPositive {
+                field: field.into(),
+            },
+            Range::Nonnegative if value < 0.0 => Reason::Negative {
+                field: field.into(),
+            },
+            _ => return None,
+        }
+    };
+    Some(reason)
+}
+
 #[derive(Clone, Copy)]
-enum Range {
+pub(crate) enum Range {
     Signed,
     Nonnegative,
     Positive,
