@@ -500,16 +500,10 @@ export const rustBoundaries: RustBoundary[] = [
     crate: "madori-modeling",
     kind: "direct",
     dependencyPrefix: "solidcraft-",
-    allowedDirectDeps: [
-      "solidcraft-engine",
-      "solidcraft-doc",
-      "solidcraft-kernel",
-      "solidcraft-io",
-    ],
+    allowedDirectDeps: ["solidcraft-engine", "solidcraft-doc", "solidcraft-io"],
     reason:
-      "docs/plan.md §4.2 modeling uses engine, doc and kernel; current solidcraft-io enables external-workspace cache safety (§5.1)",
-    message:
-      "Modeling SolidCraft dependencies must stay within its documented layers and cache-safety IO exception.",
+      "docs/plan.md §4.2 modeling uses engine and doc and reaches kernel through solidcraft_engine::kernel; io is direct only to enable external-workspace (§5.1)",
+    message: "Modeling may directly use only SolidCraft engine, doc and io.",
   },
   {
     id: "geometry-solidcraft",
@@ -546,7 +540,7 @@ export const rustBoundaries: RustBoundary[] = [
     required: ["external-workspace"],
     forbidden: ["trust-unknown-source"],
     reason:
-      "docs/plan.md §5.1 disable upstream cache reuse because its fingerprint does not describe this workspace",
+      "docs/plan.md §5.1 disable upstream cache reuse because its fingerprint does not describe this workspace, and keep io's build script from reading this repository's git state because HEAD is not the SolidCraft source",
     message: "The service must not trust a cache fingerprint from the upstream workspace.",
   },
 ];
