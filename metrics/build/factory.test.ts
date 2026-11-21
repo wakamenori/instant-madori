@@ -220,10 +220,24 @@ void test("hourly and eight active hour windows count releases, owner gaps and m
   });
   const out = new DatabaseSync(join(root, "metrics-derived.sqlite"), { readOnly: true });
   t.after(() => out.close());
-  const policy = readFileSync(
-    join(import.meta.dirname, "../../.claude/skills/madori-coordinator/SKILL.md"),
-    "utf8",
-  );
+  const skill = ".claude/skills/madori-coordinator/SKILL.md";
+  const repo = join(import.meta.dirname, "../..");
+  const policy = readFileSync(join(repo, skill), "utf8");
+  const verification = out.prepare("SELECT effective,revision FROM verification_policy").get();
+  assert.ok(verification);
+  const rule = "検証は、head ごとに検証役一人で行う。";
+  assert.ok(policy.includes(rule));
+  const revision = String(verification.revision);
+  const introduced = execFileSync("git", ["show", "--format=", revision, "--", skill], {
+    encoding: "utf8",
+    cwd: repo,
+  });
+  assert.ok(introduced.split("\n").some((line) => line.startsWith("+") && line.includes(rule)));
+  const commitTime = execFileSync("git", ["show", "-s", "--format=%cI", revision], {
+    cwd: repo,
+    encoding: "utf8",
+  });
+  assert.equal(verification.effective, new Date(commitTime.trim()).toISOString());
   const capacity = Number(
     out.prepare("SELECT capacity FROM owner_limit ORDER BY effective DESC LIMIT 1").get()?.capacity,
   );

@@ -12,17 +12,30 @@ SELECT *,CASE WHEN cause IN ('不明','もとからあった','外の変化') TH
  WHEN (SELECT count(*) FROM mart_active_minute WHERE minute>=unixepoch(merged_at) AND minute<unixepoch(at))<=1800 THEN 'within_window'
  ELSE 'late' END disposition FROM causes;
 
+CREATE TABLE verification_policy(effective TEXT PRIMARY KEY,revision TEXT NOT NULL);
+INSERT INTO verification_policy VALUES ('2026-11-18T01:49:39.000Z','faf6af125');
+
 CREATE TABLE mart_quality_issue AS
-WITH rounds AS (
+WITH completed AS (
+ SELECT c.*,c.merged_at<(SELECT min(effective) FROM verification_policy) pre_verification
+ FROM issue_classification c WHERE c.pr IS NOT NULL
+), rounds AS (
  SELECT *,row_number() OVER(PARTITION BY issue,pr ORDER BY round,at,actor) seq FROM verification_decision
 ), legacy_comments AS (
  SELECT c.issue,count(DISTINCT m.value) verdicts,min(m.value) marker
- FROM issue_classification c JOIN stg_github_comment b ON b.issue_or_pr=c.pr AND b.created_at<=c.merged_at
+ FROM completed c JOIN stg_github_comment b ON NOT c.pre_verification AND b.issue_or_pr=c.pr
+ AND julianday(b.created_at)<=julianday(c.merged_at,'+5 minutes')
  JOIN json_each(b.markers) m WHERE m.value IN ('verdict_pass','verdict_fail') GROUP BY c.issue
 )
 SELECT c.issue,c.pr,c.merged_at,coalesce(c.area,'unknown') area,
- CASE WHEN d.round IS NULL AND l.verdicts=1 THEN l.marker='verdict_pass' WHEN d.round IS NULL AND l.verdicts IS NULL THEN 0 WHEN d.round=1 AND d.verdict IS NOT NULL THEN d.verdict='PASS' END first_pass,
- d.round IS NULL AND l.verdicts IS NULL missing_verifier,d.round IS NULL AND l.verdicts IS NOT NULL legacy_comment,CASE WHEN d.round=1 THEN d.failed_checks END failed_checks,
+ c.pre_verification,
+ CASE WHEN c.pre_verification THEN NULL
+      WHEN d.round=1 THEN d.verdict='PASS'
+      WHEN d.round IS NULL AND l.verdicts=1 THEN l.marker='verdict_pass'
+      WHEN d.round IS NULL AND l.verdicts IS NULL THEN 0 END first_pass,
+ NOT c.pre_verification AND d.round IS NULL AND l.verdicts IS NULL missing_verifier,
+ d.round IS NULL AND l.verdicts IS NOT NULL legacy_comment,
+ CASE WHEN NOT c.pre_verification AND d.round=1 THEN d.failed_checks END failed_checks,
  (SELECT count(*) FROM mart_active_minute WHERE minute>=unixepoch(c.merged_at))>=1800 observed,
  EXISTS(SELECT 1 FROM quality_discovery q WHERE q.cause_issue=c.issue AND disposition='within_window' AND type='作りの見直し') rework,
  EXISTS(SELECT 1 FROM quality_discovery q WHERE q.cause_issue=c.issue AND disposition='within_window' AND type='不具合')
@@ -32,12 +45,13 @@ SELECT c.issue,c.pr,c.merged_at,coalesce(c.area,'unknown') area,
  AND (SELECT count(*) FROM mart_active_minute WHERE minute>=unixepoch(original.merged_at) AND minute<unixepoch(t.created_at))<=1800) escaped,
  (SELECT count(*) FROM verification_decision v JOIN change p USING(pr)
  WHERE v.issue=c.issue AND v.pr<>c.pr AND p.created_at>=c.closed_at) record_pr_rounds
-FROM issue_classification c LEFT JOIN legacy_comments l USING(issue) LEFT JOIN rounds d ON d.issue=c.issue AND d.pr=c.pr AND d.seq=1
-WHERE c.pr IS NOT NULL;
+FROM completed c LEFT JOIN legacy_comments l USING(issue) LEFT JOIN rounds d ON d.issue=c.issue AND d.pr=c.pr AND d.seq=1;
 
 CREATE VIEW mart_quality AS
 SELECT area,count(*) completed,count(first_pass) first_denominator,sum(first_pass) passed,avg(first_pass) first_pass_rate,
- sum(legacy_comment) legacy_comments,sum(missing_verifier) missing_verifiers,sum(first_pass IS NULL) missing_first_verdicts,
+ sum(legacy_comment) legacy_comments,sum(missing_verifier) missing_verifiers,
+ sum(pre_verification) pre_verification,
+ sum(first_pass IS NULL AND NOT pre_verification) missing_first_verdicts,
  sum(rework) reworks,avg(rework) rework_rate,sum(escaped) escapes,avg(escaped) escape_rate,
  sum(observed) observed,avg(observed) observed_share,sum(record_pr_rounds) record_pr_rounds FROM mart_quality_issue GROUP BY area;
 
@@ -50,7 +64,7 @@ FROM mart_quality_issue CROSS JOIN checks GROUP BY area,name;
 CREATE VIEW mart_discovery_count AS SELECT coalesce(c.area,'unknown') area,disposition,count(*) records
 FROM quality_discovery d LEFT JOIN issue_classification c ON c.issue=d.cause_issue GROUP BY 1,2;
 
-INSERT INTO mart_record_gap SELECT issue,'missing_first_round' FROM mart_quality_issue q WHERE first_pass IS NULL
+INSERT INTO mart_record_gap SELECT issue,'missing_first_round' FROM mart_quality_issue q WHERE first_pass IS NULL AND NOT pre_verification
 AND NOT EXISTS(SELECT 1 FROM verification_decision v WHERE v.issue=q.issue AND v.pr=q.pr AND v.round=1);
 INSERT INTO mart_record_gap SELECT issue,'missing_failed_checks' FROM mart_quality_issue
 WHERE first_pass=0 AND missing_verifier=0 AND failed_checks IS NULL;
