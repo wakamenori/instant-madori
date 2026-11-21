@@ -2,36 +2,14 @@ import { readFileSync } from "node:fs";
 import { parse, stringify } from "yaml";
 import { z } from "zod";
 
-export const labels = {
-  機能: "機能：利用者に見える振る舞いを足す・変える",
-  製品の不具合: "製品の不具合：約束どおりに動かない製品を直す",
-  製品の作りの見直し: "製品の作りの見直し：振る舞いを変えずに作りを変える",
-  開発の仕組みの改善: "開発の仕組みの改善：作る・確かめる・届ける・動かす仕組みを良くする",
-  開発の仕組みの不具合: "開発の仕組みの不具合：約束どおりに動かない仕組みを直す",
-  開発の仕組みの作りの見直し: "開発の仕組みの作りの見直し：振る舞いを変えずに作りを変える",
-  外の変化への追従: "外の変化への追従：依存・脆弱性・外のツールの変化に合わせる",
-  確かめと判断: "確かめと判断：試作・計測・受け入れ・計画づくりで知る・決める",
-};
-
+import {
+  factsByKind,
+  labels,
+  labeledKind,
+  readIssueFields,
+} from "../../../../metrics/ingest/issue-facts.ts";
+export { labels };
 const text = z.string().trim().min(1);
-const discovery = {
-  found_at: z.enum(["マージの前の検証", "マージの後"]),
-  found_by: text,
-  cause: z.string().regex(/^(?:#[1-9]\d*|PR #[1-9]\d*|外の変化|もとからあった|不明)$/),
-};
-
-const issue = z.discriminatedUnion("type", [
-  z.strictObject({ type: z.literal("機能") }),
-  z.strictObject({ type: z.enum(["製品の不具合", "開発の仕組みの不具合"]), ...discovery }),
-  z.strictObject({
-    type: z.enum(["製品の作りの見直し", "開発の仕組みの作りの見直し"]),
-    ...discovery,
-    plan_change: z.enum(["はい", "いいえ"]),
-  }),
-  z.strictObject({ type: z.literal("外の変化への追従") }),
-  z.strictObject({ type: z.literal("開発の仕組みの改善"), target: text }),
-  z.strictObject({ type: z.literal("確かめと判断") }),
-]);
 
 const check = z.enum(["検査", "振る舞い", "地図", "差分", "終わった証拠"]);
 const time = z.iso.datetime();
@@ -64,12 +42,12 @@ function leadingBlock(markdown) {
 }
 
 export function checkRecord(kind, markdown, label) {
-  const raw = leadingBlock(markdown);
   if (kind === "issue" || kind === "addition") {
-    const record = issue.parse(raw);
-    if (labels[record.type] !== label) throw new Error("type must match the Issue label");
+    if (!labeledKind([label]) || readIssueFields(markdown, [label]) === null)
+      throw new Error("expected the fields required by the Issue label");
     return;
   }
+  const raw = leadingBlock(markdown);
   if (kind === "verdict") verdict.parse(raw);
   else if (kind === "staging-start") stagingStart.parse(raw);
   else if (kind === "staging-end") stagingEnd.parse(raw);
@@ -79,18 +57,21 @@ export function checkRecord(kind, markdown, label) {
 export function renderDraft(markdown) {
   const match = /^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/.exec(markdown);
   if (!match) throw new Error("expected draft frontmatter");
-  const { id, title, milestone, blockedBy, ...fields } = z
+  const { id, title, milestone, blockedBy, type, ...fields } = z
     .looseObject({
+      type: z.enum(Object.keys(labels)),
       id: z.union([text, z.int()]),
       title: text,
       milestone: z.union([text, z.int()]),
       blockedBy: z.string().nullable(),
     })
     .parse(parse(match[1]));
-  const record = issue.parse(fields);
+  const schema = factsByKind[type];
+  const record = (schema ?? z.strictObject({})).parse(fields);
   const body = markdown.slice(match[0].length).trimStart();
   if (!body.startsWith("## ") || [...body.matchAll(/^## 依存\r?$/gm)].length !== 1)
     throw new Error("expected draft headings including exactly one ## 依存");
+  if (!schema) return body;
   return "```yaml\n" + stringify(record) + "```\n\n" + body;
 }
 

@@ -71,8 +71,7 @@ void test("comment markers follow the coordinator's staging occupancy wording", 
 
 void test("GitHub fields come only from the leading YAML and the shared resources section", () => {
   const yaml = (lines: string) => "```yaml\n" + lines + "\n```";
-  const findings =
-    "type: 製品の作りの見直し\nfound_at: マージの後\nfound_by: 担当\ncause: '#123'\nplan_change: いいえ";
+  const findings = "found_at: マージの後\nfound_by: 担当\ncause: '#123'\nplan_change: いいえ";
   const body =
     yaml(findings) + "\n## 使う共有資源\n<!-- pnpm dev -->\nstaging を占有する\n## 依存\nなし";
   const issue = issueRecord(
@@ -83,7 +82,7 @@ void test("GitHub fields come only from the leading YAML and the shared resource
       closed_at: null,
       state: "open",
       milestone: null,
-      labels: [],
+      labels: [{ name: "製品の作りの見直し：振る舞いを変えずに作りを変える" }],
       body,
     },
     [],
@@ -103,7 +102,8 @@ void test("GitHub fields come only from the leading YAML and the shared resource
     issue_url: "issues/1",
     user: { login: "fixture" },
   };
-  const comment = (body: string) => commentRecord({ ...input, body });
+  const comment = (body: string) =>
+    commentRecord({ ...input, body }, ["製品の作りの見直し：振る舞いを変えずに作りを変える"]);
   assert.deepEqual(comment(yaml(findings)).payload.fields, [issue.payload.fields]);
   assert.deepEqual(comment("## 検証役の判定：PASS\n前回の FAIL").payload.markers, ["verdict_pass"]);
   const fields =
