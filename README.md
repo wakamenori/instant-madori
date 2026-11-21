@@ -8,7 +8,7 @@
 
 macOSまたはLinux、Git（`git subtree`を含む）、[mise](https://mise.jdx.dev/getting-started.html)、rustupを使用します。Node.js・pnpm・検査ツールは`mise.toml`、Rust・Clippy・rustfmt・Wasmターゲットは`rust-toolchain.toml`で固定しています。Dockerは `pnpm dev` と `pnpm check --full` に必要です。Docker DesktopのVMには、12 GBのメモリを割り当ててください。8.32 GBのVMでは、形状サービスのイメージのビルドがメモリ不足で止まりました。画面だけの作業では `MADORI_DEV_CONTAINERS=0 pnpm dev` で起動できます。
 
-リポジトリのルートで実行します。ローカル起動にCloudflareアカウントやAIキーは不要です。
+リポジトリのルートで実行します。ローカル起動にCloudflareアカウントやAIキーは不要です。ローカルでは、AIの代わりに、決まった応答を返す台本のAIを使います。
 
 ```sh
 mise trust

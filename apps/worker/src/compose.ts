@@ -1,3 +1,4 @@
+import { selectAi } from "./ai/select.ts";
 import { jobTestHoldSettingSchema } from "./services/job-test-hold.ts";
 import { geometryClient } from "./geometry/geometry-client.ts";
 import { d1 } from "./storage/d1.ts";
@@ -78,6 +79,7 @@ export function jobWorkflowDeps(
       },
       snapshots: { write: snapshots.write },
     },
+    ai: selectAi(env),
     testHold: jobTestHoldSettingSchema.parse(env),
     runtime,
     geometry: geometryClient((name) => env.GEOMETRY.getByName(name)),

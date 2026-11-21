@@ -1,3 +1,4 @@
+import { scriptedAi } from "../../src/ai/scripted.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
@@ -60,6 +61,7 @@ await test("Pattern reconciliation on D1", async (t) => {
       store: db.store,
       runtime,
       jobRuns,
+      ai: scriptedAi([]),
       testHold: null,
       wakePattern: async () => {},
       geometry: () => ({

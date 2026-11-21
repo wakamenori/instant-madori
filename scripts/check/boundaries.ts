@@ -1,6 +1,7 @@
 export const typescriptExtensions = "{ts,tsx,mts,cts}";
 
 const workerLayerScopes = {
+  "worker-ai": { files: [`apps/worker/src/ai/**/*.${typescriptExtensions}`], ignores: [] },
   "worker-api": {
     files: [`apps/worker/src/api/**/*.${typescriptExtensions}`],
     ignores: ["apps/worker/src/api/app.ts", "apps/worker/src/api/access.ts"],
@@ -75,6 +76,12 @@ export const workerLayers: Record<
   WorkerLayer,
   { allowed: WorkerLayer[]; typeOnly: WorkerLayer[]; reason: BoundaryReason }
 > = {
+  ai: {
+    allowed: [],
+    typeOnly: [],
+    reason:
+      "docs/plan.md §4.2 ai owns one provider round trip without business decisions or other layers",
+  },
   api: {
     allowed: ["services"],
     typeOnly: ["geometry"],
@@ -82,9 +89,9 @@ export const workerLayers: Record<
   },
   services: {
     allowed: ["geometry"],
-    typeOnly: ["storage"],
+    typeOnly: ["storage", "ai"],
     reason:
-      "docs/plan.md §4.2 services receive Store operations and call geometry without HTTP handlers",
+      "docs/plan.md §4.2 services receive Store operations and the AI round trip and call geometry without HTTP handlers",
   },
   storage: {
     allowed: [],
@@ -142,6 +149,7 @@ const workerLayerNames = Object.keys(workerLayers).filter((layer): layer is Work
 );
 const workerLayerMembers: Record<WorkerLayer, TypeScriptScope[]> = {
   api: ["worker-api-entry", "worker-access"],
+  ai: [],
   services: [],
   storage: ["worker-d1", "worker-r2"],
   geometry: [],
