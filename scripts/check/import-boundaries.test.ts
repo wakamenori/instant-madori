@@ -420,6 +420,36 @@ for (const row of typescriptBoundaries) {
   });
 }
 
+const httpFreeLayers = {
+  "services-http": "apps/worker/src/services/",
+  "storage-http": "apps/worker/src/storage/",
+} satisfies Record<string, string>;
+
+void test("HTTP-free layers reject HTTP globals in every file of the layer", async () => {
+  for (const [id, dir] of Object.entries(httpFreeLayers)) {
+    const row = typescriptBoundaries.find((entry) => entry.id === id);
+    assert(row, id);
+    const cases = syntaxCases[id];
+    assert(cases, id);
+    const paths = [
+      ...[...Object.values(scopes), ...storageExtensionFiles].filter((path) =>
+        path.startsWith(dir),
+      ),
+      `${dir}nested/x.ts`,
+    ];
+    for (const path of paths) {
+      for (const source of cases.rejected) {
+        assert(
+          (await diagnostics(source, path)).some((diagnostic) =>
+            diagnostic.message.includes(row.message),
+          ),
+          `${id} ${path}: ${source}`,
+        );
+      }
+    }
+  }
+});
+
 void test("Worker layers permit precisely their runtime and type dependencies", () => {
   for (const [layer, { allowed, typeOnly }] of Object.entries(workerLayerPermissions)) {
     const from = `apps/worker/src/${layer}/nested/source.ts`;
