@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { DatabaseSync } from "node:sqlite";
@@ -12,10 +12,10 @@ void test("T3 message checkpoints persist only after commit and exclude foreign 
   const file = join(home, "t3.sqlite");
   const db = new DatabaseSync(file);
   db.exec(`CREATE TABLE projection_projects(project_id,workspace_root);
- CREATE TABLE orchestration_v2_projection_threads(thread_id,project_id,title);
+ CREATE TABLE orchestration_v2_projection_threads(thread_id,project_id,title,created_at,updated_at,archived_at,default_provider,payload_json);
  CREATE TABLE orchestration_v2_projection_messages(thread_id,message_id,created_at,updated_at,role,streaming,payload_json);
  INSERT INTO projection_projects VALUES ('repo','/repo'),('other','/other');
- INSERT INTO orchestration_v2_projection_threads VALUES ('v','repo','検証 #391 @ abcd'),('v2','repo','PR #416（#381）の検証（2回目）'),('f','other','検証 #1 @ ef01');`);
+ INSERT INTO orchestration_v2_projection_threads(thread_id,project_id,title) VALUES ('v','repo','検証 #391 @ abcd'),('v2','repo','PR #416（#381）の検証（2回目）'),('v1','repo','PR #416（#381）の検証'),('f','other','検証 #1 @ ef01');`);
   const insert = db.prepare(
     "INSERT INTO orchestration_v2_projection_messages VALUES(?,?,'2026-01-01T00:00:00Z','2026-01-01T00:00:00Z','assistant',?,?)",
   );
@@ -26,7 +26,19 @@ void test("T3 message checkpoints persist only after commit and exclude foreign 
   ] as const)
     insert.run(thread, id, streaming, JSON.stringify({ text: "PASS #391" }));
   insert.run("v2", "new-format", 0, JSON.stringify({ text: "判定：FAIL。前回は PASS" }));
+  insert.run("v1", "first-round", 0, JSON.stringify({ text: "FAIL" }));
+  db.exec("UPDATE orchestration_v2_projection_threads SET updated_at='2026-01-01T00:00:00Z'");
   db.close();
+  for (const source of ["t3.thread", "t3.message"])
+    writeFileSync(join(home, source + ".verifier-2.cursor"), "2026-01-02T00:00:00.000Z");
+  const threads = t3Pollers(file, "/repo", home).find((p) => p.name === "t3.thread");
+  assert.ok(threads);
+  const first = (await threads.poll(new AbortController().signal)).find(
+    (r) => r.naturalKey === "v1",
+  );
+  assert.equal(first?.payload.title_kind, "verifier");
+  assert.equal(first.payload.issue, 381);
+  assert.equal(first.payload.pr, 416);
   const poller = () => {
     const p = t3Pollers(file, "/repo", home).find((p) => p.name === "t3.message");
     assert.ok(p);
@@ -40,10 +52,11 @@ void test("T3 message checkpoints persist only after commit and exclude foreign 
     [
       ["message", "PASS", 9],
       ["new-format", "FAIL", "判定：FAIL。前回は PASS".length],
+      ["first-round", "FAIL", 4],
     ],
   );
   assert.ok(!JSON.stringify(rows).includes("PASS #391"));
-  assert.equal((await poller().poll(signal)).length, 2);
+  assert.equal((await poller().poll(signal)).length, 3);
   p.committed?.();
   assert.equal((await poller().poll(signal)).length, 0);
 });
