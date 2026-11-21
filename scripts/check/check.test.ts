@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { existsSync, readFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  readdirSync,
+  readFileSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { text } from "node:stream/consumers";
@@ -9,6 +17,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { after, test } from "node:test";
 import { runChecks } from "./check.ts";
+import { nodeTestFlags } from "./test-results.ts";
 
 type Command = string[];
 const modes = ["--fast", "default", "--full"] as const;
@@ -23,6 +32,7 @@ mkdirSync(join(wasmBindingsOnly, "crates/viewer/pkg"), { recursive: true });
 writeFileSync(join(wasmBindingsOnly, "crates/viewer/pkg/madori_viewer.d.ts"), "");
 const original = process.cwd();
 process.chdir(wasmBindingsOnly);
+const resultsDir = join(wasmBindingsOnly, "results");
 after(() => {
   process.chdir(original);
   rmSync(wasmBindingsOnly, { recursive: true, force: true });
@@ -42,6 +52,7 @@ void test("import boundaries read TypeScript after ESLint fixes and formatting, 
           return typeCheck(invoked) ? Promise.reject(failure) : Promise.resolve();
         },
         (stage) => stage(),
+        resultsDir,
       ),
       (error) => error === failure,
     );
@@ -50,6 +61,55 @@ void test("import boundaries read TypeScript after ESLint fixes and formatting, 
     const shown = `${mode}:\n${commands.map((command) => command.join(" ")).join("\n")}`;
     assert(fixed >= 0 && checked > fixed, shown);
     assert(commands.slice(fixed + 1, checked).some(prettierWrite), shown);
+  }
+});
+
+void test("each mode clears previous results before the first step and records each suite it runs", async () => {
+  const e2e = "apps/worker/tests/container.e2e.ts";
+  mkdirSync("apps/worker/tests", { recursive: true });
+  writeFileSync(e2e, "");
+  writeFileSync("apps/worker/tests/example.test.ts", "");
+  for (const mode of modes) {
+    mkdirSync(resultsDir, { recursive: true });
+    writeFileSync(join(resultsDir, "container.jsonl"), "stale");
+    const commands = new Map<string, string[]>();
+    await runChecks(
+      mode,
+      [],
+      (label, _command, args) => {
+        if (!commands.size) assert.deepEqual(readdirSync(resultsDir), []);
+        commands.set(label, args);
+        return Promise.resolve();
+      },
+      (stage) => stage(),
+      resultsDir,
+    );
+    for (const [label, suite] of [
+      ["TypeScript tests", "typescript"],
+      ["Container integration", "container"],
+    ] as const) {
+      const args = commands.get(label);
+      if (mode === "--fast" || (suite === "container" && mode !== "--full"))
+        assert.equal(args, undefined);
+      else {
+        assert(args);
+        assert(args.includes("--test-reporter=spec"));
+        assert(args.includes("--test-reporter-destination=stdout"));
+        assert(
+          args.some(
+            (flag) => flag.startsWith("--test-reporter=") && flag.endsWith("/test-results.ts"),
+          ),
+        );
+        assert(args.includes("--test-reporter-destination=" + join(resultsDir, suite + ".jsonl")));
+      }
+    }
+    const rust = commands.get("Rust tests");
+    if (mode === "--fast") assert.equal(rust, undefined);
+    else {
+      assert(rust);
+      assert(rust.includes("--no-fail-fast"));
+      assert(rust.some((flag) => flag.includes(join(resultsDir, "rust.jsonl"))));
+    }
   }
 });
 
@@ -71,6 +131,7 @@ void test("full checks hold one Docker slot across container integration and pru
         await stage();
         commands.push("exit");
       },
+      resultsDir,
     );
     const markers = commands.filter((command) => command === "enter" || command === "exit");
     if (mode !== "--full") {
@@ -80,7 +141,11 @@ void test("full checks hold one Docker slot across container integration and pru
     assert.deepEqual(markers, ["enter", "exit"]);
     const end = commands.indexOf("exit");
     assert.deepEqual(commands.slice(commands.indexOf("enter") + 1, end), [
-      "Container integration --test --test-reporter=spec apps/worker/tests/container.e2e.ts",
+      [
+        "Container integration",
+        ...nodeTestFlags(resultsDir, "container"),
+        "apps/worker/tests/container.e2e.ts",
+      ].join(" "),
       "Prune Docker build cache scripts/dev/prune-build-cache.ts",
     ]);
     assert.deepEqual(
@@ -118,7 +183,13 @@ setTimeout(() => process.exit(1), 10000);
     process.execPath,
     [fileURLToPath(new URL("./check.ts", import.meta.url)), "--fast"],
     {
-      env: { ...process.env, PATH: directory + ":" + process.env["PATH"], STEP_PID: pidFile },
+      env: {
+        ...process.env,
+        PATH: directory + ":" + process.env["PATH"],
+        STEP_PID: pidFile,
+        // The outer pnpm check is writing its own results while this test runs.
+        MADORI_TEST_RESULTS_DIR: join(directory, "results"),
+      },
       stdio: ["ignore", "pipe", "pipe"],
       timeout: 10000,
       killSignal: "SIGKILL",
@@ -137,6 +208,7 @@ setTimeout(() => process.exit(1), 10000);
       await sleep(10);
     }
     const pid = Number(readFileSync(pidFile, "utf8"));
+    assert(existsSync(join(directory, "results")), "check used the given results directory");
     check.kill("SIGINT");
     while (!existsSync(pidFile + ".stopping")) {
       assert(Date.now() < deadline, "pnpm stub did not receive SIGTERM");

@@ -1,9 +1,11 @@
 import { machineSlots, withDockerSlot } from "../shared/docker-slots.ts";
 import { access, glob } from "node:fs/promises";
+import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { start, stop } from "../shared/processes.ts";
 import { repositoryRoot, serviceCrates } from "../shared/repository.ts";
 import { assertContainerE2eFiles } from "./layout-contract.ts";
+import { cargoTestFlags, nodeTestFlags, resetResults } from "./test-results.ts";
 
 const usage = `Usage: pnpm check [--fast | --full]
   --fast  Autofix, TypeScript types/lint, Rust native/Wasm Clippy, local static checks.
@@ -17,7 +19,9 @@ export async function runChecks(
   crates: ReturnType<typeof serviceCrates>,
   run: (label: string, command: string, args: string[]) => Promise<void>,
   inDockerSlot: (stage: () => Promise<void>) => Promise<void>,
+  resultsDir = resolve(process.env.MADORI_TEST_RESULTS_DIR ?? "target/test-results"),
 ): Promise<void> {
+  await resetResults(resultsDir);
   const pnpm = (label: string, ...commandArgs: string[]) => run(label, "pnpm", commandArgs);
   const cargo = (label: string, ...commandArgs: string[]) => run(label, "cargo", commandArgs);
   const script = (label: string, path: string) => run(label, process.execPath, [path]);
@@ -127,11 +131,10 @@ export async function runChecks(
       tests.push(path);
     if (tests.length === 0) throw new Error("No TypeScript tests found");
     await run("TypeScript tests", process.execPath, [
-      "--test",
-      "--test-reporter=spec",
+      ...nodeTestFlags(resultsDir, "typescript"),
       ...tests.sort(),
     ]);
-    await cargo("Rust tests", "test", "--locked", "--workspace");
+    await cargo("Rust tests", ...cargoTestFlags(resultsDir));
   }
   if (mode === "--full") {
     await pnpm("Build web", "--filter", "@madori/web", "build");
@@ -152,8 +155,7 @@ export async function runChecks(
     );
     await inDockerSlot(async () => {
       await run("Container integration", process.execPath, [
-        "--test",
-        "--test-reporter=spec",
+        ...nodeTestFlags(resultsDir, "container"),
         "apps/worker/tests/container.e2e.ts",
       ]);
       await script("Prune Docker build cache", "scripts/dev/prune-build-cache.ts");
