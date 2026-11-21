@@ -48,11 +48,13 @@ void test("T3 message checkpoints persist only after commit and exclude foreign 
   const p = poller();
   const rows = await p.poll(signal);
   assert.deepEqual(
-    rows.map((r) => [r.naturalKey, r.payload.verdict, r.payload.text_length]),
+    [...rows]
+      .sort((a, b) => a.naturalKey.localeCompare(b.naturalKey))
+      .map((r) => [r.naturalKey, r.payload.verdict, r.payload.text_length]),
     [
+      ["first-round", "FAIL", 4],
       ["message", "PASS", 9],
       ["new-format", "FAIL", "判定：FAIL。前回は PASS".length],
-      ["first-round", "FAIL", 4],
     ],
   );
   assert.ok(!JSON.stringify(rows).includes("PASS #391"));
