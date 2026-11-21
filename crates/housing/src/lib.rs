@@ -4,13 +4,16 @@ mod data;
 mod error;
 mod house;
 mod id;
+mod joint;
 mod json;
 mod layout;
+mod measure;
 mod topology;
 
 pub use data::*;
 pub use error::*;
-pub use house::{BoundaryView, EdgeView, Face, House, RoomView, VertexView};
+pub use house::{BoundaryView, EdgeView, Face, House, RoomView, StoreyView, VertexView};
 pub use id::{BoundaryId, OpeningId, OperationId, RoomId, StoreyId, VertexId};
 pub use json::{ReadError, WriteError};
 pub use layout::*;
+pub use measure::*;
