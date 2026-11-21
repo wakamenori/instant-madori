@@ -239,7 +239,7 @@ L4は、L3から指標を計算する。指標の定義はコードとして版�
 
 - 受け口は、launchdで常駐し、OTLP/HTTPとhookの記録を受ける。L1に書くのは受け口だけにして、書き手を一つにする。hookは受け口に送らず、いつも一時ファイル（spool）に書いて終わる。受け口は1秒ごとにspoolを取り込み、書き込みが成功した後にファイルを消す。受け口が止まっている間はspoolに溜まり、戻ったときに、OTLPを受け始める前に取り込む。受け口がこのマシンで一度も動いていなければ、hookは何も書かない。受け口のポートはOTLP/HTTPの既定の4318で、`pnpm dev` が使う5173と8787を避ける。
 - ポーラーは、GitHub（Issue、依存、PR、コメント、Actionsのjobとstep）を数分ごとに、T3のDBを1分ごとに読む。T3のDBは読み取り専用で開く。
-- hookは、リポジトリの `.claude/settings.json` に置き、SessionStart、UserPromptSubmit、Stopの三つだけを使う。SessionStartは、`session_id` とT3のスレッド（`T3CODE_THREAD_ID`）とcwdを結ぶ。UserPromptSubmitとStopは、ターンの始まりと終わりを記録する。ツールとモデルの時間はOTelが出すので、ツールを呼ぶたびに動くhookは使わない。
+- hookは、リポジトリの `.claude/settings.json` に置き、SessionStart、UserPromptSubmit、Stop、PermissionRequestの四つを使う。SessionStartは、`session_id` とT3のスレッド（`T3CODE_THREAD_ID`）とcwdを結ぶ。UserPromptSubmitとStopは、ターンの始まりと終わりを記録する。PermissionRequestは、承認を求めたときだけ動き、承認待ちの始まりを記録する。承認の結果はOTelの `tool_decision` に出るが、hookの入力には `tool_use_id` が無いので、要求と結果は別々に持つ。ツールとモデルの時間はOTelが出すので、ツールを呼ぶたびに動くhookは使わない。
 
 OTelは、リポジトリではなくこのマシンの設定で有効にする。Claude Codeは、プロジェクトの `.claude/settings.json` の `env` に書いたテレメトリーの設定を使わないためである。
 
