@@ -14,6 +14,7 @@ void test("quality follows the closing PR and active observation clock", (t) => 
  CREATE TABLE mart_record_gap(issue,reason);
  CREATE TABLE issue_classification(issue,pr,merged_at,closed_at,area);
  INSERT INTO issue_classification VALUES (1,11,'2027-01-01','2027-01-01','product'),(2,12,'2027-03-01','2027-03-01','development'),(3,13,'2027-01-01','2027-01-01','product'),(4,14,'2027-01-01','2027-01-01','product');
+ INSERT INTO issue_classification VALUES(27,37,'2027-03-01','2027-03-01','development');
  CREATE TABLE mart_active_minute(minute);
  WITH RECURSIVE n(i) AS (VALUES(0) UNION ALL SELECT i+1 FROM n WHERE i<1800)
  INSERT INTO mart_active_minute SELECT unixepoch('2027-01-01')+60*i FROM n;
@@ -26,11 +27,13 @@ void test("quality follows the closing PR and active observation clock", (t) => 
  INSERT INTO stg_github_comment VALUES(29,'2027-01-01T00:00:48.000Z','["verdict_pass"]'),(30,'2027-01-01T00:05:00.001Z','["verdict_pass"]');
  CREATE TABLE stg_github_issue(number,type,cause,found_at,plan_change,created_at);
  INSERT INTO stg_github_issue VALUES
- (20,'不具合','#1','マージの後',NULL,'2027-01-01'),(21,'不具合','不明','マージの後',NULL,'2027-01-01'),
- (22,'作りの見直し','PR #11','マージの後','はい','2027-01-01'),(23,'不具合','#3','マージの前の検証',NULL,'2027-01-02'),
- (24,'不具合','#4','マージの後',NULL,'2027-02-01'),(25,'不具合','もとからあった','マージの後',NULL,'2027-01-01');
+ (20,'製品の不具合','#1','マージの後',NULL,'2027-01-01'),(21,'製品の不具合','不明','マージの後',NULL,'2027-01-01'),
+ (22,'製品の作りの見直し','PR #11','マージの後','はい','2027-01-01'),(23,'製品の不具合','#3','マージの前の検証',NULL,'2027-01-02'),
+ (24,'製品の不具合','#4','マージの後',NULL,'2027-02-01'),(25,'製品の不具合','もとからあった','マージの後',NULL,'2027-01-01');
  CREATE TABLE stg_github_comment_block(issue_or_pr,type,cause,found_at,plan_change,created_at);
- INSERT INTO stg_github_comment_block VALUES(26,'作りの見直し','PR #11','マージの後','いいえ','2027-01-02');
+ INSERT INTO stg_github_comment_block VALUES(26,'製品の作りの見直し','PR #11','マージの後','いいえ','2027-01-02');
+ INSERT INTO stg_github_issue VALUES(28,'開発の仕組みの不具合','#27','マージの後',NULL,'2027-03-02');
+ INSERT INTO stg_github_comment_block VALUES(29,'開発の仕組みの作りの見直し','#27','マージの後','いいえ','2027-03-02');
  CREATE TABLE issue_change(issue,pr);
  INSERT INTO issue_change VALUES(1,11);
  CREATE TABLE stg_github_issue_timeline(issue,event,created_at);
@@ -60,6 +63,10 @@ void test("quality follows the closing PR and active observation clock", (t) => 
       [4, 1, 0, 0, 0, 1, 0],
     ],
   );
+  assert.deepEqual(
+    rows("SELECT reworks,escapes,completed FROM mart_quality WHERE area='development'"),
+    [[1, 2, 2]],
+  );
   assert.deepEqual(rows("SELECT disposition FROM quality_discovery ORDER BY report_issue").flat(), [
     "within_window",
     "不明",
@@ -67,6 +74,8 @@ void test("quality follows the closing PR and active observation clock", (t) => 
     "deferred",
     "late",
     "もとからあった",
+    "within_window",
+    "within_window",
     "within_window",
   ]);
   assert.deepEqual(
@@ -112,7 +121,9 @@ void test("compares equal active windows around clustered improvements and count
  CREATE TABLE issue_classification(issue,pr,merged_at,kind);
  CREATE TABLE stg_github_issue(number,target,type);
  INSERT INTO stg_github_issue(number,target) VALUES(1,'activity.ci'),(2,'activity.ci'),(3,'slot.resource_limit'),(4,'absent'),(5,'操作できる'),(6,'prevention.r2_create_only');
- INSERT INTO issue_classification SELECT number,number+10,datetime(CASE number WHEN 2 THEN 600 WHEN 3 THEN 0 ELSE 540 END,'unixepoch'),'開発の改善' FROM stg_github_issue;
+ INSERT INTO issue_classification SELECT number,number+10,datetime(CASE number WHEN 2 THEN 600 WHEN 3 THEN 0 ELSE 540 END,'unixepoch'),'開発の仕組みの改善' FROM stg_github_issue;
+ INSERT INTO stg_github_issue VALUES(7,'activity.ci','開発の仕組みの改善'),(8,'activity.ci','開発の仕組みの改善');
+ INSERT INTO issue_classification VALUES(7,17,NULL,NULL),(8,18,NULL,'開発の仕組みの不具合');
  CREATE TABLE mart_active_minute(minute); INSERT INTO mart_active_minute VALUES(0),(60),(480),(540),(600),(660),(720),(780);
  CREATE TABLE mart_minute(minute,state); INSERT INTO mart_minute SELECT minute,iif(minute<540,'ci','owner_turn') FROM mart_active_minute;
  CREATE TABLE owner_capacity_minute(minute,owners,slots); INSERT INTO owner_capacity_minute SELECT minute,1,2 FROM mart_active_minute;
@@ -129,6 +140,7 @@ void test("compares equal active windows around clustered improvements and count
       .prepare(sql)
       .all()
       .map((r) => Object.values(r));
+  assert.deepEqual(rows("SELECT issue FROM improvement WHERE issue IN (7,8)"), []);
   assert.deepEqual(
     rows(
       "SELECT issues,minutes,before,after,change FROM mart_improvement_effect WHERE target='activity.ci'",

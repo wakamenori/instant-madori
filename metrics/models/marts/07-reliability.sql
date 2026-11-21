@@ -2,7 +2,7 @@ CREATE TABLE mart_record_gap AS
 SELECT issue,'missing_closure' reason FROM work_item WHERE closed_at IS NOT NULL AND issue NOT IN (SELECT issue FROM final_closure)
 UNION ALL SELECT issue,'missing_kind' FROM issue_classification WHERE label_count=0 AND closed_at IS NOT NULL
 UNION ALL SELECT number,'missing_open_kind' FROM stg_github_issue i WHERE i.state='open' AND NOT EXISTS(
- SELECT 1 FROM json_each(i.labels) l JOIN issue_kind k ON l.value=k.kind OR l.value LIKE k.kind||'：%')
+ SELECT 1 FROM json_each(i.labels) l JOIN issue_kind k ON l.value=k.label)
 UNION ALL SELECT issue,'multiple_kinds' FROM issue_classification WHERE label_count>1
 UNION ALL SELECT number,'missing_issue_yaml' FROM stg_github_issue WHERE type IS NULL
 UNION ALL SELECT issue,ownership FROM issue_classification WHERE ownership IN ('missing_owner','bypass')
@@ -12,11 +12,24 @@ UNION ALL SELECT c.issue_or_pr,'missing_comment_yaml' FROM stg_github_comment c
  WHERE EXISTS(SELECT 1 FROM json_each(c.markers) m WHERE m.value IN ('verdict_pass','verdict_fail','staging_occupy_start','staging_occupy_end')) AND NOT EXISTS
  (SELECT 1 FROM stg_github_comment_block b WHERE b.comment_id=c.id)
 UNION ALL SELECT c.issue_or_pr,'invalid_comment_yaml' FROM stg_github_invalid_yaml g JOIN stg_github_comment c ON c.id=g.natural_key WHERE g.valid_to IS NULL AND g.source='github.comment';
+WITH paths AS (
+ SELECT pr,filename path FROM stg_github_pr_file UNION ALL
+ SELECT pr,previous_filename FROM stg_github_pr_file WHERE previous_filename IS NOT NULL
+), files AS (
+ SELECT pr,min(product) only_product,max(product) any_product FROM (
+ SELECT pr,path GLOB 'apps/*' OR path GLOB 'crates/*' OR path GLOB 'packages/*' product FROM paths
+ ) GROUP BY pr
+)
+INSERT INTO mart_record_gap
+SELECT c.issue,'label_file_mismatch' FROM issue_classification c JOIN final_closure fc USING(issue,pr)
+LEFT JOIN files f USING(pr)
+WHERE c.kind_source='closure' AND fc.files_complete AND
+ ((c.area='product' AND coalesce(f.any_product,0)=0) OR (c.area='development' AND f.only_product=1));
 CREATE VIEW mart_record_gap_count AS SELECT reason,count(*) records FROM mart_record_gap GROUP BY reason;
 CREATE TABLE mart_kind_change AS
 WITH edits AS (
  SELECT t.*,k.kind,lag(k.kind) OVER(PARTITION BY issue ORDER BY created_at,id) previous_kind
- FROM stg_github_issue_timeline t JOIN issue_kind k ON t.label=k.kind OR t.label LIKE k.kind||'：%' WHERE t.event='labeled'
+ FROM stg_github_issue_timeline t JOIN issue_kind k ON t.label=k.label WHERE t.event='labeled'
 )
 SELECT issue,id,created_at,previous_kind,kind FROM edits WHERE kind<>previous_kind;
 CREATE VIEW mart_kind_change_count AS SELECT count(*) changes FROM mart_kind_change;
