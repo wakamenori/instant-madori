@@ -8,10 +8,12 @@ const block = (record) => "```yaml\n" + stringify(record) + "```\n";
 const findings = { found_at: "マージの後", found_by: "担当", cause: "#123" };
 const fields = {
   機能: {},
-  不具合: findings,
-  作りの見直し: { ...findings, plan_change: "いいえ" },
-  外部への追従: {},
-  開発の改善: { target: "検査で古い形式を検出できる" },
+  開発の仕組みの不具合: findings,
+  製品の不具合: findings,
+  開発の仕組みの作りの見直し: { ...findings, plan_change: "いいえ" },
+  製品の作りの見直し: { ...findings, plan_change: "いいえ" },
+  外の変化への追従: {},
+  開発の仕組みの改善: { target: "検査で古い形式を検出できる" },
   確かめと判断: {},
 };
 
@@ -42,10 +44,10 @@ test("every template supplies exactly the fields of its label and the same work 
 test("draft copies only record fields and preserves the filled body", () => {
   const body = "## 目的\n\n原因の調査\n\n## 依存\n\n- #12\n";
   const draft =
-    '---\nid: sample\ntitle: 調査\nmilestone: 開発基盤\nblockedBy: "#12"\ntype: 不具合\nfound_at: マージの後\nfound_by: 担当\ncause: "#34"\n---\n' +
+    '---\nid: sample\ntitle: 調査\nmilestone: 開発基盤\nblockedBy: "#12"\ntype: 製品の不具合\nfound_at: マージの後\nfound_by: 担当\ncause: "#34"\n---\n' +
     body;
   const rendered = renderDraft(draft.replaceAll("\n", "\r\n"));
-  checkRecord("issue", rendered, typeLabels["不具合"]);
+  checkRecord("issue", rendered, typeLabels["製品の不具合"]);
   assert.ok(rendered.endsWith(body.replaceAll("\n", "\r\n")));
   assert.doesNotMatch(rendered, /sample|blockedBy|milestone/);
   assert.equal(parse(rendered.split("```")[1].slice(4)).cause, "#34");
@@ -54,7 +56,7 @@ test("draft copies only record fields and preserves the filled body", () => {
     renderDraft(
       draft.replace("id: sample", "id: 12").replace("milestone: 開発基盤", "milestone: 2"),
     ),
-    typeLabels["不具合"],
+    typeLabels["製品の不具合"],
   );
   for (const invalid of [
     draft.replace('"#34"', "#34"),
@@ -68,19 +70,23 @@ test("draft copies only record fields and preserves the filled body", () => {
 test("issue and addition enforce label, first block, discovery and type-specific fields", () => {
   for (const kind of ["issue", "addition"]) {
     for (const cause of ["#1", "PR #123", "外の変化", "もとからあった", "不明"])
-      checkRecord(kind, block({ type: "不具合", ...findings, cause }), typeLabels["不具合"]);
+      checkRecord(
+        kind,
+        block({ type: "製品の不具合", ...findings, cause }),
+        typeLabels["製品の不具合"],
+      );
     for (const record of [
-      { type: "不具合" },
-      { type: "作りの見直し", ...findings },
-      { type: "不具合", ...findings, found_at: "作業中" },
-      { type: "不具合", ...findings, cause: "PR 3" },
-      { type: "不具合", ...findings, found_by: " " },
+      { type: "製品の不具合" },
+      { type: "製品の作りの見直し", ...findings },
+      { type: "製品の不具合", ...findings, found_at: "作業中" },
+      { type: "製品の不具合", ...findings, cause: "PR 3" },
+      { type: "製品の不具合", ...findings, found_by: " " },
       { type: "機能", target: "値" },
-      { type: "開発の改善", target: "" },
+      { type: "開発の仕組みの改善", target: "" },
       { type: "その他" },
     ])
       assert.throws(() => checkRecord(kind, block(record), typeLabels[record.type]));
-    assert.throws(() => checkRecord(kind, block({ type: "機能" }), typeLabels["不具合"]));
+    assert.throws(() => checkRecord(kind, block({ type: "機能" }), typeLabels["製品の不具合"]));
     assert.throws(() => checkRecord(kind, "本文\n" + block({ type: "機能" }), typeLabels["機能"]));
     assert.throws(() =>
       checkRecord(kind, "```yaml\ntype: 機能\ntype: 機能\n```", typeLabels["機能"]),

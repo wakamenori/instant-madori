@@ -32,13 +32,13 @@ void test("rebuilds closure labels, PR files and both deployment attempts from a
     body: "Closes #263",
   };
   const timeline = [
-    { event: "labeled", label: { name: "機能" } },
+    { event: "labeled", label: { name: "機能：利用者に見える振る舞いを足す・変える" } },
     { event: "closed", commit_id: sha },
     { event: "reopened" },
-    { event: "unlabeled", label: { name: "機能" } },
-    { event: "labeled", label: { name: "不具合" } },
+    { event: "unlabeled", label: { name: "機能：利用者に見える振る舞いを足す・変える" } },
+    { event: "labeled", label: { name: "製品の不具合：約束どおりに動かない製品を直す" } },
     { event: "closed", commit_id: second },
-    { event: "unlabeled", label: { name: "不具合" } },
+    { event: "unlabeled", label: { name: "製品の不具合：約束どおりに動かない製品を直す" } },
     { event: "reopened" },
     { event: "closed", commit_id: null, node_id: "CLOSE" },
   ].map((e, i) => ({ ...e, created_at: at, id: i + 1 }));
@@ -170,8 +170,8 @@ void test("rebuilds closure labels, PR files and both deployment attempts from a
     assert.deepEqual(
       query("SELECT labels,pr_numbers FROM stg_github_issue_closure ORDER BY event_id"),
       [
-        ['["機能"]', "[380]"],
-        ['["不具合"]', "[392]"],
+        ['["機能：利用者に見える振る舞いを足す・変える"]', "[380]"],
+        ['["製品の不具合：約束どおりに動かない製品を直す"]', "[392]"],
         ["[]", "[400]"],
       ],
     );

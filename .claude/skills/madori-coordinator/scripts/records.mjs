@@ -4,12 +4,13 @@ import { z } from "zod";
 
 export const labels = {
   機能: "機能：利用者に見える振る舞いを足す・変える",
-  不具合: "不具合：約束どおりに動かないものを直す",
-  作りの見直し: "作りの見直し：振る舞いを変えずにコードや計画の作りを変える",
-  外部への追従: "外部への追従：依存・脆弱性・ツールの変化に合わせる",
-  開発の改善: "開発の改善：担当・検証・CI・道具・手順を良くする",
-  確かめと判断:
-    "確かめと判断：試作・計測・確かめ・受け入れ・計画づくりで、知ることや決めることを得る",
+  製品の不具合: "製品の不具合：約束どおりに動かない製品を直す",
+  製品の作りの見直し: "製品の作りの見直し：振る舞いを変えずに作りを変える",
+  開発の仕組みの改善: "開発の仕組みの改善：作る・確かめる・届ける・動かす仕組みを良くする",
+  開発の仕組みの不具合: "開発の仕組みの不具合：約束どおりに動かない仕組みを直す",
+  開発の仕組みの作りの見直し: "開発の仕組みの作りの見直し：振る舞いを変えずに作りを変える",
+  外の変化への追従: "外の変化への追従：依存・脆弱性・外のツールの変化に合わせる",
+  確かめと判断: "確かめと判断：試作・計測・受け入れ・計画づくりで知る・決める",
 };
 
 const text = z.string().trim().min(1);
@@ -21,14 +22,14 @@ const discovery = {
 
 const issue = z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("機能") }),
-  z.strictObject({ type: z.literal("不具合"), ...discovery }),
+  z.strictObject({ type: z.enum(["製品の不具合", "開発の仕組みの不具合"]), ...discovery }),
   z.strictObject({
-    type: z.literal("作りの見直し"),
+    type: z.enum(["製品の作りの見直し", "開発の仕組みの作りの見直し"]),
     ...discovery,
     plan_change: z.enum(["はい", "いいえ"]),
   }),
-  z.strictObject({ type: z.literal("外部への追従") }),
-  z.strictObject({ type: z.literal("開発の改善"), target: text }),
+  z.strictObject({ type: z.literal("外の変化への追従") }),
+  z.strictObject({ type: z.literal("開発の仕組みの改善"), target: text }),
   z.strictObject({ type: z.literal("確かめと判断") }),
 ]);
 

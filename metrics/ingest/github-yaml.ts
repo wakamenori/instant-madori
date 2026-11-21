@@ -8,11 +8,11 @@ const discovery = {
   cause: z.string().regex(/^(?:#[1-9]\d*|PR #[1-9]\d*|外の変化|もとからあった|不明)$/u),
 };
 const issueFields = z.discriminatedUnion("type", [
-  z.strictObject({ type: z.enum(["機能", "外部への追従", "確かめと判断"]) }),
-  z.strictObject({ type: z.literal("開発の改善"), target: text }),
-  z.strictObject({ type: z.literal("不具合"), ...discovery }),
+  z.strictObject({ type: z.enum(["機能", "外の変化への追従", "確かめと判断"]) }),
+  z.strictObject({ type: z.literal("開発の仕組みの改善"), target: text }),
+  z.strictObject({ type: z.enum(["製品の不具合", "開発の仕組みの不具合"]), ...discovery }),
   z.strictObject({
-    type: z.literal("作りの見直し"),
+    type: z.enum(["製品の作りの見直し", "開発の仕組みの作りの見直し"]),
     ...discovery,
     plan_change: z.enum(["はい", "いいえ"]),
   }),

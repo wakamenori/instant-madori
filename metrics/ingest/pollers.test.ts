@@ -72,7 +72,7 @@ void test("comment markers follow the coordinator's staging occupancy wording", 
 void test("GitHub fields come only from the leading YAML and the shared resources section", () => {
   const yaml = (lines: string) => "```yaml\n" + lines + "\n```";
   const findings =
-    "type: 作りの見直し\nfound_at: マージの後\nfound_by: 担当\ncause: '#123'\nplan_change: いいえ";
+    "type: 製品の作りの見直し\nfound_at: マージの後\nfound_by: 担当\ncause: '#123'\nplan_change: いいえ";
   const body =
     yaml(findings) + "\n## 使う共有資源\n<!-- pnpm dev -->\nstaging を占有する\n## 依存\nなし";
   const issue = issueRecord(
@@ -90,7 +90,7 @@ void test("GitHub fields come only from the leading YAML and the shared resource
   );
   assert.deepEqual(issue.payload.shared_resources, ["staging を占有する"]);
   assert.deepEqual(issue.payload.fields, {
-    type: "作りの見直し",
+    type: "製品の作りの見直し",
     found_at: "マージの後",
     found_by: "担当",
     cause: "#123",
