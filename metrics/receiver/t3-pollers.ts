@@ -35,7 +35,7 @@ const queries = {
     coalesce((r.payload_json ->> '$.notification.source.kind') || coalesce(':' || (r.payload_json ->> '$.notification.source.work'),''),case when json_type(r.payload_json,'$.delegatedCompletion')='object' then 'delegated_completion' end) notification_kind,
     r.payload_json ->> '$.notification.outcome' notification_outcome,
     length(coalesce(r.payload_json ->> '$.text','')) text_length,
-    case when t.title like '検証 #%' and r.role='assistant' then substr(r.payload_json ->> '$.text',1,400) end head`,
+    case when (t.title like '検証 #%' or t.title like 'PR #%の検証%') and r.role='assistant' then r.payload_json ->> '$.text' end head`,
   },
   "t3.subagent": {
     table: "subagents",
@@ -50,7 +50,10 @@ export function t3Pollers(file: string, root: string, home: string): Poller[] {
     const query = queries[name];
     let since = "",
       next = "";
-    const checkpoint = join(home, name + ".cursor");
+    const checkpoint = join(
+      home,
+      name + (name === "t3.thread" || name === "t3.message" ? ".verifier-2" : "") + ".cursor",
+    );
     try {
       since = z.iso.datetime().parse(readFileSync(checkpoint, "utf8"));
     } catch {
