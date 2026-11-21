@@ -37,8 +37,8 @@ SELECT c.issue,c.pr,c.merged_at,coalesce(c.area,'unknown') area,
  d.round IS NULL AND l.verdicts IS NOT NULL legacy_comment,
  CASE WHEN NOT c.pre_verification AND d.round=1 THEN d.failed_checks END failed_checks,
  (SELECT count(*) FROM mart_active_minute WHERE minute>=unixepoch(c.merged_at))>=1800 observed,
- EXISTS(SELECT 1 FROM quality_discovery q WHERE q.cause_issue=c.issue AND disposition='within_window' AND type='作りの見直し') rework,
- EXISTS(SELECT 1 FROM quality_discovery q WHERE q.cause_issue=c.issue AND disposition='within_window' AND type='不具合')
+ EXISTS(SELECT 1 FROM quality_discovery q WHERE q.cause_issue=c.issue AND disposition='within_window' AND type IN ('製品の作りの見直し','開発の仕組みの作りの見直し')) rework,
+ EXISTS(SELECT 1 FROM quality_discovery q WHERE q.cause_issue=c.issue AND disposition='within_window' AND type IN ('製品の不具合','開発の仕組みの不具合'))
  OR EXISTS(SELECT 1 FROM stg_github_issue_timeline t JOIN stg_github_issue_closure earlier ON earlier.issue=t.issue AND earlier.closed_at<t.created_at
  JOIN change original ON original.merge_commit_sha=earlier.commit_sha OR original.pr IN (SELECT value FROM json_each(earlier.pr_numbers))
  WHERE t.issue=c.issue AND t.event='reopened' AND t.created_at<=c.merged_at AND original.merged_at<t.created_at AND original.pr<>c.pr

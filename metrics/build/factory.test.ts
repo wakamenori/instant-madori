@@ -153,24 +153,40 @@ void test("hourly and eight active hour windows count releases, owner gaps and m
         shared_resources: n >= 7 ? ["staging を占有する"] : [],
         blocked_by: n === 9 ? [{ number: 7 }] : [],
       });
-    for (const n of [1, 2, 3, 4]) {
+    const mergedFiles = [
+      { issue: 1, files: [{ filename: "scripts/dev/x", previous_filename: "apps/web/x" }] },
+      { issue: 2, files: [{ filename: "scripts/dev/x" }] },
+      { issue: 3, files: [{ filename: "scripts/dev/x" }] },
+      { issue: 4, files: [{ filename: "crates/display/x" }] },
+      { issue: 31, files: [{ filename: "scripts/dev/x" }] },
+      { issue: 32, files: [{ filename: "packages/contracts/x" }] },
+      { issue: 33, files: [{ filename: "packages/contracts/x", previous_filename: "scripts/x" }] },
+      { issue: 34, files: [{ filename: "apps/web/x" }] },
+    ];
+    for (const n of [31, 32, 33, 34]) add("github.issue", n, { number: n, created_at: at(0) });
+    for (const { issue: n, files } of mergedFiles) {
       const pr = n + 10;
       add("github.pr", pr, {
         number: pr,
         merged_at: at(603),
         created_at: at(0),
         head_ref: n === 3 ? "t3/issue-3-fix" : "manual",
-        files_complete: true,
-        files: n === 1 ? [{ filename: "apps/web/x" }] : [],
+        files_complete: n !== 31,
+        files,
         merge_commit_sha: "merge" + n,
         closes: [n],
       });
       timeline(n, 603, "closed", null, [pr]);
     }
-    timeline(1, 0, "labeled", "不具合");
+    timeline(31, 1, "labeled", "製品の不具合：約束どおりに動かない製品を直す");
+    timeline(32, 1, "labeled", "確かめと判断：試作・計測・受け入れ・計画づくりで知る・決める");
+    timeline(33, 1, "labeled", "開発の仕組みの作りの見直し：振る舞いを変えずに作りを変える");
+    timeline(3, 1, "labeled", "製品の作りの見直し：振る舞いを変えずに作りを変える");
+    timeline(4, 1, "labeled", "開発の仕組みの不具合：約束どおりに動かない仕組みを直す");
+    timeline(1, 0, "labeled", "製品の不具合：約束どおりに動かない製品を直す");
     timeline(1, 1, "closed");
     timeline(1, 2, "reopened");
-    timeline(1, 600, "unlabeled", "不具合");
+    timeline(1, 600, "unlabeled", "製品の不具合：約束どおりに動かない製品を直す");
     timeline(1, 601, "labeled", "機能：利用者に見える振る舞いを足す・変える");
     timeline(1, 604, "unlabeled", "機能：利用者に見える振る舞いを足す・変える");
     timeline(5, 5, "closed");
@@ -199,7 +215,7 @@ void test("hourly and eight active hour windows count releases, owner gaps and m
       fields: [{ started_at: at(603), ended_at: at(606) }],
     });
     const file = join(root, "backfill.json");
-    writeFileSync(file, JSON.stringify([{ issue: 2, kind: "開発の改善" }]));
+    writeFileSync(file, JSON.stringify([{ issue: 2, kind: "開発の仕組みの改善" }]));
     for (const dir of ["tmp", "ready"]) mkdirSync(join(root, "spool", dir), { recursive: true });
     execFileSync(
       process.execPath,
@@ -263,9 +279,32 @@ void test("hourly and eight active hour windows count releases, owner gaps and m
     [
       { issue: 1, ownership: "owner", kind_source: "closure", area: "product" },
       { issue: 2, ownership: "owner", kind_source: "backfill", area: "development" },
-      { issue: 3, ownership: "missing_owner", kind_source: null, area: "development" },
-      { issue: 4, ownership: "bypass", kind_source: null, area: "development" },
+      { issue: 3, ownership: "missing_owner", kind_source: "closure", area: "product" },
+      { issue: 4, ownership: "bypass", kind_source: "closure", area: "development" },
+      { issue: 31, ownership: "bypass", kind_source: "closure", area: "product" },
+      { issue: 32, ownership: "bypass", kind_source: "closure", area: null },
+      { issue: 33, ownership: "bypass", kind_source: "closure", area: "development" },
+      { issue: 34, ownership: "bypass", kind_source: null, area: null },
     ],
+  );
+  assert.deepEqual(
+    all("SELECT issue FROM mart_record_gap WHERE reason='label_file_mismatch' ORDER BY issue"),
+    [{ issue: 3 }, { issue: 4 }],
+  );
+  assert.deepEqual(
+    all("SELECT DISTINCT kind FROM mart_kind_period WHERE kind<>'unknown' ORDER BY kind").map(
+      (row) => row.kind,
+    ),
+    [
+      "機能",
+      "製品の不具合",
+      "製品の作りの見直し",
+      "開発の仕組みの改善",
+      "開発の仕組みの不具合",
+      "開発の仕組みの作りの見直し",
+      "外の変化への追従",
+      "確かめと判断",
+    ].sort(),
   );
   assert.deepEqual(
     all("SELECT state FROM mart_minute WHERE issue=20 ORDER BY minute LIMIT 10").map(
@@ -317,7 +356,7 @@ void test("hourly and eight active hour windows count releases, owner gaps and m
     ],
   );
   assert.deepEqual(all("SELECT previous_kind,kind FROM mart_kind_change"), [
-    { previous_kind: "不具合", kind: "機能" },
+    { previous_kind: "製品の不具合", kind: "機能" },
   ]);
   assert.deepEqual(
     all(
