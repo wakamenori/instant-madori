@@ -73,6 +73,11 @@ export const typescriptScopes = {
     ],
   },
   contracts: { files: [`packages/contracts/**/*.${typescriptExtensions}`], ignores: [] },
+  "docker-slot": { files: ["scripts/shared/docker-slots.ts"], ignores: [] },
+  scripts: {
+    files: [`scripts/**/*.${typescriptExtensions}`],
+    ignores: ["scripts/shared/docker-slots.ts"],
+  },
   ...metricsAreaScopes,
   "metrics-other": {
     files: [`metrics/**/*.${typescriptExtensions}`],
@@ -439,12 +444,21 @@ export const typescriptBoundaries: TypeScriptBoundary[] = [
   },
   {
     id: "service-metrics",
-    from: serviceScopes,
+    from: serviceScopes.filter((scope) => scope !== "docker-slot"),
     kind: "imports",
     targets: ["metrics/**"],
     reason: "metrics/README.md サービスも metrics/ をimportしない",
     message: "The service must not import metrics.",
     appliesToTests: true,
+  },
+  {
+    id: "docker-slot-metrics",
+    from: ["docker-slot"],
+    kind: "imports",
+    targets: ["metrics/**"],
+    exceptTargets: ["metrics/hook/docker-slot.ts"],
+    reason: "docs/plan.md §4.2 Docker slot events use the spool writer",
+    message: "Docker slots may import only the slot event writer from metrics.",
   },
   {
     id: "metrics-hook-closure",

@@ -47,3 +47,51 @@ void test("T3 message checkpoints persist only after commit and exclude foreign 
   p.committed?.();
   assert.equal((await poller().poll(signal)).length, 0);
 });
+
+void test("Codex approval requests retain resolution updates and exclude other prompts and projects", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "approval-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const file = join(root, "t3.sqlite");
+  const db = new DatabaseSync(file);
+  t.after(() => db.close());
+  db.exec(`CREATE TABLE projection_projects(project_id, workspace_root);
+ CREATE TABLE orchestration_v2_projection_threads(thread_id, project_id);
+ CREATE TABLE orchestration_v2_projection_runtime_requests(runtime_request_id,thread_id,provider_turn_id,kind,status,created_at,resolved_at,payload_json);
+ INSERT INTO projection_projects VALUES ('repo','/repo'),('foreign','/elsewhere');
+ INSERT INTO orchestration_v2_projection_threads VALUES ('local','repo'),('other','foreign');`);
+  const at = new Date().toISOString();
+  const input = db.prepare(
+    "INSERT INTO orchestration_v2_projection_runtime_requests VALUES(?,?,'turn',?,'pending',?,NULL,?)",
+  );
+  for (const [id, thread, kind, driver] of [
+    ["a", "local", "command", "codex"],
+    ["b", "local", "user_input", "codex"],
+    ["c", "other", "command", "codex"],
+    ["d", "local", "command", "claudeAgent"],
+  ] as const)
+    input.run(
+      id,
+      thread,
+      kind,
+      at,
+      JSON.stringify({ nativeRequestRef: { driver }, instructions: "secret" }),
+    );
+  const poller = t3Pollers(file, "/repo", root).find((p) => p.name === "t3.approval");
+  assert.ok(poller);
+  const signal = new AbortController().signal;
+  const pending = await poller.poll(signal);
+  assert.deepEqual(
+    pending.map((r) => [r.naturalKey, r.payload.status, r.payload.resolved_at]),
+    [["a", "pending", null]],
+  );
+  poller.committed?.();
+  db.prepare(
+    "UPDATE orchestration_v2_projection_runtime_requests SET status='resolved',resolved_at=?,payload_json=json_set(payload_json,'$.decision','accept') WHERE runtime_request_id='a'",
+  ).run(at);
+  const resolved = await poller.poll(signal);
+  assert.deepEqual(
+    resolved.map((r) => [r.naturalKey, r.payload.decision, r.payload.resolved_at]),
+    [["a", "accept", at]],
+  );
+  assert.doesNotMatch(JSON.stringify(resolved), /secret/u);
+});

@@ -1,13 +1,14 @@
-import { hookPrivacy, telemetry } from "./privacy.ts";
+import { hookPrivacy, logPrivacy, telemetry } from "./privacy.ts";
 import type { Candidate, Rejection } from "./envelope.ts";
 const event = { kind: "event", sanitize: telemetry } as const;
 const observation = { ...event, kind: "observation" } as const;
 export const registry = {
-  "claude.otel.log": event,
+  "claude.otel.log": { ...event, sanitize: logPrivacy },
   "claude.otel.metric": event,
-  "codex.otel.log": event,
+  "codex.otel.log": { ...event, sanitize: logPrivacy },
   "codex.otel.metric": event,
   "claude.hook": { ...event, sanitize: hookPrivacy },
+  "docker.slot": event,
   otlp: event,
   "github.issue": observation,
   "github.issue.timeline": event,
@@ -18,6 +19,7 @@ export const registry = {
   "t3.thread": observation,
   "t3.run": observation,
   "t3.message": event,
+  "t3.approval": observation,
   "t3.subagent": observation,
   "t3.codex_link": event,
   "metrics.receiver": event,

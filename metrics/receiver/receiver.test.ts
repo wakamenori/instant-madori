@@ -47,6 +47,27 @@ void test("listener ownership, durable hold, spool replay and expiration", async
     db.prepare("SELECT count(*) AS n FROM " + table + " WHERE " + filter).get()?.n;
   assert.equal((await post(body)).status, 200);
   assert.equal(count("held_record"), 1);
+  assert.equal(count("held_record", "payload LIKE '%fake-body%'"), 0);
+  const slot = {
+    v: 1,
+    wait_id: randomUUID(),
+    phase: "started",
+    pool: "development",
+    cwd: "/fake",
+    at: now.toISOString(),
+    project: { dir: "/fake", git: { kind: "directory" } },
+  };
+  writeFileSync(
+    join(home.ready, "docker-slot-one.json"),
+    JSON.stringify({ ...slot, command: "private" }),
+  );
+  writeFileSync(
+    join(home.ready, "docker-slot-two.json"),
+    JSON.stringify({ ...slot, project: { dir: "/foreign", git: { kind: "directory" } } }),
+  );
+  receiver.flush();
+  assert.equal(count("l1_record", "source='docker.slot'"), 1);
+  assert.equal(count("l1_record", "source='docker.slot' AND payload LIKE '%private%'"), 0);
   const file = join(home.ready, "1.json"),
     spooled = JSON.stringify({
       v: 1,
@@ -60,6 +81,7 @@ void test("listener ownership, durable hold, spool replay and expiration", async
   receiver.flush();
   assert.equal(count("held_record"), 0);
   assert.equal(count("l1_record", "source='claude.otel.log'"), 1);
+  assert.equal(count("l1_record", "payload LIKE '%fake-body%'"), 0);
   assert.equal((await post(body)).status, 200);
   await receiver.close();
   // Restore the ready file to the on-disk state of a crash immediately after commit.

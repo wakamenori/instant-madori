@@ -37,6 +37,15 @@ const queries = {
     length(coalesce(r.payload_json ->> '$.text','')) text_length,
     case when (t.title like '検証 #%' or t.title like 'PR #%の検証%') and r.role='assistant' then r.payload_json ->> '$.text' end head`,
   },
+  "t3.approval": {
+    table: "runtime_requests",
+    id: "runtime_request_id",
+    cursor: `r.payload_json ->> '$.nativeRequestRef.driver' = 'codex'
+      and r.kind in ('command','file-read','file-change','permission','mcp-elicitation') and (r.resolved_at is null or r.resolved_at >= ?)`,
+    fields: `r.thread_id, r.provider_turn_id, r.kind, r.status, r.created_at, r.resolved_at,
+      case when r.payload_json ->> '$.decision' in ('accept','acceptForSession','acceptAlways','decline','cancel')
+      then r.payload_json ->> '$.decision' end decision`,
+  },
   "t3.subagent": {
     table: "subagents",
     cursor: "r.updated_at >= ?",

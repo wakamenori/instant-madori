@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
@@ -11,6 +11,12 @@ import { machineSlots, withDockerSlot, type DockerSlots } from "./docker-slots.t
 function fixture(t: TestContext) {
   const directory = mkdtempSync(join(tmpdir(), "docker-slots-"));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const previousHome = process.env.INSTANT_MADORI_METRICS_HOME;
+  process.env.INSTANT_MADORI_METRICS_HOME = directory;
+  t.after(() => {
+    if (previousHome === undefined) delete process.env.INSTANT_MADORI_METRICS_HOME;
+    else process.env.INSTANT_MADORI_METRICS_HOME = previousHome;
+  });
   const lines: string[] = [];
   const controller = new AbortController();
   function run<T>(
@@ -271,3 +277,43 @@ void test("machine slots depend on the platform and reserve the runner pool for 
   assert.deepEqual(machineSlots({ GITHUB_ACTIONS: "false" }, "darwin"), defaults);
   assert.deepEqual(machineSlots({ HOME: "/elsewhere", TMPDIR: "/elsewhere" }, "darwin"), defaults);
 });
+
+void test(
+  "slot acquisition, release and cancellation spool only lifecycle data",
+  { skip: process.platform !== "darwin" },
+  async (t) => {
+    const { run, directory } = fixture(t);
+    const ready = join(directory, "spool/ready");
+    mkdirSync(ready, { recursive: true });
+    mkdirSync(join(directory, "spool/tmp"));
+    await run("private command", immediate, "runner");
+    await assert.rejects(
+      run("private command", immediate, "runner", AbortSignal.abort(new Error("stop"))),
+    );
+    const names = readdirSync(ready);
+    assert.equal(names.length, 5);
+    for (const phase of ["acquired", "released", "cancelled"]) {
+      const name = names.find((n) => n.endsWith("-" + phase + ".json"));
+      assert.ok(name);
+      assert.ok(names.includes(name.replace(phase, "started")));
+      const body = readFileSync(join(ready, name), "utf8");
+      assert.doesNotMatch(body, /private command/u);
+      assert.ok(body.includes(JSON.stringify(process.cwd())));
+    }
+  },
+);
+
+void test(
+  "a broken spool preserves the work result and cancellation reason",
+  { skip: process.platform !== "darwin" },
+  async (t) => {
+    const { run, directory } = fixture(t);
+    mkdirSync(join(directory, "spool/ready"), { recursive: true });
+    assert.equal(await run("work", immediate), "development-1");
+    const reason = new Error("cancel");
+    await assert.rejects(
+      run("cancelled", immediate, "development", AbortSignal.abort(reason)),
+      (error) => error === reason,
+    );
+  },
+);

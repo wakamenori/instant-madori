@@ -52,7 +52,7 @@ export function messageDecision(title: string, role: string, head: string) {
 
 const scalarRow = z.record(z.string(), z.union([z.string(), z.number(), z.null()]));
 export function t3Record(
-  name: "t3.thread" | "t3.run" | "t3.subagent" | "t3.message",
+  name: "t3.thread" | "t3.run" | "t3.subagent" | "t3.message" | "t3.approval",
   raw: unknown,
 ) {
   const { id, title, prs, head, ...fields } = scalarRow.parse(raw);

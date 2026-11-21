@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { parseOtlp } from "./otlp.ts";
+import { parseSlot } from "./docker-slot.ts";
 import { parseHook } from "./hook-record.ts";
 import { registry } from "../l1/sources.ts";
 import { telemetry } from "../l1/privacy.ts";
@@ -106,4 +107,78 @@ void test("hook privacy keeps validated prompt facts across replays", () => {
   assert.match(text, /"session_crons_count":2/u);
   assert.doesNotMatch(text, /private words/u);
   assert.deepEqual(registry["claude.hook"].sanitize(payload), payload);
+});
+
+void test("only the event name survives in an OTLP body", () => {
+  const sanitize = registry["claude.otel.log"].sanitize;
+  const attributes = [{ key: "event.name", value: { stringValue: "tool_result" } }];
+  for (const name of ["tool_result", "claude_code.tool_result"]) {
+    const body = { stringValue: name };
+    assert.deepEqual(sanitize({ log_record: { attributes, body: { ...body, extra: "secret" } } }), {
+      log_record: { attributes, body },
+    });
+  }
+  assert.deepEqual(
+    sanitize({ log_record: { attributes, body: { kvlistValue: { secret: "hidden" } } } }),
+    { log_record: { attributes } },
+  );
+});
+
+void test("permission hook proves session membership with only request metadata", () => {
+  const input = {
+    hook_event_name: "PermissionRequest",
+    tool_name: "Bash",
+    session_id: "s",
+    prompt: "private",
+    reason: "private",
+    tool_input: { command: "private" },
+  };
+  const parsed = parseHook(
+    Buffer.from(
+      JSON.stringify({
+        v: 1,
+        id: randomUUID(),
+        at: new Date().toISOString(),
+        project: { dir: "/repo", git: { kind: "directory" } },
+        env: {},
+        stdin: JSON.stringify(input),
+      }),
+    ),
+    "/repo/.git",
+  );
+  const row = parsed.records[0];
+  assert.ok(row);
+  assert.deepEqual(row.scope, { kind: "proof", subject: "claude.session:s" });
+  assert.deepEqual(registry["claude.hook"].sanitize(row.payload).input, {
+    hook_event_name: "PermissionRequest",
+    tool_name: "Bash",
+    session_id: "s",
+  });
+});
+
+void test("a runner checkout can prove its repository with an Actions run and attempt", () => {
+  const event = {
+    v: 1,
+    wait_id: randomUUID(),
+    phase: "acquired",
+    pool: "runner",
+    cwd: "/runner/work",
+    at: new Date().toISOString(),
+    project: { dir: "/runner/work", git: { kind: "directory" } },
+    repository: "wakamenori/instant-madori",
+    run_id: "123",
+    run_attempt: "2",
+  };
+  const parse = (overrides: object) =>
+    parseSlot(Buffer.from(JSON.stringify({ ...event, ...overrides })), "/main/.git");
+  assert.deepEqual(
+    parse({}).records.map((r) => [r.payload.run_id, r.payload.run_attempt]),
+    [["123", "2"]],
+  );
+  for (const override of [
+    { repository: "other/repo" },
+    { run_attempt: undefined },
+    { pool: "development" },
+  ])
+    assert.equal(parse(override).drops[0]?.reason, "foreign");
 });
