@@ -65,7 +65,7 @@ const waitNames = [
   "担当のターン",
   "担当の子（設計・Codex）",
   "CIの順番待ち",
-  "CIの実行",
+  "CI",
   "検証役",
   "指揮役の待ち",
   "その他",
@@ -83,9 +83,17 @@ const states = [
     "gap:delegate_done",
   ],
   ["ci_queue"],
-  ["ci_run", "gap:pr_watch"],
+  ["ci", "ci_run", "gap:pr_watch"],
   ["verifier", "verifier_run"],
-  ["coord_dispatch", "coord_decide", "coordinator_dispatch", "coordinator_decide", "gap:coord_msg"],
+  [
+    "coordinator_busy",
+    "coordinator_asleep",
+    "coord_dispatch",
+    "coord_decide",
+    "coordinator_dispatch",
+    "coordinator_decide",
+    "gap:coord_msg",
+  ],
 ];
 function group(state: string) {
   const named = waitNames.indexOf(state);
@@ -305,6 +313,7 @@ function mergeWait(d: DashboardData) {
   const reasons = new Map([
     ["staging_occupied", "staging占有"],
     ["deploy_running", "デプロイ実行中"],
+    ["check_wait", "合格したheadのcheck待ち"],
     ["conflict_or_rebase", "競合・リベース"],
     ["none", "理由を特定できず"],
   ]);

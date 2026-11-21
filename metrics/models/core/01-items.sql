@@ -14,6 +14,7 @@ CREATE TABLE owner AS SELECT * FROM stg_t3_thread WHERE title_kind='owner' AND p
 CREATE TABLE issue_change AS
 SELECT DISTINCT issue,pr FROM (
  SELECT CAST(j.value AS INTEGER) issue,c.pr FROM change c,json_each(c.closes) j
+ UNION SELECT issue,pr FROM final_closure WHERE pr IS NOT NULL
  UNION SELECT o.issue,c.pr FROM owner o,json_each(o.pr_numbers) j JOIN change c ON c.pr=j.value
  WHERE julianday(c.created_at)>=julianday(o.created_at)-1.0/24
 );
@@ -28,9 +29,9 @@ SELECT t.id, CASE WHEN t.title_kind='verifier' THEN 'verifier'
  WHEN parent.id IS NOT NULL AND t.provider='codex' THEN 'implementer'
  WHEN parent.id IS NOT NULL THEN 'advisor'
  WHEN t.id IN (SELECT id FROM coordinators) THEN 'coordinator' ELSE 'other' END role,
- coalesce(o.issue,parent.issue,ic.issue) issue,t.pr,t.model,t.effort,t.created_at,t.settled_at
+ coalesce(o.issue,parent.issue,t.issue,ic.issue) issue,t.pr,t.model,t.effort,t.created_at,t.settled_at
 FROM stg_t3_thread t LEFT JOIN owner o ON o.id=t.id LEFT JOIN owner parent ON parent.id=t.parent_thread_id
-LEFT JOIN issue_change ic ON ic.pr=t.pr
+LEFT JOIN issue_change ic ON ic.pr=t.pr AND (t.issue IS NULL OR ic.issue=t.issue)
 UNION ALL SELECT s.id,'advisor',o.issue,NULL,NULL,NULL,s.started_at,s.completed_at
 FROM stg_t3_subagent s LEFT JOIN owner o ON o.id=s.thread_id WHERE s.origin='provider_native';
 
@@ -39,19 +40,9 @@ SELECT DISTINCT ic.issue,j.id FROM issue_change ic JOIN change c USING(pr)
 JOIN stg_actions_job j ON j.workflow='check' AND (j.head_branch=c.head_ref OR EXISTS (SELECT 1 FROM json_each(j.pr_numbers) WHERE value=c.pr));
 
 CREATE TABLE issue_deploy AS
-WITH attempts AS (
- SELECT run_id,run_attempt,run_created_at,max(completed_at) completed_at,
-        row_number() OVER(PARTITION BY run_id ORDER BY run_attempt DESC) latest,
-        min(run_conclusion='success') successful
- FROM stg_actions_job WHERE workflow='deploy-staging' AND head_branch='main'
- GROUP BY run_id,run_attempt
-), candidates AS (
- SELECT ic.issue,c.pr,d.run_id,d.run_attempt,d.completed_at,
-        row_number() OVER(PARTITION BY ic.issue,c.pr ORDER BY d.completed_at,d.run_id) first
- FROM issue_change ic JOIN change c USING(pr) JOIN attempts d
- ON d.latest=1 AND d.successful AND d.run_created_at>=c.merged_at AND d.completed_at IS NOT NULL
-)
-SELECT issue,pr,run_id,run_attempt,completed_at FROM candidates WHERE first=1;
+SELECT ic.issue,c.pr,d.run_id,d.run_attempt,d.updated_at completed_at
+FROM issue_change ic JOIN change c USING(pr) JOIN stg_actions_attempt d
+ON d.workflow='deploy-staging' AND d.head_sha=c.merge_commit_sha AND d.conclusion='success';
 
 INSERT INTO issue_job
 SELECT DISTINCT d.issue,j.id FROM issue_deploy d JOIN stg_actions_job j USING(run_id,run_attempt);

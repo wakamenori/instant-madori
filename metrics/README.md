@@ -332,3 +332,11 @@ metrics/
 T3はプロジェクトの最初のスレッドから、GitHubは2026年11月1日から収集する。以後は取り込みが確定した位置から再開する。GitHub APIの残量が1500件を下回ると、その周期を見送る。失敗と見送りの回数は `mart_health` で確認できる。
 
 待ち時間は担当スレッドが作成された瞬間から1分刻みで分類する。マージ直前の端数も1分に数えるため、状態別の合計とタイムスタンプから求めた経過時間には、Issueごとに1分未満の差が出る。
+
+集計結果の `owner_interval` は担当スレッドごとの区間、`mart_minute` は Issue・UTC 分ごとの内訳である。同じ Issue の立て直しが同じ分に入ったときは、その分を一度数える。`mart_turn_detail` は時間が分かるツールやモデル、承認、Docker 枠の記録を持つ。これらには重なりがあるので延べ時間には足さない。
+
+`mart_kpi` と `mart_kind_period` の `hour` は UTC の正時を表す Unix 秒で、`hour` 窓はその1時間、`rolling` 窓はその時間の終わりからさかのぼった動いた時間である。長さは `INSTANT_MADORI_METRICS_WINDOW_MINUTES`（既定480）で指定できる。蓄積の短い期間は実際の分数を出す。スループットは件／稼働時間、1件あたりは延べ時間／件である。区間は完了数の両側95%ポアソン信頼区間から求め、分母が0の値は NULL とする。種類不明の延べ時間も並列数の分子に入る。過去分の分類を使うには、`INSTANT_MADORI_METRICS_KIND_FILE` に `[{"issue":123,"kind":"機能"}]` の形の JSON ファイルを指定する。`issue_classification.kind_source` に `backfill` が残る。
+
+`owner_limit` の各行には、指揮役の上限が変わったコミットとその時刻を記録する。上限が変わったら行を加える。`mart_slot_candidate` は選べる候補を段階・開発基盤の空きに優先して割り当て、余った枠を融通する。`mart_empty_slot.slots` は理由ごとの枠・分である。Issue の記録が初めて届くまでの共有資源と依存には、最初の観測値を使う。
+
+`deployment_delivery` は成功したデプロイのコミットをマージに結ぶ。後のコミットで反映されたかを確かめるときは、この checkout の `origin/main` の first-parent 履歴を使う。コミットが手元に無いときは同じ SHA の試行だけを結ぶ。`mart_record_gap_count` は記録の抜けなどの件数、`mart_inactive_stretch` は担当区間の中でエージェントと CI がともに30分以上動かなかった期間を示す。
