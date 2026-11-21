@@ -7,6 +7,8 @@ import {
   readFileSync,
   writeFileSync,
 } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { recordSlot } from "../../metrics/hook/docker-slot.ts";
 import { userInfo } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -121,6 +123,9 @@ export async function withDockerSlot<T>(
     );
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   const started = Date.now();
+  const waitId = randomUUID();
+  const cwd = process.cwd();
+  recordSlot(waitId, "started", started, pool, cwd);
   let nextReport = started;
   while (!signal.aborted) {
     for (const slot of slots) {
@@ -129,6 +134,7 @@ export async function withDockerSlot<T>(
       if (fd === undefined) continue;
       const acquired = Date.now();
       try {
+        recordSlot(waitId, "acquired", acquired, pool, cwd);
         ftruncateSync(fd, 0);
         writeFileSync(
           fd,
@@ -150,6 +156,7 @@ export async function withDockerSlot<T>(
         } finally {
           closeSync(fd);
         }
+        recordSlot(waitId, "released", Date.now(), pool, cwd);
         report(`released ${slot.name} after ${duration(Date.now() - acquired)}`);
       }
     }
@@ -164,6 +171,7 @@ export async function withDockerSlot<T>(
       if (!signal.aborted) throw error;
     }
   }
+  recordSlot(waitId, "cancelled", Date.now(), pool, cwd);
   report(`stopped waiting for a ${pool} slot`);
   throw signal.reason;
 }

@@ -370,6 +370,8 @@ DBの行は、テーブルごとに一つのSQLの `json_object` で読み、`st
 
 Webのコードは開発用の `scripts/` をimportしない。Viteの設定だけは、ローカルの認証プロキシに使う `scripts/dev/` をimportできる。WebからのWasmバインディングの読込みは `apps/web/src/viewer/wasm.ts` に集め、同じ `viewer/` 直下の `*.test.ts` だけはバインディングを直接importできる。`apps/geometry` には、UIツールキット（egui系・eguiの下位のepaint系・emath・ecolor・eframe・winit）とGPUの描画（wgpu系）を含めない。UIの有無は、crateの名前ではなくツールキットのcrateで判定する。UIを持たない文言の目録 `solidcraft-ui-text` は、engineを通して含まれてよい。サービスはSolidCraftのpluginを実行しない。そのため、ルートの `solidcraft-engine` は既定のfeatureを外し、Containerにwasmtimeとcraft-plugin-wasmを含めない。
 
+開発スクリプトから計測への依存は、`scripts/shared/docker-slots.ts` が枠の記録を渡す `metrics/hook/docker-slot.ts` に限る。
+
 TypeScriptのアプリと共有定義のimport境界は、TypeScriptのモジュール解決後の参照先ファイルで判定する。静的import、再export、文字列リテラルの動的import、import型、`import = require`、型の参照ディレクティブとモジュール拡張を対象にする。動的importの引数を囲む括弧は外し、参照先のqueryとfragmentは除いて解決する。解決できない参照は失敗にする。Node.jsの組込みと、対応するworkspaceが依存として宣言した外部パッケージだけは、解決できなくても許可する。workspaceのパッケージはこの例外に含めない。環境が宣言するambient moduleは、その宣言のファイルで判定する。相対パスの資産は実ファイルの存在を要求する。ファイルの同一性はsymlinkをたどり、OSの実パスで確かめる。大文字小文字を区別するファイルシステムでは、綴りの違う参照は未解決として拒否する。検査はESLintの自動修正と整形の後に実行し、pre-commitでもステージしたTypeScriptファイルを対象に実行する。
 
 動的importの参照先は文字列リテラルに限定する。`import.meta.glob` と `new URL(..., import.meta.url)` による読込みは禁止し、テスト（`*.test.*` と `tests/` 内のファイル）だけは、フィクスチャやWasmを読むために後者を許可する。型の再exportは `export type` 宣言で書く。テスト以外のファイルは `*.test.*` と `tests/` 内のファイルをimportしない。テストも参照先の解決は必要とし、表でテストにも適用すると定めた境界は維持する。層に属さないファイルを経由した再exportは追跡しない。

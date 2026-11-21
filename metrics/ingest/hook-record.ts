@@ -2,7 +2,7 @@ import { z } from "zod";
 import { dirname, join, resolve, isAbsolute, basename } from "node:path";
 import { hash, type Obj } from "../l1/envelope.ts";
 import type { Parsed } from "../l1/sources.ts";
-const project = z.object({
+export const project = z.object({
   dir: z.string().refine(isAbsolute),
   git: z.discriminatedUnion("kind", [
     z.object({ kind: z.literal("file"), text: z.string().regex(/^gitdir: [^\r\n]+\s*$/u) }),
@@ -24,7 +24,7 @@ const hook = z.record(z.string(), z.json()).and(
     session_id: z.string().min(1).max(256),
   }),
 );
-function commonDir(p: z.infer<typeof project>) {
+export function commonDir(p: z.infer<typeof project>) {
   if (p.git.kind === "directory") return join(p.dir, ".git");
   if (p.git.kind === "missing") return null;
   const dir = resolve(p.dir, p.git.text.slice(8).trim());

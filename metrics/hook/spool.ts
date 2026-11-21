@@ -9,7 +9,7 @@ import {
 import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { metricsHome } from "../home.ts";
-function captureProject(start: string) {
+export function captureProject(start: string) {
   let dir = realpathSync(start);
   while (true) {
     const git = join(dir, ".git");
@@ -41,6 +41,9 @@ export function spool(env: NodeJS.ProcessEnv) {
     project: captureProject(env.CLAUDE_PROJECT_DIR ?? process.cwd()),
     env: Object.fromEntries(keys.filter((k) => env[k] !== undefined).map((k) => [k, env[k]])),
   };
+  publish(home, name, record);
+}
+export function publish(home: ReturnType<typeof metricsHome>, name: string, record: object) {
   writeFileSync(join(home.tmp, name), JSON.stringify(record), { mode: 0o600, flag: "wx" });
   renameSync(join(home.tmp, name), join(home.ready, name));
 }

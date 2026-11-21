@@ -55,6 +55,8 @@ const scopes = {
   "worker-composition": "apps/worker/src/compose.ts",
   "worker-owner": "apps/worker/src/owner.ts",
   "worker-other": "apps/worker/src/index.ts",
+  "docker-slot": "scripts/shared/docker-slots.ts",
+  scripts: "scripts/example.ts",
   contracts: "packages/contracts/src/index.ts",
   "metrics-hook": "metrics/hook/hook.ts",
   "metrics-l1": "metrics/l1/privacy.ts",
@@ -136,6 +138,7 @@ for (const [name, path] of [
   assert(path);
   symlinkSync(join(root, path), join(root, `node_modules/@madori/${name}`), "dir");
 }
+write("metrics/hook/docker-slot.ts");
 for (const path of Object.values(scopes)) {
   write(path);
   write(path.replace(/\.ts$/u, ".test.ts"));
@@ -382,6 +385,7 @@ const importCases: Record<string, string[]> = {
     "packages/contracts/src/index.ts",
     "scripts/shared/repository.ts",
   ],
+  "docker-slot-metrics": ["metrics/hook/spool.ts", "metrics/l1/store.ts"],
   "service-metrics": ["metrics/l1/envelope.ts", "metrics/hook/spool.ts"],
   "metrics-hook-closure": ["metrics/l1/envelope.ts", "metrics/ingest/membership.ts"],
   "metrics-l1-layers": [
@@ -399,6 +403,7 @@ const importCases: Record<string, string[]> = {
   "metrics-l1-writer": ["metrics/l1/store.ts"],
 };
 const exceptedTargets: Record<string, string> = {
+  "docker-slot-metrics": "metrics/hook/docker-slot.ts",
   "web-config-scripts": "scripts/dev/local-access.ts",
   "metrics-hook-closure": "metrics/home.ts",
 };

@@ -8,6 +8,7 @@ export const registry = {
   "codex.otel.log": { ...event, sanitize: logPrivacy },
   "codex.otel.metric": event,
   "claude.hook": { ...event, sanitize: hookPrivacy },
+  "docker.slot": event,
   otlp: event,
   "github.issue": observation,
   "github.pr": observation,
