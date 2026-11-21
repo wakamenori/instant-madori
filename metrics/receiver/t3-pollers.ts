@@ -61,7 +61,7 @@ export function t3Pollers(file: string, root: string, home: string): Poller[] {
       next = "";
     const checkpoint = join(
       home,
-      name + (name === "t3.thread" || name === "t3.message" ? ".verifier-2" : "") + ".cursor",
+      name + (name === "t3.thread" || name === "t3.message" ? ".verifier-3" : "") + ".cursor",
     );
     try {
       since = z.iso.datetime().parse(readFileSync(checkpoint, "utf8"));

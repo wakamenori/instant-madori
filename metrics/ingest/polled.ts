@@ -22,9 +22,9 @@ export function candidate(
 export function threadTitle(title: string) {
   const owner = /^#(\d+) /u.exec(title),
     verifier = /^検証 #(\d+) @ (\w+)/u.exec(title);
-  const round = /^PR #(\d+)\s*[（(]#(\d+)[）)]の検証[（(](\d+)回目[）)]/u.exec(title);
+  const round = /^PR #(\d+)\s*[（(]#(\d+)[）)]の検証(?:[（(](\d+)回目[）)]|$)/u.exec(title);
   return {
-    ...(round ? { attempt: Number(round[3]) } : {}),
+    ...(round?.[3] ? { attempt: Number(round[3]) } : {}),
     title_kind: owner ? "owner" : verifier || round ? "verifier" : "other",
     issue: owner ? Number(owner[1]) : round ? Number(round[2]) : null,
     pr: verifier ? Number(verifier[1]) : round ? Number(round[1]) : null,

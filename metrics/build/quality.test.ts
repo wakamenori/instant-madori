@@ -13,28 +13,32 @@ void test("quality follows the closing PR and active observation clock", (t) => 
   db.exec(`
  CREATE TABLE mart_record_gap(issue,reason);
  CREATE TABLE issue_classification(issue,pr,merged_at,closed_at,area);
- INSERT INTO issue_classification VALUES (1,11,'2026-01-01','2026-01-01','product'),(2,12,'2026-03-01','2026-03-01','development'),(3,13,'2026-01-01','2026-01-01','product'),(4,14,'2026-01-01','2026-01-01','product');
+ INSERT INTO issue_classification VALUES (1,11,'2027-01-01','2027-01-01','product'),(2,12,'2027-03-01','2027-03-01','development'),(3,13,'2027-01-01','2027-01-01','product'),(4,14,'2027-01-01','2027-01-01','product');
  CREATE TABLE mart_active_minute(minute);
  WITH RECURSIVE n(i) AS (VALUES(0) UNION ALL SELECT i+1 FROM n WHERE i<1800)
- INSERT INTO mart_active_minute SELECT unixepoch('2026-01-01')+60*i FROM n;
+ INSERT INTO mart_active_minute SELECT unixepoch('2027-01-01')+60*i FROM n;
  CREATE TABLE stg_github_comment(issue_or_pr,created_at,markers);
- INSERT INTO stg_github_comment VALUES(11,'2025-12-31','["verdict_pass"]'),(14,'2025-12-31','["verdict_fail"]');
- INSERT INTO issue_classification VALUES(5,15,'2026-01-01','2026-01-01','product'),(6,16,'2026-01-01','2026-01-01','product'); INSERT INTO stg_github_comment VALUES(15,'2025-12-31','["verdict_pass"]'),(16,'2025-12-31','["verdict_pass","verdict_fail"]');
+ INSERT INTO stg_github_comment VALUES(11,'2026-12-31','["verdict_pass"]'),(14,'2026-12-31','["verdict_fail"]');
+ INSERT INTO issue_classification VALUES(5,15,'2027-01-01','2027-01-01','product'),(6,16,'2027-01-01','2027-01-01','product'); INSERT INTO stg_github_comment VALUES(15,'2026-12-31','["verdict_pass"]'),(16,'2026-12-31','["verdict_pass","verdict_fail"]');
+ INSERT INTO issue_classification VALUES
+ (7,17,'2026-11-18T01:49:38.999Z',NULL,'history'),(8,18,'2026-11-18T01:49:39.000Z',NULL,'history'),
+ (9,29,'2027-01-01T00:00:00.000Z',NULL,'window'),(10,30,'2027-01-01T00:00:00.000Z',NULL,'window');
+ INSERT INTO stg_github_comment VALUES(29,'2027-01-01T00:00:48.000Z','["verdict_pass"]'),(30,'2027-01-01T00:05:00.001Z','["verdict_pass"]');
  CREATE TABLE stg_github_issue(number,type,cause,found_at,plan_change,created_at);
  INSERT INTO stg_github_issue VALUES
- (20,'不具合','#1','マージの後',NULL,'2026-01-01'),(21,'不具合','不明','マージの後',NULL,'2026-01-01'),
- (22,'作りの見直し','PR #11','マージの後','はい','2026-01-01'),(23,'不具合','#3','マージの前の検証',NULL,'2026-01-02'),
- (24,'不具合','#4','マージの後',NULL,'2026-02-01'),(25,'不具合','もとからあった','マージの後',NULL,'2026-01-01');
+ (20,'不具合','#1','マージの後',NULL,'2027-01-01'),(21,'不具合','不明','マージの後',NULL,'2027-01-01'),
+ (22,'作りの見直し','PR #11','マージの後','はい','2027-01-01'),(23,'不具合','#3','マージの前の検証',NULL,'2027-01-02'),
+ (24,'不具合','#4','マージの後',NULL,'2027-02-01'),(25,'不具合','もとからあった','マージの後',NULL,'2027-01-01');
  CREATE TABLE stg_github_comment_block(issue_or_pr,type,cause,found_at,plan_change,created_at);
- INSERT INTO stg_github_comment_block VALUES(26,'作りの見直し','PR #11','マージの後','いいえ','2026-01-02');
+ INSERT INTO stg_github_comment_block VALUES(26,'作りの見直し','PR #11','マージの後','いいえ','2027-01-02');
  CREATE TABLE issue_change(issue,pr);
  INSERT INTO issue_change VALUES(1,11);
  CREATE TABLE stg_github_issue_timeline(issue,event,created_at);
- INSERT INTO stg_github_issue_timeline VALUES(2,'reopened','2026-02-10');
+ INSERT INTO stg_github_issue_timeline VALUES(2,'reopened','2027-02-10');
  CREATE TABLE stg_github_issue_closure(issue,closed_at,pr_numbers,commit_sha);
- INSERT INTO stg_github_issue_closure VALUES(2,'2026-02-01','[10]',NULL);
+ INSERT INTO stg_github_issue_closure VALUES(2,'2027-02-01','[10]',NULL);
  CREATE TABLE change(pr,merged_at,merge_commit_sha,created_at);
- INSERT INTO change VALUES(10,'2026-02-01','a','2026-01-30'),(19,'2026-01-04','b','2026-01-03');
+ INSERT INTO change VALUES(10,'2027-02-01','a','2027-01-30'),(19,'2027-01-04','b','2027-01-03');
  CREATE TABLE verification_decision(issue,pr,round,at,actor,verdict,failed_checks);
  INSERT INTO verification_decision VALUES(1,11,1,1,'x','FAIL','["検査"]'),(1,11,2,2,'y','PASS','[]'),
  (1,19,1,3,'z','PASS','[]'),(3,13,1,1,'u',NULL,NULL),(4,14,1,1,NULL,'PASS','[]');
@@ -73,13 +77,31 @@ void test("quality follows the closing PR and active observation clock", (t) => 
   );
   assert.deepEqual(
     rows(
-      "SELECT first_pass,legacy_comment,missing_verifier FROM mart_quality_issue WHERE issue>=5 ORDER BY issue",
+      "SELECT first_pass,legacy_comment,missing_verifier FROM mart_quality_issue WHERE issue BETWEEN 5 AND 6 ORDER BY issue",
     ),
     [
       [1, 1, 0],
       [null, 1, 0],
     ],
   );
+  assert.deepEqual(
+    rows(
+      "SELECT first_pass,missing_verifier FROM mart_quality_issue WHERE area='window' ORDER BY issue",
+    ),
+    [
+      [1, 0],
+      [0, 1],
+    ],
+  );
+  assert.deepEqual(
+    rows(
+      "SELECT completed,first_denominator,pre_verification,missing_verifiers,missing_first_verdicts FROM mart_quality WHERE area='history'",
+    ),
+    [[2, 1, 1, 1, 0]],
+  );
+  assert.deepEqual(rows("SELECT issue,reason FROM mart_record_gap WHERE issue IN (7,8)"), [
+    [8, "missing_verifier"],
+  ]);
 });
 
 void test("compares equal active windows around clustered improvements and counts distinct CI catches", (t) => {
