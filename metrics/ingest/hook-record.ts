@@ -20,7 +20,7 @@ const spool = z.object({
 });
 const hook = z.record(z.string(), z.json()).and(
   z.object({
-    hook_event_name: z.enum(["SessionStart", "UserPromptSubmit", "Stop"]),
+    hook_event_name: z.enum(["SessionStart", "UserPromptSubmit", "Stop", "PermissionRequest"]),
     session_id: z.string().min(1).max(256),
   }),
 );

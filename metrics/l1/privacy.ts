@@ -243,6 +243,16 @@ export function hookPrivacy(p: Obj) {
       "CLAUDE_EFFORT",
       "CLAUDE_CODE_CHILD_SESSION",
     ]),
-    input: facts,
+    input:
+      input.hook_event_name === "PermissionRequest"
+        ? pick(input, [
+            "hook_event_name",
+            "cwd",
+            "session_id",
+            "tool_name",
+            "prompt_id",
+            "permission_mode",
+          ])
+        : facts,
   });
 }

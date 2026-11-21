@@ -30,12 +30,18 @@ void test("every installed settings command stays silent across opt-in, IO and l
   function run(command: string, project = root, path = process.env.PATH) {
     const result = spawnSync("/bin/sh", ["-c", command], {
       env: { CLAUDE_PROJECT_DIR: project, INSTANT_MADORI_METRICS_HOME: dir, PATH: path },
-      input: "{}",
+      input: JSON.stringify({
+        hook_event_name: "PermissionRequest",
+        tool_name: "Bash",
+        tool_input: { command: "private command" },
+        permission_suggestions: ["private suggestion"],
+      }),
       encoding: "utf8",
     });
     assert.deepEqual([result.status, result.stdout, result.stderr], [0, "", ""]);
   }
   assert.deepEqual(Object.keys(settings.hooks).sort(), [
+    "PermissionRequest",
     "SessionStart",
     "Stop",
     "UserPromptSubmit",
@@ -52,6 +58,11 @@ void test("every installed settings command stays silent across opt-in, IO and l
         const [name] = readdirSync(home.ready);
         assert.ok(name);
         assert.equal(statSync(join(home.ready, name)).mode & 0o777, 0o600);
+        if (command.includes(" permission")) {
+          const stored = readFileSync(join(home.ready, name), "utf8");
+          assert.match(stored, /Bash/u);
+          assert.doesNotMatch(stored, /private|tool_input|suggestions/u);
+        }
         run(command, dir);
         run(command, root, dir);
         const fake = join(dir, "metrics/hook");

@@ -17,6 +17,7 @@ export const registry = {
   "t3.thread": observation,
   "t3.run": observation,
   "t3.message": event,
+  "t3.approval": observation,
   "t3.subagent": observation,
   "t3.codex_link": event,
   "metrics.receiver": event,

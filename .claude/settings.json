@@ -32,6 +32,17 @@
           }
         ]
       }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/metrics/hook/hook.ts\" permission >/dev/null 2>&1 || true",
+            "timeout": 5
+          }
+        ]
+      }
     ]
   }
 }

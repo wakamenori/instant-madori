@@ -122,3 +122,35 @@ void test("only the event name survives in an OTLP body", () => {
     { log_record: { attributes } },
   );
 });
+
+void test("permission hook proves session membership with only request metadata", () => {
+  const input = {
+    hook_event_name: "PermissionRequest",
+    tool_name: "Bash",
+    session_id: "s",
+    prompt: "private",
+    reason: "private",
+    tool_input: { command: "private" },
+  };
+  const parsed = parseHook(
+    Buffer.from(
+      JSON.stringify({
+        v: 1,
+        id: randomUUID(),
+        at: new Date().toISOString(),
+        project: { dir: "/repo", git: { kind: "directory" } },
+        env: {},
+        stdin: JSON.stringify(input),
+      }),
+    ),
+    "/repo/.git",
+  );
+  const row = parsed.records[0];
+  assert.ok(row);
+  assert.deepEqual(row.scope, { kind: "proof", subject: "claude.session:s" });
+  assert.deepEqual(registry["claude.hook"].sanitize(row.payload).input, {
+    hook_event_name: "PermissionRequest",
+    tool_name: "Bash",
+    session_id: "s",
+  });
+});
