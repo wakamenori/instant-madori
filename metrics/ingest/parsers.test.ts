@@ -107,3 +107,18 @@ void test("hook privacy keeps validated prompt facts across replays", () => {
   assert.doesNotMatch(text, /private words/u);
   assert.deepEqual(registry["claude.hook"].sanitize(payload), payload);
 });
+
+void test("only the event name survives in an OTLP body", () => {
+  const sanitize = registry["claude.otel.log"].sanitize;
+  const attributes = [{ key: "event.name", value: { stringValue: "tool_result" } }];
+  for (const name of ["tool_result", "claude_code.tool_result"]) {
+    const body = { stringValue: name };
+    assert.deepEqual(sanitize({ log_record: { attributes, body: { ...body, extra: "secret" } } }), {
+      log_record: { attributes, body },
+    });
+  }
+  assert.deepEqual(
+    sanitize({ log_record: { attributes, body: { kvlistValue: { secret: "hidden" } } } }),
+    { log_record: { attributes } },
+  );
+});

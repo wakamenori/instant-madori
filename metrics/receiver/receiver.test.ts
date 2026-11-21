@@ -47,6 +47,7 @@ void test("listener ownership, durable hold, spool replay and expiration", async
     db.prepare("SELECT count(*) AS n FROM " + table + " WHERE " + filter).get()?.n;
   assert.equal((await post(body)).status, 200);
   assert.equal(count("held_record"), 1);
+  assert.equal(count("held_record", "payload LIKE '%fake-body%'"), 0);
   const file = join(home.ready, "1.json"),
     spooled = JSON.stringify({
       v: 1,
@@ -60,6 +61,7 @@ void test("listener ownership, durable hold, spool replay and expiration", async
   receiver.flush();
   assert.equal(count("held_record"), 0);
   assert.equal(count("l1_record", "source='claude.otel.log'"), 1);
+  assert.equal(count("l1_record", "payload LIKE '%fake-body%'"), 0);
   assert.equal((await post(body)).status, 200);
   await receiver.close();
   // Restore the ready file to the on-disk state of a crash immediately after commit.

@@ -122,6 +122,21 @@ function walk(value: Json): Json {
     );
   return value;
 }
+export function logPrivacy(payload: Obj) {
+  const { body, ...record } = object(payload.log_record);
+  const name = Array.isArray(record.attributes)
+    ? record.attributes.map(object).find((a) => a.key === "event.name")?.value
+    : undefined;
+  const event = object(name).stringValue;
+  const text = object(body).stringValue;
+  if (
+    typeof event === "string" &&
+    /^[a-z][a-z0-9_.-]{0,127}$/u.test(event) &&
+    (text === event || text === "claude_code." + event)
+  )
+    record.body = { stringValue: text };
+  return telemetry({ ...payload, log_record: record });
+}
 export function telemetry(payload: Obj) {
   return object(walk(payload));
 }
