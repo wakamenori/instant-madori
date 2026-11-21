@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { join } from "node:path";
 import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
@@ -25,8 +26,28 @@ export function openL1Writer<R extends Registry>(file: string, registry: R) {
       const version = db.prepare("PRAGMA user_version").get()?.user_version;
       if (version === 0) {
         db.exec(readFileSync(join(import.meta.dirname, "migrations/0001_l1.sql"), "utf8"));
-        db.exec("PRAGMA user_version=1");
-      } else if (version !== 1) throw new Error("Unsupported metrics schema version");
+      } else if (version === 1) {
+        // Older receivers promoted these rows verbatim, including free-form log bodies.
+        const held = db
+          .prepare(
+            "SELECT held_id,source,payload FROM held_record WHERE source IN ('claude.otel.log','codex.otel.log') ORDER BY held_id",
+          )
+          .all();
+        for (const row of held) {
+          const spec = registry[String(row.source)];
+          if (!spec) throw new Error("Unregistered held log source");
+          const payload = canonical(
+            spec.sanitize(z.record(z.string(), z.json()).parse(JSON.parse(String(row.payload)))),
+          );
+          if (payload === row.payload) continue;
+          const updated = db
+            .prepare("UPDATE OR IGNORE held_record SET payload=?, content_hash=? WHERE held_id=?")
+            .run(payload, hash(payload), row.held_id ?? null);
+          if (!updated.changes)
+            db.prepare("DELETE FROM held_record WHERE held_id=?").run(row.held_id ?? null);
+        }
+      } else if (version !== 2) throw new Error("Unsupported metrics schema version");
+      if (version !== 2) db.exec("PRAGMA user_version=2");
       for (const [source, spec] of Object.entries(registry)) {
         db.prepare("INSERT INTO l1_source VALUES (?,?,?) ON CONFLICT(source) DO NOTHING").run(
           source,

@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { registry } from "./sources.ts";
 import { openL1Writer } from "./store.ts";
 import { hash, type Candidate, type Obj } from "./envelope.ts";
 void test("retries, state transitions, promotion and expiry survive reopening", (t) => {
@@ -127,6 +128,39 @@ void test("retries, state transitions, promotion and expiry survive reopening", 
   }
 
   assert.throws(() => openL1Writer(file, { state: { kind: "event", sanitize } }), /kind changed/u);
-  db.exec("PRAGMA user_version=2");
+  db.exec("PRAGMA user_version=3");
   assert.throws(() => openL1Writer(file, registry), /Unsupported/u);
+});
+
+void test("upgrading held logs removes old bodies and deduplicates the sanitized content", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "held-logs-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const file = join(root, "db");
+  const old = openL1Writer(file, {
+    "claude.otel.log": { kind: "event", sanitize: (p: Obj) => p },
+  } as const);
+  const at = new Date().toISOString();
+  for (const text of ["first private text", "second private text"])
+    old.ingest(
+      [
+        {
+          source: "claude.otel.log",
+          sourceVersion: "1",
+          scope: { kind: "gated", subject: "session:x" },
+          occurredAt: at,
+          naturalKey: "x",
+          payload: { log_record: { body: { stringValue: text } } },
+        },
+      ],
+      at,
+    );
+  old.close();
+  const db = new DatabaseSync(file);
+  t.after(() => db.close());
+  db.exec("PRAGMA user_version=1");
+  openL1Writer(file, registry).close();
+  assert.deepEqual(
+    { ...db.prepare("SELECT count(*) n,payload,content_hash FROM held_record").get() },
+    { n: 1, payload: '{"log_record":{}}', content_hash: hash('{"log_record":{}}') },
+  );
 });
