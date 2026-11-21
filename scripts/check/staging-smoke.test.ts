@@ -426,7 +426,7 @@ function deployPathsIgnore(workflow: string): string[] {
   return entries;
 }
 
-void test("deploy skips only documents and agent instructions that the coordinator can match", () => {
+void test("deploy skips only documents, agent instructions, and metrics that the coordinator can match", () => {
   const workflow = readFileSync(
     new URL(".github/workflows/deploy-staging.yml", repositoryRoot),
     "utf8",
@@ -435,6 +435,7 @@ void test("deploy skips only documents and agent instructions that the coordinat
     ".claude/**",
     ".github/ISSUE_TEMPLATE/**",
     "docs/**",
+    "metrics/**",
     "AGENTS.md",
     "CLAUDE.md",
     "README.md",

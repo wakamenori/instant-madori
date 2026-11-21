@@ -24,7 +24,7 @@ pstack の poteto-mode の Orchestrate に従い、各 PR は Autopilot-full の
 
 指揮役のセッションを新しく始めたら、まずメインのチェックアウトを `git pull --ff-only` で main に合わせる。このスキルとスクリプトは、そこから読み込まれる。引き継ぎのメモは探さずに、状態を次から読み直す。
 
-- 開いている PR と、それぞれの head と `check`（`gh pr list --state open --search "-label:metrics"`、`gh pr checks <番号>`）
+- 開いている PR と、それぞれの head と `check`（`gh pr list --state open`、`gh pr checks <番号>`）
 - T3 のスレッドの一覧（`t3_thread_list`）。担当のスレッドの題は `#<番号> <Issue の題>` にしてある
 - 定期タスク（`list_scheduled_tasks`）。指揮役のスレッドが変わったら、見回りの紐付けを新しいスレッドへ移す
 - 直近のデプロイ（`gh run list --workflow deploy-staging.yml --limit 5`）
