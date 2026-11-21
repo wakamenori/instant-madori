@@ -110,6 +110,24 @@ void test("housing accepts its schema and JSON dependencies and rejects reqwest"
   );
 });
 
+void test("modeling reaches kernel through engine and rejects a direct kernel dependency", () => {
+  const allowed = compliantMetadata();
+  addDependency(allowed, "solidcraft-engine", "solidcraft-kernel");
+  addDependency(allowed, "madori-modeling", "madori-housing");
+  assert.deepEqual(checkRustBoundaries(allowed, compliantFeatureTrees()), []);
+  for (const kind of [null, "build"] satisfies ("build" | null)[]) {
+    const direct = compliantMetadata();
+    addDependency(direct, "madori-modeling", "solidcraft-kernel", kind);
+    assert(
+      checkRustBoundaries(direct, compliantFeatureTrees()).some(
+        (message) =>
+          message.startsWith("[modeling-solidcraft]") &&
+          message.includes("madori-modeling -> solidcraft-kernel"),
+      ),
+    );
+  }
+});
+
 void test("direct dependency checks also reject build dependencies", () => {
   for (const [parent, dependency, id] of [
     ["madori-display", "serde", "display-dependencies"],
