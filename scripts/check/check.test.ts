@@ -223,3 +223,27 @@ setTimeout(() => process.exit(1), 10000);
     await closed;
   }
 });
+
+void test("default and full checks run the skill script tests; fast checks do not", async () => {
+  mkdirSync("apps/worker/tests", { recursive: true });
+  writeFileSync("apps/worker/tests/container.e2e.ts", "");
+  writeFileSync("apps/worker/tests/example.test.ts", "");
+  const skillTest = ".claude/skills/madori-coordinator/scripts/example.test.mjs";
+  mkdirSync(".claude/skills/madori-coordinator/scripts", { recursive: true });
+  writeFileSync(skillTest, "");
+  for (const mode of modes) {
+    let args: string[] | undefined;
+    await runChecks(
+      mode,
+      [],
+      (label, _command, commandArgs) => {
+        if (label === "TypeScript tests") args = commandArgs;
+        return Promise.resolve();
+      },
+      (stage) => stage(),
+      resultsDir,
+    );
+    if (mode === "--fast") assert.equal(args, undefined);
+    else assert(args?.includes(skillTest), `${mode}: ${String(args)}`);
+  }
+});

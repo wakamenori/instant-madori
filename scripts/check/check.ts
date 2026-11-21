@@ -127,6 +127,7 @@ export async function runChecks(
       "apps/*/{src,tests}/**/*.test.ts",
       "packages/*/{src,tests}/**/*.test.ts",
       "scripts/**/*.test.ts",
+      ".claude/skills/*/scripts/*.test.mjs",
     ]))
       tests.push(path);
     if (tests.length === 0) throw new Error("No TypeScript tests found");
