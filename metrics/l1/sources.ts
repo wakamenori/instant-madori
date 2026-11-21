@@ -10,6 +10,8 @@ export const registry = {
   "claude.hook": { ...event, sanitize: hookPrivacy },
   otlp: event,
   "github.issue": observation,
+  "github.issue.timeline": event,
+  "github.actions.attempt": observation,
   "github.pr": observation,
   "github.comment": event,
   "github.actions.job": observation,

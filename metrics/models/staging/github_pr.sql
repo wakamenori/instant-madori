@@ -15,8 +15,13 @@ SELECT natural_key AS id,
        payload ->> '$.labels' AS labels,
        payload ->> '$.closes' AS closes,
        payload ->> '$.mergeable_state' AS mergeable_state,
+       payload->>'$.files' files, payload->>'$.files_complete' files_complete,
        valid_from,
        valid_to
 FROM staging_record WHERE source='github.pr';
 
 CREATE TABLE stg_github_pr AS SELECT * FROM stg_github_pr_history WHERE valid_to IS NULL;
+
+CREATE VIEW stg_github_pr_file AS
+SELECT p.number pr,f.value->>'$.filename' filename,f.value->>'$.previous_filename' previous_filename,
+       f.value->>'$.status' status FROM stg_github_pr p,json_each(p.files) f;

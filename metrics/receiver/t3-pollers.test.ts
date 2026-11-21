@@ -15,7 +15,7 @@ void test("T3 message checkpoints persist only after commit and exclude foreign 
  CREATE TABLE orchestration_v2_projection_threads(thread_id,project_id,title);
  CREATE TABLE orchestration_v2_projection_messages(thread_id,message_id,created_at,updated_at,role,streaming,payload_json);
  INSERT INTO projection_projects VALUES ('repo','/repo'),('other','/other');
- INSERT INTO orchestration_v2_projection_threads VALUES ('v','repo','検証 #391 @ abcd'),('f','other','検証 #1 @ ef01');`);
+ INSERT INTO orchestration_v2_projection_threads VALUES ('v','repo','検証 #391 @ abcd'),('v2','repo','PR #416（#381）の検証（2回目）'),('f','other','検証 #1 @ ef01');`);
   const insert = db.prepare(
     "INSERT INTO orchestration_v2_projection_messages VALUES(?,?,'2026-01-01T00:00:00Z','2026-01-01T00:00:00Z','assistant',?,?)",
   );
@@ -25,6 +25,7 @@ void test("T3 message checkpoints persist only after commit and exclude foreign 
     ["f", "foreign", 0],
   ] as const)
     insert.run(thread, id, streaming, JSON.stringify({ text: "PASS #391" }));
+  insert.run("v2", "new-format", 0, JSON.stringify({ text: "判定：FAIL。前回は PASS" }));
   db.close();
   const poller = () => {
     const p = t3Pollers(file, "/repo", home).find((p) => p.name === "t3.message");
@@ -36,10 +37,13 @@ void test("T3 message checkpoints persist only after commit and exclude foreign 
   const rows = await p.poll(signal);
   assert.deepEqual(
     rows.map((r) => [r.naturalKey, r.payload.verdict, r.payload.text_length]),
-    [["message", "PASS", 9]],
+    [
+      ["message", "PASS", 9],
+      ["new-format", "FAIL", "判定：FAIL。前回は PASS".length],
+    ],
   );
   assert.ok(!JSON.stringify(rows).includes("PASS #391"));
-  assert.equal((await poller().poll(signal)).length, 1);
+  assert.equal((await poller().poll(signal)).length, 2);
   p.committed?.();
   assert.equal((await poller().poll(signal)).length, 0);
 });

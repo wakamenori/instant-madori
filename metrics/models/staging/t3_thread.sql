@@ -18,6 +18,7 @@ SELECT natural_key AS id,
        payload ->> '$.issue' AS issue,
        payload ->> '$.pr' AS pr,
        payload ->> '$.sha' AS sha,
+       payload ->> '$.attempt' AS attempt,
        valid_from,
        valid_to
 FROM staging_record WHERE source='t3.thread';

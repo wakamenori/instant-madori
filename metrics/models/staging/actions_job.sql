@@ -16,6 +16,7 @@ SELECT natural_key AS id,
        payload ->> '$.steps' AS steps,
        strftime('%Y-%m-%dT%H:%M:%fZ',payload ->> '$.run_created_at') AS run_created_at,
        payload ->> '$.run_conclusion' AS run_conclusion,
+       payload->>'$.name' name,
        valid_from,
        valid_to
 FROM staging_record WHERE source='github.actions.job';
