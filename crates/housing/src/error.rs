@@ -1,4 +1,4 @@
-use crate::Side;
+use crate::{Point, Side};
 use schemars::JsonSchema;
 use serde::Serialize;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema)]
@@ -58,6 +58,11 @@ pub enum Reason {
     SideTaken { side: Side, rooms: Vec<String> },
     NoRoom {},
     UnusedVertex {},
+    NoRooms {},
+    TooNarrow { axis: Axis, size: f64, minimum: f64 },
+    Overlap { min: Point, max: Point },
+    NarrowGap { gap: f64, minimum: f64 },
+    PinchedCorner { at: Point },
 }
 
 impl std::fmt::Display for Rejections {
@@ -76,3 +81,10 @@ impl std::fmt::Display for Rejections {
     }
 }
 impl std::error::Error for Rejections {}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Axis {
+    X,
+    Y,
+}
