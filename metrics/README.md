@@ -335,8 +335,18 @@ T3はプロジェクトの最初のスレッドから、GitHubは2026年11月1�
 
 集計結果の `owner_interval` は担当スレッドごとの区間、`mart_minute` は Issue・UTC 分ごとの内訳である。同じ Issue の立て直しが同じ分に入ったときは、その分を一度数える。`mart_turn_detail` は時間が分かるツールやモデル、承認、Docker 枠の記録を持つ。これらには重なりがあるので延べ時間には足さない。
 
-`mart_kpi` と `mart_kind_period` の `hour` は UTC の正時を表す Unix 秒で、`hour` 窓はその1時間、`rolling` 窓はその時間の終わりからさかのぼった動いた時間である。長さは `INSTANT_MADORI_METRICS_WINDOW_MINUTES`（既定480）で指定できる。蓄積の短い期間は実際の分数を出す。スループットは件／稼働時間、1件あたりは延べ時間／件である。区間は完了数の両側95%ポアソン信頼区間から求め、分母が0の値は NULL とする。種類不明の延べ時間も並列数の分子に入る。過去分の分類を使うには、`INSTANT_MADORI_METRICS_KIND_FILE` に `[{"issue":123,"kind":"機能"}]` の形の JSON ファイルを指定する。`issue_classification.kind_source` に `backfill` が残る。
+`mart_kpi` と `mart_kind_period` の `hour` は UTC の正時を表す Unix 秒で、`hour` 窓はその1時間、`rolling` 窓はその時間の終わりからさかのぼった動いた時間である。長さは `INSTANT_MADORI_METRICS_WINDOW_MINUTES`（既定480）で指定できる。蓄積の短い期間は実際の分数を出す。スループットは件／稼働時間、1件あたりは延べ時間／件である。区間は完了数の両側95%ポアソン信頼区間から求め、分母が0の値は NULL とする。種類不明の延べ時間も並列数の分子に入る。過去分の分類は `[{"issue":123,"kind":"機能"}]` の形の JSON ファイルを `node metrics/import/classifications.ts <file>` に渡す。受け口は spool から L1 の `classification.backfill` に保存する。`issue_classification.kind_source` に `backfill` が残る。
 
 `owner_limit` の各行には、指揮役の上限が変わったコミットとその時刻を記録する。上限が変わったら行を加える。`mart_slot_candidate` は選べる候補を段階・開発基盤の空きに優先して割り当て、余った枠を融通する。`mart_empty_slot.slots` は理由ごとの枠・分である。Issue の記録が初めて届くまでの共有資源と依存には、最初の観測値を使う。
 
-`deployment_delivery` は成功したデプロイのコミットをマージに結ぶ。後のコミットで反映されたかを確かめるときは、この checkout の `origin/main` の first-parent 履歴を使う。コミットが手元に無いときは同じ SHA の試行だけを結ぶ。`mart_record_gap_count` は記録の抜けなどの件数、`mart_inactive_stretch` は担当区間の中でエージェントと CI がともに30分以上動かなかった期間を示す。
+`deployment_delivery` は成功したデプロイのコミットをマージに結ぶ。後のコミットで反映されたかを確かめるときは、GitHub ポーラーが L1 に保存した `github.commit` の最初の親をたどる。親の記録が途切れた先の反映は推定しない。`mart_record_gap_count` は記録の抜けなどの件数、`mart_inactive_stretch` は担当区間の中でエージェントと CI がともに30分以上動かなかった期間を示す。
+
+`mart_quality_issue` は、マージで閉じた Issue ごとに初回判定、観察完了、見直し、漏れを持つ。`mart_quality` はそれを製品と開発に分ける。観察完了前の Issue を含む率は暫定値である。番号付き判定もスレッドも無い過去分は、マージ前の PR コメントに残った判定の印がすべて一致すれば使う。混在すれば初回は不明とする。どちらも判定時刻は補わず、件数を `legacy_comments` に出す。発見日時の専用欄がないため、Issue 本文の発見はその Issue の作成時、追記はコメント作成時に置き、検証で発見したという `found_at` を優先する。`mart_failed_check` の分母は初回の結果が判定できた Issue 数で、確認名が残っていない失敗があると各率は下限になる。その件数は `unknown_checks` に出す。`mart_discovery_count` では原因不明、もとからあった問題、検証で見つけて後に回した問題などを別々に数える。
+
+狙いは `improvement_target` の `id` を使う。一覧にない識別子（英数字、ピリオド、ハイフン、アンダースコア）は `unknown_target` として記録の抜けに出す。日本語の成功条件など、その文字種に収まらない自由文は `manual` として比較から外す。これは自由文と識別子を同じ YAML の欄に書く現行形式での判別方法である。
+
+`mart_improvement_effect` は同じ狙いの連続したマージの間隔が集計窓（既定480稼働分）未満ならまとめる。最初のマージ前と最後のマージ後で、両側に取れる同じ分数を使う。狙いの観測分母がない側とその差は NULL になる。品質の見直しと漏れは観察完了済みの Issue で比べる。割合の差の参考範囲は両側の Wilson 95% 区間の端点の差で、同一 Issue 内の分同士の相関は補正していない。
+
+事故防止の狙いは `prevention_signal` で workflow と専用 step 名に結ぶ。`mart_prevention_catch` はマージ以降に開始した run でその step の結論が failure になったとき、同じ run と head の再試行を1件にまとめる。`mart_prevention` はこの件数を改善別に出す。step の失敗は検出の代理指標で、外部サービスの失敗も含み得る。汎用の試験実行 step は個別の検査と結べないので登録しない。
+
+事故防止は比較窓を設けず、次に同じ狙いの改善が入るまで追う。`checked_runs` が0件なら検出数は NULL になる。`main_runs` と `main_failures` で、main で同じ検査を実行した回数と失敗数を確認できる。main でその検査を走らせていない期間の再発は判定できない。

@@ -6,8 +6,6 @@ UNION ALL SELECT number,'missing_open_kind' FROM stg_github_issue i WHERE i.stat
 UNION ALL SELECT issue,'multiple_kinds' FROM issue_classification WHERE label_count>1
 UNION ALL SELECT number,'missing_issue_yaml' FROM stg_github_issue WHERE type IS NULL
 UNION ALL SELECT issue,ownership FROM issue_classification WHERE ownership IN ('missing_owner','bypass')
-UNION ALL SELECT issue,'missing_verifier' FROM issue_classification c WHERE ownership='owner' AND pr IS NOT NULL
- AND NOT EXISTS(SELECT 1 FROM verification_decision d WHERE d.pr=c.pr)
 UNION ALL SELECT issue,'invalid_verdict' FROM verification_decision WHERE verdict IS NULL OR legacy=1
 UNION ALL SELECT CAST(natural_key AS INTEGER),reason FROM stg_github_invalid_yaml WHERE valid_to IS NULL AND source='github.issue'
 UNION ALL SELECT c.issue_or_pr,'missing_comment_yaml' FROM stg_github_comment c
