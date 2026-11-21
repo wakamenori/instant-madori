@@ -4,6 +4,7 @@ import { receivedTurn } from "../src/ai/round-trip.ts";
 import type { AiRequest, AiResponse, AiResult, Conversation, Reply } from "../src/ai/round-trip.ts";
 import { scriptedAi } from "../src/ai/scripted.ts";
 import type { ScriptStep } from "../src/ai/scripted.ts";
+import { selectAi } from "../src/ai/select.ts";
 
 const script: ScriptStep[] = [
   {
@@ -174,4 +175,20 @@ await test("scripted AI", async (t) => {
     const step: ScriptStep = { stop: "tool_calls", parts: [call] };
     assert.throws(() => scriptedAi([step, step]), /step 1/u);
   });
+});
+
+await test("AI selection", async (t) => {
+  for (const ENVIRONMENT of ["local", "staging"]) {
+    await t.test(`${ENVIRONMENT} answers from the script`, async () => {
+      const result = await selectAi({ ENVIRONMENT }).roundTrip(request(opening));
+      assert.equal(result.kind, "ok");
+    });
+  }
+
+  for (const ENVIRONMENT of ["production", "", "Local", "staging ", "preview"]) {
+    await t.test(`${JSON.stringify(ENVIRONMENT)} cannot use the scripted AI`, async () => {
+      const result = await selectAi({ ENVIRONMENT }).roundTrip(request(opening));
+      assert.equal(result.kind === "failed" && result.reason, "no_provider");
+    });
+  }
 });

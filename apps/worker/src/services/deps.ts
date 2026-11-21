@@ -1,3 +1,4 @@
+import type { Ai } from "../ai/round-trip.ts";
 import type { JobStepName, JobStepResult } from "./jobs.ts";
 import type { JobTestHold } from "./job-test-hold.ts";
 import type { JobExecutionReference } from "../storage/job-execution.ts";
@@ -75,4 +76,7 @@ export type JobWorkflowDeps = StoreDeps<
   "restore" | "check" | "complete" | "failAndHoldQueue" | "ownedBySubject"
 > &
   StoreDeps<"snapshots", "write"> &
-  Pick<ServiceDeps, "geometry" | "runtime" | "wakePattern"> & { testHold: JobTestHold | null };
+  Pick<ServiceDeps, "geometry" | "runtime" | "wakePattern"> & {
+    ai: Ai;
+    testHold: JobTestHold | null;
+  };
