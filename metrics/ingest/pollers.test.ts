@@ -74,8 +74,7 @@ void test("GitHub fields come only from the leading YAML and the shared resource
   const findings =
     "type: 作りの見直し\nfound_at: マージの後\nfound_by: 担当\ncause: '#123'\nplan_change: いいえ";
   const body =
-    yaml(findings + "\nextra: PRIVATE") +
-    "\n## 使う共有資源\n<!-- pnpm dev -->\nstaging を占有する\n## 依存\nなし";
+    yaml(findings) + "\n## 使う共有資源\n<!-- pnpm dev -->\nstaging を占有する\n## 依存\nなし";
   const issue = issueRecord(
     {
       number: 1,
@@ -110,7 +109,7 @@ void test("GitHub fields come only from the leading YAML and the shared resource
   const fields =
     "head: " +
     "a".repeat(40) +
-    "\nverdict: FAIL\ndecided_at: 2026-11-20T11:00:00+09:00\nfailed_checks: [地図]";
+    "\nverdict: FAIL\ndecided_at: 2026-11-20T02:00:00Z\nfailed_checks: [地図]";
   const c = comment(yaml("attempt: 2\n" + fields) + "\nPASS SECRET");
   assert.deepEqual(c.payload.markers, []);
   assert.equal(c.naturalKey, "11");

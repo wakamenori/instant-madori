@@ -8,18 +8,18 @@ const discovery = {
   cause: z.string().regex(/^(?:#[1-9]\d*|PR #[1-9]\d*|外の変化|もとからあった|不明)$/u),
 };
 const issueFields = z.discriminatedUnion("type", [
-  z.object({ type: z.enum(["機能", "外部への追従", "確かめと判断"]) }),
-  z.object({ type: z.literal("開発の改善"), target: text }),
-  z.object({ type: z.literal("不具合"), ...discovery }),
-  z.object({
+  z.strictObject({ type: z.enum(["機能", "外部への追従", "確かめと判断"]) }),
+  z.strictObject({ type: z.literal("開発の改善"), target: text }),
+  z.strictObject({ type: z.literal("不具合"), ...discovery }),
+  z.strictObject({
     type: z.literal("作りの見直し"),
     ...discovery,
     plan_change: z.enum(["はい", "いいえ"]),
   }),
 ]);
-const time = z.iso.datetime({ offset: true }).transform((v) => new Date(v).toISOString());
+const time = z.iso.datetime().transform((v) => new Date(v).toISOString());
 export const verificationFields = z
-  .object({
+  .strictObject({
     head: z.string().regex(/^[a-f\d]{40}$/u),
     verdict: z.enum(["PASS", "FAIL"]),
     decided_at: time,
@@ -31,7 +31,7 @@ export const verificationFields = z
       new Set(v.failed_checks).size === v.failed_checks.length,
   );
 const staging = z
-  .object({ started_at: time, ended_at: time.optional() })
+  .strictObject({ started_at: time, ended_at: time.optional() })
   .refine((v) => !v.ended_at || v.started_at <= v.ended_at);
 const commentFields = z.union([
   issueFields,
@@ -42,7 +42,7 @@ const commentFields = z.union([
 // Only a leading fence is a record. Later examples in the report describe other work.
 export function leadingRecord<T>(markdown: string, schema: z.ZodType<T>) {
   const body = markdown.trimStart();
-  const fence = /^```ya?ml[ \t]*\r?\n/iu.exec(body);
+  const fence = /^```yaml[ \t]*\r?\n/u.exec(body);
   if (!fence) return undefined;
   const rest = body.slice(fence[0].length);
   const end = /^```[ \t]*\r?$/mu.exec(rest);

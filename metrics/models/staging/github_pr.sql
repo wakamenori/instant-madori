@@ -15,7 +15,7 @@ SELECT natural_key AS id,
        payload ->> '$.labels' AS labels,
        payload ->> '$.closes' AS closes,
        payload ->> '$.mergeable_state' AS mergeable_state,
-       payload->>'$.files' files, payload->>'$.files_complete' files_complete,
+       payload->>'$.creator_type' creator_type, payload->>'$.files' files, payload->>'$.files_complete' files_complete,
        valid_from,
        valid_to
 FROM staging_record WHERE source='github.pr';

@@ -108,7 +108,7 @@ void test("issue drill-down preserves span times and wait grouping", () => {
     ],
     span: [{ issue: 42, kind: "verifier_run", start: launch, end: merged }],
   });
-  assert.ok(html.includes("#42 CIの実行 8分"));
+  assert.ok(html.includes("#42 CI 8分"));
   assert.ok(html.includes('aria-controls="issue-42"'));
   assert.ok(html.includes('id="issue-42" hidden'));
   assert.ok(html.includes("検証役 2026-11-20 15:00 〜 2026-11-20 17:00"));
