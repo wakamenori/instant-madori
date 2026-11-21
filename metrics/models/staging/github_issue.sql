@@ -8,6 +8,9 @@ SELECT natural_key AS id,
        payload ->> '$.milestone' AS milestone,
        payload ->> '$.labels' AS labels,
        payload ->> '$.blocked_by' AS blocked_by,
+       payload->>'$.fields.type' type,payload->>'$.fields.found_at' found_at,
+       payload->>'$.fields.found_by' found_by,payload->>'$.fields.cause' cause,
+       payload->>'$.fields.plan_change' plan_change,payload->>'$.fields.target' target,payload->>'$.shared_resources' shared_resources,
        valid_from,
        valid_to
 FROM staging_record WHERE source='github.issue';

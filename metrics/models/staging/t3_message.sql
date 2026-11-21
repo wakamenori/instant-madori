@@ -10,6 +10,8 @@ SELECT natural_key AS id,
        payload ->> '$.notification_outcome' AS notification_outcome,
        payload ->> '$.verdict' AS verdict,
        payload ->> '$.text_length' AS text_length,
+       payload->>'$.verification.head' head,
+       payload->>'$.verification.decided_at' decided_at,payload->>'$.verification.failed_checks' failed_checks,
        valid_from,
        valid_to
 FROM staging_record WHERE source='t3.message' AND valid_to IS NULL;
