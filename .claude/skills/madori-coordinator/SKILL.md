@@ -17,7 +17,7 @@ pstack の poteto-mode の Orchestrate に従い、各 PR は Autopilot-full の
 - 同時に動かす担当は五人まで。担当はこのマシンで、`pnpm dev` の固定のポート、CPU とメモリ、ディスクを共有するため。その内側の枠は「次の Issue を選ぶ」にある。Rust の `target` は worktree ごとに持つので、担当と検証役は同時に cargo を使ってよい。
 - 検証は、head ごとに検証役一人で行う。Autopilot-full の swarm にはしない。
 - マージするかは指揮役が決める。コマンドも指揮役が打ってよい。
-- 着手する Issue の順は [scripts/rank-ready.mjs](scripts/rank-ready.mjs) で出す。依存の鎖の長さは手で数えられないため。ほかのスクリプトとポーリングのループは使わない。
+- シェルの手順は、[scripts/](scripts/) のスクリプトを、各節に書いたコマンドで呼ぶ。着手する Issue の順も [scripts/rank-ready.mjs](scripts/rank-ready.mjs) で出す。依存の鎖の長さは手で数えられないため。番号や SHA を書き込んだコマンドを一つずつ打ち、変数、ループ、ファイルへのリダイレクトで手順を組み立てない。Bash ツールの zsh は、`noclobber` で既存のファイルへの `>` を拒み、引用符の無い変数を単語に分けないので、組み立てた手順は黙って失敗する。新しい手順が要るときは、スキルにシェルを書かずに、テスト（`*.test.mjs`。`pnpm check` が実行する）と一緒にスクリプトを `scripts/` に足す。その場で書いたスクリプトとポーリングのループは使わない。
 - Autopilot-full の `/loop 1h` は、T3 の定期タスクに置き換える。プロンプトは `/madori-coordinator 見回り` の一行だけにする。
 
 ## 始めるとき
@@ -39,12 +39,24 @@ pstack の poteto-mode の Orchestrate に従い、各 PR は Autopilot-full の
 
 1. 下書きを `.issues/<id>.md` に書く。このフォルダーは Git で追跡しない。本文はテンプレートと同じ見出しにする。frontmatter には `id`、`title`、`milestone`、`blockedBy` を書く。`blockedBy` には、先に閉じる必要がある下書きの `id` か、既存の Issue の `#<番号>` をカンマ区切りで書く。`#` を含む値は引用符で囲む。YAML では、値の先頭か空白の直後にある、引用符の外の `#` から後ろがコメントになる。依存の欄では、番号のない下書きを `#<id>` で指し、`blockedBy` と同じものだけを並べる。
 2. 下書きを書いたのとは別のエージェントに、下書きを plan.md とコードに照らして確かめさせる。見るのは、計画の抜けと重複、下書き同士の食い違い、終わった証拠を実行できるか、依存の向き、人の判断が要る項目。plan.md がコードや決めたことと食い違っていれば、正しい内容を決めて下書きをそれに合わせ、plan.md を直す Issue も作る。指摘を直してから次へ進む。
-3. 依存の先から順に Issue を作り、依存の欄の `#<id>` を実際の番号に置き換える。`blockedBy` の組は、GitHub の Issue の依存関係（blocked by）にも登録する。作った後は Issue を正とし、下書きを消す。
+3. 依存の先から順に Issue を作り、依存の欄の `#<id>` を実際の番号に置き換える。作った Issue ごとに、`blockedBy` の番号を「依存を登録する」のとおりに登録する。依存の欄には番号がもうあるので、`--reason` は要らない。作った後は Issue を正とし、下書きを消す。
 
 依存には、先に閉じる必要がある Issue のほかに、次も入れる。下書きでも、作った後の Issue でも同じにする。
 
 - 同じファイルを触る Issue。先に進める方を依存の先にする。`README.md` と `docs/plan.md` は、同じ節を触るときだけ同じファイルと数える。ディレクトリで書いたパスは、その下のファイルをすべて触るものと数える。
 - 調べた結果が別の Issue の設計の前提になるとき、調べる Issue。
+
+### 依存を登録する
+
+Issue の依存は、GitHub の依存関係（blocked by）と本文の依存の欄の両方に置く。どの場面でも、次のコマンドで登録する。
+
+```sh
+node .claude/skills/madori-coordinator/scripts/blocked-by.mjs <番号> <依存の先の番号>... --reason '<理由>'
+```
+
+- GitHub に無い依存の先を登録し、依存の欄に無い依存の先を `- #<依存の先>。<理由>` の一行で足す。欄が「なし」なら、その行に置き換える。欄に全部あれば、`--reason` は省いてよい。
+- 0で終わったら、GitHub と依存の欄を読み直して、両方にあることを確かめてある。0以外なら、表示された理由を直して打ち直す。打ち直すと、足りない分だけを書く。
+- 番号に `#` を付けず、理由は一重引用符で囲む。zsh は、`#` で始まる語から後ろをコメントとして捨て、二重引用符の中のバッククォートをコマンドとして実行する。
 
 ## Issue の置き場
 
@@ -82,7 +94,7 @@ node .claude/skills/madori-coordinator/scripts/rank-ready.mjs
 出た候補から、担当のいる Issue と、次のどちらかに当たる Issue を除く。
 
 - 資源の枠を超える。
-- 動いている担当の Issue と同じファイルを触る。同じファイルの数え方は、「計画を Issue に分ける」の依存と同じにする。除いたら、動いている方を依存の先として、GitHub の依存と本文の依存の欄に登録する。
+- 動いている担当の Issue と同じファイルを触る。同じファイルの数え方は、「計画を Issue に分ける」の依存と同じにする。除いたら、動いている方を依存の先として「依存を登録する」のとおりに登録し、理由に同じファイルを書く。
 
 ### 資源の枠
 
@@ -185,35 +197,31 @@ gh api --paginate \
 - D1 のマイグレーションを加える PR なら、今の main のマイグレーションと番号が衝突しない。PR の `check` は分岐点と比べるので、先に main へ入った同じ番号には、マージ後の main の `check` で初めて気づく。
 - staging が占有されていない（「staging の占有」）か、そのマージがデプロイを起こさない。「staging を占有する」Issue の PR なら、マージした時点でその担当の占有が始まる。
 
-占有の間にマージするときは、`--match-head-commit` に渡す head で、PR の変更のうち main の `deploy-staging.yml` の `paths-ignore` に入らないファイルを出す。一覧は毎回 main から読み、このスキルに写さない。
+占有の間にマージするときは、`--match-head-commit` に渡す head で、PR の変更のうち main の `deploy-staging.yml` の `paths-ignore` に入らないファイルを出す。スクリプトは main と PR の head を取得し、一覧を毎回 main から読む。一覧をこのスキルに写さない。
 
 ```sh
-git fetch -q origin main "pull/<番号>/head" &&
-  { echo ':/'; git show origin/main:.github/workflows/deploy-staging.yml |
-    sed -n '/^    paths-ignore:$/,/^ \{0,5\}[^ #]/s/^      - "\(.*\)"$/:(top,glob,exclude)\1/p'; } |
-  xargs git diff --no-renames --name-only "origin/main...<head>" --
+node .claude/skills/madori-coordinator/scripts/deploy-files.mjs before <番号> <head>
 ```
 
-コマンドが成功して出力が空なら、デプロイを起こさないので占有の間もマージしてよい。ファイルが出たらデプロイを起こすので、占有が終わるまで待つ。一覧を読み取れないときは PR の変更ファイルがすべて出るため、デプロイを起こすマージとして扱う。
+0で終わって何も出なければ、デプロイを起こさないので占有の間もマージしてよい。ファイルが出たらデプロイを起こすので、占有が終わるまで待つ。一覧を読み取れないときは、警告と一緒に PR の変更ファイルがすべて出るので、デプロイを起こすマージとして扱う。0以外で終わったら判定できていないので、占有の間はマージしない。
 
 ```sh
 gh pr merge <番号> --merge --match-head-commit <head>
 ```
 
+続けてマージするときも、PR ごとに、判定とマージを、番号と head を書き込んだ別々のコマンドで打つ。
+
 ## マージの後
 
-マージで main に入った変更に `paths-ignore` に入らないファイルがあれば、staging へ自動でデプロイされる。結果は見回りで読む。マージの後は PR の head が main の祖先になり、「マージを決める」のコマンドは空を返すので、マージコミットとその第一親の差分で判定する。
+マージで main に入った変更に `paths-ignore` に入らないファイルがあれば、staging へ自動でデプロイされる。結果は見回りで読む。マージの後は PR の head が main の祖先になるので、`before` ではなく次のコマンドで判定する。マージコミットとその第一親の差分を、マージコミットの `deploy-staging.yml` の一覧で判定する。
 
 ```sh
-MERGE=$(gh pr view <番号> --json mergeCommit --jq .mergeCommit.oid) &&
-  git fetch -q origin main &&
-  { echo ':/'; git show "$MERGE:.github/workflows/deploy-staging.yml" |
-    sed -n '/^    paths-ignore:$/,/^ \{0,5\}[^ #]/s/^      - "\(.*\)"$/:(top,glob,exclude)\1/p'; } |
-  xargs git diff --no-renames --name-only "$MERGE^1" "$MERGE" --
+node .claude/skills/madori-coordinator/scripts/deploy-files.mjs after <番号>
 ```
 
-- ファイルが出たら、デプロイが動く。その実行は、マージ SHA で特定する（`gh run list --workflow deploy-staging.yml --branch main --event push --commit "$MERGE"`）。手で始めた実行は、同じ SHA でも数えない。
-- コマンドが成功して出力が空なら、デプロイは動かない。そのマージでは、デプロイの結果を待たず、担当にもデプロイを知らせない。
+- ファイルが出たら、デプロイが動く。そのとき標準エラーに `merge commit <マージ SHA>` が出る。その実行は、マージ SHA で特定する（`gh run list --workflow deploy-staging.yml --branch main --event push --commit <マージ SHA>`）。手で始めた実行は、同じ SHA でも数えない。
+- 0で終わって何も出なければ、デプロイは動かない。そのマージでは、デプロイの結果を待たず、担当にもデプロイを知らせない。
+- 0以外で終わったら、判定できていない。表示された理由を直して打ち直す。
 - デプロイか疎通の確認が失敗したら、原因を確かめる。環境の問題なら、「staging の占有」に従って `gh run rerun <run> --failed` でやり直す。コードの問題なら、直す担当をすぐに立てる。
 - Issue の終わった証拠がマージの後の staging での確認を求めるなら、デプロイが終わったら、指揮役が担当のスレッドへ `t3_thread_send` で知らせる。担当のスレッドはマージで settled になり、担当の見張りは消えているため。知らせを受けた担当が確かめて、記録が要るなら記録の PR を作る。
 
@@ -221,7 +229,7 @@ MERGE=$(gh pr view <番号> --json mergeCommit --jq .mergeCommit.oid) &&
 
 - 判断と結果は、その Issue か PR にコメントで書く。誰の判定か、どの head か、何で確かめたかを書く。検証役の判定とマージは PR に書く。
 - 画像は、AGENTS.md「Issue と PR の画像」のとおり `images` に置いたリンクで貼る。検証役の報告にある画像の Markdown は、判定のコメントにそのまま貼る。
-- 担当や検証役が範囲の外で見つけた問題は、根拠を確かめてから行き先を決める。関係する Issue があれば、そこに書き足す。無ければテンプレートで新しい Issue を作り、「Issue の置き場」で決めた milestone に入れて、依存を登録する。
+- 担当や検証役が範囲の外で見つけた問題は、根拠を確かめてから行き先を決める。関係する Issue があれば、そこに書き足す。無ければテンプレートで新しい Issue を作り、「Issue の置き場」で決めた milestone に入れて、「依存を登録する」のとおりに依存を登録する。
 
 ## 見回り
 
