@@ -41,6 +41,7 @@ const scopes = {
   "web-config": "apps/web/vite.config.ts",
   "worker-api": "apps/worker/src/api/projects.ts",
   "worker-services": "apps/worker/src/services/projects.ts",
+  "worker-ai": "apps/worker/src/ai/select.ts",
   "worker-storage": "apps/worker/src/storage/projects.ts",
   "worker-geometry": "apps/worker/src/geometry/geometry-client.ts",
   "worker-objects": "apps/worker/src/objects/pattern.ts",
@@ -300,7 +301,8 @@ const workerLayerPermissions: Record<
   { allowed: string[]; typeOnly: string[] }
 > = {
   api: { allowed: ["services"], typeOnly: ["geometry"] },
-  services: { allowed: ["geometry"], typeOnly: ["storage"] },
+  ai: { allowed: [], typeOnly: [] },
+  services: { allowed: ["geometry"], typeOnly: ["storage", "ai"] },
   storage: { allowed: [], typeOnly: [] },
   geometry: { allowed: [], typeOnly: [] },
   workflows: { allowed: ["services"], typeOnly: [] },
@@ -957,4 +959,20 @@ void test("plan layer table declares every enforced Worker layer", () => {
         ),
       `${layer} layer table row`,
     );
+});
+
+void test("AI cannot import storage and services can import only AI types", () => {
+  const ai = scopes["worker-ai"];
+  const storage = specifier(ai, "apps/worker/src/storage/x.ts");
+  for (const source of [importValue(storage), importType(storage)]) {
+    assert(resolved(source, ai).some(({ boundaryId }) => boundaryId === "worker-ai-layers"));
+  }
+  const services = scopes["worker-services"];
+  const target = specifier(services, "apps/worker/src/ai/x.ts");
+  assert.deepEqual(resolved(importType(target), services), []);
+  assert(
+    resolved(importValue(target), services).some(
+      ({ boundaryId }) => boundaryId === "worker-services-type-only",
+    ),
+  );
 });
