@@ -17,7 +17,7 @@ WITH kinds AS (
  (f.filename GLOB 'apps/*' OR f.filename GLOB 'crates/*' OR f.filename GLOB 'packages/*'
  OR f.previous_filename GLOB 'apps/*' OR f.previous_filename GLOB 'crates/*' OR f.previous_filename GLOB 'packages/*')) THEN 'product'
  WHEN c.files_complete THEN 'development' END area
- FROM work_item w LEFT JOIN final_closure c USING(issue) LEFT JOIN backfill_kind b USING(issue)
+ FROM work_item w LEFT JOIN final_closure c USING(issue) LEFT JOIN (SELECT payload->>'$.issue' issue,payload->>'$.kind' kind FROM staging_record WHERE source='classification.backfill' AND valid_to IS NULL) b USING(issue)
 )
 SELECT issue,pr,closed_at,merged_at,ownership,area,n label_count,
  CASE n WHEN 1 THEN kind WHEN 0 THEN iif(closed_at IS NOT NULL,backfill,NULL) END kind,

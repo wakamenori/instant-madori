@@ -8,8 +8,8 @@ void test("matches the first successful rollout by ancestry, including a retry a
   const db = new DatabaseSync(":memory:");
   t.after(() => db.close());
   db.exec(`
- CREATE TABLE main_commit(sha,position);
- INSERT INTO main_commit VALUES('a',1),('b',2),('c',3),('d',4);
+ CREATE TABLE staging_record(source,natural_key,payload,valid_to);
+ INSERT INTO staging_record VALUES('github.commit','c','{"parent":"b"}',NULL),('github.commit','b','{"parent":"a"}',NULL);
  CREATE TABLE change(pr,merge_commit_sha,merged_at);
  INSERT INTO change VALUES(1,'a',1),(2,'b',2),(3,'c',3),(4,'d',4),(5,'unknown',5);
  CREATE TABLE stg_github_pr(number,files_complete);

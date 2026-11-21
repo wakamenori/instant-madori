@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { registry, type RecordInput } from "../l1/sources.ts";
 import { openL1Writer } from "../l1/store.ts";
+import { parseClassifications } from "../ingest/classification.ts";
 import { poissonBounds } from "./poisson.ts";
 
 void test("zero and one completion retain exact two-sided Poisson limits", () => {
@@ -26,6 +27,7 @@ void test("hourly and eight active hour windows count releases, owner gaps and m
     source: RecordInput["source"],
     id: string | number,
     payload: RecordInput["payload"],
+    observed = at(610),
   ) {
     db.ingest(
       [
@@ -38,7 +40,7 @@ void test("hourly and eight active hour windows count releases, owner gaps and m
           payload,
         },
       ],
-      at(610),
+      observed,
     );
   }
   let id = 0;
@@ -68,6 +70,7 @@ void test("hourly and eight active hour windows count releases, owner gaps and m
       created_at: at(-75),
       shared_resources: ["staging を占有する"],
     });
+    add("github.issue", 21, { number: 21, created_at: at(-75) }, at(-70));
     for (const n of [21, 22])
       add("github.issue", n, {
         number: n,
@@ -97,6 +100,13 @@ void test("hourly and eight active hour windows count releases, owner gaps and m
       issue: 20,
       pr: 30,
       created_at: at(-68),
+    });
+    add("t3.message", "inspect-verdict", {
+      thread_id: "inspect",
+      role: "assistant",
+      created_at: at(-66),
+      verdict: "PASS",
+      verification: { head, decided_at: at(-66), failed_checks: [] },
     });
     add("t3.run", "inspect-run", {
       thread_id: "inspect",
@@ -188,25 +198,50 @@ void test("hourly and eight active hour windows count releases, owner gaps and m
       markers: [],
       fields: [{ started_at: at(603), ended_at: at(606) }],
     });
+    const file = join(root, "backfill.json");
+    writeFileSync(file, JSON.stringify([{ issue: 2, kind: "開発の改善" }]));
+    for (const dir of ["tmp", "ready"]) mkdirSync(join(root, "spool", dir), { recursive: true });
+    execFileSync(
+      process.execPath,
+      [join(import.meta.dirname, "../import/classifications.ts"), file],
+      { env: { ...process.env, INSTANT_MADORI_METRICS_HOME: root } },
+    );
+    const ready = join(root, "spool/ready");
+    for (const name of readdirSync(ready))
+      db.ingest(parseClassifications(readFileSync(join(ready, name))).records, at(610));
   } finally {
     db.close();
   }
-  const file = join(root, "backfill.json");
-  writeFileSync(file, JSON.stringify([{ issue: 2, kind: "開発の改善" }]));
   execFileSync(process.execPath, [join(import.meta.dirname, "build.ts")], {
     env: {
       ...process.env,
       INSTANT_MADORI_METRICS_HOME: root,
-      INSTANT_MADORI_METRICS_KIND_FILE: file,
     },
   });
   const out = new DatabaseSync(join(root, "metrics-derived.sqlite"), { readOnly: true });
   t.after(() => out.close());
+  const policy = readFileSync(
+    join(import.meta.dirname, "../../.claude/skills/madori-coordinator/SKILL.md"),
+    "utf8",
+  );
+  const capacity = Number(
+    out.prepare("SELECT capacity FROM owner_limit ORDER BY effective DESC LIMIT 1").get()?.capacity,
+  );
+  assert.ok(
+    policy.includes(
+      "同時に動かす担当は" +
+        new Intl.NumberFormat("ja-JP-u-nu-hanidec").format(capacity) +
+        "人まで。",
+    ),
+  );
   const all = (sql: string) =>
     out
       .prepare(sql)
       .all()
       .map((row) => ({ ...row }));
+  assert.deepEqual(all("SELECT DISTINCT shared_resources FROM issue_requirements WHERE issue=21"), [
+    { shared_resources: '["staging を占有する"]' },
+  ]);
   assert.deepEqual(
     all(
       "SELECT issue,ownership,kind_source,area FROM issue_classification WHERE pr IS NOT NULL ORDER BY issue",

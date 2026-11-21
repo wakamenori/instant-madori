@@ -16,9 +16,13 @@ SELECT issue,start,end FROM periods WHERE state='open';
 CREATE INDEX availability_issue ON issue_availability(issue,start,end);
 
 CREATE TABLE issue_requirements AS
-SELECT number issue,blocked_by,shared_resources,milestone,
+SELECT number issue,
+ coalesce(h.blocked_by,(SELECT r.blocked_by FROM stg_github_issue_history r
+ WHERE r.number=h.number AND r.blocked_by IS NOT NULL ORDER BY r.valid_from LIMIT 1)) blocked_by,
+ coalesce(h.shared_resources,(SELECT r.shared_resources FROM stg_github_issue_history r
+ WHERE r.number=h.number AND r.shared_resources IS NOT NULL ORDER BY r.valid_from LIMIT 1)) shared_resources,milestone,
  CASE WHEN row_number() OVER(PARTITION BY number ORDER BY valid_from)=1 THEN unixepoch(created_at) ELSE unixepoch(valid_from) END start,
- unixepoch(valid_to) end FROM stg_github_issue_history;
+ unixepoch(valid_to) end FROM stg_github_issue_history h;
 CREATE INDEX requirement_issue ON issue_requirements(issue,start,end);
 
 CREATE TABLE owner_capacity_minute AS
