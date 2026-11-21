@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { openJobDatabase, jobMigration, queueHoldMigration, now } from "./jobs-support.ts";
+import {
+  openJobDatabase,
+  jobMigration,
+  queueHoldMigration,
+  conversationMigration,
+  now,
+} from "./jobs-support.ts";
 
 import { z } from "zod";
 import { createOnceStatements, updateOnceStatements, runOnce } from "../../src/storage/requests.ts";
@@ -141,6 +147,7 @@ try {
   assert.equal(await fail(a, patternId), 1);
   await oldStop(c);
   await db.apply(await readFile(queueHoldMigration, "utf8"));
+  await db.apply(await readFile(conversationMigration, "utf8"));
   const migrated = await db.raw
     .prepare("SELECT id, state, holds_queue FROM jobs ORDER BY id")
     .all();

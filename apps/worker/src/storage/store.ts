@@ -2,6 +2,7 @@ import type { D1 } from "./d1.ts";
 import type { R2 } from "./r2.ts";
 import * as projects from "./projects.ts";
 import * as patterns from "./patterns.ts";
+import * as messages from "./messages.ts";
 import * as revisions from "./revisions.ts";
 import * as snapshots from "./snapshots.ts";
 import * as jobs from "./jobs.ts";
@@ -78,6 +79,10 @@ export function createStore(db: D1, bucket: R2) {
         key: Parameters<typeof patterns.renamePatternOnce>[1],
         input: Parameters<typeof patterns.renamePatternOnce>[2],
       ) => patterns.renamePatternOnce(db, key, input),
+    },
+    messages: {
+      list: (query: Parameters<typeof messages.listMessages>[1]) =>
+        messages.listMessages(db, query),
     },
     revisions: {
       state: (scope: Parameters<typeof revisions.getPatternState>[1]) =>

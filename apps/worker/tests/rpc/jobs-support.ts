@@ -12,8 +12,12 @@ import { r2 } from "../../src/storage/r2.ts";
 
 export const jobMigration = new URL("../../migrations/0003_jobs_messages.sql", import.meta.url);
 export const queueHoldMigration = new URL("../../migrations/0004_queue_hold.sql", import.meta.url);
+export const conversationMigration = new URL(
+  "../../migrations/0005_conversation_kinds.sql",
+  import.meta.url,
+);
 export async function applyJobMigrations(db: Awaited<ReturnType<typeof openJobDatabase>>) {
-  for (const migration of [jobMigration, queueHoldMigration])
+  for (const migration of [jobMigration, queueHoldMigration, conversationMigration])
     await db.apply(await readFile(migration, "utf8"));
 }
 export const now = "2026-11-15T00:00:00.000Z";

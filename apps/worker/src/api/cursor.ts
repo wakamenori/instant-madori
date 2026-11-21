@@ -13,8 +13,7 @@ const projectPositionSchema = z.tuple([
   z.uuid().refine((value) => value === value.toLowerCase(), "must be lowercase"),
 ]);
 
-/** A revision's position is its number within the pattern's history. */
-const revisionPositionSchema = z.int().positive();
+const numberPositionSchema = z.int().positive();
 
 function encode(position: unknown): string {
   const bytes = new TextEncoder().encode(JSON.stringify(position));
@@ -51,5 +50,13 @@ export function encodeRevisionCursor(number: number): string {
 }
 
 export function decodeRevisionCursor(cursor: string): number {
-  return decode(cursor, revisionPositionSchema);
+  return decode(cursor, numberPositionSchema);
+}
+
+export function encodeMessageCursor(number: number): string {
+  return encode(number);
+}
+
+export function decodeMessageCursor(cursor: string): number {
+  return decode(cursor, numberPositionSchema);
 }

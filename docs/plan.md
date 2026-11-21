@@ -387,7 +387,7 @@ SolidCraftには、形状操作、フィーチャー評価、編集可能な設�
 | Pattern                     | 案件ID、案件内の作成順                                                                                     |
 | Revision                    | パターン、履歴内の順番、編集元・復帰元、案の名前、会話の区切り、snapshotへの参照                           |
 | Snapshot                    | 所有者、R2のmanifestのキーとハッシュ、保存形式の版                                                         |
-| Message / ConversationEvent | 会話内の順番、指示・質問・回答、添付参照、関連する案・ジョブ、復帰や複製の記録                             |
+| Message / ConversationEvent | 会話の番号、指示・回答・AIの説明・選択肢付きの質問・知らせ、添付参照、関連する案・ジョブ、復帰や複製の記録 |
 | Job / Operation             | 指示への参照、状態、編集開始時の案ID、実行世代、待機列を保留しているか、チェックポイント参照、操作IDと費用 |
 | Asset / Usage               | 所有者、R2キー、用途・形式・サイズ・ハッシュ、API試行ごとの利用量・費用予約・確定額                        |
 
@@ -397,13 +397,15 @@ SolidCraftには、形状操作、フィーチャー評価、編集可能な設�
 
 `snapshots` の行は、所有者、manifestのキーとSHA-256、形式の版を持つ。`revisions` の行は、パターン内の番号、名前、編集元、snapshotへの参照を持つ。形式の版は、読み書きできる版だけをDBのCHECK制約で許可し、版を増やすときは読込処理と制約を一緒に更新する。所有者と親の一致、および編集元が同じパターンに属することは、複合外部キーで保証する。
 
-`messages` は指示の本文とパターン内の会話の番号を持つ。本文はD1へ保存し、UTF-8で16,384バイトを上限とする。サービスは孤立したサロゲートと、JavaScriptの `trim()` で空になる本文を拒む。D1も本文のバイト数と同じ空白文字の集合をCHECK制約で検査する。本文はtrimせず、検査した文字列をそのまま保存し、要求内容のハッシュにも使う。会話の番号は追加する文のスカラー副問い合わせで既存の最大値に1を足して決め、`UNIQUE (pattern_id, number)` で重複を防ぐ。
+`messages` は種類、本文、パターン内で全種類に共通の会話の番号を持つ。本文はD1へ保存し、UTF-8で16,384バイトを上限とする。サービスは孤立したサロゲートと、JavaScriptの `trim()` で空になる本文を拒む。D1も本文のバイト数と同じ空白文字の集合をCHECK制約で検査する。本文はtrimせず、検査した文字列をそのまま保存し、要求内容のハッシュにも使う。会話の番号は追加する文のスカラー副問い合わせで既存の最大値に1を足して決め、`UNIQUE (pattern_id, number)` で重複を防ぐ。
 
-`jobs` は指示のmessage ID、4.6の9状態、実行世代、実行開始時の編集元のrevision IDを持つ。受付時は `queued`、世代は0、編集元はNULLとする。messageとjobの所有者は親のパターンと一致させ、messageと編集元も同じパターンに属することを複合外部キーで保証する。指示のmessage IDはジョブ間で一意とする。`running`・`validating`・`committing` の行だけを対象にした `pattern_id` の部分一意索引で、一パターンの実行権を一件に限る。パターンには実行中ジョブを指す列を持たせず、ジョブの状態から読む。待機列はパターンと状態の索引で絞り、対応するmessageの番号で順序を決める。
+入力（指示・回答）は、それを受け付けたジョブが `jobs.message_id` で指すため、message側の `job_id` はNULLにする。AIの説明と質問は、書き込んだジョブのIDを持つ。知らせはジョブに伴う場合だけそのIDを持つ。jobsとmessagesの生成列 `pattern_job` はパターンIDとジョブIDを連結し、その外部キーで別のパターンのジョブへの参照を防ぐ。関連する案は、そのジョブが確定した案を `revisions.job_id` から読む。質問だけが `choices` に選択肢の文字列配列をJSONで持つ。D1では配列であることと16,384バイトの上限を検査する。部分索引 `messages_inputs` は指示と回答だけをパターンと会話の番号で引けるようにする。
+
+`jobs` は入力（指示または回答）のmessage ID、4.6の9状態、実行世代、実行開始時の編集元のrevision IDを持つ。受付時は `queued`、世代は0、編集元はNULLとする。messageとjobの所有者は親のパターンと一致させ、messageと編集元も同じパターンに属することを複合外部キーで保証する。入力のmessage IDはジョブ間で一意とする。`running`・`validating`・`committing` の行だけを対象にした `pattern_id` の部分一意索引で、一パターンの実行権を一件に限る。パターンには実行中ジョブを指す列を持たせず、ジョブの状態から読む。待機列はパターンと状態の索引で絞り、対応するmessageの番号で順序を決める。
 
 待機列の保留（2.4）は、保留の原因になったジョブの行の `holds_queue`（0か1）で表し、パターンの行には持たせない。実行中のジョブを指す列を持たせないのと同じく、指す列とジョブの状態が食い違う状態を表せないようにするためである。`holds_queue = 1` を許すのは、CHECK制約でcancelled・failed・limited・awaiting_answerの行だけとする。`holds_queue = 1` の行だけを対象にした `pattern_id` の部分一意索引で、一パターンの保留を一つに限る。保留の原因は保留する行そのものなので、同じパターン・同じ所有者のジョブであることも保証される。保留は、activeなジョブをcancelled・failedへ変える文の中で、待機中のジョブがあり、ほかに保留がないときだけ1にする。この式は変更前の行を読むので、失敗の段階の再試行、終わったジョブへの停止、同じ要求の再送は保留を書かない。保留を解くのは、再開・取り消し、保留中に最後の待機中のジョブを止める停止、待機中のジョブがない保留を見つけた受付だけとする。保留中は実行権を取らないので、保留中のパターンにactiveなジョブはなく、待機中のジョブが必ずある。保留を書く文と読む文は `apps/worker/src/storage/job-queue.ts` にまとめ、ほかのファイルには列名を書かない。列は既定値0とともにマイグレーションで加えるので、既存の行と前の版のWorkerが加える行は保留しない。前の版のWorkerは保留を読まないので、版が混在する間やWorkerを前の版に戻した後は、前の版の停止が保留を解かずに待機列を空にすることがある。受付が待機中のジョブがない保留を解くので、その後に送った指示は保留されない。
 
-`revisions.job_id` はその案を作ったジョブを指し、同じパターンのジョブだけを複合外部キーで許す。NULL以外のjob IDの部分一意索引で、同じジョブから二つの案を確定することを防ぐ。結果の案はこの列から読み、jobsには結果を指す列を持たせない。`(job_id, base_revision_id)` の複合外部キーでジョブの編集元との一致を検査する。jobsとrevisionsは、編集元がNULLかどうかを表す生成列 `base_is_null` も持ち、`(job_id, base_is_null)` の複合外部キーでNULLを含む一致も保証する。`conversation_number` はその案が取り込んだ会話の最後の番号を指し、`(pattern_id, conversation_number)` の複合外部キーで同じパターンのmessageに結び付ける。既存の案とジョブを使わない保存では、この二列にNULLを許す。
+`revisions.job_id` はその案を作ったジョブを指し、同じパターンのジョブだけを複合外部キーで許す。NULL以外のjob IDの部分一意索引で、同じジョブから二つの案を確定することを防ぐ。結果の案はこの列から読み、jobsには結果を指す列を持たせない。`(job_id, base_revision_id)` の複合外部キーでジョブの編集元との一致を検査する。jobsとrevisionsは、編集元がNULLかどうかを表す生成列 `base_is_null` も持ち、`(job_id, base_is_null)` の複合外部キーでNULLを含む一致も保証する。`conversation_number` はその案が取り込んだ会話の最後の番号を指し、`(pattern_id, conversation_number)` の複合外部キーで同じパターンのどの種類のmessageにも結び付けられる。既存の案とジョブを使わない保存では、この二列にNULLを許す。
 
 指示の受付は、所有者を条件にしたmessageの追加、その新しいmessageを条件にしたqueuedのjobの追加、要求の結果の記録を一つのbatchで行う。`createOnceStatements` が新しいjobのIDと要求の所有者の一致を成功の証拠にする。同じrequest IDの再送はbatchを取り消して最初に記録した結果を返す。存在しないパターンと別所有者のパターンでは何も追加せず、要求も記録しない。
 
@@ -572,13 +574,15 @@ APIの応答を受け取れず再呼び出しが必要になった場合、課�
 
 request IDは利用者ごとの範囲で一意とし、固定するのは成功した結果だけとする。失敗した要求は記録せず、同じIDで内容を直した再試行を新しい要求として扱う。一度成功したIDを別の操作・内容に使った場合は拒否する。同じ要求の同時の再送では、先に確定した結果を全員に返す。
 
-表示データ以外の応答はJSONで、失敗は共有定義のエラーコードを `{ error }` で返す。利用者ごとのデータを返すため、API応答はすべてキャッシュさせない。応答と構造化ログに追跡用のIDを付け、ログには会話・名前などの本文を出さない。案件の一覧は作成日時の新しい順に、案の一覧は履歴の番号の降順に、続きを取得するためのカーソルを付けて返す。パターンの一覧は番号の昇順に、ページに分けずに返す。
+表示データ以外の応答はJSONで、失敗は共有定義のエラーコードを `{ error }` で返す。利用者ごとのデータを返すため、API応答はすべてキャッシュさせない。応答と構造化ログに追跡用のIDを付け、ログには会話・名前などの本文を出さない。案件の一覧は作成日時の新しい順に、案の一覧は履歴の番号の降順に、会話は会話の番号の降順に並べ、続きを取得するためのカーソルを付けて返す。パターンの一覧は番号の昇順に、ページに分けずに返す。
 
 案の一覧は50件ずつ返し、カーソルには最後の番号を符号化する。作成時刻ではなく履歴の番号で並べるため、作成時刻が同じ場合や実行元の時計が前後した場合も、現在の案と一覧の先頭は一致する。表示データの応答には、閲覧対象の案IDを `x-revision-id` ヘッダーで付ける。
 
+`GET /api/patterns/:id/messages` は省略可能な `cursor` だけを受け付け、`{ messages, nextCursor }` を返す。各行は `{ id, number, kind, body, createdAt, jobId, revision }` で、質問だけに `choices` が付く。jobIdは入力を受け付けたジョブか、その行を書いたジョブのIDで、ジョブがなければnullとする。revisionはそのジョブが確定した案（案の一覧と同じ形）で、なければnullとする。1ページは最大50件。続きがあれば最後の行の番号をJSONにしてbase64urlで符号化したカーソルを返し、なければnullを返す。開き直した画面は、カーソルなしで最新のページを読み、nextCursorで古い会話へさかのぼる。新しい行は既存の最大より大きい番号を取るので、最新のページにだけ現れ、手元のカーソルで取得する古い行は変わらない。所有者から見えるパターンの存在確認とページの取得は同じD1 batchで行う。番号の索引でカーソルより古い行から読み始め、ジョブと案は索引で結び付けるため、深いページでも読取り量はページの件数で決まる。
+
 `POST /api/patterns/:id/messages` はJSONの `{ requestId, body }` を受け取る。bodyはUnicodeとして正しく、空白だけではなく、UTF-8で16,384バイト以下とする。本文の空白やUnicodeを正規化しない。JSON全体の上限はこのルートだけ128 KiBとし、ほかのJSON要求の既定は16 KiBとする。
 
-受付の応答は202の `{ job: { jobId, messageId, number } }` で、numberはmessageの受付番号である。この応答は受付の記録であり、ジョブの現在の状態を表さない。同じrequest IDと内容の再送は、ジョブの状態が変わった後も同じ状態コードと本文を返す。現在の状態は `GET /api/patterns/:id/state` で読む。
+受付の応答は202の `{ job: { jobId, messageId, number } }` で、numberはmessageの会話の番号で、受付順に増えるが連続しない。この応答は受付の記録であり、ジョブの現在の状態を表さない。同じrequest IDと内容の再送は、ジョブの状態が変わった後も同じ状態コードと本文を返す。現在の状態は `GET /api/patterns/:id/state` で読む。
 
 入力が不正なら400 `invalid_request`、JSON全体の上限超過は413 `payload_too_large`、成功済みのrequest IDを別の内容や操作に使うと422 `request_id_reused` とする。認証の失敗は401 `unauthenticated`、認証後のOriginの拒否は403 `forbidden`、別の所有者と存在しないパターンは同じ404 `not_found` とする。
 
@@ -586,7 +590,7 @@ request IDは利用者ごとの範囲で一意とし、固定するのは成功�
 
 `POST /api/patterns/:id/queue/resume` と `POST /api/patterns/:id/queue/cancel` は、JSONの `{ requestId, heldBy }` を受け取る。heldByは画面が読んだstateの `queueHold.job.jobId` で、そのジョブがまだ待機列を保留している場合だけ適用する。所有者・Origin・request IDは、ほかの変更要求と同じに確かめる。別の所有者と存在しないパターンは同じ404 `not_found` に、保留していない場合と別のジョブが保留している場合は409 `version_conflict` にする。再開は保留を解き、保留を解いた時点の待機中の指示を `{ jobs: [{ jobId, messageId, number }] }` で番号順に返す。取り消しは、保留中に受け付けた指示も含めて待機中の指示をすべてcancelledにし、保留を解いて `{ jobs: [{ jobId, messageId, number, state: "cancelled" }] }` を返す。どちらも200で、結果を記録し、同じrequest IDの再送には同じ状態コードと本文を返す。heldByは一つの保留を指すので、再開を二度押しても、その間に失敗した次の指示の保留は解かない。
 
-stateはqueryパラメータを受け付けず、`{ pattern, currentRevision, runningJob, queuedJobs, queueHold, lastFinishedJob }` を返す。runningJobは実行権を持つジョブ（running・validating・committing）の `{ jobId, messageId, number }` で、なければnullにする。DBがパターンごとにactiveなジョブを一つに限るので、配列にしない。queuedJobsは同じ形の配列で、対応するmessageの番号の昇順に並べ、待機中がなければ空配列にする。同じジョブを両方に入れない。パターン・最新案・実行中のジョブ・待機中のジョブ・保留・最後に終わったジョブは同じD1 batchで読み、所有者を条件にする。実行中のジョブのSELECTは `jobs_one_active_per_pattern` 索引を `INDEXED BY` で使う。所有者の条件を加えると、統計を取った後のSQLiteはこの索引を使わず、パターンのジョブをすべて読むためである。待機列のSELECTはjobsをCROSS JOINの外側に置き、`jobs_queue` 索引でパターンとqueuedを絞ってからmessageを読む。lastFinishedJobは、終わった（completed・cancelled・failed）ジョブのうちmessageの番号が最も大きいものを、停止の応答のjobと同じ形で返し、なければnullにする。待機中に止めたジョブも含む。このSELECTはmessageを外側に置いて番号の降順に読み、最初に終わったジョブで止めるので、読取り量は待機中・実行中のジョブの数で決まる。完了済みの会話とジョブの件数を読取り量に含めない。後の指示が終わると、lastFinishedJobはその指示に置き換わる。止めた画面は、記録された停止の応答を同じrequest IDの再送で読み直せる。
+stateはqueryパラメータを受け付けず、`{ pattern, currentRevision, runningJob, queuedJobs, queueHold, lastFinishedJob }` を返す。runningJobは実行権を持つジョブ（running・validating・committing）の `{ jobId, messageId, number }` で、なければnullにする。DBがパターンごとにactiveなジョブを一つに限るので、配列にしない。queuedJobsは同じ形の配列で、対応するmessageの番号の昇順に並べ、待機中がなければ空配列にする。同じジョブを両方に入れない。パターン・最新案・実行中のジョブ・待機中のジョブ・保留・最後に終わったジョブは同じD1 batchで読み、所有者を条件にする。実行中のジョブのSELECTは `jobs_one_active_per_pattern` 索引を `INDEXED BY` で使う。所有者の条件を加えると、統計を取った後のSQLiteはこの索引を使わず、パターンのジョブをすべて読むためである。待機列のSELECTはjobsをCROSS JOINの外側に置き、`jobs_queue` 索引でパターンとqueuedを絞ってからmessageを読む。lastFinishedJobは、終わった（completed・cancelled・failed）ジョブのうちmessageの番号が最も大きいものを、停止の応答のjobと同じ形で返し、なければnullにする。待機中に止めたジョブも含む。このSELECTはmessageを外側に置き、部分索引 `messages_inputs` で指示と回答だけを番号の降順に読み、最初に終わったジョブで止めるので、最後に終わったジョブより新しい入力だけが追加の読取り対象になる。これには待機中・実行中のジョブの入力と、ジョブのない入力が含まれる。完了済みの会話とジョブの件数を読取り量に含めない。後の指示が終わると、lastFinishedJobはその指示に置き換わる。止めた画面は、記録された停止の応答を同じrequest IDの再送で読み直せる。
 
 queueHoldは、待機列が保留中なら `{ job: { jobId, messageId, number, state } }`、保留していなければnullにする。jobは保留の原因になったジョブで、stateはcancelledかfailedである。保留中は、queuedJobsのすべてが保留中の指示で、runningJobはnullである。保留の原因はlastFinishedJobと異なることがある。たとえば、実行中の指示Aと待機中の指示B・Cがあり、先にCを止め、その後でAを止めたとする。lastFinishedJobは番号の大きいCを、queueHoldは保留の原因のAを示す。このSELECTは `jobs_one_queue_hold_per_pattern` 索引を `INDEXED BY` で使い、ほかの読取りと同じD1 batchで、所有者を条件にして読む。
 
