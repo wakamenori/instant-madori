@@ -61,6 +61,13 @@ impl House {
         })
     }
 
+    pub fn storeys(&self) -> impl Iterator<Item = StoreyView<'_>> {
+        self.data
+            .storeys
+            .iter()
+            .map(|data| StoreyView { house: self, data })
+    }
+
     pub fn rooms(&self) -> impl Iterator<Item = RoomView<'_>> {
         self.data
             .rooms
@@ -187,4 +194,15 @@ pub struct EdgeView<'a> {
     pub from: Point,
     pub to: Point,
     pub inset: f64,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct StoreyView<'a> {
+    pub(crate) house: &'a House,
+    data: &'a Storey,
+}
+impl<'a> StoreyView<'a> {
+    pub fn data(self) -> &'a Storey {
+        self.data
+    }
 }

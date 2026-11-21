@@ -63,6 +63,9 @@ pub enum Reason {
     Overlap { min: Point, max: Point },
     NarrowGap { gap: f64, minimum: f64 },
     PinchedCorner { at: Point },
+    UnresolvedJoint { boundaries: Vec<String> },
+    WallInsideRoom { vertex: String, boundary: String },
+    NoFloor {},
 }
 
 impl std::fmt::Display for Rejections {
@@ -87,4 +90,10 @@ impl std::error::Error for Rejections {}
 pub enum Axis {
     X,
     Y,
+}
+
+impl From<Rejection> for Rejections {
+    fn from(error: Rejection) -> Self {
+        Self(vec![error])
+    }
 }
