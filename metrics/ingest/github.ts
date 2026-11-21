@@ -38,7 +38,7 @@ const commentSchema = z.object({
 // The coordinator's own wording (占有を、今から始める / 占有を終える / 占有が終わり). "占有が終わってから
 // マージする" defers a merge and must not end an occupancy. Bump commentRulesVersion with any change
 // so the comment poller rereads history under the new rules.
-export const commentRulesVersion = "yaml-1";
+export const commentRulesVersion = "yaml-2";
 const markers = {
   staging_occupy_end:
     /占有を終え(?:る|た)|占有が終わ(?:り|った|る。)|占有を(?:解除|解放|終了)|占有の(?:終了|解除)/u,

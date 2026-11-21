@@ -62,8 +62,10 @@ export function issueFacts(body: string) {
       .replaceAll(/<!--[\s\S]*?(?:-->|$)/gu, "")
       .split(/^##[ \t]+使う共有資源[ \t]*\r?$/mu)[1]
       ?.split(/^#/mu)[0] ?? "";
+  const fields = leadingRecord(body, issueFields);
   return {
-    fields: leadingRecord(body, issueFields) ?? null,
+    fields: fields ?? null,
+    invalid_yaml_record: fields === null,
     shared_resources: [
       "staging を占有する",
       "staging を読むだけ",

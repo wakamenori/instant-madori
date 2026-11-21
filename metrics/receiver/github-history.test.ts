@@ -96,6 +96,13 @@ void test("rebuilds closure labels, PR files and both deployment attempts from a
       revision++;
       data = [
         {
+          id: 52,
+          created_at: at,
+          user: { login: "fixture" },
+          issue_url: "issues/263",
+          body: "```yaml\nstarted_at: PRIVATE\n```",
+        },
+        {
           id: 51,
           created_at: at,
           updated_at: revision === 1 ? at : "2026-11-21T01:00:00Z",
@@ -176,6 +183,9 @@ void test("rebuilds closure labels, PR files and both deployment attempts from a
     );
     assert.deepEqual(query("SELECT comment_id,ended_at FROM stg_github_comment_block"), [
       ["51", "2026-11-21T00:20:00.000Z"],
+    ]);
+    assert.deepEqual(query("SELECT natural_key,reason FROM stg_github_invalid_yaml"), [
+      ["52", "invalid_comment_record"],
     ]);
     assert.deepEqual(query("SELECT filename,previous_filename FROM stg_github_pr_file"), [
       ["apps/web/new.ts", "old.ts"],
