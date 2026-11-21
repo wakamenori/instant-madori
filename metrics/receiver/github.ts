@@ -49,7 +49,11 @@ export function githubPollers(home: string, tokenFor = authToken, request = fetc
   ] as const;
   return sources.map((name) => {
     const version =
-      name === "github.comment" || name === "github.issue" ? "." + commentRulesVersion : ".2";
+      name === "github.comment" || name === "github.issue"
+        ? "." + commentRulesVersion
+        : name === "github.pr"
+          ? ".3"
+          : ".2";
     const path = join(home, name + version + ".cursor.json");
     let state: z.infer<typeof stateSchema> = { since: first, tags: {} };
     try {

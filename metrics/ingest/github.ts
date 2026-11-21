@@ -16,6 +16,7 @@ const issueSchema = reference.extend({
 });
 const prSchema = reference.extend({
   ...timestamped,
+  user: z.object({ type: str }).optional(),
   merged_at: nullable,
   head: z.object({ ref: str, sha: str }),
   base: z.object({ ref: str }),
@@ -38,7 +39,7 @@ const commentSchema = z.object({
 // The coordinator's own wording (占有を、今から始める / 占有を終える / 占有が終わり). "占有が終わってから
 // マージする" defers a merge and must not end an occupancy. Bump commentRulesVersion with any change
 // so the comment poller rereads history under the new rules.
-export const commentRulesVersion = "yaml-2";
+export const commentRulesVersion = "yaml-3";
 const markers = {
   staging_occupy_end:
     /占有を終え(?:る|た)|占有が終わ(?:り|った|る。)|占有を(?:解除|解放|終了)|占有の(?:終了|解除)/u,
@@ -60,10 +61,11 @@ export const changedFile = z.object({
   status: str,
 });
 export function prRecord(data: unknown, rows: unknown[]) {
-  const { body, head, base, mergeable_state, ...pr } = prSchema.parse(data);
+  const { body, head, base, user, mergeable_state, ...pr } = prSchema.parse(data);
   const files = z.array(changedFile).parse(rows);
   return candidate("github.pr", pr.number, pr.created_at, {
     ...pr,
+    creator_type: user?.type ?? null,
     files,
     files_complete: files.length === pr.changed_files,
     mergeable_state: mergeable_state ?? null,
