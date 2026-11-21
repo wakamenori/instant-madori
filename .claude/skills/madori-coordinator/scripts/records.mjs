@@ -2,6 +2,16 @@ import { readFileSync } from "node:fs";
 import { parse, stringify } from "yaml";
 import { z } from "zod";
 
+export const labels = {
+  機能: "機能：利用者に見える振る舞いを足す・変える",
+  不具合: "不具合：約束どおりに動かないものを直す",
+  作りの見直し: "作りの見直し：振る舞いを変えずにコードや計画の作りを変える",
+  外部への追従: "外部への追従：依存・脆弱性・ツールの変化に合わせる",
+  開発の改善: "開発の改善：担当・検証・CI・道具・手順を良くする",
+  確かめと判断:
+    "確かめと判断：試作・計測・確かめ・受け入れ・計画づくりで、知ることや決めることを得る",
+};
+
 const text = z.string().trim().min(1);
 const discovery = {
   found_at: z.enum(["マージの前の検証", "マージの後"]),
@@ -52,11 +62,11 @@ function leadingBlock(markdown) {
   return parse(match[1]);
 }
 
-export function checkRecord(kind, markdown, expectedType) {
+export function checkRecord(kind, markdown, label) {
   const raw = leadingBlock(markdown);
   if (kind === "issue" || kind === "addition") {
     const record = issue.parse(raw);
-    if (record.type !== expectedType) throw new Error("type must match the Issue label");
+    if (labels[record.type] !== label) throw new Error("type must match the Issue label");
     return;
   }
   if (kind === "verdict") verdict.parse(raw);
@@ -85,14 +95,14 @@ export function renderDraft(markdown) {
 
 if (import.meta.main) {
   try {
-    const [kind, file, expectedType, ...rest] = process.argv.slice(2);
-    if (!file || rest.length || ["issue", "addition"].includes(kind) !== Boolean(expectedType))
+    const [kind, file, label, ...rest] = process.argv.slice(2);
+    if (!file || rest.length || ["issue", "addition"].includes(kind) !== Boolean(label))
       throw new Error(
         "usage: records.mjs draft|verdict|staging-start|staging-end <file> OR issue|addition <file> <Issue label>",
       );
     const markdown = readFileSync(file, "utf8");
     if (kind === "draft") process.stdout.write(renderDraft(markdown));
-    else checkRecord(kind, markdown, expectedType);
+    else checkRecord(kind, markdown, label);
   } catch (error) {
     console.error(error.message);
     process.exitCode = 1;
