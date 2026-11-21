@@ -1,4 +1,5 @@
-import { leadingRecord, verificationFields } from "./github-yaml.ts";
+import { leadingRecord } from "./issue-facts.ts";
+import { verificationFields } from "./github-yaml.ts";
 import { z } from "zod";
 import type { Obj } from "../l1/envelope.ts";
 import type { RecordInput } from "../l1/sources.ts";

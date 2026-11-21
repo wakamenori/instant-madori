@@ -39,7 +39,7 @@ const commentSchema = z.object({
 // The coordinator's own wording (占有を、今から始める / 占有を終える / 占有が終わり). "占有が終わってから
 // マージする" defers a merge and must not end an occupancy. Bump commentRulesVersion with any change
 // so the comment poller rereads history under the new rules.
-export const commentRulesVersion = "yaml-3";
+export const commentRulesVersion = "yaml-4";
 const markers = {
   staging_occupy_end:
     /占有を終え(?:る|た)|占有が終わ(?:り|った|る。)|占有を(?:解除|解放|終了)|占有の(?:終了|解除)/u,
@@ -51,7 +51,7 @@ export function issueRecord(data: unknown, blockers: unknown[]) {
   const { body, ...issue } = issueSchema.parse(data);
   return candidate("github.issue", issue.number, issue.created_at, {
     ...issue,
-    ...issueFacts(body ?? ""),
+    ...issueFacts(body ?? "", issue.labels),
     blocked_by: z.array(blockerSchema).parse(blockers),
   });
 }
@@ -81,9 +81,9 @@ export function prRecord(data: unknown, rows: unknown[]) {
     ],
   });
 }
-export function commentRecord(data: unknown) {
+export function commentRecord(data: unknown, labels: string[] = []) {
   const c = commentSchema.parse(data);
-  const fields = commentFacts(c.body);
+  const fields = commentFacts(c.body, labels);
   const legacy = fields.length
     ? []
     : Object.entries(markers)

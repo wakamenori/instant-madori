@@ -22,7 +22,9 @@ import type { Poller } from "./poller.ts";
 import type { RecordInput } from "../l1/sources.ts";
 
 import { candidate } from "../ingest/polled.ts";
+import { additionFields, leadingRecord } from "../ingest/issue-facts.ts";
 
+const label = z.object({ name: z.string() });
 const repo = "https://api.github.com/repos/wakamenori/instant-madori/";
 const first = "2026-11-01T00:00:00.000Z";
 const stateSchema = z.object({
@@ -33,7 +35,9 @@ const stateSchema = z.object({
       etag: z.string(),
       next: z.string().nullable(),
       context: z.string().optional(),
-      cached: z.array(z.union([blockerSchema, runSchema, changedFile, reference])).optional(),
+      cached: z
+        .array(z.union([blockerSchema, runSchema, changedFile, reference, label]))
+        .optional(),
     }),
   ),
 });
@@ -146,6 +150,8 @@ export function githubPollers(home: string, tokenFor = authToken, request = fetc
                   .filter((r) => !r.conclusion || Date.parse(r.updated_at) >= now - 3600_000);
               if (tag && endpoint.includes("/files?"))
                 tag.cached = values.map((v) => changedFile.parse(v));
+              if (tag && endpoint.includes("/labels?"))
+                tag.cached = values.map((v) => label.parse(v));
               if (tag && endpoint.startsWith("commits/"))
                 tag.cached = values.map((v) => reference.parse(v));
               if (tag && endpoint.includes("/dependencies/blocked_by"))
@@ -201,8 +207,25 @@ export function githubPollers(home: string, tokenFor = authToken, request = fetc
             }
           }
         } else if (name === "github.comment") {
-          for (const raw of await pages("issues/comments?per_page=100&since=" + sinceDay))
-            records.push(commentRecord(raw));
+          const issueLabels = new Map<number, string[]>();
+          for (const raw of await pages("issues/comments?per_page=100&since=" + sinceDay)) {
+            const { body, issue_url } = z
+              .object({ body: z.string(), issue_url: z.string() })
+              .parse(raw);
+            let names: string[] = [];
+            if (leadingRecord(body, additionFields)) {
+              const number = z.coerce.number().int().positive().parse(issue_url.split("/").at(-1));
+              const cached = issueLabels.get(number);
+              if (cached) names = cached;
+              else {
+                names = (await pages("issues/" + number + "/labels?per_page=100")).map(
+                  (v) => label.parse(v).name,
+                );
+                issueLabels.set(number, names);
+              }
+            }
+            records.push(commentRecord(raw, names));
+          }
         } else {
           for (const raw of await pages("issues?state=all&per_page=100&since=" + sinceDay)) {
             const issue = reference

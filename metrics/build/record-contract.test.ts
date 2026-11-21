@@ -42,11 +42,12 @@ void test("coordinator CLI and ingestion recognize the same record shapes", (t) 
   ] as const) {
     const type = label.split("：")[0];
     assert.ok(classifications.safeParse([{ issue: 1, kind: type }]).success, label);
-    const prefix = "type: " + type;
     for (const kind of ["issue", "addition"]) {
       records.push(
-        [kind, prefix + fields, true, label],
-        [kind, prefix + invalidFields, false, label],
+        [kind, fields, true, label],
+        [kind, invalidFields, false, label],
+        [kind, "type: " + type + fields, false, label],
+        [kind, "{}", false, label],
       );
     }
   }
@@ -59,7 +60,7 @@ void test("coordinator CLI and ingestion recognize the same record shapes", (t) 
     ["staging-end", start + "\nended_at: 2026-11-19T00:00:00Z", false],
   );
   for (const [kind, yaml, valid, label] of records) {
-    const body = "```yaml\n" + yaml + "\n```";
+    const body = !yaml ? "## 目的" : "```yaml\n" + yaml + "\n```";
     const file = join(dir, "record.md");
     writeFileSync(file, body);
     const labelArgs = label ? [label] : [];
@@ -70,10 +71,9 @@ void test("coordinator CLI and ingestion recognize the same record shapes", (t) 
       ...labelArgs,
     ]);
     assert.equal(result.status === 0, valid, kind + " " + yaml);
-    assert.equal(
-      (kind === "issue" ? issueFacts(body).fields : commentFacts(body)[0]) != null,
-      valid,
-      kind,
-    );
+    if (kind === "issue")
+      assert.equal(!issueFacts(body, labelArgs).invalid_yaml_record, valid, kind);
+    else if (yaml) assert.equal(commentFacts(body, labelArgs)[0] != null, valid, kind);
+    else assert.deepEqual(commentFacts(body, labelArgs), []);
   }
 });

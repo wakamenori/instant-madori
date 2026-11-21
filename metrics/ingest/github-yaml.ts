@@ -1,22 +1,5 @@
-import { parseDocument } from "yaml";
 import { z } from "zod";
-
-const text = z.string().trim().min(1);
-const discovery = {
-  found_at: z.enum(["マージの前の検証", "マージの後"]),
-  found_by: text,
-  cause: z.string().regex(/^(?:#[1-9]\d*|PR #[1-9]\d*|外の変化|もとからあった|不明)$/u),
-};
-const issueFields = z.discriminatedUnion("type", [
-  z.strictObject({ type: z.enum(["機能", "外の変化への追従", "確かめと判断"]) }),
-  z.strictObject({ type: z.literal("開発の仕組みの改善"), target: text }),
-  z.strictObject({ type: z.enum(["製品の不具合", "開発の仕組みの不具合"]), ...discovery }),
-  z.strictObject({
-    type: z.enum(["製品の作りの見直し", "開発の仕組みの作りの見直し"]),
-    ...discovery,
-    plan_change: z.enum(["はい", "いいえ"]),
-  }),
-]);
+import { leadingRecord, readIssueFields } from "./issue-facts.ts";
 const time = z.iso.datetime().transform((v) => new Date(v).toISOString());
 export const verificationFields = z
   .strictObject({
@@ -34,35 +17,17 @@ const staging = z
   .strictObject({ started_at: time, ended_at: time.optional() })
   .refine((v) => !v.ended_at || v.started_at <= v.ended_at);
 const commentFields = z.union([
-  issueFields,
   verificationFields.safeExtend({ attempt: z.int().positive() }),
   staging,
 ]);
 
-// Only a leading fence is a record. Later examples in the report describe other work.
-export function leadingRecord<T>(markdown: string, schema: z.ZodType<T>) {
-  const body = markdown.trimStart();
-  const fence = /^```yaml[ \t]*\r?\n/u.exec(body);
-  if (!fence) return undefined;
-  const rest = body.slice(fence[0].length);
-  const end = /^```[ \t]*\r?$/mu.exec(rest);
-  if (!end) return null;
-  try {
-    const doc = parseDocument(rest.slice(0, end.index));
-    if (doc.errors.length) return null;
-    const result = schema.safeParse(doc.toJS({ maxAliasCount: 0 }));
-    return result.success ? result.data : null;
-  } catch {
-    return null;
-  }
-}
-export function issueFacts(body: string) {
+export function issueFacts(body: string, labels: string[]) {
   const section =
     body
       .replaceAll(/<!--[\s\S]*?(?:-->|$)/gu, "")
       .split(/^##[ \t]+使う共有資源[ \t]*\r?$/mu)[1]
       ?.split(/^#/mu)[0] ?? "";
-  const fields = leadingRecord(body, issueFields);
+  const fields = readIssueFields(body, labels);
   return {
     fields: fields ?? null,
     invalid_yaml_record: fields === null,
@@ -75,7 +40,8 @@ export function issueFacts(body: string) {
     ].filter((item) => section.includes(item)),
   };
 }
-export function commentFacts(body: string) {
-  const fields = leadingRecord(body, commentFields);
+export function commentFacts(body: string, labels: string[]) {
+  const event = leadingRecord(body, commentFields);
+  const fields = event === null ? readIssueFields(body, labels) : event;
   return fields === undefined ? [] : [z.json().parse(fields)];
 }

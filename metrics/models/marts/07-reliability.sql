@@ -4,7 +4,9 @@ UNION ALL SELECT issue,'missing_kind' FROM issue_classification WHERE label_coun
 UNION ALL SELECT number,'missing_open_kind' FROM stg_github_issue i WHERE i.state='open' AND NOT EXISTS(
  SELECT 1 FROM json_each(i.labels) l JOIN issue_kind k ON l.value=k.label)
 UNION ALL SELECT issue,'multiple_kinds' FROM issue_classification WHERE label_count>1
-UNION ALL SELECT number,'missing_issue_yaml' FROM stg_github_issue WHERE type IS NULL
+UNION ALL SELECT number,'missing_issue_yaml' FROM stg_github_issue i WHERE type IS NULL AND EXISTS (
+ SELECT 1 FROM json_each(i.labels) l JOIN issue_kind k ON k.label=l.value
+ WHERE k.kind IN ('製品の不具合','製品の作りの見直し','開発の仕組みの改善','開発の仕組みの不具合','開発の仕組みの作りの見直し'))
 UNION ALL SELECT issue,ownership FROM issue_classification WHERE ownership IN ('missing_owner','bypass')
 UNION ALL SELECT issue,'invalid_verdict' FROM verification_decision WHERE verdict IS NULL OR legacy=1
 UNION ALL SELECT CAST(natural_key AS INTEGER),reason FROM stg_github_invalid_yaml WHERE valid_to IS NULL AND source='github.issue'

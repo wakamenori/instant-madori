@@ -23,10 +23,12 @@ test("every template supplies exactly the fields of its label and the same work 
   for (const file of readdirSync(dir).filter((file) => file.endsWith(".md"))) {
     const [, metadata, body] = readFileSync(new URL(file, dir), "utf8").split(/^---\r?$/m);
     const { labels } = parse(metadata);
-    const raw = parse(body.match(/^\s*```yaml\n([\s\S]*?)\n```/)[1]);
-    types.push(raw.type);
-    assert.equal(labels, typeLabels[raw.type]);
-    assert.deepEqual(Object.keys(raw).sort(), ["type", ...Object.keys(fields[raw.type])].sort());
+    const type = Object.keys(typeLabels).find((type) => typeLabels[type] === labels);
+    types.push(type);
+    const yaml = body.match(/^\s*```yaml\n([\s\S]*?)\n```/);
+    assert.equal(Boolean(yaml), Object.keys(fields[type]).length > 0);
+    if (yaml)
+      assert.deepEqual(Object.keys(parse(yaml[1])).sort(), Object.keys(fields[type]).sort());
     assert.deepEqual(body.match(/^## .+$/gm), [
       "## 目的",
       "## 計画の該当節",
@@ -36,7 +38,7 @@ test("every template supplies exactly the fields of its label and the same work 
       "## 依存",
       "## 人の判断",
     ]);
-    checkRecord("issue", block({ ...raw, ...fields[raw.type] }), labels);
+    checkRecord("issue", yaml ? block(fields[type]) : body, labels);
   }
   assert.deepEqual(types.sort(), Object.keys(fields).sort());
 });
@@ -48,6 +50,11 @@ test("draft copies only record fields and preserves the filled body", () => {
     body;
   const rendered = renderDraft(draft.replaceAll("\n", "\r\n"));
   checkRecord("issue", rendered, typeLabels["製品の不具合"]);
+  assert.doesNotMatch(rendered, /^type:/m);
+  assert.equal(
+    renderDraft(draft.replace(/type: 製品の不具合[\s\S]*?\n---/, "type: 機能\n---")),
+    body,
+  );
   assert.ok(rendered.endsWith(body.replaceAll("\n", "\r\n")));
   assert.doesNotMatch(rendered, /sample|blockedBy|milestone/);
   assert.equal(parse(rendered.split("```")[1].slice(4)).cause, "#34");
@@ -70,12 +77,8 @@ test("draft copies only record fields and preserves the filled body", () => {
 test("issue and addition enforce label, first block, discovery and type-specific fields", () => {
   for (const kind of ["issue", "addition"]) {
     for (const cause of ["#1", "PR #123", "外の変化", "もとからあった", "不明"])
-      checkRecord(
-        kind,
-        block({ type: "製品の不具合", ...findings, cause }),
-        typeLabels["製品の不具合"],
-      );
-    for (const record of [
+      checkRecord(kind, block({ ...findings, cause }), typeLabels["製品の不具合"]);
+    for (const { type, ...record } of [
       { type: "製品の不具合" },
       { type: "製品の作りの見直し", ...findings },
       { type: "製品の不具合", ...findings, found_at: "作業中" },
@@ -85,9 +88,11 @@ test("issue and addition enforce label, first block, discovery and type-specific
       { type: "開発の仕組みの改善", target: "" },
       { type: "その他" },
     ])
-      assert.throws(() => checkRecord(kind, block(record), typeLabels[record.type]));
+      assert.throws(() => checkRecord(kind, block(record), typeLabels[type]));
     assert.throws(() => checkRecord(kind, block({ type: "機能" }), typeLabels["製品の不具合"]));
-    assert.throws(() => checkRecord(kind, "本文\n" + block({ type: "機能" }), typeLabels["機能"]));
+    assert.throws(() =>
+      checkRecord(kind, "本文\n" + block({ type: "機能" }), typeLabels["製品の不具合"]),
+    );
     assert.throws(() =>
       checkRecord(kind, "```yaml\ntype: 機能\ntype: 機能\n```", typeLabels["機能"]),
     );
