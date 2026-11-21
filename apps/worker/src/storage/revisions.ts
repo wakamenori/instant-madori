@@ -51,9 +51,9 @@ export const runningJobSql = `SELECT json_object('jobId', j.id, 'messageId', m.i
   WHERE j.pattern_id = ? AND j.owner_id = ? AND j.state IN (${activeJobStates})`;
 
 export const lastFinishedJobSql = `SELECT ${finishedJobJson("j", "m", "r")} AS json
-  FROM messages m CROSS JOIN jobs j ON j.message_id = m.id AND j.pattern_id = m.pattern_id
+  FROM messages m INDEXED BY messages_inputs CROSS JOIN jobs j ON j.message_id = m.id AND j.pattern_id = m.pattern_id
   LEFT JOIN revisions r ON r.job_id = j.id AND r.pattern_id = j.pattern_id
-  WHERE m.pattern_id = ? AND m.owner_id = ? AND j.state IN (${finishedJobStates})
+  WHERE m.pattern_id = ? AND m.owner_id = ? AND m.kind IN ('instruction', 'answer') AND j.state IN (${finishedJobStates})
   ORDER BY m.number DESC LIMIT 1`;
 
 export async function getPatternState(

@@ -6,7 +6,13 @@ import {
   saveJobSnapshot,
   completeJob,
 } from "../../src/services/jobs.ts";
-import { openJobDatabase, jobMigration, queueHoldMigration, now } from "./jobs-support.ts";
+import {
+  openJobDatabase,
+  jobMigration,
+  queueHoldMigration,
+  conversationMigration,
+  now,
+} from "./jobs-support.ts";
 
 const db = await openJobDatabase();
 try {
@@ -97,6 +103,7 @@ try {
   );
   assert.deepEqual((await db.raw.prepare("PRAGMA foreign_key_check").all()).results, []);
   await db.apply(await readFile(queueHoldMigration, "utf8"));
+  await db.apply(await readFile(conversationMigration, "utf8"));
   const deps = { store: db.store, runtime: db.runtime, wakePattern: async () => {} };
   const accepted = await acceptInstruction(deps, {
     ownerId,
