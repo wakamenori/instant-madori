@@ -28,4 +28,13 @@ poteto-mode の `playbooks/autopilot-full.md` の手順4に従い、示せる問
 
 ## 報告
 
-最初に、`{HEAD}` での判定を PASS か FAIL で書く。続けて、確かめたことごとにコマンドと結果を書く。画像の証拠は、`images` に上げたときに出力された Markdown で示す。不合格の理由とその直し方、後続、確かめられなかったことも書く。終える前に、仕込んだ変更をすべて戻して `git status` が空であることを示し、PR の head が `{HEAD}` のままか確かめる。
+最終報告の先頭に次の yaml を置く。`head` は確かめた完全な SHA、`decided_at` は判定した UTC の時刻に置き換える。`verdict` は PASS か FAIL とする。`failed_checks` は、落ちた確認を「検査」「振る舞い」「地図」「差分」「終わった証拠」からすべて選ぶ。PASS なら `[]` にする。
+
+```yaml
+head: "{HEAD}"
+verdict: FAIL
+decided_at: 2026-11-22T00:00:00Z
+failed_checks: [振る舞い]
+```
+
+続けて、確かめたことごとにコマンドと結果を書く。画像の証拠は、`images` に上げたときに出力された Markdown で示す。不合格の理由とその直し方、後続、確かめられなかったことも書く。終える前に、仕込んだ変更をすべて戻して `git status` が空であることを示し、PR の head が `{HEAD}` のままか確かめる。
