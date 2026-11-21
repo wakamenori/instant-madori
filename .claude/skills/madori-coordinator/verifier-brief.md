@@ -1,6 +1,6 @@
 # 検証役への指示
 
-指揮役は `{…}` を埋めて、この下の線から後ろを渡す。`{POTETO_MODE}` には、このセッションで読み込んだ poteto-mode の `SKILL.md` の絶対パスを入れる。
+指揮役は `{…}` を埋めて、この下の線から後ろを渡す。`{POTETO_MODE}` には、メインのチェックアウトで `node .claude/skills/madori-coordinator/scripts/poteto-mode.mjs` が出す絶対パスを入れる。担当が読むものと同じ選び方である。
 
 ---
 

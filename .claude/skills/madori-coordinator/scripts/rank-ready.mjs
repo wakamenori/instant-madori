@@ -44,17 +44,45 @@ const chain = (number, seen = new Set()) => {
   return length;
 };
 
-const stage = (issue) => issue.milestone?.number ?? Number.MAX_SAFE_INTEGER;
+const groups = new Map([
+  ["段階", []],
+  ["開発基盤", []],
+  ["milestone なし", []],
+  ["期限なし", []],
+]);
+const throughput = (issue) => issue.labels.nodes.some((label) => label.name === "スループット");
 const ready = [...issues.values()].filter(
   (issue) => !issue.blockedBy.nodes.some((b) => b.state === "OPEN"),
 );
-ready.sort(
-  (a, b) => stage(a) - stage(b) || chain(b.number) - chain(a.number) || a.number - b.number,
-);
 for (const issue of ready) {
-  const milestone = issue.milestone?.title ?? "-";
-  console.log(
-    [`#${issue.number}`, milestone, `chain=${chain(issue.number)}`, issue.title].join("\t"),
+  const title = issue.milestone?.title;
+  const group = !issue.milestone
+    ? "milestone なし"
+    : title === "開発基盤" || title === "期限なし"
+      ? title
+      : "段階";
+  groups.get(group).push(issue);
+}
+for (const [group, members] of groups) {
+  if (group === "milestone なし" && !members.length) continue;
+  console.log(`== ${group}`);
+  members.sort(
+    (a, b) =>
+      (group === "段階" && a.milestone.number - b.milestone.number) ||
+      throughput(b) - throughput(a) ||
+      chain(b.number) - chain(a.number) ||
+      a.number - b.number,
   );
+  for (const issue of members) {
+    console.log(
+      [
+        `#${issue.number}`,
+        issue.milestone?.title ?? "-",
+        `chain=${chain(issue.number)}`,
+        throughput(issue) ? "スループット" : "-",
+        issue.title,
+      ].join("\t"),
+    );
+  }
 }
 console.log(`open=${issues.size} ready=${ready.length}`);

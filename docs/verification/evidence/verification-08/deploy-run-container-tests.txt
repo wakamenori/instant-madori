@@ -1,0 +1,11 @@
+# gh run view 44825758357 --log (deploy-staging, main 6febc4a24, step: pnpm check --full), container test lines
+2026-11-20T22:04:50.1926870Z ✔ exit during readiness clears the lifetime when the probe answers throw (0.294708ms)
+2026-11-20T22:04:50.1927170Z ✔ exit during readiness clears the lifetime when the probe answers healthy (0.263875ms)
+2026-11-20T22:05:22.3952500Z ℹ tests 884
+2026-11-20T22:05:22.3952700Z ℹ pass 884
+2026-11-20T22:05:22.3952780Z ℹ fail 0
+2026-11-20T22:07:29.7722470Z   ✔ stopped during the hold, the commit is refused (15123.883333ms)
+2026-11-20T22:08:17.5969020Z   ✔ a Container killed outside the gateway is replaced by the next job (32686.659458ms)
+2026-11-20T22:08:17.6321320Z ℹ tests 5
+2026-11-20T22:08:17.6322880Z ℹ pass 5
+2026-11-20T22:08:17.6323110Z ℹ fail 0

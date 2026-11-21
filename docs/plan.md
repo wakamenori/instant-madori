@@ -108,20 +108,35 @@ AIが編集をまとめて案を提示するたびに履歴を一件追加する
 
 ### 3.1 階・部屋・共有境界・壁の表現
 
-住宅の編集データを次の構成で持つ。各要素には名前とは別の安定したIDを与える。
+住宅の編集データは、要素の種類ごとの一覧で持つ。各要素には名前とは別の安定したIDを与える。IDは家全体で重複させず、表示データの `ElementId` と同じく、64バイト以下の英数字と `._:-` に収める。関係は片方向だけを保存し、逆向きの関係は住宅データを作るときに求める。
 
-| 要素       | 保持する情報                                                                           |
-| ---------- | -------------------------------------------------------------------------------------- |
-| 階         | 基準高さ、階高、床領域、階段の床開口                                                   |
-| 頂点・境界 | 平面上の座標、境界の始点・終点、接する部屋、対応する壁                                 |
-| 部屋       | 名前・用途、向きを持った境界の列。輪郭はこの境界から得る                               |
-| 壁         | 境界への参照、厚さ、左右側面のオフセット、高さ、接する部屋ごとの面の役割、開口への参照 |
+| 要素 | 保存する情報                                                                     | 求める情報                             |
+| ---- | -------------------------------------------------------------------------------- | -------------------------------------- |
+| 階   | 基準高さ、階高。床領域と階段の床開口は6.3で加える                                | なし                                   |
+| 頂点 | 属する階、平面上の座標                                                           | 接する境界                             |
+| 境界 | 始点と終点の頂点、その上に立つ壁                                                 | 左右に接する部屋                       |
+| 壁   | 境界の中に一つだけ持ち、境界のIDで指す。境界から左右の側面までのオフセット、高さ | 厚さ、側ごとの面の役割、取り付いた開口 |
+| 部屋 | 名前、用途、向きを持った境界の列                                                 | 輪郭、属する階                         |
+
+部屋の境界の列は、上から見て反時計回りとする。境界を始点から終点へたどる部屋は境界の左側に、逆にたどる部屋は右側に接する。一つの境界の各側に接する部屋は一つまでとする。壁の面の役割は、その側に部屋があればその部屋、なければ外側とする。壁の幅は境界から左右の側面までのオフセット（どちらも0以上）で持ち、厚さはその和として求める。一直線に続く壁のまとまりは保存せず、それを動かす操作が求める。座標と長さはmmの浮動小数で持ち、境界の共有は座標の一致ではなく頂点のIDで表す。各一覧は追加順を保ち、その順を要求の始めのCADの生成順とする。要求の中の操作が足した要素は、生成する側が自分の生成順の末尾に足す（3.5）。
+
+住宅データを作るとき（保存したJSONを読むときを含む）、次のものを要素IDと理由を付けてまとめて返し、住宅データを作らない。自己交差、開口のはみ出し、重なりなどの形の検査は3.6で行う。
+
+- IDの文字・長さの違反と、IDの重複
+- 存在しない階・頂点・境界・壁への参照
+- 両端が同じ頂点の境界、長さ0の境界、二つの階をまたぐ境界、同じ二つの頂点を結ぶ二つ目の境界
+- 閉じていない、同じ頂点を二度通る、または反時計回りでない部屋の境界の列と、同じ境界を二度含む列
+- 三つ以上の部屋、または同じ側の二つの部屋に接する境界。どの部屋にも接しない境界と、どの境界にも使われない頂点
+- 有限でない数と、絶対値が10 km（10⁷ mm）を超える数
+- 負のオフセット・開口の位置・床からの高さと、0以下の厚さ・高さ・幅・階高
+
+住宅データは `{"version": 1, "house": {…}}` の形のJSONで読み書きする。読むときは版を確かめ、知らない版と未知の欄を拒んでから、上の検査を行う。後から足す欄は、無ければ空として読み、空なら書かない。欄の名前や意味を変えるときは版を上げ、古い版を読むときに今の形へ移す（5.4）。
 
 隣室との境界を一つのデータで共有し、変更時に両側の部屋と壁を更新する。部屋の輪郭と壁座標を独立に書き換えて後から合わせる方式は採らない。壁厚を反映した室内側の輪郭から、面積と2D表示を生成する。部屋の輪郭を変える加工がある部屋は、3.4のとおり3Dから求める。LDK内部の用途は設備・家具の配置で表し、用途別の面積境界を追加しない。
 
 壁の追加・分割・統合では、境界と部屋の関係も同じ操作内で更新する。部屋IDを残すか統合先へ移すかを操作結果に含め、参照先が変わったことをAIへ返す。
 
-壁の平面形は、境界と左右側面のオフセットから住宅側で決め、壁ごとに押し出す。外側の面をそろえた厚さ違いも、一つの共有頂点と側ごとのオフセットで表す。中心線を40 mmずらすためだけの短い接続壁を足さない。
+壁の平面形は、境界と左右側面のオフセットから住宅側で決め、壁ごとに押し出す。接合の形は保存せず、頂点の座標・オフセット・要素IDから求める。外側の面をそろえた厚さ違いも、一つの共有頂点と側ごとのオフセットで表す。中心線を40 mmずらすためだけの短い接続壁を足さない。
 
 節点では入射する壁を角度順に並べ、次の優先順位で輪郭の端を決める。一直線からのずれが3度以下の組を通し壁の候補とし、候補が複数ならずれの小さい組を優先し、同じなら安定した要素IDで決める。この角度幅は[検証6](verification/verification-06.md)の0.3・1・2・3・5度の比較に基づく。
 
@@ -130,6 +145,22 @@ AIが編集をまとめて案を提示するたびに履歴を一件追加する
 3. 平行またはほぼ平行で厚さの違う壁は、側面の交点を遠方へ延ばさず、境界の向きを二等分する線で切る。完全な一直線では境界に垂直な線とする。
 
 角度幅だけで形の成立を保証しない。短い留め、自己交差、開口のはみ出しなどは3.6で拒む。
+
+AIが平屋を作るときは、部屋の配置だけを渡し、境界・頂点・壁はサービスが作る（6.2では、パターンの住宅を置き換える操作とする）。入力は、部屋ごとの名前・用途・壁の中心線上の対角の二点（`min` と `max`）と、外壁の厚さ・内壁の厚さ・壁の高さである。隣の部屋と共有する座標は同じ数で書き、隣接は座標の完全一致で判定する。許容差は使わない。長方形でない部屋はこの入力では表せず、頂点の列などの欄は未知の欄として拒む。斜めの壁とL字の部屋は6.3で加える。
+
+サービスは、部屋の各辺を、その線上にあるすべての部屋の角で分け、分けた区間ごとに境界を一つ作る。両側に部屋がある境界には内壁、片側だけの境界には外壁を立て、壁は境界から両側へ厚さの半分ずつの幅を持つ。境界の左には、その区間に接する部屋のうち要求で先に書いた部屋を置く。したがって外周の境界は、左が部屋、右が外になる。階は一つで、基準高さを0、階高を壁の高さとする。各一覧の順は、要求の順に各部屋を `min` の角から反時計回りにたどり、初めて出会った順とする。
+
+次のものは、要求の何番目の部屋かと部屋名を付けてまとめて返し、住宅データを作らない。
+
+- 有限でない数、絶対値が10 kmを超える数、0以下の厚さと高さ、半分にすると0になる厚さ。部屋が一つもないこと
+- どちらかの軸の幅が、最も厚い壁の厚さ（1 mm未満なら1 mm）以下の部屋
+- 重なる二部屋。重なった長方形を付ける
+- 外周の壁が4本集まる頂点。角だけで接し、残りの二つの象限を埋める部屋がない二部屋である
+- 実体が重なる二枚の壁。頂点を共有せず、同じ線上にもない組を調べる。壁の実体は、境界から両側へ厚さの半分ずつ広げた箱とし、端の長さは節点の形で決める。同じ線上に壁が続く端は延ばさない。L字の角では、相手の壁の厚さの半分だけ延ばす（上の規則2）。T字の足では、通し壁のうち薄いほうの厚さの半分だけ縮める（上の規則1）。面が接するだけなら重なりとしないので、外壁の厚さちょうどの段差と隙間は作れる
+
+これらに当たらなければ、離れた部屋、コの字、中庭も作る。この検査を通った住宅データを住宅データの検査が拒んだら、サービスの不具合として扱い、AIへは返さない。
+
+この操作が作るIDは、操作IDのバイト列に対するFNV-1a（64 bit）の上位40 bitを10桁の小文字の16進にしたものを前に付け、`<前置き>:s1`（階）、`<前置き>:r<n>`（要求のn番目の部屋）、`<前置き>:w<n>`（境界と壁）、`<前置き>:v<n>`（頂点）とする。どの操作IDでも32バイト以下に収まる。同じ操作IDと入力からは同じ住宅データを作るので、Workflowの再試行は同じ結果に収束する（4.6）。別の操作からは別のIDになり、置き換えた後の住宅で、古い壁のIDが別の壁を指さない。40 bitの値が衝突して同じ住宅でIDが重なった場合は、住宅データの検査が `DuplicateId` で拒む。前置きの計算を変えると再試行中の操作のIDが変わるので、計算を変えるときは操作の版を分ける。
 
 ### 3.2 窓・ドア・屋根・階段の表現
 
@@ -149,15 +180,17 @@ AIが編集をまとめて案を提示するたびに履歴を一件追加する
 
 ### 3.4 寸法・面積の計算と表示基準
 
-長さはmm、面積はm²で保持・計算する。寸法を固定のマス目へ丸めず、任意の値を指定できるようにする。AIが生成時に目安となる寸法を使うことは許容する。
+長さはmm、面積はm²で表す。面積は座標からmm²で求めて持ち、表示するときにm²と畳へ直す。軸に平行で座標が整数mmの輪郭なら、面積は誤差なく求まる。寸法を固定のマス目へ丸めず、任意の値を指定できるようにする。AIが生成時に目安となる寸法を使うことは許容する。
 
-部屋面積は壁の内側の床領域で求める。初期の計算基準では、床のない階段開口などを除き、ドアの敷居部分を部屋へ重複加算しない。参考畳数は内法面積を1.62 m²で割って表示し、換算基準を明記する。丸めは表示時だけ行う。
+部屋面積は壁の内側の床領域で求める。部屋の各境界を、その部屋の側の壁の側面まで内側へずらした線を、3.1の節点の規則でつないで内法の輪郭とする。一直線から3度以内で続く二本は境界の向きを二等分する線で切り、部屋の側のオフセットが違えば切り口に段ができる（規則3）。それより角度のある二本は、側面の交点で出会う（規則2）。通し壁で止まる壁の側面は、通し壁の側面か、厚さの変わる通し壁の切り口で止まる（規則1）。ほかの壁に隠れて床に面さない側面は除き、その前後の側面を交点で出会わせる。同じ向きに出る二本の壁、部屋の角の内側に入る壁、床が残らない部屋は、要素IDと理由を付けて返し、面積を出さない。開口は輪郭を変えないので、ドアの敷居部分はどの部屋の面積にも入らず、重複加算しない。床のない階段開口などを除く処理は6.3で加える。参考畳数は内法面積を1.62 m²で割って表示し、換算基準を明記する。丸めは表示時だけ行う。
 
 3Dとの照合では、すべての壁のボディを床の高さへ投影し、部屋の内点を含む領域の面積と比べる。壁を部屋側へ広げる加工のように、部屋の輪郭を変える加工がある部屋は、面積と2Dの輪郭をこの投影から求める。部屋のIDと境界は住宅データのまま保つ。
 
-建物全体は各階の参考面積を別に算出する。初期設計では外周壁の中心線で囲む領域から床のない部分を除き、階ごとの値と合計を表示する。内法の部屋面積の単純合計とは区別する。この計算を法定床面積の判定へ広げない。
+建物全体は各階の参考面積を別に算出する。外周壁は、片側だけに部屋がある境界の壁とする。その中心線は、境界から部屋の側へ（部屋の側のオフセット−外側のオフセット）÷2の位置にある。初期設計では、外周壁の中心線を規則2と規則3でつないでたどった輪で囲む領域から床のない部分を除き、階ごとの値と合計を表示する。中庭のように囲まれた外は含めず、内壁は参考面積を変えない。内法の部屋面積の単純合計とは区別する。この計算を法定床面積の判定へ広げない。
 
-幾何計算の許容差と面積の表示桁は6.2で固定し、検査にも同じ基準を使う。特定の例を通すために期待値へ合わせて変更しない。畳換算の出典は付録Cに記す。
+幾何計算の許容差は長さ0.001 mmとする。同じ形を別の方法で求めた二つの結果は、一方のどの点も他方から0.001 mm以内にあれば一致とみなす。面積では、輪郭の周長に0.001 mmを掛けた値以内の差を一致とする。この値は、SolidCraftが同じ点とみなす距離（10⁻⁶ mm）より3桁大きく、人が指定する寸法の単位（1 mm）より3桁小さい。座標の上限の10⁷ mmでもf64の刻みは約2×10⁻⁹ mmで、この許容差より十分小さい。試験の期待値との比較と3Dとの照合は、どちらもこの判定を使う。輪郭の計算そのものは許容差を使わず、入力の値だけで分岐する。
+
+面積はm²の小数第2位まで、参考畳数は小数第1位まで表示する。どちらも求めた値の下の桁を切り捨てる。表示は求めた値を超えないので、部屋を実際より広く見せず、表示した畳数に1.62 m²を掛けた値は内法面積を超えない。参考畳数は、丸めた面積ではなく求めた面積から直接出す。例えば内法4,410×4,500 mmの部屋は19.845 m²・12.25畳なので、19.84 m²・12.2畳と表示する。許容差と表示桁は、特定の例を通すために変更しない。畳換算の出典は付録Cに記す。
 
 ### 3.5 SolidCraftの形状との対応、変更・削除時の引き継ぎ
 
@@ -271,6 +304,7 @@ instant-madori/
 │   ├── build/
 │   ├── upstream/
 │   ├── deploy/
+│   ├── measure/
 │   └── shared/
 ├── metrics/               # Software Factoryの計測。設計は metrics/README.md
 ├── .github/
@@ -302,17 +336,17 @@ instant-madori/
 | packages/contracts/       | 通信スキーマと共有型。Rust側の定義から生成した型・スキーマの受け渡し先                                                                         |
 | third_party/solidcraft/   | 固定した版のSolidCraft一式。SolidCraft自体に必要な修正もこの領域で行う                                                                         |
 | third_party/solidcraft.md | 取り込み元、採用コミット、独自変更の理由、更新手順。subtreeの外に置く                                                                          |
-| docs/・scripts/           | サービスの計画・検証記録。scripts/はcheck・dev・generate・build・upstream・deployに分け、複数の目的で使う部品はsharedに置く                    |
+| docs/・scripts/           | サービスの計画・検証記録。scripts/はcheck・dev・generate・build・upstream・deploy・measureに分け、複数の目的で使う部品はsharedに置く           |
 | metrics/                  | Software Factoryの計測。生の記録を溜める層、解釈する層、viewer。サービスから独立し、設計は metrics/README.md に置く                            |
 | .github/workflows/        | PRの検査（check.yml）とstagingへのデプロイ（deploy-staging.yml）。開発用Macのself-hosted runnerで動く                                          |
 | .github/ISSUE_TEMPLATE/   | 作業の単位（Issue）のテンプレート                                                                                                              |
 | .github/dependabot.yml    | npm・Cargoの依存関係の更新提案                                                                                                                 |
 
-Workerの依存は、層に属さない `apps/worker/src/compose.ts` で構築する。APIは `serviceDeps(env, runtime)`、パターンのDOは `patternCoordinatorDeps(env, workflow, runtime)`、ジョブのWorkflowは `jobWorkflowDeps(env, runtime)` を使う。DOには、実行権の取得、activeなジョブの参照の読取り、Workflowの開始だけを渡す。Workflowには、実行権の復元と、実行権を受け取る確認・確定・失敗の記録・snapshotの保存、形状処理、パターンのDOを起こす関数だけを渡す。組み立て関数をimportできるのは `api/app.ts`・`objects/pattern-coordinator.ts`・`workflows/job-workflow.ts` だけで、この3つも元の層のimportの制限を受ける。サービスはDOのnamespaceではなく、型付き `GeometryInstance` を受けて `GeometryApi` を返す関数に依存する。インスタンス名の導出とRPCのretryable/overloaded例外からunavailableへの変換は `geometry/geometry-client.ts` に集める。サービス基盤のジョブは、パターンごとの接続用DOのインスタンス（キー `{ kind: "pattern", patternId }`、名前 `pattern:<パターンID>`）でContainerを呼ぶ。インスタンスのキーを加えるときも導出はこのファイルに置き、呼び出し側はDOの名前を組み立てない。
+Workerの依存は、層に属さない `apps/worker/src/compose.ts` で構築する。APIは `serviceDeps(env, runtime)`、パターンのDOは `patternCoordinatorDeps(env, workflow, runtime)`、ジョブのWorkflowは `jobWorkflowDeps(env, runtime)` を使う。DOには、実行権の取得、activeなジョブの参照の読取り、Workflowの開始だけを渡す。Workflowには、実行権の復元と、実行権を受け取る確認・確定・失敗の記録・snapshotの保存、形状処理、AIとの往復、パターンのDOを起こす関数だけを渡す。組み立て関数をimportできるのは `api/app.ts`・`objects/pattern-coordinator.ts`・`workflows/job-workflow.ts` だけで、この3つも元の層のimportの制限を受ける。サービスはDOのnamespaceではなく、型付き `GeometryInstance` を受けて `GeometryApi` を返す関数に依存する。インスタンス名の導出とRPCのretryable/overloaded例外からunavailableへの変換は `geometry/geometry-client.ts` に集める。サービス基盤のジョブは、パターンごとの接続用DOのインスタンス（キー `{ kind: "pattern", patternId }`、名前 `pattern:<パターンID>`）でContainerを呼ぶ。インスタンスのキーを加えるときも導出はこのファイルに置き、呼び出し側はDOの名前を組み立てない。
 
 内部ルートは `geometry/` の `callGeometry` で呼び、成功のバイナリまたはJSON、エラー本文、ストリームのサイズ上限と中断を共通処理する。ルートとメソッドは生成された定義を使い、タイムアウトは同じモジュールの表で管理する。形状処理の結果を再試行と失敗に振り分けるのは、ジョブが呼ぶ `services/geometry.ts` である。公開APIは形状処理を呼ばない。
 
-Workerの内部は、`api/` から `services/` を呼び、`services/` は外から渡された保存の操作（`storage/` が作る `Store`）または形状処理用の `geometry/` を呼ぶ。`services/` から `storage/` へのimportは型だけにする。`objects/` と `workflows/` は `services/` だけを呼び、`storage/` と `geometry/` は他の層をimportしない。`api/` から `geometry/` への型だけのimportを例外として許可する。許可先は `scripts/check/boundaries.ts` のWorker層の表で管理し、同じ層の内部とこの例外を除いて、表にない層間importを拒否する。`apps/worker/src/` 直下にディレクトリを追加するときは、この表にも層を宣言する。直下のファイルは層に含めない。`storage/` はHTTPの `Request`・`Response`・`fetch`・`Headers` を使わず、API応答の型・スキーマも使わない。
+Workerの内部は、`api/` から `services/` を呼び、`services/` は外から渡された保存の操作（`storage/` が作る `Store`）または形状処理用の `geometry/` を呼ぶ。AIとの往復は、外から渡された `ai/` の実装を呼ぶ。`services/` から `storage/` と `ai/` へのimportは型だけにする。`objects/` と `workflows/` は `services/` だけを呼び、`storage/`・`geometry/`・`ai/` は他の層をimportしない。`api/` から `geometry/` への型だけのimportを例外として許可する。許可先は `scripts/check/boundaries.ts` のWorker層の表で管理し、同じ層の内部とこの例外を除いて、表にない層間importを拒否する。`apps/worker/src/` 直下にディレクトリを追加するときは、この表にも層を宣言する。直下のファイルは層に含めない。`storage/` はHTTPの `Request`・`Response`・`fetch`・`Headers` を使わず、API応答の型・スキーマも使わない。
 
 | 層           | 受け持つこと                                                                                                                                                                                                                    | 持ち込まないもの                                          |
 | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
@@ -322,6 +356,11 @@ Workerの内部は、`api/` から `services/` を呼び、`services/` は外か
 | `workflows/` | ジョブのWorkflowと、その作成のアダプター。段階の順序・名前・再試行の方針は `services/` が持ち、この層はWorkflowの `step` を渡してログを書く                                                                                     | 業務の判断、Containerへの接続処理、D1・R2の直接の読み書き |
 | `geometry/`  | Container接続用DO。起動、準備確認、内部認証、転送と内部APIの呼出し                                                                                                                                                              | 業務の判断                                                |
 | `storage/`   | D1・R2への読み書き。条件付きの書込みと冪等性の記録を、操作ごとに名前を付けた関数で原子的に行う。採番のように同じトランザクションの中でしか決まらない値は、`services/` から受け取った材料（初期名の接頭辞など）でSQLが組み立てる | HTTP、業務の判断                                          |
+| `ai/`        | AIとの一回の往復。提供元によらない要求・応答の型、環境ごとの実装の選択、台本のAI。提供元ごとの接続（要求の組み立て、応答の解析、失敗の分類）もこの層に置く                                                                      | 業務の判断、再試行の方針、D1・R2・Containerへの接続       |
+
+`ai/` の往復の型は、提供元のSDKやAPIの型に寄せず、独自に定める。会話は、システムの指示、ツールの定義、最初の利用者の発言と、アシスタントの発言とそれへの返事の組の列からなる。後の要求は、前の要求の内容を変えずに組を足すだけにする。アシスタントの発言は、本文、ツールの呼出し、思考の部分を、モデルが返した順の一つの列として持つ。思考の部分は提供元の形のまま持ち、中身を解釈せず、作った実装だけが読む。Claude Opus 5.5は、思考のブロックを変えた、並べ替えた、一部を落としたアシスタントの発言を400で拒む。そのため、発言は受け取ったとおりに次の要求へ戻す。発言の列は `ai/` の実装だけが作れる型にし、絞り込んだ列や組み直した列を型の検査で拒む。モデルが読み書きするJSON（ツールの入力と入力スキーマ）は、Workflowの `step` の結果に入れられるように、JSONの文字列で運ぶ。一回の往復は一度だけ試み、再試行は呼び出す側のWorkflowの `step` が受け持つ。失敗は、例外でなく結果の値で返す。
+
+台本のAIは、決まった応答の列を返す実装で、テストとローカルの開発で使う。会話にある組の数から何番目の応答を返すかを決め、状態を持たない。そのため、Workflowが別のisolateで再開しても、`step` を再試行しても、同じ応答を返す。戻された発言が自分の返したものと違うとき、ツールの呼出しに結果が一つずつ揃わないときは拒み、台本の終わりを越えた要求は失敗として返す。システムの指示とツールの定義が要求の間で変わらないことは、状態を持たないので確かめない。使う実装は `compose.ts` が `ENVIRONMENT` で選び、`local` と `staging` だけが台本のAIを使える。それ以外の環境で提供元の接続がなければ、往復のたびに失敗する実装を使う。選ぶ処理は例外を投げないので、AIを呼ばないWorkflowの処理はどの環境でも動く。
 
 `services/` を分けるのは、Workflow・Durable Objectが同じ業務の判断をHTTPを通らずに使うためである。`services/` は書込みの文を組み立てず、`storage/` の操作（例：`store.projects.renameOnce`、`store.revisions.commit`）を呼ぶ。文どうしの条件を確かめないまま、任意の文の列を一括で確定させる仕組みは作らない。D1のbatchでは条件付き更新が0件でもエラーにならず、後続の文が確定してしまうためである。`storage/requests.ts` の `OnceBatch` は中身と要求キーを非公開の欄に持つクラスとし、型だけを公開する。生成入口は作成用の `createOnceStatements` と更新用の `updateOnceStatements` の二つに限定し、記録の文を作る `recordStatement` は公開しない。各生成入口で要求キーとSQL部品を一度ずつコピーし、そのコピーからすべての文を組み立てて凍結する。バインドの値は文字列・数値・真偽値・nullの原始型に限り、組を作るときに確かめる。配列・TypedArrayなどの参照型は、文ごとの値の変化を防ぐため生成時に拒否する。クラスとprototypeも凍結し、コンストラクタはモジュール内だけで持つtokenを検査する。`runOnce(db, schema, batch)` は組の要求キーを使い、本物のクラスの非公開欄を持たない値をSQLの実行前に拒否する。Proxy、spreadやstructuredCloneの写し、型だけを偽造したオブジェクトにはこの欄がない。複数の変更の文どうしの結び付けは操作ごとに設計する。複数の条件を含む操作は、各条件が後続の文を止めるように、その操作専用のSQLとして設計する。後続の文の条件は、行の有無や値といったデータの状態で書き、`changes()` のような接続の状態には依存しない。依存してよいのは、D1の文書が保証している次の性質だけである：batchが一つのトランザクションとして順に実行され、後の文が前の文の書込みを見ること、途中の文が失敗するとbatch全体が取り消されること、一つのデータベースが一度に一つのクエリを処理すること。冪等性の記録と変更は、この条件で結び付ける。作成は `createOnceStatements` が変更の文の後に記録を置き、対象の表に指定したIDと要求の所有者IDが一致する行があることを記録の条件にする。呼び出し側は変更の文、対象の表、新しいID、結果の式を渡し、記録の条件や順序は指定しない。更新は `updateOnceStatements` で記録を先に置き、一度だけ書いた前提条件を、記録と更新の両方の条件にする。
 
@@ -329,7 +368,7 @@ Workerの内部は、`api/` から `services/` を呼び、`services/` は外か
 
 DBの行は、テーブルごとに一つのSQLの `json_object` で読み、`storage/` で共有スキーマにより検証してから返す。型引数による決めつけで行を扱わない。業務上の結果（見つからない、版の競合など）は例外でなく判別可能な結果として返し、`api/` がエラーコードへ対応付ける。予期しない例外だけを500とし、本文を含めずに記録する。
 
-Webのコードは開発用の `scripts/` をimportしない。Viteの設定だけは、ローカルの認証プロキシに使う `scripts/dev/` をimportできる。WebからのWasmバインディングの読込みは `apps/web/src/viewer/wasm.ts` に集め、同じ `viewer/` 直下の `*.test.ts` だけはバインディングを直接importできる。`apps/geometry` には、UIツールキット（egui系・eframe・winit）とGPUの描画（wgpu系）を含めない。UIの有無は、crateの名前ではなくツールキットのcrateで判定する。UIを持たない文言の目録 `solidcraft-ui-text` は、engineを通して含まれてよい。サービスはSolidCraftのpluginを実行しない。そのため、ルートの `solidcraft-engine` は既定のfeatureを外し、Containerにwasmtimeとcraft-plugin-wasmを含めない。
+Webのコードは開発用の `scripts/` をimportしない。Viteの設定だけは、ローカルの認証プロキシに使う `scripts/dev/` をimportできる。WebからのWasmバインディングの読込みは `apps/web/src/viewer/wasm.ts` に集め、同じ `viewer/` 直下の `*.test.ts` だけはバインディングを直接importできる。`apps/geometry` には、UIツールキット（egui系・eguiの下位のepaint系・emath・ecolor・eframe・winit）とGPUの描画（wgpu系）を含めない。UIの有無は、crateの名前ではなくツールキットのcrateで判定する。UIを持たない文言の目録 `solidcraft-ui-text` は、engineを通して含まれてよい。サービスはSolidCraftのpluginを実行しない。そのため、ルートの `solidcraft-engine` は既定のfeatureを外し、Containerにwasmtimeとcraft-plugin-wasmを含めない。
 
 TypeScriptのアプリと共有定義のimport境界は、TypeScriptのモジュール解決後の参照先ファイルで判定する。静的import、再export、文字列リテラルの動的import、import型、`import = require`、型の参照ディレクティブとモジュール拡張を対象にする。動的importの引数を囲む括弧は外し、参照先のqueryとfragmentは除いて解決する。解決できない参照は失敗にする。Node.jsの組込みと、対応するworkspaceが依存として宣言した外部パッケージだけは、解決できなくても許可する。workspaceのパッケージはこの例外に含めない。環境が宣言するambient moduleは、その宣言のファイルで判定する。相対パスの資産は実ファイルの存在を要求する。ファイルの同一性はsymlinkをたどり、OSの実パスで確かめる。大文字小文字を区別するファイルシステムでは、綴りの違う参照は未解決として拒否する。検査はESLintの自動修正と整形の後に実行し、pre-commitでもステージしたTypeScriptファイルを対象に実行する。
 
@@ -337,11 +376,11 @@ TypeScriptのアプリと共有定義のimport境界は、TypeScriptのモジュ
 
 `apps/` は起動・デプロイするもの、`crates/` はRustの機能をまとめたモジュール、`packages/` はJS/TS側から共有する定義を置く。`apps/geometry` は `crates/modeling` を呼ぶ入口とし、住宅の計算やCADとの対応をHTTP処理に散らさない。
 
-`crates/housing` は画面・HTTP・Cloudflareへ依存させない。`crates/modeling` が住宅モデルとSolidCraftのengine・doc・kernelを利用する。評価キャッシュの誤った再利用を防ぐ `external-workspace` featureを有効にするため、modelingはsolidcraft-ioにも直接依存する。`crates/viewer` はgeom・viewport・viewport-gpuを利用し、wgpuで描く。`solidcraft-viewport-egui` は使わない。ビューアには編集エンジン（modeling・engine・doc・kernel・io）とUIツールキット（egui系・eframe・winit）を含めず、依存を持たない `crates/display` の表示データで接続する。geomがsolidcoreに依存するため、Cargoの依存グラフではsolidcoreもビューアに届く。利用者に届くコードは、`pnpm check --full` がreleaseのWasm（wasm-bindgenの前）の名前セクションで確かめる。各関数を本体を定義したcrateに数え、CADカーネル（solidcore・solidcore-ops）・編集エンジン・UIツールキットの関数があれば失敗する。禁止する族は、ビューアの依存グラフの行と `viewerWasmBoundary` から導く。crateごとの関数の数とコード量は、Markdownの表でログに出す。`crates/modeling` が符号化し、`crates/viewer` が復号する。`crates/geometry-api` は形状処理の内部APIを定義し、TypeScriptの定義を `packages/contracts/src/generated/geometry-internal.ts` へ生成する。公開する表示メディア型は同じ生成処理で `packages/contracts/src/generated/display.ts` に出し、`@madori/contracts` から公開する。WebとViteの設定は内部API定義をimportせず、`packages/contracts` への相対パスでの参照も使わず、公開した `@madori/contracts` から参照する。公開入口への参照もパッケージ名に限るのは、宣言した依存を通すためである。相対パスに置き換えると、Knipがパッケージの依存宣言を未使用と判断して削除でき、pnpmの依存の図からWebとcontractsの関係が消えてしまう。
+`crates/housing` が直接依存してよいのは serde・serde_json・schemars だけとし、画面・HTTP・Cloudflare・CADへは依存させない。この一覧は、`scripts/check/boundaries.ts` の `housing-dependencies` の行と一緒に変える。`crates/modeling` は住宅モデルとSolidCraftのengine・docを利用する。kernelの機能（体積の計測など）は、engineが再exportする `solidcraft_engine::kernel` から使い、kernelには直接依存しない。engineはkernel全体を再exportし、kernelにはfeatureがないので、直接依存しても使える機能は増えない。modelingはsolidcraft-ioにも直接依存し、`external-workspace` featureを有効にする。このfeatureは、評価キャッシュの誤った再利用を防ぎ、ioのbuild.rsにこのリポジトリのgitの状態を読ませない（5.1）。`solidcraft-` で始まるcrateのうち、modelingが直接依存してよいのはengine・doc・ioだけとし、この一覧は、`scripts/check/boundaries.ts` の `modeling-solidcraft` の行と一緒に変える。`crates/viewer` はgeom・viewport・viewport-gpuを利用し、wgpuで描く。`solidcraft-viewport-egui` は使わない。ビューアには編集エンジン（modeling・engine・doc・kernel・io）とUIツールキット（egui系・eguiの下位のepaint系・emath・ecolor・eframe・winit）を含めず、依存を持たない `crates/display` の表示データで接続する。geomがsolidcoreに依存するため、Cargoの依存グラフではsolidcoreもビューアに届く。利用者に届くコードは、`pnpm check --full` がreleaseのWasm（wasm-bindgenの前）の名前セクションで確かめる。各関数を本体を定義したcrateに数え、CADカーネル（solidcore・solidcore-ops）・編集エンジン・UIツールキットの関数があれば失敗する。禁止する族は、ビューアの依存グラフの行と `viewerWasmBoundary` から導く。crateごとの関数の数とコード量は、Markdownの表でログに出す。`crates/modeling` が符号化し、`crates/viewer` が復号する。`crates/geometry-api` は形状処理の内部APIを定義し、TypeScriptの定義を `packages/contracts/src/generated/geometry-internal.ts` へ生成する。公開する表示メディア型は同じ生成処理で `packages/contracts/src/generated/display.ts` に出し、`@madori/contracts` から公開する。WebとViteの設定は内部API定義をimportせず、`packages/contracts` への相対パスでの参照も使わず、公開した `@madori/contracts` から参照する。公開入口への参照もパッケージ名に限るのは、宣言した依存を通すためである。相対パスに置き換えると、Knipがパッケージの依存宣言を未使用と判断して削除でき、pnpmの依存の図からWebとcontractsの関係が消えてしまう。
 
 内部API本文は `crates/geometry-api` のRust型にschemarsを適用し、インライン化したJSON Schemaからjson-schema-to-zodでZod検証とTypeScript型を生成する。`pnpm generate:geometry` で定数と本文を一緒に更新し、RustとNodeのテストが生成結果のずれを検出する。再帰型と参照が残る型は生成時に拒否する。結果の共用体は `kind` を判別子とする。固定幅整数には範囲を付け、JavaScriptで正確に表せない64/128ビット整数は文字列で運ぶ。ポインター幅に依存する整数も生成時に拒否し、通信には固定幅の型を選ぶ。Optionは `skip_serializing_if = "Option::is_none"` でNoneを省略し、受信時は省略とnullを許す。各ルートに本文型のスキーマ生成関数を登録し、要求・応答のスロットから方向を導出する。エラー本文はルートごとに登録せず、プロトコル共通のスキーマ・メディア型・本文上限を定義し、Rustのエラー応答とWorkerの検証で使う。同名の本文を異なる契約で登録すると生成を停止する。要求はDeserialize契約で生成し、オブジェクトの未知フィールド拒否を生成時に検査する。応答はSerialize契約で生成し、共有型に指定された未知フィールド拒否を応答スキーマから再帰的に除き、追加フィールドを許容する。ルートにはHTTPメソッドと要求・応答本文の形式（なし、JSONのスキーマと本文上限、バイナリのメディア型と本文上限）を登録し、Workerの受信方針をそこから組み立てる。
 
-住宅データはRust側で定義し、通信に必要な型とスキーマを生成してJS/TS側へ渡す。WebとWorkerの共通の通信定義も `packages/contracts` で管理し、同じ型を両側で独立に手書きしない。
+住宅データはRust側で定義し、通信に必要な型とスキーマを生成してJS/TS側へ渡す。住宅データの型のJSON Schemaは `crates/housing` がschemarsで導出する。`crates/geometry-api` は同じ形の型を写さず、その型を内部API本文とAIの操作の入力に組み込む。WebとWorkerの共通の通信定義も `packages/contracts` で管理し、同じ型を両側で独立に手書きしない。
 
 ルートのREADME、AGENTS、開発設定は本サービス向けに整える。SolidCraft由来の資料と開発設定は取り込み領域に保持する。本計画書は `docs/plan.md`、検証記録と、画像を除く証拠は `docs/verification/` に置く。Issue、PR、検証記録に貼る画像は、main と履歴を共有しない追記だけの `images` ブランチに置き、画像を加えた commit に固定したリンクで参照する。
 
@@ -357,7 +396,7 @@ SolidCraftには、形状操作、フィーチャー評価、編集可能な設�
 | Pattern                     | 案件ID、案件内の作成順                                                                                     |
 | Revision                    | パターン、履歴内の順番、編集元・復帰元、案の名前、会話の区切り、snapshotへの参照                           |
 | Snapshot                    | 所有者、R2のmanifestのキーとハッシュ、保存形式の版                                                         |
-| Message / ConversationEvent | 会話内の順番、指示・質問・回答、添付参照、関連する案・ジョブ、復帰や複製の記録                             |
+| Message / ConversationEvent | 会話の番号、指示・回答・AIの説明・選択肢付きの質問・知らせ、添付参照、関連する案・ジョブ、復帰や複製の記録 |
 | Job / Operation             | 指示への参照、状態、編集開始時の案ID、実行世代、待機列を保留しているか、チェックポイント参照、操作IDと費用 |
 | Asset / Usage               | 所有者、R2キー、用途・形式・サイズ・ハッシュ、API試行ごとの利用量・費用予約・確定額                        |
 
@@ -367,13 +406,15 @@ SolidCraftには、形状操作、フィーチャー評価、編集可能な設�
 
 `snapshots` の行は、所有者、manifestのキーとSHA-256、形式の版を持つ。`revisions` の行は、パターン内の番号、名前、編集元、snapshotへの参照を持つ。形式の版は、読み書きできる版だけをDBのCHECK制約で許可し、版を増やすときは読込処理と制約を一緒に更新する。所有者と親の一致、および編集元が同じパターンに属することは、複合外部キーで保証する。
 
-`messages` は指示の本文とパターン内の会話の番号を持つ。本文はD1へ保存し、UTF-8で16,384バイトを上限とする。サービスは孤立したサロゲートと、JavaScriptの `trim()` で空になる本文を拒む。D1も本文のバイト数と同じ空白文字の集合をCHECK制約で検査する。本文はtrimせず、検査した文字列をそのまま保存し、要求内容のハッシュにも使う。会話の番号は追加する文のスカラー副問い合わせで既存の最大値に1を足して決め、`UNIQUE (pattern_id, number)` で重複を防ぐ。
+`messages` は種類、本文、パターン内で全種類に共通の会話の番号を持つ。本文はD1へ保存し、UTF-8で16,384バイトを上限とする。サービスは孤立したサロゲートと、JavaScriptの `trim()` で空になる本文を拒む。D1も本文のバイト数と同じ空白文字の集合をCHECK制約で検査する。本文はtrimせず、検査した文字列をそのまま保存し、要求内容のハッシュにも使う。会話の番号は追加する文のスカラー副問い合わせで既存の最大値に1を足して決め、`UNIQUE (pattern_id, number)` で重複を防ぐ。
 
-`jobs` は指示のmessage ID、4.6の9状態、実行世代、実行開始時の編集元のrevision IDを持つ。受付時は `queued`、世代は0、編集元はNULLとする。messageとjobの所有者は親のパターンと一致させ、messageと編集元も同じパターンに属することを複合外部キーで保証する。指示のmessage IDはジョブ間で一意とする。`running`・`validating`・`committing` の行だけを対象にした `pattern_id` の部分一意索引で、一パターンの実行権を一件に限る。パターンには実行中ジョブを指す列を持たせず、ジョブの状態から読む。待機列はパターンと状態の索引で絞り、対応するmessageの番号で順序を決める。
+入力（指示・回答）は、それを受け付けたジョブが `jobs.message_id` で指すため、message側の `job_id` はNULLにする。AIの説明と質問は、書き込んだジョブのIDを持つ。知らせはジョブに伴う場合だけそのIDを持つ。jobsとmessagesの生成列 `pattern_job` はパターンIDとジョブIDを連結し、その外部キーで別のパターンのジョブへの参照を防ぐ。関連する案は、そのジョブが確定した案を `revisions.job_id` から読む。質問だけが `choices` に選択肢の文字列配列をJSONで持つ。D1では配列であることと16,384バイトの上限を検査する。部分索引 `messages_inputs` は指示と回答だけをパターンと会話の番号で引けるようにする。
+
+`jobs` は入力（指示または回答）のmessage ID、4.6の9状態、実行世代、実行開始時の編集元のrevision IDを持つ。受付時は `queued`、世代は0、編集元はNULLとする。messageとjobの所有者は親のパターンと一致させ、messageと編集元も同じパターンに属することを複合外部キーで保証する。入力のmessage IDはジョブ間で一意とする。`running`・`validating`・`committing` の行だけを対象にした `pattern_id` の部分一意索引で、一パターンの実行権を一件に限る。パターンには実行中ジョブを指す列を持たせず、ジョブの状態から読む。待機列はパターンと状態の索引で絞り、対応するmessageの番号で順序を決める。
 
 待機列の保留（2.4）は、保留の原因になったジョブの行の `holds_queue`（0か1）で表し、パターンの行には持たせない。実行中のジョブを指す列を持たせないのと同じく、指す列とジョブの状態が食い違う状態を表せないようにするためである。`holds_queue = 1` を許すのは、CHECK制約でcancelled・failed・limited・awaiting_answerの行だけとする。`holds_queue = 1` の行だけを対象にした `pattern_id` の部分一意索引で、一パターンの保留を一つに限る。保留の原因は保留する行そのものなので、同じパターン・同じ所有者のジョブであることも保証される。保留は、activeなジョブをcancelled・failedへ変える文の中で、待機中のジョブがあり、ほかに保留がないときだけ1にする。この式は変更前の行を読むので、失敗の段階の再試行、終わったジョブへの停止、同じ要求の再送は保留を書かない。保留を解くのは、再開・取り消し、保留中に最後の待機中のジョブを止める停止、待機中のジョブがない保留を見つけた受付だけとする。保留中は実行権を取らないので、保留中のパターンにactiveなジョブはなく、待機中のジョブが必ずある。保留を書く文と読む文は `apps/worker/src/storage/job-queue.ts` にまとめ、ほかのファイルには列名を書かない。列は既定値0とともにマイグレーションで加えるので、既存の行と前の版のWorkerが加える行は保留しない。前の版のWorkerは保留を読まないので、版が混在する間やWorkerを前の版に戻した後は、前の版の停止が保留を解かずに待機列を空にすることがある。受付が待機中のジョブがない保留を解くので、その後に送った指示は保留されない。
 
-`revisions.job_id` はその案を作ったジョブを指し、同じパターンのジョブだけを複合外部キーで許す。NULL以外のjob IDの部分一意索引で、同じジョブから二つの案を確定することを防ぐ。結果の案はこの列から読み、jobsには結果を指す列を持たせない。`(job_id, base_revision_id)` の複合外部キーでジョブの編集元との一致を検査する。jobsとrevisionsは、編集元がNULLかどうかを表す生成列 `base_is_null` も持ち、`(job_id, base_is_null)` の複合外部キーでNULLを含む一致も保証する。`conversation_number` はその案が取り込んだ会話の最後の番号を指し、`(pattern_id, conversation_number)` の複合外部キーで同じパターンのmessageに結び付ける。既存の案とジョブを使わない保存では、この二列にNULLを許す。
+`revisions.job_id` はその案を作ったジョブを指し、同じパターンのジョブだけを複合外部キーで許す。NULL以外のjob IDの部分一意索引で、同じジョブから二つの案を確定することを防ぐ。結果の案はこの列から読み、jobsには結果を指す列を持たせない。`(job_id, base_revision_id)` の複合外部キーでジョブの編集元との一致を検査する。jobsとrevisionsは、編集元がNULLかどうかを表す生成列 `base_is_null` も持ち、`(job_id, base_is_null)` の複合外部キーでNULLを含む一致も保証する。`conversation_number` はその案が取り込んだ会話の最後の番号を指し、`(pattern_id, conversation_number)` の複合外部キーで同じパターンのどの種類のmessageにも結び付けられる。既存の案とジョブを使わない保存では、この二列にNULLを許す。
 
 指示の受付は、所有者を条件にしたmessageの追加、その新しいmessageを条件にしたqueuedのjobの追加、要求の結果の記録を一つのbatchで行う。`createOnceStatements` が新しいjobのIDと要求の所有者の一致を成功の証拠にする。同じrequest IDの再送はbatchを取り消して最初に記録した結果を返す。存在しないパターンと別所有者のパターンでは何も追加せず、要求も記録しない。
 
@@ -542,13 +583,15 @@ APIの応答を受け取れず再呼び出しが必要になった場合、課�
 
 request IDは利用者ごとの範囲で一意とし、固定するのは成功した結果だけとする。失敗した要求は記録せず、同じIDで内容を直した再試行を新しい要求として扱う。一度成功したIDを別の操作・内容に使った場合は拒否する。同じ要求の同時の再送では、先に確定した結果を全員に返す。
 
-表示データ以外の応答はJSONで、失敗は共有定義のエラーコードを `{ error }` で返す。利用者ごとのデータを返すため、API応答はすべてキャッシュさせない。応答と構造化ログに追跡用のIDを付け、ログには会話・名前などの本文を出さない。案件の一覧は作成日時の新しい順に、案の一覧は履歴の番号の降順に、続きを取得するためのカーソルを付けて返す。パターンの一覧は番号の昇順に、ページに分けずに返す。
+表示データ以外の応答はJSONで、失敗は共有定義のエラーコードを `{ error }` で返す。利用者ごとのデータを返すため、API応答はすべてキャッシュさせない。応答と構造化ログに追跡用のIDを付け、ログには会話・名前などの本文を出さない。案件の一覧は作成日時の新しい順に、案の一覧は履歴の番号の降順に、会話は会話の番号の降順に並べ、続きを取得するためのカーソルを付けて返す。パターンの一覧は番号の昇順に、ページに分けずに返す。
 
 案の一覧は50件ずつ返し、カーソルには最後の番号を符号化する。作成時刻ではなく履歴の番号で並べるため、作成時刻が同じ場合や実行元の時計が前後した場合も、現在の案と一覧の先頭は一致する。表示データの応答には、閲覧対象の案IDを `x-revision-id` ヘッダーで付ける。
 
+`GET /api/patterns/:id/messages` は省略可能な `cursor` だけを受け付け、`{ messages, nextCursor }` を返す。各行は `{ id, number, kind, body, createdAt, jobId, revision }` で、質問だけに `choices` が付く。jobIdは入力を受け付けたジョブか、その行を書いたジョブのIDで、ジョブがなければnullとする。revisionはそのジョブが確定した案（案の一覧と同じ形）で、なければnullとする。1ページは最大50件。続きがあれば最後の行の番号をJSONにしてbase64urlで符号化したカーソルを返し、なければnullを返す。開き直した画面は、カーソルなしで最新のページを読み、nextCursorで古い会話へさかのぼる。新しい行は既存の最大より大きい番号を取るので、最新のページにだけ現れ、手元のカーソルで取得する古い行は変わらない。所有者から見えるパターンの存在確認とページの取得は同じD1 batchで行う。番号の索引でカーソルより古い行から読み始め、ジョブと案は索引で結び付けるため、深いページでも読取り量はページの件数で決まる。
+
 `POST /api/patterns/:id/messages` はJSONの `{ requestId, body }` を受け取る。bodyはUnicodeとして正しく、空白だけではなく、UTF-8で16,384バイト以下とする。本文の空白やUnicodeを正規化しない。JSON全体の上限はこのルートだけ128 KiBとし、ほかのJSON要求の既定は16 KiBとする。
 
-受付の応答は202の `{ job: { jobId, messageId, number } }` で、numberはmessageの受付番号である。この応答は受付の記録であり、ジョブの現在の状態を表さない。同じrequest IDと内容の再送は、ジョブの状態が変わった後も同じ状態コードと本文を返す。現在の状態は `GET /api/patterns/:id/state` で読む。
+受付の応答は202の `{ job: { jobId, messageId, number } }` で、numberはmessageの会話の番号で、受付順に増えるが連続しない。この応答は受付の記録であり、ジョブの現在の状態を表さない。同じrequest IDと内容の再送は、ジョブの状態が変わった後も同じ状態コードと本文を返す。現在の状態は `GET /api/patterns/:id/state` で読む。
 
 入力が不正なら400 `invalid_request`、JSON全体の上限超過は413 `payload_too_large`、成功済みのrequest IDを別の内容や操作に使うと422 `request_id_reused` とする。認証の失敗は401 `unauthenticated`、認証後のOriginの拒否は403 `forbidden`、別の所有者と存在しないパターンは同じ404 `not_found` とする。
 
@@ -556,7 +599,7 @@ request IDは利用者ごとの範囲で一意とし、固定するのは成功�
 
 `POST /api/patterns/:id/queue/resume` と `POST /api/patterns/:id/queue/cancel` は、JSONの `{ requestId, heldBy }` を受け取る。heldByは画面が読んだstateの `queueHold.job.jobId` で、そのジョブがまだ待機列を保留している場合だけ適用する。所有者・Origin・request IDは、ほかの変更要求と同じに確かめる。別の所有者と存在しないパターンは同じ404 `not_found` に、保留していない場合と別のジョブが保留している場合は409 `version_conflict` にする。再開は保留を解き、保留を解いた時点の待機中の指示を `{ jobs: [{ jobId, messageId, number }] }` で番号順に返す。取り消しは、保留中に受け付けた指示も含めて待機中の指示をすべてcancelledにし、保留を解いて `{ jobs: [{ jobId, messageId, number, state: "cancelled" }] }` を返す。どちらも200で、結果を記録し、同じrequest IDの再送には同じ状態コードと本文を返す。heldByは一つの保留を指すので、再開を二度押しても、その間に失敗した次の指示の保留は解かない。
 
-stateはqueryパラメータを受け付けず、`{ pattern, currentRevision, runningJob, queuedJobs, queueHold, lastFinishedJob }` を返す。runningJobは実行権を持つジョブ（running・validating・committing）の `{ jobId, messageId, number }` で、なければnullにする。DBがパターンごとにactiveなジョブを一つに限るので、配列にしない。queuedJobsは同じ形の配列で、対応するmessageの番号の昇順に並べ、待機中がなければ空配列にする。同じジョブを両方に入れない。パターン・最新案・実行中のジョブ・待機中のジョブ・保留・最後に終わったジョブは同じD1 batchで読み、所有者を条件にする。実行中のジョブのSELECTは `jobs_one_active_per_pattern` 索引を `INDEXED BY` で使う。所有者の条件を加えると、統計を取った後のSQLiteはこの索引を使わず、パターンのジョブをすべて読むためである。待機列のSELECTはjobsをCROSS JOINの外側に置き、`jobs_queue` 索引でパターンとqueuedを絞ってからmessageを読む。lastFinishedJobは、終わった（completed・cancelled・failed）ジョブのうちmessageの番号が最も大きいものを、停止の応答のjobと同じ形で返し、なければnullにする。待機中に止めたジョブも含む。このSELECTはmessageを外側に置いて番号の降順に読み、最初に終わったジョブで止めるので、読取り量は待機中・実行中のジョブの数で決まる。完了済みの会話とジョブの件数を読取り量に含めない。後の指示が終わると、lastFinishedJobはその指示に置き換わる。止めた画面は、記録された停止の応答を同じrequest IDの再送で読み直せる。
+stateはqueryパラメータを受け付けず、`{ pattern, currentRevision, runningJob, queuedJobs, queueHold, lastFinishedJob }` を返す。runningJobは実行権を持つジョブ（running・validating・committing）の `{ jobId, messageId, number }` で、なければnullにする。DBがパターンごとにactiveなジョブを一つに限るので、配列にしない。queuedJobsは同じ形の配列で、対応するmessageの番号の昇順に並べ、待機中がなければ空配列にする。同じジョブを両方に入れない。パターン・最新案・実行中のジョブ・待機中のジョブ・保留・最後に終わったジョブは同じD1 batchで読み、所有者を条件にする。実行中のジョブのSELECTは `jobs_one_active_per_pattern` 索引を `INDEXED BY` で使う。所有者の条件を加えると、統計を取った後のSQLiteはこの索引を使わず、パターンのジョブをすべて読むためである。待機列のSELECTはjobsをCROSS JOINの外側に置き、`jobs_queue` 索引でパターンとqueuedを絞ってからmessageを読む。lastFinishedJobは、終わった（completed・cancelled・failed）ジョブのうちmessageの番号が最も大きいものを、停止の応答のjobと同じ形で返し、なければnullにする。待機中に止めたジョブも含む。このSELECTはmessageを外側に置き、部分索引 `messages_inputs` で指示と回答だけを番号の降順に読み、最初に終わったジョブで止めるので、最後に終わったジョブより新しい入力だけが追加の読取り対象になる。これには待機中・実行中のジョブの入力と、ジョブのない入力が含まれる。完了済みの会話とジョブの件数を読取り量に含めない。後の指示が終わると、lastFinishedJobはその指示に置き換わる。止めた画面は、記録された停止の応答を同じrequest IDの再送で読み直せる。
 
 queueHoldは、待機列が保留中なら `{ job: { jobId, messageId, number, state } }`、保留していなければnullにする。jobは保留の原因になったジョブで、stateはcancelledかfailedである。保留中は、queuedJobsのすべてが保留中の指示で、runningJobはnullである。保留の原因はlastFinishedJobと異なることがある。たとえば、実行中の指示Aと待機中の指示B・Cがあり、先にCを止め、その後でAを止めたとする。lastFinishedJobは番号の大きいCを、queueHoldは保留の原因のAを示す。このSELECTは `jobs_one_queue_hold_per_pattern` 索引を `INDEXED BY` で使い、ほかの読取りと同じD1 batchで、所有者を条件にして読む。
 
@@ -626,17 +669,23 @@ Rustの版とWasmのターゲットは `rust-toolchain.toml` で固定し、rust
 
 git worktreeで並行して開発するときは、worktreeごとにRustの `target/` を持つ。Cargoはpath依存のクレートの新しさをソースの更新時刻だけで判断し、クレートのハッシュもworkspaceからの相対パスで作る。そのため、`target/` を共有すると、古いチェックアウトのworktreeが別のworktreeのコンパイルしたクレートを再利用する。worktreeの `pnpm setup` は、メインのチェックアウトの `target/` をcopy-on-writeで複製し、自作のクレートのソースの更新時刻を進める。外部のクレートは複製を再利用し、自作のクレートだけを各worktreeでビルドし直す。Gitのフックは全worktreeで共有なので、メインのチェックアウトでだけ登録する。
 
-サービスの依存解決はルートのCargo.lockとpnpm-lock.yamlで固定する。Cargoのプロファイル・依存パッチは利用側ルートで必要な設定を管理し、SolidCraft側の設定が自動で引き継がれるとは仮定しない。devプロファイルはincrementalコンパイルを無効にする。Cargoはincrementalの有無を成果物のハッシュに含めるので、有効にすると、環境変数の `CARGO_INCREMENTAL=0` や `CI` を設定した実行と設定しない実行が、同じコードの成果物を二組作るためである。キャッシュを利用する場合は、識別値に実際の依存解決とビルド条件を反映する。誤った再利用を避けるため、サービスから使うSolidCraftの評価キャッシュを無効にする。
+サービスの依存解決はルートのCargo.lockとpnpm-lock.yamlで固定する。Cargoのプロファイル・依存パッチは利用側ルートで必要な設定を管理し、SolidCraft側の設定が自動で引き継がれるとは仮定しない。devプロファイルはincrementalコンパイルを無効にする。Cargoはincrementalの有無を成果物のハッシュに含めるので、有効にすると、環境変数の `CARGO_INCREMENTAL=0` や `CI` を設定した実行と設定しない実行が、同じコードの成果物を二組作るためである。キャッシュを利用する場合は、識別値に実際の依存解決とビルド条件を反映する。誤った再利用を避けるため、サービスから使うSolidCraftの評価キャッシュを無効にする。SolidCraftのbuild.rsには、このリポジトリのgitの状態を読ませない。このリポジトリのHEADはSolidCraftのソースを表さず、読むとコミットやcheckoutのたびにsolidcraft-ioとそれに依存するcrateを作り直すためである。
 
 配信するWasmはreleaseプロファイルでビルドする。`pnpm setup`・`pnpm dev`・`pnpm build`・`pnpm check --full` は同じ生成スクリプトを使い、開発・検査・配信のWasmをそろえる。スクリプト内の一つのプロファイル値からCargoの `--profile` とwasm-bindgenの入力先を導き、`target/wasm32-unknown-unknown/release/` の出力からバインディングを生成する。プロファイルと入力先をログへ出す。バインディングを生成する前に、Wasmに入る自作のクレートがすべてそのチェックアウトの `target/` でコンパイルされたことを、rustcがクレートごとに書くdep-infoで確かめ、違えば止める。初回はdebugよりコンパイルに時間がかかり、再ビルドでは依存のキャッシュを再利用する。RustのテストとClippyはdebugのままにする。通常・軽い検査は生成済みの型定義を使い、全体検査はreleaseのWasmを再生成して、ローカル配信と実Containerの接続を確かめる。
 
-開発では `pnpm dev` がWeb画面、Worker・D1、Wasmと、`wrangler dev` 経由のDocker Containerを接続する。画面だけを扱うときは `MADORI_DEV_CONTAINERS=0` でContainerを無効にする。`pnpm check --full` はDockerイメージをビルドし、実Containerとの接続も検査する。Dockerはビルドプラットフォーム上のRustからLinux amd64向けにコンパイルし、Cargoのキャッシュを再利用する。テスト用と本番用の認証設定・DB・R2・秘密情報は分離する。
+開発では `pnpm dev` がWeb画面、Worker・D1、Wasmと、`wrangler dev` 経由のDocker Containerを接続する。画面だけを扱うときは `MADORI_DEV_CONTAINERS=0` でContainerを無効にする。`pnpm check --full` はDockerイメージをビルドし、実Containerとの接続も検査する。Dockerはビルドプラットフォーム上のRustからLinux amd64向けにコンパイルし、Cargoのキャッシュを再利用する。イメージのビルドに送る材料からは、取り込み領域のうちビルドが読まない大きなデータ（テストの正解データと入力、資料、使わない資産とクレート）を `.dockerignore` で除く。除くパスは、Linux向けのビルドのdep-infoに現れないことで確かめる。テスト用と本番用の認証設定・DB・R2・秘密情報は分離する。
 
-`pnpm check --full` の最後で、ローカルDocker Engineの未使用ビルドキャッシュを回収する。Cargoのregistry・git・targetを含む `exec.cachemount` は合計8 GiBまで保持する。別の枠で `regular` と `frontend` を最近使った順に合計4 GiBまで保持する。形状サービスの一組の層（Rustの基底層・aptのRUN・COPY・CargoのRUN・frontend・実行用のCOPY）は、計測値で約3.91 GBである。4 GiBの枠は一組を残すが、更新時の余裕は残らない。BuildKitは、再利用した基底層とaptのRUNの最終使用時刻を更新しない。そのため、記録が枠を超えると、回収はRustの基底イメージの層を最も古い記録として選ぶ。計測では、選んだ基底層の記録は回収の後も残り、層の記録の合計は回収の前後とも約6.37 GBで、枠を超えたままだった。時間の範囲では集中したビルドの容量を制限できないため、容量を上限にする。各枠の報告値が上限を超えた場合だけ、最終使用時刻が古い未使用記録から丸ごと削除する。`source.local`・`source.git.checkout`・`internal` の未使用記録はすべて回収する。未知の種類は選ばずに保持し、一行で報告する。使用中の記録は削除しない。Dockerは使用中のcache mountを0バイトと報告するため、その実容量を上限の計算に含められず、使用が終わった後に上限を超えることがある。並行したビルドや回収で計測後の状態も変わる。回収後の報告値は使用中のmountの実容量を保証しない。選別はDocker EngineのID・種類・バイト数・使用状態・時刻を検証した純粋関数で行い、選んだIDだけをBuildKitへ渡す。手動のdry-runも同じ選別を使い、保持・削除の記録を出す。手元とrunnerで同じ入口を使い、UnixソケットのローカルEngineだけを対象にする。イメージ・Container・ボリューム、runnerのCargoのtargetとツールは対象にしない。
+開発用のMacでは、複数のエージェントとself-hosted runnerが一つのCPUとDocker Engineを共有する。Dockerを使う重い作業が重なると、関係の無い試験まで時間切れで落ちる。そのため、Dockerを使う作業の数を、マシン全体で共有する「Dockerの枠」で制限する。`pnpm check --full` の実Containerの接続検査とビルドキャッシュの回収、Containerを有効にした `pnpm dev` は、枠を一つ取ってから始め、枠が埋まっていれば空くまで待つ。枠は開発用に二つ、runner用に一つとし、その数は `scripts/shared/docker-slots.ts` の一つの表だけで定める。runnerは環境変数 `GITHUB_ACTIONS=true` で見分け、runner用の枠だけを使うので、開発の作業が枠を埋めていても待たない。runnerは一度に一つのジョブを動かすので、stagingへのデプロイで `wrangler deploy` が行うイメージのビルドを含めても、runnerのDockerの作業は一つまでになる。
+
+枠は、ユーザーのホーム（`os.userInfo().homedir`）の `.local/state/instant-madori/docker-slots/` にある枠ごとのファイルへの、排他のflockで表す。macOSには `flock(1)` が無いので、`O_EXLOCK` を付けた一回の `open(2)` で取る。共有するマシンはmacOSなので、枠はmacOSでだけ働く。Linuxでは枠を取らずに実行し、そのことを一行出す。枠を使っているかはロックだけで決め、pidや時刻の記録には頼らない。そのため、落ちたプロセスや `kill -9` で止めたプロセスの枠は、OSが外して残らない。枠は取ったプロセスだけが持ち、子プロセスへは渡さない。Wranglerは自分の子プロセスに別のファイル記述子を渡し、Dockerのビルドを別のプロセスグループで起動するので、子に渡しても実際のDockerの作業までは届かない。そのうえ、`kill -9` の後に残った `wrangler dev` が枠を持ち続ける。枠を持つプロセスは、枠のファイルに目的・pid・開始時刻・チェックアウトを書き、手放すときに消す。待つプロセスと `status` は、この記録を表示だけに使う。ロックを取るのは枠を取るときだけで、自分の側（開発用かrunner用）の枠に限る。開発の作業がrunner用の枠のロックに触れることはない。待つプロセスは、待ち始めとその後の一分ごとに、各枠を持つプロセスを表示する。長く起動したままの `pnpm dev` は枠を一つ持ち続けるが、時間で止めることはしない。ポートが固定なので `pnpm dev` は同時に一つしか動かず、占める枠は一つまでである。
+
+`pnpm check --full` は、実Containerとの接続を検査した直後に、同じDockerの枠を持ったまま、ローカルDocker Engineの未使用ビルドキャッシュを回収する。Cargoのregistry・git・targetを含む `exec.cachemount` は合計8 GiBまで保持する。別の枠で `regular` と `frontend` を最近使った順に合計4 GiBまで保持する。形状サービスの一組の層（Rustの基底層・aptのRUN・COPY・CargoのRUN・frontend・実行用のCOPY）は、計測値で約3.91 GBである。4 GiBの枠は一組を残すが、更新時の余裕は残らない。BuildKitは、再利用した基底層とaptのRUNの最終使用時刻を更新しない。そのため、記録が枠を超えると、回収はRustの基底イメージの層を最も古い記録として選ぶ。計測では、選んだ基底層の記録は回収の後も残り、層の記録の合計は回収の前後とも約6.37 GBで、枠を超えたままだった。時間の範囲では集中したビルドの容量を制限できないため、容量を上限にする。各枠の報告値が上限を超えた場合だけ、最終使用時刻が古い未使用記録から丸ごと削除する。`source.local`・`source.git.checkout`・`internal` の未使用記録はすべて回収する。未知の種類は選ばずに保持し、一行で報告する。使用中の記録は削除しない。Dockerは使用中のcache mountを0バイトと報告するため、その実容量を上限の計算に含められず、使用が終わった後に上限を超えることがある。並行したビルドや回収で計測後の状態も変わる。回収後の報告値は使用中のmountの実容量を保証しない。選別はDocker EngineのID・種類・バイト数・使用状態・時刻を検証した純粋関数で行い、選んだIDだけをBuildKitへ渡す。手動のdry-runも同じ選別を使い、保持・削除の記録を出す。手元とrunnerで同じ入口を使い、UnixソケットのローカルEngineだけを対象にする。イメージ・Container・ボリューム、runnerのCargoのtargetとツールは対象にしない。
+
+実Containerの試験は、成功・失敗・中断のどの終わり方でも、自分のセッションのContainerを残さない。workerdは、アプリのContainerと、その通信を中継する `-proxy` のContainerに、セッションごとのラベル `dev.workerd.session` を付ける。Wranglerは、終了するときにこのラベルのContainerを消す。試験は、Wranglerを小さな監視プロセスの下で起動する。監視プロセスはWranglerのプロセスグループの先頭になり、試験のプロセスとのパイプが閉じると、Wranglerだけに SIGTERM を送る。パイプは、試験がWorkerを止めるときにも、試験のプロセスが中断の信号で終わるときにも閉じる。workerdには直接 SIGTERM を送らない。workerdが自分でアプリのContainerを消し始めると、同じContainerを消すWranglerの後始末がDockerに拒まれ（409）、`-proxy` を消さずに終わるためである。
 
 招待した利用者が使い始めるまでは、stagingだけを環境とし、本番の環境は作らない。本番の環境（設定、Accessアプリ、D1、R2、デプロイ手順）は、招待の前に6.6で用意する。本番はWorkerと静的ファイル、D1マイグレーション、R2、DO・Workflow、Containerイメージを一組の版としてデプロイする。RustはContainerの対象であるLinux向けにビルドし、Wasmは別の成果物として作る。形状処理のメモリと起動時間を測り、Containerのサイズ・同時実行数・休止条件を選ぶ。Cloudflareの利用料はできるだけ少なくする。Containerは動いている間だけ、確保したメモリ・ディスクと使ったCPUで課金される（[Containersの料金](https://developers.cloudflare.com/containers/platform/pricing/)）。そのため、インスタンスの種類と休止時間を利用料を左右する値として選び、止め忘れたContainerを残さない。
 
-stagingはworkers.devのホスト名で公開し、Worker宛先のAccessアプリで守る（preview URLは無効）。マイグレーションはデプロイの前に適用するため、動いている前の版のWorkerと両立する形で書く。デプロイの流れ、試験用ブランチのデプロイ、最初に環境を作る手順は、README「stagingへデプロイする」にまとめる。初期値の `.invalid` 発行元はローカル以外で拒否する。インスタンスの種類と休止時間は環境別の変数で指定する。Workers Logsを有効にし、Container内の標準出力もそこへ集める。接続用DOが出す `container.ready` ログの `mode: cold` で起動時間、Rustの要求ログの `vmHwmKib` でLinux上のメモリ最大値を読む。
+stagingはworkers.devのホスト名で公開し、Worker宛先のAccessアプリで守る（preview URLは無効）。mainへのpushでは、デプロイが読むファイルを一つでも変更したときにstagingへデプロイする。文書とエージェント向けの指示だけを変えるpushではデプロイせず、それらを読む検査はPRの `check` で行う。デプロイしないパスはworkflowの `paths-ignore` だけで定義する。マイグレーションはデプロイの前に適用するため、動いている前の版のWorkerと両立する形で書く。デプロイの流れ、デプロイしないパス、試験用ブランチのデプロイ、最初に環境を作る手順は、README「stagingへデプロイする」にまとめる。初期値の `.invalid` 発行元はローカル以外で拒否する。インスタンスの種類と休止時間は環境別の変数で指定する。Workers Logsを有効にし、Container内の標準出力もそこへ集める。接続用DOが出す `container.ready` ログの `mode: cold` で起動時間、Rustの要求ログの `vmHwmKib` でLinux上のメモリ最大値を読む。
 
 Wranglerは、アップロードした版を約3秒のうちに読めないと、その版を公開したまま、Containerのアプリケーション設定とトリガーを適用せずに失敗し、同じ `wrangler deploy` のやり直しを求める。Wranglerの版を変えても直らないため、stagingのデプロイは `scripts/deploy/wrangler-deploy.ts` を通し、この失敗のときだけ同じコマンドを初回を含めて3回まで、待たずにやり直す。失敗はWranglerの構造化出力にある失敗の文の完全一致で見分け、ほかの失敗はやり直さない。
 
@@ -762,6 +811,8 @@ workspace継承、依存パッチ、資産参照、評価キャッシュの誤�
 
 招待した利用者がログインして案件を作れ、別利用者の案件・パターン・案・ジョブへアクセスできない。サンプルの形をサーバーからブラウザへ表示できる。停止と確定の競合、同じ要求の再送、R2保存後のDB失敗、Worker・Containerの停止を試し、以前の確定案と履歴が壊れない。
 
+障害の試験のうち、stagingで起こせるものは `scripts/check/staging-faults/main.ts` で繰り返す。同じ要求の再送、確定の後と待ちの間の停止、待たせたジョブをまたぐWorkerとパターンDOの再起動、停止の後の待機列の保留と再開である。このスクリプトは、検証用の利用者のジョブを `before_render` で待たせる `JOB_TEST_HOLD` に頼る。R2保存後のDB失敗、確定の前の停止、Containerの停止はstagingで起こせないので、ローカルの試験で確かめる。stagingのContainerはデプロイで入れ替わらず、一つのContainerを外から止める手段もないためである。Cloudflare上で起動の途中にContainerが止まったときの扱いは、検証用の利用者だけに効く停止の設定を加えるまで確かめられない。
+
 **この段階で確かめること**
 
 Linux Container上のSolidCraftの動作、必要メモリと起動時間、WebGPUが使えるPCブラウザでの描画を確認する。結果に基づいて資源設定と実行時の上限を決める。既存検証のWasmサイズだけで、本体の配信サイズを確定しない。
@@ -863,6 +914,7 @@ Linux Container上のSolidCraftの動作、必要メモリと起動時間、WebG
 | [検証5](verification/verification-05.md)                                                                                                | stagingで、最後の要求から約10分（600,164 ms）でContainerが止まることを確認                                                                                                                                                                                                                               |
 | [検証6](verification/verification-06.md)                                                                                                | 家一軒の試作で、要求ごとに住宅データからCADを作り直す方式、壁ごとの輪郭の押し出しと接合の規則、完了した要求の間でSessionを保持しないことを決めた                                                                                                                                                         |
 | [検証7](verification/verification-07.md)                                                                                                | 三つのデータの持ち方を同じ場面で比べ、加工を取り付け先の座標系で、物体を自分の座標系で書いた形と部屋か壁での置き場所で、住宅データに持つ方式を採った。投影による面積の照合を確かめた                                                                                                                     |
+| [検証8](verification/verification-08.md)                                                                                                | stagingで、再送、確定の後と待ちの間の停止、待たせたジョブをまたぐ再デプロイ、待機列の保留と再開を一つのパターンで試し、前の案と表示データが変わらないことを確認。再デプロイの後もWorkflowは古い版で確定し、Containerは引き継がれた。R2保存後のDB失敗とContainerの停止はローカルで確認                    |
 | [SolidCraftの構成](../third_party/solidcraft/docs/architecture.md)、[Session](../third_party/solidcraft/crates/engine/src/lib.rs)       | 形状処理を専用画面と分けて利用する。同期的な処理と協調的な停止をサービス側で扱う                                                                                                                                                                                                                         |
 | [外観](../third_party/solidcraft/crates/doc/src/appearance.rs)、[面の名前](../third_party/solidcraft/docs/book/src/dev/naming.md)       | 見た目と面の追跡を利用し、住宅としての役割と対応を補う                                                                                                                                                                                                                                                   |
 | [素材画像](../third_party/solidcraft/docs/render-runtime-textures.md)、[描画経路](../third_party/solidcraft/docs/render-integration.md) | 通常の描画経路に素材・影の機能がすべて揃っているとは扱わず、追加実装を計画する                                                                                                                                                                                                                           |

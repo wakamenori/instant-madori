@@ -2,10 +2,18 @@ name: deploy-staging
 on:
   push:
     branches: [main]
+    # Paths that no deploy input reads (README: stagingへデプロイする).
+    paths-ignore:
+      - ".claude/**"
+      - ".github/ISSUE_TEMPLATE/**"
+      - "docs/**"
+      - "AGENTS.md"
+      - "CLAUDE.md"
+      - "README.md"
   workflow_dispatch:
 permissions:
   contents: read
-# Never cancel a deploy midway; a newer push waits and then deploys the latest main.
+# Never cancel a running deploy; a newer run replaces the one pending run and later deploys its own commit.
 concurrency:
   group: deploy-staging
   cancel-in-progress: false
@@ -32,6 +40,14 @@ jobs:
       - run: pnpm check --full
         env:
           MADORI_MIGRATION_BASE: ${{ github.event.before }}
+          MADORI_TEST_RESULTS_DIR: ${{ runner.temp }}/test-results
+      - if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results-v1-${{ github.workflow }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/test-results/
+          retention-days: 30
+          if-no-files-found: ignore
       # Credentials come from the runner's MADORI_ENV_FILE (README: PRの検査); read only what each step needs.
       - name: Migrate and deploy
         working-directory: apps/worker

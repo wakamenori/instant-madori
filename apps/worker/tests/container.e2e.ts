@@ -21,16 +21,15 @@ async function runningContainers() {
     "ps",
     "--no-trunc",
     "--format",
-    "{{.ID}}\t{{.Image}}",
+    '{{.ID}}\t{{.Image}}\t{{.Label "dev.workerd.session"}}',
   ]);
   return stdout
-    .trim()
     .split("\n")
     .filter(Boolean)
     .map((line) => {
-      const [id, image] = line.split("\t");
+      const [id, image, session = ""] = line.split("\t");
       assert(id && image, `Invalid docker ps row: ${line}`);
-      return { id, image };
+      return { id, image, session };
     });
 }
 void test(
@@ -45,6 +44,7 @@ void test(
       vars: { GEOMETRY_IDLE_TIMEOUT_MS: String(idleTimeoutMs), JOB_TEST_HOLD: "before_commit:15" },
     });
     const bootMs = performance.now() - started;
+    let session: string | undefined;
     try {
       const preexistingIds = new Set((await runningContainers()).map(({ id }) => id));
       const viewer = await import("../../../crates/viewer/pkg/madori_viewer.js");
@@ -132,6 +132,19 @@ void test(
         );
       }
       await commitAndView("cold");
+      const image = worker.logEntries().find((entry) => entry["event"] === "container.started")?.[
+        "image"
+      ];
+      assert.equal(typeof image, "string");
+      const sessions = new Set(
+        (await runningContainers())
+          .filter((entry) => entry.image === image)
+          .map((entry) => entry.session),
+      );
+      assert.equal(sessions.size, 1);
+      [session] = sessions;
+      assert(session);
+      assert.match(session, /^[0-9a-f]{16}$/);
       await commitAndView("warm");
       assert.equal(
         worker.logEntries().filter((entry) => entry["event"] === "container.started").length,
@@ -185,75 +198,6 @@ void test(
               nextStart: "cold",
             }),
           );
-        },
-      );
-      await t.test(
-        "killing the cold Container during readiness retries render and commits once",
-        async () => {
-          const created = await worker.call("/api/projects", {
-            method: "POST",
-            as: user,
-            body: { requestId: crypto.randomUUID() },
-          });
-          const { pattern } = createProjectResponseSchema.parse(await created.json());
-          const history = async () =>
-            revisionListResponseSchema.parse(
-              await (
-                await worker.call(`/api/patterns/${pattern.id}/revisions`, { as: user })
-              ).json(),
-            ).revisions;
-          const previous = await history();
-          const image = worker.logEntries().find((e) => e["event"] === "container.started")?.[
-            "image"
-          ];
-          assert.equal(typeof image, "string");
-          const owned = async () => (await runningContainers()).filter((c) => c.image === image);
-          const before = new Set((await owned()).map((c) => c.id));
-          const accepted = await worker.call(`/api/patterns/${pattern.id}/messages`, {
-            method: "POST",
-            as: user,
-            body: { requestId: crypto.randomUUID(), body: "作って" },
-          });
-          const { job } = acceptInstructionResponseSchema.parse(await accepted.json());
-          const started = await worker.logLine(job.jobId, "container.started");
-          assert.equal(started["image"], image);
-          const deadline = Date.now() + 10_000;
-          let added = (await owned()).filter((c) => !before.has(c.id));
-          while (!added.length && Date.now() < deadline) {
-            await setTimeout(25);
-            added = (await owned()).filter((c) => !before.has(c.id));
-          }
-          assert.equal(added.length, 1);
-          const target = added[0];
-          assert(target);
-          await docker("docker", ["kill", target.id]);
-          assert(
-            !worker
-              .logEntries()
-              .some((e) => e["event"] === "container.ready" && e["traceId"] === job.jobId),
-          );
-          await settleJobs(worker, user, pattern.id, [job.jobId], 300_000);
-          const render = worker
-            .logEntries()
-            .filter(
-              (e) =>
-                e["jobId"] === job.jobId &&
-                e["event"] === "job.step" &&
-                e["step"] === "render snapshot",
-            );
-          const failed = render.find(
-            (e) =>
-              e["outcome"] === "error" &&
-              /Geometry unavailable: (exited|not_ready)/u.test(String(e["error"])),
-          );
-          assert(failed);
-          assert(
-            render.some(
-              (e) => e["outcome"] === "saved" && Number(e["attempt"]) > Number(failed["attempt"]),
-            ),
-          );
-          assert.equal((await worker.logLine(job.jobId, "job.finished"))["outcome"], "committed");
-          assert.equal((await history()).length, previous.length + 1);
         },
       );
       await t.test("stopped during the hold, the commit is refused", async () => {
@@ -415,5 +359,25 @@ void test(
     } finally {
       await worker.stop();
     }
+    assert(session);
+    const filter = `label=dev.workerd.session=${session}`;
+    await t.test("stopping the Worker removes every container of its session", async () => {
+      const deadline = performance.now() + 30_000;
+      let remaining: string;
+      do {
+        const { stdout } = await docker("docker", [
+          "ps",
+          "--all",
+          "--quiet",
+          "--no-trunc",
+          "--filter",
+          filter,
+        ]);
+        remaining = stdout.trim();
+        if (!remaining) break;
+        await setTimeout(250);
+      } while (performance.now() < deadline);
+      assert.equal(remaining, "", `containers remain for ${filter}`);
+    });
   },
 );

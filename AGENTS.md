@@ -4,7 +4,7 @@
 
 ## 進め方
 
-作業の進め方、設計、レビュー、コミットとPRの書き方は、pstackの poteto-mode に従う。タスクの最初に `/pstack:poteto-mode` を起動し、起動できなければ pstack プラグインの `skills/poteto-mode/SKILL.md` を読んで従う。モデルの割り当ては、[.claude/rules/pstack-models.md](.claude/rules/pstack-models.md) に従う。計画のmilestoneとIssueを進めるときは、指揮役は `/madori-coordinator`、Issueの担当は `/madori-owner` を使う。アプリの振る舞いは `/verify-madori` で確かめる。このファイルには、このリポジトリ固有の構成・検査・安全の決まりだけを書く。
+作業の進め方、設計、レビュー、コミットとPRの書き方は、pstackの poteto-mode に従う。poteto-mode は Skill ツールでは起動できないので、タスクの最初に、Claude Code が入れた pstack プラグインの `skills/poteto-mode/SKILL.md` を読んで従う。その探し方は [madori-owner](.claude/skills/madori-owner/SKILL.md) の冒頭にある。モデルの割り当ては、[.claude/rules/pstack-models.md](.claude/rules/pstack-models.md) に従う。計画のmilestoneとIssueを進めるときは、指揮役は `/madori-coordinator`、Issueの担当は `/madori-owner` を使う。アプリの振る舞いは `/verify-madori` で確かめる。このファイルには、このリポジトリ固有の構成・検査・安全の決まりだけを書く。
 
 - ユーザーの作業を失わない。リポジトリを変更する前にGitの作業状態と履歴を確認し、関係のない変更を巻き戻さない。
 - プロダクトの文書と議論は日本語でよい。コードの識別子とコメントは英語で書く。
@@ -23,16 +23,18 @@
 - 第三者の著作権表示とライセンスを保持する。GPL、LGPL、AGPLの依存を追加しない。他の製品のコードや資産を写さない。
 - ローカルの検査とテストに、本番の認証情報を持ち込まない。秘密の値を表示しない。
 
-- 補助スクリプトは、目的に合う `scripts/check/`・`scripts/dev/`・`scripts/generate/`・`scripts/build/`・`scripts/upstream/`・`scripts/deploy/` に置く。複数の目的から使う部品だけを `scripts/shared/` に置き、テストは対象のファイルと同じフォルダーに置く。当てはまる目的がなければ、目的を表す名前のフォルダーを許可なしで足してよく、足したらこの一覧に加える。一度限りの検証スクリプトは `scripts/` に置かない。
+- 補助スクリプトは、目的に合う `scripts/check/`・`scripts/dev/`・`scripts/generate/`・`scripts/build/`・`scripts/upstream/`・`scripts/deploy/`・`scripts/measure/` に置く。複数の目的から使う部品だけを `scripts/shared/` に置き、テストは対象のファイルと同じフォルダーに置く。当てはまる目的がなければ、目的を表す名前のフォルダーを許可なしで足してよく、足したらこの一覧に加える。一度限りの検証スクリプトは `scripts/` に置かない。
 
 ## 検査と引き継ぎ
 
 - miseで固定したツールと、READMEに書いたコマンドを使う。`pnpm check --fast` は、TypeScriptとRustを自動修正したうえで検査する。`pnpm check` は、それに加えて両方のテストを実行する。`pnpm check --full` は、ビルド、ローカルでの統合検査、依存関係の監査まで行う。依存関係、upstream、WasmのAPIを変更した後にも `--full` を使う。コミットの前に、変更に関係する検査を手元で実行する。PRの検査と、マージの前に確かめることは、README「PRの検査（self-hosted runner）」にある。実行していない検査を、実行したと書かない。
 - `apps/geometry`、Dockerfile、`crates/display`・`crates/geometry-api`・`crates/modeling`、Workerの `geometry/`・サンプルAPIと形状サービス、Containerの設定など、Containerまたは表示データの経路を変更した後は、Dockerを起動して `pnpm check --full` で実Containerとの接続を検査する。
+- `pnpm check --full` のDockerの段階と `pnpm dev` は、マシン全体で共有するDockerの枠（開発用に二つ、runner用に一つ）を取ってから動き、枠が埋まっていれば、枠を持つプロセスを `[docker-slot]` の行に示して待つ。待つのは正常な動作なので、止めずに待つ。そのほかのDockerの重い作業（実Containerの試験を直接動かす、キャッシュなしでビルドするなど）は、`node scripts/shared/docker-slots.ts run -- <コマンド>` で実行する。`pnpm dev` は使い終わったら止める。枠を持つプロセスは、`kill -9` ではなく、Ctrl-Cか `kill` で止める。`kill -9` は子プロセスのDockerの作業を残したまま枠を空ける。
 - TypeScriptのアプリとスクリプトには、型情報を使うESLintと厳格な型検査を適用し続ける。信頼できないJSONは、外から受け取る箇所でパースして検証する。依存関係のカタログとツールのバージョン固定を、互いに食い違わない状態に保つ。ロックファイルの変更は内容を確認する。
 - `pnpm check` は、どのモードでもサービスのファイルを整形し、ESLintとClippyの自動修正を適用する。ステージする前に、その結果の差分を確認する。upstreamのソース、過去の検証記録、生成されたファイルを一括で整形しない。コミット前のフックは、ステージされたファイルを書き換えずに検査するだけで、プロジェクト全体の検査の代わりにはならない。
 - テスト以外の新しいRustコードでは、`unsafe`、`unwrap`、`expect`、およびパニックに頼るエラー処理を使わない。外部からの入力は、受け取る箇所で検証する。
 - 生成したWasmとビルドのキャッシュは、Gitの追跡対象にしない。
+- 試験の失敗を判断する前に、`node scripts/check/test-history.ts` で失敗率を確認する。不安定と分かった試験は不具合のIssueにする。自動の再実行も手動の `gh run rerun <run> --failed` も、不安定なのか常に失敗するのかを見分けるためだけに使う。合格させるために再実行しない。試験を一時的に外すときは、外した箇所からそのIssueにリンクする。
 - 要件または構成が変わったときは、`docs/plan.md` を更新する。plan.mdは変更履歴ではなく、その時点の計画として書く。plan.mdには仕様と設計だけを書き、進み具合、作業の一覧、完了の記録は書かない。今回の変更に含めない作業は、該当するmilestoneのIssueにする。PRは、対応するIssueを本文の `Closes #<番号>` で閉じる。実装が計画からずれたら、既存の記述を変更後の状態に書き直す。
 
 ## Issue と PR の画像

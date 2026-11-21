@@ -1,6 +1,7 @@
 export const typescriptExtensions = "{ts,tsx,mts,cts}";
 
 const workerLayerScopes = {
+  "worker-ai": { files: [`apps/worker/src/ai/**/*.${typescriptExtensions}`], ignores: [] },
   "worker-api": {
     files: [`apps/worker/src/api/**/*.${typescriptExtensions}`],
     ignores: ["apps/worker/src/api/app.ts", "apps/worker/src/api/access.ts"],
@@ -95,6 +96,12 @@ export const workerLayers: Record<
   WorkerLayer,
   { allowed: WorkerLayer[]; typeOnly: WorkerLayer[]; reason: BoundaryReason }
 > = {
+  ai: {
+    allowed: [],
+    typeOnly: [],
+    reason:
+      "docs/plan.md §4.2 ai owns one provider round trip without business decisions or other layers",
+  },
   api: {
     allowed: ["services"],
     typeOnly: ["geometry"],
@@ -102,9 +109,9 @@ export const workerLayers: Record<
   },
   services: {
     allowed: ["geometry"],
-    typeOnly: ["storage"],
+    typeOnly: ["storage", "ai"],
     reason:
-      "docs/plan.md §4.2 services receive Store operations and call geometry without HTTP handlers",
+      "docs/plan.md §4.2 services receive Store operations and the AI round trip and call geometry without HTTP handlers",
   },
   storage: {
     allowed: [],
@@ -162,6 +169,7 @@ const workerLayerNames = Object.keys(workerLayers).filter((layer): layer is Work
 );
 const workerLayerMembers: Record<WorkerLayer, TypeScriptScope[]> = {
   api: ["worker-api-entry", "worker-access"],
+  ai: [],
   services: [],
   storage: ["worker-d1", "worker-r2"],
   geometry: [],
@@ -515,7 +523,10 @@ export const boundaryTestIgnores = [`**/*.test.${typescriptExtensions}`, "**/tes
 
 export const crateFamilies = {
   cadKernel: { pattern: /^solidcore(?:-ops)?$/u, label: "CAD kernel" },
-  uiToolkit: { pattern: /^(?:egui(?:[-_].*)?|eframe|winit)$/u, label: "UI toolkit" },
+  uiToolkit: {
+    pattern: /^(?:egui(?:[-_].*)?|epaint(?:[-_].*)?|emath|ecolor|eframe|winit)$/u,
+    label: "UI toolkit",
+  },
   gpu: { pattern: /^wgpu(?:-.*)?$/u, label: "GPU" },
   pluginRuntime: { pattern: /^(?:wasmtime(?:-.*)?|craft-plugin-wasm)$/u, label: "plugin runtime" },
   editingEngine: {
@@ -571,10 +582,10 @@ export const rustBoundaries: RustBoundary[] = [
     id: "housing-dependencies",
     crate: "madori-housing",
     kind: "direct",
-    allowedDirectDeps: [],
+    allowedDirectDeps: ["schemars", "serde", "serde_json"],
     reason:
-      "AGENTS.md 構成と境界; docs/plan.md §4.2 housing is independent of HTTP, browser, Cloudflare and CAD",
-    message: "Housing dependencies need an explicit pure-domain allowlist entry.",
+      "AGENTS.md 構成と境界; docs/plan.md §3.1 and §4.2 housing uses serialization and schema dependencies only",
+    message: "Housing may depend only on schemars, serde and serde_json.",
   },
   {
     id: "viewer-solidcraft",
@@ -606,16 +617,10 @@ export const rustBoundaries: RustBoundary[] = [
     crate: "madori-modeling",
     kind: "direct",
     dependencyPrefix: "solidcraft-",
-    allowedDirectDeps: [
-      "solidcraft-engine",
-      "solidcraft-doc",
-      "solidcraft-kernel",
-      "solidcraft-io",
-    ],
+    allowedDirectDeps: ["solidcraft-engine", "solidcraft-doc", "solidcraft-io"],
     reason:
-      "docs/plan.md §4.2 modeling uses engine, doc and kernel; current solidcraft-io enables external-workspace cache safety (§5.1)",
-    message:
-      "Modeling SolidCraft dependencies must stay within its documented layers and cache-safety IO exception.",
+      "docs/plan.md §4.2 modeling uses engine and doc and reaches kernel through solidcraft_engine::kernel; io is direct only to enable external-workspace (§5.1)",
+    message: "Modeling may directly use only SolidCraft engine, doc and io.",
   },
   {
     id: "geometry-solidcraft",
@@ -652,7 +657,7 @@ export const rustBoundaries: RustBoundary[] = [
     required: ["external-workspace"],
     forbidden: ["trust-unknown-source"],
     reason:
-      "docs/plan.md §5.1 disable upstream cache reuse because its fingerprint does not describe this workspace",
+      "docs/plan.md §5.1 disable upstream cache reuse because its fingerprint does not describe this workspace, and keep io's build script from reading this repository's git state because HEAD is not the SolidCraft source",
     message: "The service must not trust a cache fingerprint from the upstream workspace.",
   },
 ];

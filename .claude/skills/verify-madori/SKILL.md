@@ -67,10 +67,14 @@ echo $! >| "$EVIDENCE/dev.pgid"
 wait
 ```
 
-`pnpm dev` は Wasm と Web をビルドし、ローカルの D1 にマイグレーションを当ててから、Worker（8787）と Vite（5173）を起動する。初回は amd64 イメージのビルドに数分かかる。次の二つが通れば使える。
+`pnpm dev` は Wasm と Web をビルドし、ローカルの D1 にマイグレーションを当てる。Container を有効にしていれば、マシン全体で共有する Docker の枠（AGENTS.md「検査と引き継ぎ」）を取ってから、Worker（8787）と Vite（5173）を起動する。枠が埋まっている間は、`dev.log` に `[docker-slot] <時刻> waiting …` の行を一分ごとに出して待ち、取れたら `[docker-slot] <時刻> acquired …` を出す。待つのは正常な動作なので、止めずに待つ。初回は amd64 イメージのビルドに数分かかる。次の二つが通れば使える。一つ目の繰り返しは、枠を待っている間（`waiting` の行があり、`acquired` の行がまだ無い間）の試行を数えない。
 
 ```sh
-for i in $(seq 1 120); do curl -fsS http://127.0.0.1:5173/api/me >/dev/null 2>&1 && break; sleep 5; done
+tries=0
+until curl -fsS http://127.0.0.1:5173/api/me >/dev/null 2>&1 || [ "$tries" -ge 120 ]; do
+  if grep -q '\[docker-slot\] [0-9:]* waiting ' "$EVIDENCE/dev.log" && ! grep -q '\[docker-slot\] [0-9:]* acquired ' "$EVIDENCE/dev.log"; then :; else tries=$((tries + 1)); fi
+  sleep 5
+done
 (
   set -eu
   api=http://127.0.0.1:5173/api
@@ -94,7 +98,7 @@ for i in $(seq 1 120); do curl -fsS http://127.0.0.1:5173/api/me >/dev/null 2>&1
 )
 ```
 
-二つ目が `200 application/vnd.madori.display; version=1` なら、5173 番で受け付けた指示がジョブとしてパターンの Durable Object と Container まで届き、確定した案の表示データを取得できた。Container の起動待ちは最大 60 秒。`$EVIDENCE/dev.log` に `Container image(s) ready` と `Ready on http://127.0.0.1:8787` が出ないまま 10 分過ぎたら、ログの末尾を報告して止まる。
+二つ目が `200 application/vnd.madori.display; version=1` なら、5173 番で受け付けた指示がジョブとしてパターンの Durable Object と Container まで届き、確定した案の表示データを取得できた。Container の起動待ちは最大 60 秒。`$EVIDENCE/dev.log` に `Container image(s) ready` と `Ready on http://127.0.0.1:8787` が、枠を取ってから 10 分過ぎても出なければ、ログの末尾を報告して止まる。枠を待っている間は、`waiting` の行に枠を持つプロセスの目的、pid、経過時間、チェックアウトが出る。長く待つときは、その行を指揮役に伝える。
 
 ## 状態確認
 
@@ -114,6 +118,7 @@ git rev-parse HEAD
 
 - 画面は T3 のプレビューで操作する。`preview_open` に `target: { kind: "environment-port", port: 5173 }`、`open: false`、`reuseExistingTab: false` を渡し、返った `tabId` だけを操作する。このプレビューの Chromium は WebGPU を使える。
 - 要素の ref は、`save` を付けない `preview_snapshot` の `accessibilityTree` から取る。新しい snapshot を撮ると、`save: true` でも前の ref は無効になる。操作の直前に ref を取り直す。
+- `preview_snapshot` が `The browser is not producing screenshot frames` で失敗するときは、T3 の窓が隠れているか最小化されている。`preview_evaluate` と `preview_act` はそのまま動く。要素は ref の代わりに、`preview_act` の `locator` へ `role=button[name="もう一度送る"]` の形で役割と名前を渡して指せる。スクリーンショットは撮れないので、利用者に窓を戻してもらうか、画面の絵を確かめられなかったこととして報告する。
 - API は 5173 番のプロキシへ `curl` で送る。プロキシが、開発者として署名したトークンを付ける。8787 番へ直接送ると、認証が要る経路は 401 になる。`/api/health` は認証なしで応答し、未知の経路は 404、許していないメソッドは 405 になる。
 - GET 以外の要求には `origin: http://127.0.0.1:5173` を付ける。付けないと、CSRF の防御で `403 forbidden` になる。
 - 書き込みを伴う要求の `requestId` は `uuidgen` で作る。
@@ -134,6 +139,8 @@ git rev-parse HEAD
 
 自分が起動したものだけを止める。プロセス名で kill しない。証拠は消さない。
 
+止める前に、指示を流したパターンに実行中の指示が残っていないことを確かめる。ローカルの `wrangler dev` では、止めた時点で動いていた Workflow は起動し直しても再開しない。その指示は `running` のまま残り、同じパターンへの後の指示はすべて待機中のまま動かない。残っていたら、終わるまで待つか、[指示を止める](features/stop.md)の手順で止めてから片付ける。
+
 ```sh
 kill -INT -- "-$(cat "$EVIDENCE/dev.pgid")"
 for i in $(seq 1 60); do lsof -nP -iTCP:8787 -iTCP:5173 -sTCP:LISTEN >/dev/null || break; sleep 1; done
@@ -150,11 +157,15 @@ workerd は Container を作るたびに、`dev.log` へ `containerName = worker
 
 ## マージの後に staging を確かめる
 
-main へマージすると、staging へ自動でデプロイされる。ブランチを試すときに workflow を手で実行する方法は、README「stagingへデプロイする」にある。マージの後は、まずデプロイの実行を確かめる。
+main へマージすると、staging へ自動でデプロイされる。ただし、変えたファイルがすべて `deploy-staging.yml` の `paths-ignore`（`.claude/` や `docs/` の下など）に入るマージでは、デプロイは起きない。staging は前にデプロイしたコミットのまま残る。ブランチを試すときに workflow を手で実行する方法は、README「stagingへデプロイする」にある。マージの後は、まずデプロイの実行を確かめる。
 
 ```sh
 gh run list --workflow deploy-staging.yml --commit "$MERGE_SHA" --json status,conclusion,url
 ```
+
+`[]` が返ったら、そのマージはデプロイを起こしていない。staging で確かめるのは、前にデプロイした版の振る舞いになる。
+
+計画6.1bの障害の試験（再送、確定の後と待ちの間の停止、再デプロイをまたぐ指示、保留と再開）をまとめて行うときは、下の節を一つずつ動かさず、README「stagingへデプロイする」の `scripts/check/staging-faults/main.ts` を使う。このスクリプトは、指揮役が起動した再デプロイの run を受け取って動く。
 
 同じ疎通の確認を手元から行うときは、メインのチェックアウトの `.env` を渡す。値は表示しない。
 
@@ -235,7 +246,7 @@ c() { printf '%s\n' "$HDRS" | curl -sS -H @- "$@"; }
 
 ### 検証用の利用者で再デプロイをまたいで指示を完了させる
 
-Worker と DO が再起動しても、待たせている指示は完了し、案は一件だけ増える。待ちの180秒の内に staging のデプロイが入るよう、同じ main の版を deploy-staging で起動し直し、その「Migrate and deploy」の段階が始まったときに送る。この段階は16〜31秒で終わった（2026-11 の15回の実行）。再デプロイの後も、動いている Workflow のインスタンスは作られたときの版のコードで続き、パターンの DO だけが新しい版で動き直す。前の節と同じく、ヘッダーはシェルの変数に持ち、下の各手順は一つのスクリプトで続けて実行する。`STG`・`J`・`HDRS`・`c` は前の節のとおりに設定し、`D="$EVIDENCE/staging-redeploy"; mkdir -p "$D"` にする。
+Worker と DO が再起動しても、待たせている指示は完了し、案は一件だけ増える。待ちの180秒の内に staging のデプロイが入るよう、同じ main の版を deploy-staging で起動し直し、その「Migrate and deploy」の段階が始まったときに送る。この段階は十数秒から1分ほどで終わる（2026-11-20 の成功した5回で13〜56秒）。再デプロイの後も、動いている Workflow のインスタンスは作られたときの版のコードで続き、パターンの DO だけが新しい版で動き直す。前の節と同じく、ヘッダーはシェルの変数に持ち、下の各手順は一つのスクリプトで続けて実行する。`STG`・`J`・`HDRS`・`c` は前の節のとおりに設定し、`D="$EVIDENCE/staging-redeploy"; mkdir -p "$D"` にする。
 
 - **案件を得る。** 前の節と同じ要求で `PID` を設定する。
 - **パターンを足す。** 前の節と同じ要求を、名前を `再デプロイの確認`、出力先を `"$D/pattern.json"` にして送る。`201`。`PAT` を設定する。

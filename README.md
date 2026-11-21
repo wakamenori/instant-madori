@@ -8,7 +8,7 @@
 
 macOSまたはLinux、Git（`git subtree`を含む）、[mise](https://mise.jdx.dev/getting-started.html)、rustupを使用します。Node.js・pnpm・検査ツールは`mise.toml`、Rust・Clippy・rustfmt・Wasmターゲットは`rust-toolchain.toml`で固定しています。Dockerは `pnpm dev` と `pnpm check --full` に必要です。Docker DesktopのVMには、12 GBのメモリを割り当ててください。8.32 GBのVMでは、形状サービスのイメージのビルドがメモリ不足で止まりました。画面だけの作業では `MADORI_DEV_CONTAINERS=0 pnpm dev` で起動できます。
 
-リポジトリのルートで実行します。ローカル起動にCloudflareアカウントやAIキーは不要です。
+リポジトリのルートで実行します。ローカル起動にCloudflareアカウントやAIキーは不要です。ローカルでは、AIの代わりに、決まった応答を返す台本のAIを使います。
 
 ```sh
 mise trust
@@ -33,7 +33,13 @@ Rustは、rustupのcargoで動かします。`rust-toolchain.toml` の版とWasm
 
 Containerを使うローカルセッション（実Containerテスト、別worktreeやself-hosted runnerでの `pnpm check --full`）は同時に起動できます。Miniflareがセッションごとに異なるIDをContainerの名前（`workerd-<ID>-instant-madori-GeometryContainer-...`）に付けるためです。`pnpm dev` だけは8787番と5173番のポートを固定しているので、同時に一つしか起動できません。クラッシュしたセッションのContainerは残ることがあります。`docker ps -a --format '{{.ID}} {{.Names}}'` で `workerd-` で始まる名前を確かめ、動いているセッションがないときに `docker rm --force <ID>...` で削除します。
 
-`pnpm check --full` は最後に、接続先のローカルDocker Engineの未使用ビルドキャッシュを回収します。Cargoのregistry・git・targetを含む `exec.cachemount` は合計8 GiBまで残します。それとは別に、`regular` と `frontend` は最近使った記録から合計4 GiBまで残します。形状サービスの一組の層は、Rustの基底層・aptのRUN・COPY・CargoのRUN・frontend・実行用のCOPYを合わせて約3.91 GBです。4 GiBの枠はこの一組を残しますが、更新時の余裕は残りません。BuildKitは、再利用した基底層とaptのRUNの最終使用時刻を更新しません。そのため、記録が枠を超えると、回収はRustの基底イメージの層を最も古い記録として選びます。計測では、選んだ基底層の記録は回収の後も残り、層の記録の合計は回収の前後とも約6.37 GBで、枠を超えたままでした。時間の範囲ではビルドが集中した際の容量を制限できないため、容量で制限します。
+Dockerを使う重い作業は、マシン全体で共有する「Dockerの枠」を一つ取ってから始まります。枠を取るのは、`pnpm check --full` の実Containerの接続検査とビルドキャッシュの回収の間と、Containerを有効にした `pnpm dev` の起動から終了までです。枠は開発用に二つ、self-hosted runner用に一つあります。runnerはGitHub Actionsが設定する `GITHUB_ACTIONS=true` で見分け、開発用の枠が埋まっていても待ちません。枠が埋まっていれば空くまで待ち、待ち始めとその後の一分ごとに、各枠を持つプロセスの目的、pid、経過時間、チェックアウトを `[docker-slot]` の行に表示します。待っている間のCtrl-Cで、`pnpm check` は中断して終了コード1で、`pnpm dev` は通常の停止として終了コード0で終わります。
+
+枠はmacOSでだけ働きます。Linuxでは枠を取らずに実行し、そのことを `[docker-slot]` の行に一行表示します。枠の実体は、`~/.local/state/instant-madori/docker-slots/` のファイルにかけるflockです。枠は取ったプロセスだけが持ち、プロセスが終わると、`kill -9` で止めた場合もOSが外します。子プロセスは枠を持ちません。そのため、`kill -9` で止めると、そのプロセスが起動した `wrangler dev` やDockerのビルドが動き続けていても枠は空きます。止めるときは、Ctrl-Cか `kill`（SIGTERM）を使ってください。
+
+`node scripts/shared/docker-slots.ts status` で各枠を持つプロセスを表示します。`pnpm check --full` と `pnpm dev` の外でDockerの重い作業をするときは、`node scripts/shared/docker-slots.ts run -- <コマンド>` で枠を取ってから実行してください。実Containerの試験を直接動かす場合や、キャッシュなしでイメージをビルドする場合が当たります。`run` の中で `pnpm check --full` や `pnpm dev` を起動すると、二つ目の枠を待たずに失敗します。`pnpm dev` は動いている間ずっと枠を一つ持つので、使い終わったら止めてください。
+
+`pnpm check --full` は、実Containerの接続検査の直後に、同じDockerの枠を持ったまま、接続先のローカルDocker Engineの未使用ビルドキャッシュを回収します。Cargoのregistry・git・targetを含む `exec.cachemount` は合計8 GiBまで残します。それとは別に、`regular` と `frontend` は最近使った記録から合計4 GiBまで残します。形状サービスの一組の層は、Rustの基底層・aptのRUN・COPY・CargoのRUN・frontend・実行用のCOPYを合わせて約3.91 GBです。4 GiBの枠はこの一組を残しますが、更新時の余裕は残りません。BuildKitは、再利用した基底層とaptのRUNの最終使用時刻を更新しません。そのため、記録が枠を超えると、回収はRustの基底イメージの層を最も古い記録として選びます。計測では、選んだ基底層の記録は回収の後も残り、層の記録の合計は回収の前後とも約6.37 GBで、枠を超えたままでした。時間の範囲ではビルドが集中した際の容量を制限できないため、容量で制限します。
 
 各枠を超えた場合は最終使用時刻が古い未使用記録から丸ごと消し、`source.local`・`source.git.checkout`・`internal` の未使用記録はすべて消します。使用中の記録と未知の種類は残し、未知の種類は一行で報告します。Dockerは使用中のcache mountを0バイトと報告するため、その実容量は上限の計算に含められません。使用が終わった後や別のビルドで増えた後は、実容量が上限を超えることがあります。回収後の報告値も、使用中のmountの実容量を保証しません。イメージ・Container・ボリュームは回収しません。Unixソケットで接続するローカルDockerを対象とし、独立したbuildx builderは対象にしません。
 
@@ -76,7 +82,7 @@ Viteのプロキシ（5173番）経由のAPI要求には、開発者として署
 | `pnpm dev`          | Web・WorkerとDockerの形状処理Containerを起動                                                                                                                                      |
 | `pnpm build`        | releaseのWasm・Web・Worker・ネイティブRustの成果物だけをビルド                                                                                                                    |
 
-補助スクリプトは `scripts/check/`・`scripts/dev/`・`scripts/generate/`・`scripts/build/`・`scripts/upstream/`・`scripts/deploy/` に目的別に置き、複数の目的で使う部品は `scripts/shared/` に置きます。テストは対象ファイルと同じフォルダーに置きます。
+補助スクリプトは `scripts/check/`・`scripts/dev/`・`scripts/generate/`・`scripts/build/`・`scripts/upstream/`・`scripts/deploy/`・`scripts/measure/` に目的別に置き、複数の目的で使う部品は `scripts/shared/` に置きます。テストは対象ファイルと同じフォルダーに置きます。
 
 初期設定は `pnpm setup`、引数の確認は `pnpm check --help`。upstreamの取得・取り込みには後述の `pnpm upstream:check` / `pnpm upstream:update` を使います。個別ツールを順に手動実行する必要はありません。
 
@@ -140,13 +146,25 @@ Dependabotはnpm・Cargoの更新提案用に残し、upstream本体はsubtree�
 
 PRごとに `.github/workflows/check.yml` が、開発用Macのself-hosted runner（ラベル `madori`）で `pnpm setup` と `pnpm check` を実行します。変更したファイルから `scripts/check/ci-mode.ts` が `--full` を付けるかを決めます。最後に、自動修正で差分が出ていないことを確かめます。GitHubのrunnerは使いません。無料プランのprivateリポジトリでは2コア・ディスクの空き13 GBで、`--full` がディスク不足で失敗し、無料枠も足りないためです。
 
-checkoutは毎回clone直後と同じ状態から始めます。Rustの `target/` と `.tools/` だけは、`$RUNNER_TOOL_CACHE/madori` へのシンボリックリンクで実行の間に再利用します。runnerの `--full` は、手元の `pnpm dev` や `pnpm check --full` と同時に動いても衝突しません。
+`pnpm check` は試験ごとの結果を `target/test-results/` に書きます。保存先は `MADORI_TEST_RESULTS_DIR` で変更できます。`check` と `deploy-staging` は、失敗した回も含め、結果を成果物 `test-results-v1-<workflow>-<attempt>` として30日間保存します。取り消した回は保存しません。
 
-runnerでも `--full` の最後に、手元と同じ規則でDockerのビルドキャッシュを回収します。cache mountは合計8 GiBまで、最近使ったregularとfrontendは別枠で合計4 GiBまで残します。使用中の記録はBuildKitが保持するため、並行するビルドの記録は消しません。使用中のcache mountの0バイトという報告値では実容量を把握できません。runnerの `target/` と `.tools/` はこの回収の対象にしません。
+`node scripts/check/test-history.ts` で直近200件の成果物を集計し、試験ごとの失敗率を表示します。スキップは分母から除きます。`--last N` で件数を変えられます。`--all` は安定した試験も表示します。`--test <文字列>` は名前にその文字列を含む試験を表示します。判定は次の順です。
+
+- `flaky` は同じコミット、またはmainの実行で成功と失敗の両方を観測した試験です。
+- `failing` は集計期間に失敗だけを観測した試験です。
+- `suspect` は成功歴があり、複数のブランチで失敗した試験、またはmainで失敗して他のブランチでだけ成功した試験です。
+- `branch-local` は成功歴があり、失敗が一つのPRブランチに限られる試験です。
+- `stable` は成功だけを観測した試験です。
+
+checkoutは毎回clone直後と同じ状態から始めます。Rustの `target/` と `.tools/` だけは、`$RUNNER_TOOL_CACHE/madori` へのシンボリックリンクで実行の間に再利用します。runnerの `--full` は、runner用のDockerの枠（「開発を始める」）を使うので、手元の `pnpm dev` や `pnpm check --full` が開発用の枠を埋めていても待ちません。runnerは一度に一つのジョブしか動かさないので、stagingへのデプロイで `wrangler deploy` がイメージをビルドするときも、runnerのDockerの作業は一つまでです。
+
+runnerでも、`--full` の実Containerの接続検査の直後に、手元と同じ規則でDockerのビルドキャッシュを回収します。cache mountは合計8 GiBまで、最近使ったregularとfrontendは別枠で合計4 GiBまで残します。使用中の記録はBuildKitが保持するため、並行するビルドの記録は消しません。使用中のcache mountの0バイトという報告値では実容量を把握できません。runnerの `target/` と `.tools/` はこの回収の対象にしません。
 
 このリポジトリではブランチ保護を使えないため、検査の成功はマージの条件として強制されません。マージの前に、PRの最新のheadで `check` が成功していることを確かめます。
 
 runnerを入れ直すときは、[actions/runner](https://github.com/actions/runner/releases)のosx-arm64版を `~/actions-runner/instant-madori` に展開し、リポジトリの登録トークン（`gh api -X POST repos/wakamenori/instant-madori/actions/runners/registration-token`）で `./config.sh --labels madori` を実行します。mise・cargo・Dockerのある `PATH` で設定すると、runnerがその `PATH` を保存します。runnerの `.env` には、作業フォルダーを信頼する `MISE_TRUSTED_CONFIG_PATHS=<runnerのフォルダー>/_work` と、デプロイ用の認証情報を読む `MADORI_ENV_FILE=<リポジトリの .env の絶対パス>` を書きます。最後に `./svc.sh install` と `./svc.sh start` でlaunchdに常駐させます。外すときは `./svc.sh uninstall` の後に `./config.sh remove` を実行します。
+
+ワークフローは `mise exec -- actionlint` で検査します。actionlintはrunnerのラベル `madori` を `.github/actionlint.yaml` から読み込むので、ラベルを変更するときはこのファイルも更新します。
 
 VS Code向けの推奨拡張・保存時整形・ESLint自動修正・Rust Analyzer設定を `.vscode/` に用意しています。他のエディタやエージェントによる直接編集でも、同じ `pnpm check` を使えます。
 
@@ -185,13 +203,15 @@ Miniflareのsharp依存は、LGPLのlibvipsを含むため除外しています�
 
 ## SolidCraftの更新
 
-**upstreamの更新は原則取り込みます。** 住宅サービスへの影響を確認し、問題があれば調整するか、理由を記録して保留します。採用版は[solidcraft.json](third_party/solidcraft.json)、独自変更・更新手順・初回移行の記録は[solidcraft.md](third_party/solidcraft.md)を参照してください。
+**upstreamの更新は原則取り込みます。** 住宅サービスへの影響を確認し、問題があれば調整するか、理由を記録して保留します。採用版は[solidcraft.json](third_party/solidcraft.json)、独自変更・更新手順・初回移行の記録は[solidcraft.md](third_party/solidcraft.md)を参照してください。Containerのイメージのビルドは、取り込み領域のうちビルドが読まないデータを `.dockerignore` で除いて送ります。更新の後に `pnpm check --full` のDockerのビルドが除いたファイルを読めずに失敗したら、`.dockerignore` からそのパスの行を消します。
 
 SolidCraftの元のREADME・資料・ライセンスは取り込み領域に保持しています。[MITライセンス](third_party/solidcraft/LICENSE-MIT)、[Apacheライセンス](third_party/solidcraft/LICENSE-APACHE)、[NOTICE](third_party/solidcraft/NOTICE)、[資産と依存の帰属](third_party/solidcraft/ATTRIBUTION.md)を参照してください。
 
 ## stagingへデプロイする
 
-mainへのpushで、`.github/workflows/deploy-staging.yml` がself-hosted runnerでstagingへデプロイします。`pnpm check --full`、D1のマイグレーションの適用、`scripts/deploy/wrangler-deploy.ts` を通した `wrangler deploy --env staging` の順に進め、その後 `scripts/check/staging-smoke.ts` で、Accessを通した疎通を確かめます。デプロイは途中で止めず、後から来たpushは前のデプロイが終わってから最新のmainをデプロイします。マイグレーションはデプロイの前に適用するため、動いている前の版のWorkerと両立する形で書きます。mainに入ったマイグレーションは変更せず、修正は番号の大きいファイルを追加します。`pnpm check` の全モードがこの不変条件を検査します。pushによるデプロイは、`github.event.before` が指すpushの前のmainと比較します。force pushなどで、そのコミットがHEADの履歴に無ければ失敗します。手動の実行と、前のSHAが無いpushでは、`pnpm check` と同じく、mainはfirst parent、ブランチは `origin/main` との分岐点と比較します。
+mainへのpushで、`.github/workflows/deploy-staging.yml` がself-hosted runnerでstagingへデプロイします。`pnpm check --full`、D1のマイグレーションの適用、`scripts/deploy/wrangler-deploy.ts` を通した `wrangler deploy --env staging` の順に進め、その後 `scripts/check/staging-smoke.ts` で、Accessを通した疎通を確かめます。実行中のデプロイは最後まで続けます。待機できる実行は一つで、後から来たpushの実行が先に待っていた実行を取り消します。実行中のデプロイが終わると、最後に待っていたpushのコミットをデプロイします。マイグレーションはデプロイの前に適用するため、動いている前の版のWorkerと両立する形で書きます。mainに入ったマイグレーションは変更せず、修正は番号の大きいファイルを追加します。`pnpm check` の全モードがこの不変条件を検査します。pushによるデプロイは、`github.event.before` が指すpushの前のmainと比較します。force pushなどで、そのコミットがHEADの履歴に無ければ失敗します。手動の実行と、前のSHAが無いpushでは、`pnpm check` と同じく、mainはfirst parent、ブランチは `origin/main` との分岐点と比較します。
+
+GitHubはmainへのpushの前後のコミットを比較し、変更したファイルがすべてworkflowの `paths-ignore` に該当すればデプロイを起動しません。対象は `docs/`、`.claude/`、`.github/ISSUE_TEMPLATE/` の配下と、ルートの `README.md`、`AGENTS.md`、`CLAUDE.md` です。これらは文書とエージェント向けの指示で、Containerイメージのビルド、Workerと静的ファイルのビルド、マイグレーション、デプロイ、疎通確認では読みません。読むのは `pnpm check` の整形、ESLint、文書のパス検査、秘密情報の検査、テストだけで、マージ前にPRの `check` ですべて実行します。一覧の各項目はディレクトリ全体（`<ディレクトリ>/**`）か一つのMarkdownファイルです。この形式と、デプロイが読むディレクトリと重ならないことを `scripts/check/staging-smoke.test.ts` で確かめます。アプリ、クレート、パッケージ、スクリプト、upstream、マイグレーション、依存関係やツールのバージョン固定、このworkflow自体など、対象外のファイルを一つでも変えればデプロイします。ルートのREADMEだけを変えた場合も含め、対象の文書や指示だけのpushでは、stagingは直前にデプロイしたコミットのままで、そのpushのコミットにはdeploy-stagingの実行がありません。手動実行（`gh workflow run`）ではこの一覧を使いません。
 
 `wrangler deploy` は、Workerの新しい版を公開した後、その版を読んでContainerのアプリケーション設定を適用します。アップロードの直後は、Cloudflareの版のAPIがその版に404（コード100146）を返すことがあります。Wranglerはこの読み取りを500ミリ秒おきに5回だけ試し、読めなければ「The Worker version was deployed, but its Durable Object-managed Container application settings were not fully applied. Re-run the same \`wrangler deploy\` command to retry and finish deployment.」で失敗します。このとき新しい版は公開済みですが、Containerの設定とトリガーは適用されていません。Wrangler 4.160.0から4.165.0まで同じ動きなので、版を変えても直りません。
 
@@ -237,6 +257,27 @@ mise exec -- node --env-file=/path/to/.env scripts/check/staging-smoke.ts
 mise exec -- node --env-file=/path/to/.env scripts/deploy/registry-retention.ts --dry-run
 ```
 
+計画6.1bの完了条件の障害の試験のうち、stagingで起こせるものは `scripts/check/staging-faults/main.ts` で繰り返します。デプロイの中では実行せず、手で実行します。再デプロイをまたぐ試験はデプロイの中では行えません。また、ほかの試験もジョブを待たせるので、毎回のデプロイに入れると、デプロイがそのたびに数分ずつ延びます。6.1bを閉じるとき、6.2でジョブの中身を置き換えた後、ジョブの進行・停止・確定・復帰の仕組みを変えた後に実行します。
+
+スクリプトは、検証用の利用者の案件に、パターン「障害試験」を固定のrequest IDで作り直して（再送して）使います。次の順に試します。
+
+1. 指示の再送と、そのrequest IDの別の本文・別の操作への使い回し（422）。
+2. 確定の後の停止（`already_finished`）。
+3. 待ちの間の停止（`cancelled`）。
+4. 待たせたジョブをまたぐ再デプロイ。
+5. 停止の後の待機列の保留と再開。
+
+各試験の前後で、案の一覧と各案の表示データのSHA-256を読みます。前の案がすべて変わらず、増えた案が期待どおり0件か1件であることを確かめます。同じパターンを使い続けるので、毎回それまでの実行で確定した案をすべて照合し直します。最後にWorkers Logsで三つを確かめます。待ちの間にパターンのDOが新しい版に切り替わったこと、止めたジョブが `cancelled` で終わったこと、照合の失敗が無いことです。
+
+実行には、stagingの占有と、mainの再デプロイが要ります。スクリプトはデプロイを起こしません。指揮役が `gh workflow run deploy-staging.yml --ref main` で起動したrunのIDを受け取り、そのrunの `pnpm check --full` が終わる前に実行します。始める前に、終わっていないdeploy-stagingの実行がそのrunだけであることと、その「Migrate and deploy」がまだ始まっていないことを確かめます。先の三つの試験は約3分20秒かかり、その後、「Migrate and deploy」が始まった時点で待たせるジョブを送ります。この段階は、runner がすぐに空けば、runの作成から4分ほどで始まります。そのため、IDを受け取ったらすぐに実行します。待ちは `JOB_TEST_HOLD` の180秒のままで足ります。待ちが覆う必要があるのは、十数秒から1分ほどで終わるこの段階と、その後にパターンのDOが新しい版に切り替わるまでの時間だけだからです。`.env` には、疎通確認のservice tokenの二つの値と、Workers Logsを読む `CLOUDFLARE_API_TOKEN`（`Workers Observability Write` の権限）を入れます。アカウントIDは秘密ではないので、コマンドで渡します。
+
+```sh
+CLOUDFLARE_ACCOUNT_ID=4a67230af28ec94d9c70ca48572d8e9f mise exec -- node --env-file=/path/to/.env \
+  scripts/check/staging-faults/main.ts --deploy-run <runのID> --evidence <証拠のフォルダー>
+```
+
+試験ごとに `PASS`・`FAIL`・`MISSED` の行を出し、証拠のフォルダーに `journey.jsonl`（各試験の前後の案と判定）、`logs.jsonl`（このパターンのWorkers Logsの行）、`container.jsonl`、`deploy-run.json` を書きます。終了コードは三つです。合格は0です。DOの切り替えを観測できなかったときは2で、再デプロイをもう一度頼んで実行し直します。それ以外の失敗は1です。一回の実行で、デプロイが一回、検証用の利用者のジョブが5件（完了3件、停止2件）増え、「障害試験」の案が3件増えます。記録は[検証8](docs/verification/verification-08.md)にあります。
+
 以下は、stagingの環境を最初に作るときの手順です。Cloudflareリソースの作成とデプロイを伴い、ローカルの検査では実行しません。現在のstagingは `https://instant-madori-staging.firpmnfiywl.workers.dev` です。
 
 1. Workers Paidのアカウントで、staging用D1を `wrangler d1 create instant-madori-staging` で、R2バケットを `wrangler r2 bucket create instant-madori-staging` で作成します。Containersを使うにはWorkers Paidが必要です。
@@ -252,3 +293,16 @@ mise exec -- node --env-file=/path/to/.env scripts/deploy/registry-retention.ts 
 Container接続用DOと内部プロトコルは `apps/worker/src/geometry/` に置き、`services/` から呼びます。パターンごとの調整DOは `objects/`、ジョブのWorkflowは `workflows/` に置き、どちらも `services/` だけを呼びます。ジョブの形状処理は、パターンごとの接続用DOとそのContainerで行います。
 
 内部APIの本文は `crates/geometry-api` で定義し、`pnpm generate:geometry` でJSON Schema・Zod・TypeScript型を再生成します。`pnpm check` も全モードで再生成し、RustとNodeのテストが生成結果の一致を検査します。
+
+### stagingのContainerを計測する
+
+stagingのContainerの計測は `scripts/measure/` のコマンドで行います。Workers Logsを読むコマンドは、`Workers Observability Write` の権限を持つCloudflareのAPIトークンを、環境変数 `CF_API_TOKEN_FILE` が指すファイルから読みます。トークンは出力しません。
+
+| コマンド                                                             | 用途                                                                                                                                                                                                                                                                                                                                                      |
+| -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm measure:logs --from <ISO時刻> --to <ISO時刻> --out <ファイル>` | 時間帯のWorkers Logsを、古い順に1行1件のJSONで書き出す。各行はログの項目に `t`（ms）と `service` を加えた形で、検証3の `events.jsonl` と同じ。2,000件に達したら、時間帯を狭めるよう求めて失敗する。既存のファイルは上書きしない                                                                                                                           |
+| `pnpm -s measure:summary <ファイル>`                                 | 書き出したログから、コールドスタート（`container.ready` の `mode: cold`）、処理時間、`vmHwmKib` の最大値、`geometry.limits`、Containerの起動と停止をJSONで集計する。定義は検証3と同じで、中央値は件数が偶数のとき小さいほうの値を採る                                                                                                                     |
+| `pnpm measure:deploy --ref <ブランチ> --instance <種類>`             | pushしたブランチの先頭を、`gh workflow run deploy-staging.yml --ref <ブランチ>` でstagingへデプロイし、実行の成功まで待つ。そのコミットの `env.staging.vars.GEOMETRY_INSTANCE_TYPE` が `<種類>` でないとき、または待機中のデプロイがあるとき（新しい実行が待機中の実行を取り消すため）は、実行を始めずに失敗する。`wrangler.jsonc` の変更とpushは手で行う |
+| `pnpm measure:cold`                                                  | 直近2時間のログに現れたContainerがすべて停止し、最後の停止から5分たつまで待つ。次の要求は新しいContainerを起動する                                                                                                                                                                                                                                        |
+
+インスタンスの種類を変えて測るときは、計測用のブランチで `wrangler.jsonc` の種類を変えてcommitとpushをし、`pnpm measure:deploy` と `pnpm measure:cold` を順に実行してから要求を送ります。手で `wrangler deploy --env staging` を実行すると、検証用のClient IDが渡りません。ログには停止したContainerを識別する項目が無いため、`measure:cold` は停止の行を起動の行と対にせず、動いているContainerの数を数えます。複数のパターンのContainerが同時に動くと、早く終わることがあります。測った後に、集計の `coldReadyMs` の件数と、`limits` の `cgroupMemoryMax` が種類と合うことを確かめます。

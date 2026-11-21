@@ -97,10 +97,41 @@ for (const row of rustBoundaries) {
   });
 }
 
-void test("direct dependency checks also reject build dependencies and unapproved pure housing dependencies", () => {
+void test("housing accepts its schema and JSON dependencies and rejects reqwest", () => {
+  const metadata = compliantMetadata();
+  for (const name of ["schemars", "serde", "serde_json"])
+    addDependency(metadata, "madori-housing", name);
+  assert.deepEqual(checkRustBoundaries(metadata, compliantFeatureTrees()), []);
+  addDependency(metadata, "madori-housing", "reqwest");
+  assert(
+    checkRustBoundaries(metadata, compliantFeatureTrees()).some(
+      (message) => message.startsWith("[housing-dependencies]") && message.includes("reqwest"),
+    ),
+  );
+});
+
+void test("modeling reaches kernel through engine and rejects a direct kernel dependency", () => {
+  const allowed = compliantMetadata();
+  addDependency(allowed, "solidcraft-engine", "solidcraft-kernel");
+  addDependency(allowed, "madori-modeling", "madori-housing");
+  assert.deepEqual(checkRustBoundaries(allowed, compliantFeatureTrees()), []);
+  for (const kind of [null, "build"] satisfies ("build" | null)[]) {
+    const direct = compliantMetadata();
+    addDependency(direct, "madori-modeling", "solidcraft-kernel", kind);
+    assert(
+      checkRustBoundaries(direct, compliantFeatureTrees()).some(
+        (message) =>
+          message.startsWith("[modeling-solidcraft]") &&
+          message.includes("madori-modeling -> solidcraft-kernel"),
+      ),
+    );
+  }
+});
+
+void test("direct dependency checks also reject build dependencies", () => {
   for (const [parent, dependency, id] of [
     ["madori-display", "serde", "display-dependencies"],
-    ["madori-housing", "serde", "housing-dependencies"],
+    ["madori-housing", "reqwest", "housing-dependencies"],
     ["madori-viewer", "solidcraft-engine", "viewer-solidcraft"],
     ["madori-modeling", "solidcraft-ui-egui", "modeling-solidcraft"],
   ]) {
@@ -129,7 +160,17 @@ void test("toolkit leak through normal and build edges fails for viewer and geom
     ["madori-viewer", "viewer-ui-toolkit"],
     ["madori-geometry", "geometry-ui-toolkit"],
   ]) {
-    for (const forbidden of ["egui", "egui-wgpu", "egui_extras", "eframe", "winit"]) {
+    for (const forbidden of [
+      "egui",
+      "egui-wgpu",
+      "egui_extras",
+      "epaint",
+      "epaint_default_fonts",
+      "emath",
+      "ecolor",
+      "eframe",
+      "winit",
+    ]) {
       for (const kind of [null, "build"] satisfies ("build" | null)[]) {
         const metadata = compliantMetadata();
         assert(root);
@@ -217,7 +258,16 @@ void test("viewer rejects every editing engine crate through a rendering depende
 
 void test("crate family patterns match whole crate names", () => {
   const metadata = compliantMetadata();
-  for (const name of ["my-egui", "eguiish", "wgpuish", "wasmtimeish", "craft-plugin-wasm-helper"]) {
+  for (const name of [
+    "my-egui",
+    "eguiish",
+    "epainter",
+    "emathx",
+    "my-ecolor",
+    "wgpuish",
+    "wasmtimeish",
+    "craft-plugin-wasm-helper",
+  ]) {
     addDependency(metadata, "solidcraft-engine", name);
   }
   assert.deepEqual(checkRustBoundaries(metadata, compliantFeatureTrees()), []);

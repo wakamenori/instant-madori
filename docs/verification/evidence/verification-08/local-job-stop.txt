@@ -1,0 +1,35 @@
+Using secrets defined in process.env
+[33m▲ [43;33m[[43;30mWARNING[43;33m][0m [1mMissing required secrets: ACCESS_JWKS. Add them to .dev.vars, .env, or set as environment variables.[0m
+
+
+[33m▲ [43;33m[[43;30mWARNING[43;33m][0m [1m				You have defined bindings to the following internal Durable Objects:[0m
+
+  				- {"name":"GEOMETRY","class_name":"GeometryContainer"}
+  - {"name":"PATTERNS","class_name":"PatternCoordinator"}
+  				These will not work in local development, but they should work in production.
+  
+  				If you want to develop these locally, you can define your DO in a separate Worker, with a separate configuration file.
+  				For detailed instructions, refer to the Durable Objects section here: [4mhttps://developers.cloudflare.com/workers/wrangler/api#supported-bindings[0m
+
+
+A DurableObjectNamespace in the config referenced the class "GeometryContainer", but no such Durable Object class is exported from the worker. Please make sure the class name matches, it is exported, and the class extends 'DurableObject'. Attempts to call to this Durable Object class will fail at runtime, but historically this was not a startup-time error. Future versions of workerd may make this a startup-time error.
+A DurableObjectNamespace in the config referenced the class "PatternCoordinator", but no such Durable Object class is exported from the worker. Please make sure the class name matches, it is exported, and the class extends 'DurableObject'. Attempts to call to this Durable Object class will fail at runtime, but historically this was not a startup-time error. Future versions of workerd may make this a startup-time error.
+▶ Stop orders against commit on real D1 and R2
+  ✔ a lost stop wake replays and wakes again, finished replays never wake (89.299ms)
+  ✔ queued stop skips the job and fixes its replay (106.938ms)
+  ✔ running stop refuses save, commit and failure at its generation (88.534833ms)
+  ✔ a store whose R2 head runs the stop first refuses the commit batch (75.376417ms)
+  ✔ completion first records the revision and reserves the request ID (137.899458ms)
+  ✔ parallel stop and commit choose one terminal result (1004.973625ms)
+  ✔ a failed stop update rolls back its request record (54.511834ms)
+  ✔ owner isolation, missing jobs and unwritten states leave no request record (66.260208ms)
+  ✔ every active state is stoppable and failed is already finished (107.560292ms)
+✔ Stop orders against commit on real D1 and R2 (2029.220917ms)
+ℹ tests 10
+ℹ suites 0
+ℹ pass 10
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2499.331042

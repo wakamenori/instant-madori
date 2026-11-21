@@ -17,15 +17,16 @@
 
 Preconditions:
 
-- SKILL.md の「起動」の `pnpm dev` を、`MADORI_DEV_JOB_TEST_HOLD=before_render:420` を付けて起動している。仕事は実行権を取った後、描画の前に7分待つ。待ちを付けずに動いていたら、片付けてから `MADORI_DEV_JOB_TEST_HOLD=before_render:420 perl -e 'setpgrp(0, 0); exec @ARGV or die "exec: $!"' mise exec -- pnpm dev >| "$EVIDENCE/dev.log" 2>&1 &` で起動し直す。
+- SKILL.md の「起動」の `pnpm dev` を、`MADORI_DEV_JOB_TEST_HOLD=before_render:420` を付けて起動している。仕事は実行権を取った後、描画の前に7分待つ。待ちを付けずに動いていたら、片付けてから、SKILL.md の「起動」の三行を、`perl` の行の先頭に `MADORI_DEV_JOB_TEST_HOLD=before_render:420 ` を足して実行し直す。`dev.pgid` を書く行も実行する。
 - 起動の確認は一つ目（`/api/me`）だけを行う。二つ目は指示を最後まで流すので、7分の待ちで時間切れになる。この地図の仕事は描画まで進まないので、Container は使わない。
 - [案件](./projects.md)の「作る」を済ませ、`PAT=$(jq -r .pattern.id "$EVIDENCE/projects/create.json")` を設定している。
 - [指示を止める](./stop.md)の `J`・`O`・`API`・`send`・`stop`・`state` を、`D="$EVIDENCE/recovery"` にして定義し、`$D` がある。
+- `state pre` の `runningJob` が `null` で、`queuedJobs` が `[]`。ほかの機能の手順で残った指示があると、A はその後ろで待機中のままになり、どの手順も進まない。残っていたら、[指示を止める](./stop.md)の `stop` で止める。
 
 - **送って、確かめの繰り返しを読む。** `send accept-a 台所を広くしたい`。`202`。`A=$(jq -r .job.jobId "$D/accept-a.json")` を設定する。70秒おいて `grep '"event":"pattern.advanced"' "$EVIDENCE/dev.log" | grep "$A" >| "$D/watch.log"`。`"outcome":"claimed"` の行が一つと、`"outcome":"running"` で `"instanceStatus"` を持つ行が二つ以上ある。`running` の行の間隔は約30秒。
 - **5分より前の定期実行。** 送ってから5分たつ前に `curl -sS -o "$D/sweep-early.txt" -w '%{http_code}\n' http://127.0.0.1:8787/cdn-cgi/local/scheduled`。`200` で、本文が `ok`。`grep -c '"event":"jobs.swept"' "$EVIDENCE/dev.log"` は、送る前と同じ数のまま。
 - **5分を過ぎた定期実行。** 送ってから5分を過ぎて、同じ要求を出力先 `"$D/sweep-late.txt"` で送る。`200` で `ok`。`grep '"event":"jobs.swept"' "$EVIDENCE/dev.log" | tail -1` に `"found":1` と `"woken":1` が出て、その直後に `$A` の `pattern.advanced` の `running` が一行増える。`state state-1` の `runningJob.jobId` は `$A` のまま。
-- **再読込で止まることを読む。** `touch apps/worker/src/runtime.ts`。`$EVIDENCE/dev.log` に Worker の再読込が出る。7分の待ちが明けた後も、`state state-2` の `runningJob.jobId` は `$A` のままで、`$A` の `job.finished` は出ない。`pattern.advanced` の `running` は約30秒ごとに出続ける。
+- **再読込で止まることを読む。** `n=$(grep -c 'Local server updated and ready' "$EVIDENCE/dev.log")` を設定し、`printf '\n// reload\n' >> apps/worker/src/runtime.ts` で中身に一行足す。`$EVIDENCE/dev.log` の `Local server updated and ready` が `n` より増えたら、`git checkout -- apps/worker/src/runtime.ts` で戻す。戻した変更でも、もう一度再読込する。`git status --short apps/worker` が何も出さない。7分の待ちが明けた後も、`state state-2` の `runningJob.jobId` は `$A` のままで、`$A` の `job.finished` は出ない。`pattern.advanced` の `running` は約30秒ごとに出続ける。
 - **止めて抜ける。** `stop stop-a "$A" "$(uuidgen)"`。`200` で、`outcome` が `stopped`、`job.state` が `cancelled`。`state state-3` の `runningJob` が `null`、`lastFinishedJob.state` が `cancelled`。直後の `pattern.advanced` に `"outcome":"idle"` が出て、その後 `$A` の `running` の行は増えない。
 
 ## Gotchas
@@ -33,5 +34,5 @@ Preconditions:
 - 待ちを付けずに起動すると、サンプルの仕事は数秒で終わり、確かめの繰り返しも定期実行の対象も残らない。
 - 待ちは手元のすべての仕事に掛かる。ほかの手順を続けるなら、片付けて待ちなしで起動し直す。
 - 定期実行は、5分以上前に取った実行権か、5分以上前に受け付けた待機中の指示があるパターンだけを起こす。待機列が保留中で実行中の指示が無いパターンは起こさない。`found` が `0` の回はログに出ない。
-- `touch` の後の再読込で、その時点の Workflow は再開しない。これはローカルの `wrangler dev` の制約で、本番の Workflow はデプロイを越えて続く。再読込の確認の後は、止めずに放っておくと、そのパターンの後の指示はすべて待機中のまま残る。
-- 再読込の確認で `touch` したファイルは中身が変わらないので、`git status` に差分は出ない。
+- 再読込すると、その時点の Workflow は再開しない。これはローカルの `wrangler dev` の制約で、本番の Workflow はデプロイを越えて続く。再読込の確認の後は、止めずに放っておくと、そのパターンの後の指示はすべて待機中のまま残る。
+- `touch` で日付だけを変えても、再読込は起きないことがある。中身を変えて戻す。足した行を戻し忘れると、`git status` に差分が残る。

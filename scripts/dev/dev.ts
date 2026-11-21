@@ -1,3 +1,4 @@
+import { machineSlots, withDockerSlot } from "../shared/docker-slots.ts";
 import { finishDevelopment } from "./dev-session.ts";
 import { ensureDevAccess } from "./local-access.ts";
 import { assertSucceeded, start, stop } from "../shared/processes.ts";
@@ -10,21 +11,23 @@ const wrangler = "node_modules/wrangler/bin/wrangler.js";
 // reaches only this script, which must stop whatever is running at that moment.
 // `on`, not `once`: a second Ctrl-C during shutdown must not fall back to Node's default
 // handling, which would exit at once and leave the children running.
-let interrupted = false;
+const controller = new AbortController();
+const interrupted = new Error("Development interrupted");
+const containers = process.env["MADORI_DEV_CONTAINERS"] !== "0";
 const interruption = new Promise<ProcessOutcome>((resolve) => {
   for (const signal of ["SIGINT", "SIGTERM"])
     process.on(signal, () => {
-      interrupted = true;
+      controller.abort(interrupted);
       resolve({ kind: "exit", code: 0, signal: null });
     });
 });
 
 /** Runs one setup step to completion, stopping it if the developer interrupts. */
 async function setupStep(label: string, launch: () => ReturnType<typeof start>) {
-  if (interrupted) return false;
+  if (controller.signal.aborted) return false;
   const child = launch();
   const outcome = await Promise.race([child.finished, interruption]);
-  if (interrupted) {
+  if (controller.signal.aborted) {
     await stop([child]);
     return false;
   }
@@ -42,7 +45,7 @@ const migrated = await setupStep("Local D1 migration", () =>
   }),
 );
 
-if (migrated) {
+async function develop() {
   console.info(
     "Geometry runs in Docker; the first amd64 image build takes several minutes. MADORI_DEV_CONTAINERS=0 disables containers.",
   );
@@ -58,7 +61,7 @@ if (migrated) {
         "--port",
         "8787",
         ...(jobTestHold === undefined ? [] : ["--var", `JOB_TEST_HOLD:${jobTestHold}`]),
-        ...(process.env["MADORI_DEV_CONTAINERS"] === "0" ? ["--enable-containers=false"] : []),
+        ...(!containers ? ["--enable-containers=false"] : []),
       ],
       {
         cwd: "apps/worker",
@@ -73,6 +76,20 @@ if (migrated) {
   console.log("Web: http://127.0.0.1:5173 | Worker: http://127.0.0.1:8787");
   const result = await Promise.race([...processes.map(({ finished }) => finished), interruption]);
   // Decide the exit status before stopping: a Ctrl-C during shutdown must not hide a crash.
-  const stoppedByUser = interrupted;
+  const stoppedByUser = controller.signal.aborted;
   await finishDevelopment(result, stoppedByUser, () => stop(processes));
+}
+
+if (migrated) {
+  if (containers) {
+    try {
+      await withDockerSlot(
+        machineSlots(),
+        { purpose: "pnpm dev", signal: controller.signal },
+        develop,
+      );
+    } catch (error) {
+      if (error !== interrupted) throw error;
+    }
+  } else await develop();
 }

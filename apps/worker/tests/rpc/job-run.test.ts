@@ -1,3 +1,4 @@
+import { scriptedAi } from "../../src/ai/scripted.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
@@ -22,6 +23,7 @@ await test("Job runs restore D1 execution rights across retries and lost respons
   await applyJobMigrations(db);
   const ownerId = await db.owner("job-run");
   const base = {
+    ai: scriptedAi([]),
     testHold: null,
     store: db.store,
     runtime: db.runtime,

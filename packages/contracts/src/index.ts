@@ -160,6 +160,39 @@ export const revisionSchema = z.object({
 
 export type Revision = z.infer<typeof revisionSchema>;
 
+const conversationFields = {
+  id: idSchema,
+  number: z.int().positive(),
+  body: z.string(),
+  createdAt: timestampSchema,
+  revision: revisionSchema.nullable(),
+};
+export const conversationMessageSchema = z.discriminatedUnion("kind", [
+  z.object({ ...conversationFields, kind: z.literal("instruction"), jobId: idSchema.nullable() }),
+  z.object({ ...conversationFields, kind: z.literal("answer"), jobId: idSchema.nullable() }),
+  z.object({ ...conversationFields, kind: z.literal("explanation"), jobId: idSchema }),
+  z.object({
+    ...conversationFields,
+    kind: z.literal("question"),
+    jobId: idSchema,
+    choices: z.array(z.string()),
+  }),
+  z.object({ ...conversationFields, kind: z.literal("notice"), jobId: idSchema.nullable() }),
+]);
+export type ConversationMessage = z.infer<typeof conversationMessageSchema>;
+
+export const messageListQuerySchema = z.strictObject({
+  cursor: z.string().min(1).max(200).optional(),
+});
+export type MessageListQuery = z.infer<typeof messageListQuerySchema>;
+
+/** One conversation page in descending number order. */
+export const messageListResponseSchema = z.object({
+  messages: z.array(conversationMessageSchema),
+  nextCursor: z.string().nullable(),
+});
+export type MessageListResponse = z.infer<typeof messageListResponseSchema>;
+
 function utf8Bytes(text: string): number {
   let bytes = 0;
   for (const character of text) {

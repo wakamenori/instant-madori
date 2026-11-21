@@ -40,9 +40,15 @@ Docker DesktopのVMには、12 GBのメモリを割り当てる。Dockerの中�
 
 ## 独自変更
 
-コミット`bebc1a443`で、`crates/io`に`external-workspace`機能を追加した。サービス側の依存指定で有効にすると、upstreamの評価キャッシュの識別値を`unknown`とし、そのキャッシュを信頼しない。
+`crates/io`に`external-workspace`機能を加えた。サービスは、ルートの`Cargo.toml`の依存指定でこの機能を有効にする。有効にすると、`crates/io/build.rs`の`git()`が常に`None`を返し、build.rsはgitを読まない。評価キャッシュの識別値`SOLIDCRAFT_EVALUATION_SOURCE`と、記録用のコミット`SOLIDCRAFT_SOURCE_COMMIT`は、どちらも`unknown`になる。build.rsは`<git-dir>/logs/HEAD`の変更では再実行されない。この機能を有効にしない、upstreamを単独でビルドするときの動作は変えない。`scripts/check/boundaries.ts`の`geometry-cache-trust`の行が、madori-geometryの依存でこの機能が有効であることを検査する。
 
-理由は、upstreamのbuild.rsが自身のCargo.lock・設定から識別値を作る一方、サービスのビルドでは親workspaceのCargo.lock・プロファイルで依存を解決するため。識別値が同じでも実際のビルドが異なる可能性がある。upstreamを単独でビルドするときの既定動作は変えない。`trust-unknown-source`機能はサービスで有効にしない。
+評価キャッシュを信頼しない理由。upstreamのbuild.rsは、自身のCargo.lock・設定から識別値を作る。一方、サービスのビルドは、親workspaceのCargo.lock・プロファイルで依存を解決する。識別値が同じでも、実際のビルドが異なる可能性がある。`trust-unknown-source`機能はサービスで有効にしない。
+
+コミットを読まない理由。`third_party/solidcraft`はsubtreeなので、このリポジトリのHEADはSolidCraftのソースを表さない。upstreamのbuild.rsは、HEADが動くたびに再実行してコミットを埋め直す。そのままでは、コミット・checkout・resetのたびに、solidcraft-io・solidcraft-engine・madori-modeling・madori-geometryを作り直す。空のコミットの後の`cargo build -p madori-geometry --tests`は、負荷のあるこのマシンで2〜3分かかっていた。サービスはこの値を読まない。読むのは、サービスが使わない`crates/mcp`と、サービスが書かないモデルキャッシュ・取り込みキャッシュの記録だけである。本番のContainerは`.git`を含めずにビルドするので、もとから`unknown`だった。
+
+gitの読み取りを`git()`の一か所で止めるので、upstreamが`git()`から作る値や再実行の条件を足しても、マージしただけで同じ扱いになる。`git()`を通らずにgitを読むコードが入ると、この扱いから漏れる。upstreamの更新で`crates/io/build.rs`が変わったら、空のコミットの後に`cargo build -p madori-geometry --tests -v`を実行し、`solidcraft-io`が`Fresh`のままであることを確かめる。
+
+この変更はupstreamに提案しない。upstreamのリポジトリではHEADがSolidCraftのコミットで、コミットごとに埋め直すのは意図した動作である。この変更は独自の`external-workspace`機能の上にあるので、提案するには、親workspaceの中でビルドする使い方そのものを提案する必要がある。upstreamがcrateを他のworkspaceの依存として扱うようになったら、提案するかを決め直す。upstreamが同じ目的の仕組みを持ったら、その更新を取り込むときにこの独自変更を外す。
 
 将来キャッシュを利用する場合は、実際のサービス側の依存解決・ビルド条件・形状評価コードを識別できる方式を実装し、異なるビルドのキャッシュを誤採用しないことを確認してから有効にする。
 

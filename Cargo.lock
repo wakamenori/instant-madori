@@ -2003,6 +2003,13 @@ dependencies = [
 [[package]]
 name = "madori-housing"
 version = "0.1.0"
+dependencies = [
+ "madori-display",
+ "madori-geometry-api",
+ "schemars",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "madori-modeling"

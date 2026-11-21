@@ -41,6 +41,7 @@ const scopes = {
   "web-config": "apps/web/vite.config.ts",
   "worker-api": "apps/worker/src/api/projects.ts",
   "worker-services": "apps/worker/src/services/projects.ts",
+  "worker-ai": "apps/worker/src/ai/select.ts",
   "worker-storage": "apps/worker/src/storage/projects.ts",
   "worker-geometry": "apps/worker/src/geometry/geometry-client.ts",
   "worker-objects": "apps/worker/src/objects/pattern.ts",
@@ -347,7 +348,8 @@ const workerLayerPermissions: Record<
   { allowed: string[]; typeOnly: string[] }
 > = {
   api: { allowed: ["services"], typeOnly: ["geometry"] },
-  services: { allowed: ["geometry"], typeOnly: ["storage"] },
+  ai: { allowed: [], typeOnly: [] },
+  services: { allowed: ["geometry"], typeOnly: ["storage", "ai"] },
   storage: { allowed: [], typeOnly: [] },
   geometry: { allowed: [], typeOnly: [] },
   workflows: { allowed: ["services"], typeOnly: [] },
@@ -493,6 +495,36 @@ for (const row of typescriptBoundaries) {
     }
   });
 }
+
+const httpFreeLayers = {
+  "services-http": "apps/worker/src/services/",
+  "storage-http": "apps/worker/src/storage/",
+} satisfies Record<string, string>;
+
+void test("HTTP-free layers reject HTTP globals in every file of the layer", async () => {
+  for (const [id, dir] of Object.entries(httpFreeLayers)) {
+    const row = typescriptBoundaries.find((entry) => entry.id === id);
+    assert(row, id);
+    const cases = syntaxCases[id];
+    assert(cases, id);
+    const paths = [
+      ...[...Object.values(scopes), ...storageExtensionFiles].filter((path) =>
+        path.startsWith(dir),
+      ),
+      `${dir}nested/x.ts`,
+    ];
+    for (const path of paths) {
+      for (const source of cases.rejected) {
+        assert(
+          (await diagnostics(source, path)).some((diagnostic) =>
+            diagnostic.message.includes(row.message),
+          ),
+          `${id} ${path}: ${source}`,
+        );
+      }
+    }
+  }
+});
 
 void test("Worker layers permit precisely their runtime and type dependencies", () => {
   for (const [layer, { allowed, typeOnly }] of Object.entries(workerLayerPermissions)) {
@@ -1011,4 +1043,20 @@ void test("the receiver opens L1 for writing and other metrics areas may name it
     const from = scopes[scope];
     assert.deepEqual(resolved(importType(specifier(from, store), "L1Writer"), from), [], scope);
   }
+});
+
+void test("AI cannot import storage and services can import only AI types", () => {
+  const ai = scopes["worker-ai"];
+  const storage = specifier(ai, "apps/worker/src/storage/x.ts");
+  for (const source of [importValue(storage), importType(storage)]) {
+    assert(resolved(source, ai).some(({ boundaryId }) => boundaryId === "worker-ai-layers"));
+  }
+  const services = scopes["worker-services"];
+  const target = specifier(services, "apps/worker/src/ai/x.ts");
+  assert.deepEqual(resolved(importType(target), services), []);
+  assert(
+    resolved(importValue(target), services).some(
+      ({ boundaryId }) => boundaryId === "worker-services-type-only",
+    ),
+  );
 });

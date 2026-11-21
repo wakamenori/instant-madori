@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { acceptedJobSchema, finishedJobSchema } from "@madori/contracts";
+import { messagePageSql } from "../../src/storage/messages.ts";
 import { runningJobSql, queuedJobsSql, lastFinishedJobSql } from "../../src/storage/revisions.ts";
 import { applyJobMigrations, now, openJobDatabase } from "./jobs-support.ts";
 
@@ -60,6 +61,27 @@ await test("State queue reads scale with queued jobs instead of completed histor
     )
     .bind(snapshotId, now, patternId)
     .run();
+  const appendNotices = (offset: number, count: number) =>
+    db.raw
+      .prepare(
+        `WITH RECURSIVE s(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM s WHERE i < ?)
+     INSERT INTO messages (id, pattern_id, owner_id, number, kind, body, created_at, job_id)
+     SELECT ${uuid}, j.pattern_id, j.owner_id, ? + i, 'notice', 'notice', ?, j.id
+     FROM s CROSS JOIN jobs j WHERE j.message_id = (SELECT id FROM messages WHERE pattern_id = ? AND number = 1)`,
+      )
+      .bind(count, offset, now, patternId)
+      .run();
+  const pageReads = async (before: number | null) => {
+    const page = await db.raw.prepare(messagePageSql).bind(patternId, ownerId, before, 51).all();
+    assert.equal(page.results.length, 51);
+    return page.meta.rows_read;
+  };
+  await appendNotices(3030, 100);
+  const firstPageReads = await pageReads(null);
+  await appendNotices(3130, 1000);
+  assert.equal(await pageReads(null), firstPageReads);
+  assert.equal(await pageReads(3100), firstPageReads);
+
   for (const finished of ["completed", "cancelled"] as const) {
     for (const analyzed of [false, true]) {
       if (analyzed) await db.raw.prepare("ANALYZE").run();
@@ -104,7 +126,7 @@ await test("State queue reads scale with queued jobs instead of completed histor
           .all<{ detail: string }>();
         assert(
           terminalPlan.results.some(
-            (row) => row.detail.includes("messages") && row.detail.includes("pattern_id=?"),
+            (row) => row.detail.includes("messages_inputs") && row.detail.includes("pattern_id=?"),
           ),
         );
         const state = await db.store.revisions.state({ ownerId, patternId });

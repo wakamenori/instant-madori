@@ -24,7 +24,7 @@ const roots = [
   ".github/",
 ];
 const documents = ["README.md", "AGENTS.md", "docs/plan.md"];
-const plannedPaths = ["scripts/measure/"];
+const plannedPaths: string[] = [];
 
 function findPathReferences(document: string, markdown: string): PathReference[] {
   const references: PathReference[] = [];

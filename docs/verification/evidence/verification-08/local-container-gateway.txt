@@ -1,0 +1,35 @@
+✔ concurrent cold requests share startup; warm sends carry only the owned token (12.014709ms)
+✔ DO restart adopts the stored token and rearms idle timeout; image skew replaces (1.454041ms)
+✔ unavailability clears failed starts and destroys unready or unauthorized containers (0.814541ms)
+✔ missing record replaces an orphan; exit restarts; connection failure reprobes (0.452083ms)
+✔ exit during readiness clears the lifetime when the probe answers throw (0.251583ms)
+✔ exit during readiness clears the lifetime when the probe answers healthy (0.228917ms)
+✔ failed readiness and token rejection restart; failed transport reprobes without replay (1.348375ms)
+✔ concurrent callers share a failed start and its cleanup (0.11075ms)
+✔ a request waiting for reset is measured as a cold replacement (0.242125ms)
+✔ readiness timing includes the start call and setup (0.142291ms)
+✔ malformed persisted records are cleared and running containers replaced (0.193125ms)
+✔ destroy failures are errors and ready logs distinguish lifecycle modes (0.308458ms)
+✔ binary operation bodies reach the container unchanged (0.335416ms)
+✔ contract readiness distinguishes protocol rejection from the retry deadline (3.862708ms)
+✔ operations move the idle deadline; early alarms rearm and expiry stops once (0.370792ms)
+✔ resume preserves the stored deadline and the waking alarm; fallback has 60 seconds margin (0.149875ms)
+✔ resume bounds missing, malformed and future activity by the current time (0.607833ms)
+✔ resume cleans stopped containers without starting them (0.084208ms)
+✔ a pending response body is protected; the idle window starts after consumption (0.381375ms)
+✔ overlapping operations record their actual completion order, including errors (0.291ms)
+✔ repeated destroy failures preserve both records and keep bounded retry alarms (0.409292ms)
+✔ a request arriving during idle destruction starts after all old cleanup (0.3435ms)
+✔ the alarm forgets an exited Container without destroying it (0.096291ms)
+✔ an inactivity timeout failure preserves the response and idle alarm (0.255375ms)
+✔ retry alarms double across DO restarts until an operation or successful stop (0.502709ms)
+✔ a response body the operation leaves unread is aborted when the operation settles (0.115208ms)
+✔ a send the operation does not await cannot start a request after it settles (0.108ms)
+ℹ tests 27
+ℹ suites 0
+ℹ pass 27
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 121.682958
