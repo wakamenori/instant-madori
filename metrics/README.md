@@ -315,10 +315,14 @@ metrics/
 - CodexはT3のすべてのスレッドで一つの `codex app-server` を共有するので、環境変数ではスレッドを見分けられない。
 - launchdで動くプロセスから、`gh` の認証、`git` のリモートへの接続、T3のDBの読み取りが使える。
 
+有効にした後で確かめた前提は次のとおり。
+
+- `~/.codex/config.toml` の `[otel]` は、T3の `codex app-server` で効く。T3が立てたCodexのスレッドの記録が、`t3.codex_link` で結ばれてL1に入った。
+- `~/.claude_personal/settings.json` の `env` に書いたOTelの設定は、`CLAUDE_CONFIG_DIR` を同じフォルダーにして起動したClaude Codeで効く。このリポジトリのhookと組み合わせると、記録がこのリポジトリのものとしてL1に入った。
+
 まだ確かめていない前提は次のとおり。
 
-- `~/.claude_personal/settings.json` の `env` に書いたOTelの設定が、T3が起動したClaude Codeで効く。
-- `~/.codex/config.toml` の `[otel]` が、T3の `codex app-server` で効く。
+- `~/.claude_personal/settings.json` の `env` に書いたOTelの設定が、T3が起動したClaude Codeでも効く。
 - 受け口が止まっているとき、OTelの送信の失敗が、担当、検証役、指揮役のセッションに何も表示しない。
 
 ## 集計を作り直す
