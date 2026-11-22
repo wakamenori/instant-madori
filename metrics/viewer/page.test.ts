@@ -1,12 +1,16 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { runInNewContext } from "node:vm";
 import { stack } from "./chart.ts";
 import { script } from "./page.ts";
 import { renderDashboard } from "./render.ts";
 
 // The repository has no DOM library; this covers exactly the DOM surface the page script touches.
 type Box = { left: number; top: number; width: number; height: number };
+type Listener = (event: object) => void;
 class FakeElement {
+  readonly listeners = new Map<string, Listener[]>();
+  readonly attributes = new Map<string, string>();
   readonly classList: Set<string> & { add(c: string): void; remove(c: string): void };
   readonly dataset: Record<string, string> = {};
   readonly style: Record<string, string> & { setProperty(k: string, v: string): void };
@@ -52,7 +56,18 @@ class FakeElement {
     this.text = "";
     this.append(...nodes);
   }
-  addEventListener() {}
+  addEventListener(type: string, fn: Listener) {
+    this.listeners.set(type, [...(this.listeners.get(type) ?? []), fn]);
+  }
+  dispatch(type: string, event: object = {}) {
+    for (const fn of this.listeners.get(type) ?? []) fn({ target: this, ...event });
+  }
+  getAttribute(name: string) {
+    return this.attributes.get(name) ?? null;
+  }
+  setAttribute(name: string, value: string) {
+    this.attributes.set(name, value);
+  }
   getBoundingClientRect() {
     return this.box;
   }
@@ -83,12 +98,14 @@ class FakeElement {
     return this.querySelectorAll(selector)[0] ?? null;
   }
 }
-type Listener = (event: object) => void;
 /** Builds the page skeleton from the rendered markup, so the value lists sit where the page puts them. */
 function page() {
   const body = new FakeElement("body");
   const dialog = new FakeElement("dialog");
-  body.append(new FakeElement("form", ["filters"]), dialog);
+  const form = Object.assign(new FakeElement("form", ["filters"]), {
+    elements: { target: { value: "全種類" }, span: { value: "8" } },
+  });
+  body.append(form, dialog);
   const html = renderDashboard({
     generatedAt: null,
     timelines: {},
@@ -118,13 +135,7 @@ function page() {
     addEventListener: (type: string, fn: Listener) =>
       listeners.set(type, [...(listeners.get(type) ?? []), fn]),
   };
-  // eslint-disable-next-line @typescript-eslint/no-implied-eval
-  const run = new Function("document", "innerWidth", "innerHeight", script) as (
-    doc: typeof document,
-    width: number,
-    height: number,
-  ) => void;
-  run(document, 1280, 800);
+  runInNewContext(script, { document, innerWidth: 1280, innerHeight: 800 });
   const fire = (type: string, event: object) => {
     for (const fn of listeners.get(type) ?? []) fn({ preventDefault() {}, ...event });
   };
@@ -135,7 +146,7 @@ function page() {
     return tips[0] as FakeElement;
   };
   const anyShown = () => body.querySelectorAll("div").some((d) => /tip/u.test(d.id) && !d.hidden);
-  return { body, dialog, fire, shown, anyShown };
+  return { body, dialog, form, fire, shown, anyShown };
 }
 const lines = (tip: FakeElement) => tip.children.map((c) => c.textContent);
 
@@ -167,13 +178,28 @@ function chartLayer() {
   const cross = new FakeElement("i", ["cross"]);
   cross.hidden = true;
   layer.append(cross);
-  return { layer, cross };
+  const { host, swap, plot, table } = chartFrame("article", layer);
+  return { layer, cross, host, swap, plot, table };
+}
+/** The markup around a chart that the 表で見る button switches: host > [button, figure > [.plot, .chart-table]]. */
+function chartFrame(hostTag: "article" | "div", ...content: FakeElement[]) {
+  const host = new FakeElement(hostTag, hostTag === "div" ? ["chart"] : []);
+  const swap = new FakeElement("button", ["swap"]);
+  const figure = new FakeElement("figure");
+  const plot = new FakeElement("div", ["plot"]);
+  const table = new FakeElement("div", ["chart-table"]);
+  table.hidden = true;
+  plot.append(...content);
+  figure.append(plot, table);
+  host.append(swap, figure);
+  return { host, swap, figure, plot, table };
 }
 
 void test("pointing at a time chart lists every series at that period and marks it", () => {
   const { body, fire, shown, anyShown } = page();
-  const { layer, cross } = chartLayer();
-  body.append(layer);
+  const chart = chartLayer();
+  const { layer, cross } = chart;
+  body.append(chart.host);
   fire("pointermove", { target: layer, clientX: 100 + 300 * 0.5, clientY: 220 });
   assert.equal(cross.hidden, false);
   assert.equal(cross.style.left, "50%");
@@ -186,8 +212,9 @@ void test("pointing at a time chart lists every series at that period and marks 
 
 void test("arrow keys step through periods from the latest and Escape hides the list", () => {
   const { body, fire, shown, anyShown } = page();
-  const { layer } = chartLayer();
-  body.append(layer);
+  const chart = chartLayer();
+  const { layer } = chart;
+  body.append(chart.host);
   fire("focusin", { target: layer });
   assert.deepEqual(lines(shown()).slice(1), ["0.9 h/件作業", "0.3 h/件待ち"]);
   fire("keydown", { target: layer, key: "ArrowLeft" });
@@ -198,9 +225,6 @@ void test("arrow keys step through periods from the latest and Escape hides the 
 });
 
 function timelineIn(dialog: FakeElement) {
-  const lanes = new FakeElement("figure", ["lanes"]);
-  lanes.dataset.start = String(Date.UTC(2026, 10, 23, 0));
-  lanes.dataset.end = String(Date.UTC(2026, 10, 23, 2));
   const lane = (name: string, start: number, end: number) => {
     const row = new FakeElement("div", ["lane"]);
     const label = new FakeElement("b");
@@ -214,11 +238,14 @@ function timelineIn(dialog: FakeElement) {
     row.append(label, track);
     return row;
   };
-  lanes.append(lane("作業", 0, 1), lane("待ち", 1, 2));
-  dialog.append(lanes);
-  const track = lanes.querySelector(".track");
+  const { host, swap, figure } = chartFrame("div", lane("作業", 0, 1), lane("待ち", 1, 2));
+  figure.classList.add("lanes");
+  figure.dataset.start = String(Date.UTC(2026, 10, 23, 0));
+  figure.dataset.end = String(Date.UTC(2026, 10, 23, 2));
+  dialog.append(host);
+  const track = figure.querySelector(".track");
   assert.ok(track);
-  return { lanes, track };
+  return { lanes: figure, track, swap };
 }
 
 void test("moving across an issue timeline keeps updating the time without touching chart probes", () => {
@@ -242,10 +269,40 @@ void test("after an issue timeline closes with Escape, a chart behind it shows i
   fire("keydown", { target: track, key: "Escape" });
   dialog.hidden = true;
   assert.equal(anyShown(), false);
-  const { layer } = chartLayer();
-  body.append(layer);
+  const chart = chartLayer();
+  const { layer } = chart;
+  body.append(chart.host);
   fire("pointermove", { target: layer, clientX: 101, clientY: 220 });
   const list = shown();
   assert.equal(list.closest("dialog"), null, "the list is not left inside the closed dialog");
   assert.deepEqual(lines(list).slice(1), ["0.5 h/件作業", "0.1 h/件待ち"]);
+});
+
+void test("every view change hides the value lists: table switch, filters and closing the timeline", () => {
+  const { body, dialog, form, fire, shown, anyShown } = page();
+  const chart = chartLayer();
+  body.append(chart.host);
+  const point = () => {
+    fire("pointermove", { target: chart.layer, clientX: 250, clientY: 220 });
+    assert.ok(shown());
+  };
+  point();
+  fire("click", { target: chart.swap });
+  assert.equal(anyShown(), false, "switching the chart to its table hides the list");
+  assert.deepEqual([chart.plot.hidden, chart.table.hidden], [true, false]);
+  fire("click", { target: chart.swap });
+  point();
+  form.dispatch("change");
+  assert.equal(anyShown(), false, "changing the target or span hides the list");
+
+  const timeline = timelineIn(dialog);
+  fire("pointermove", { target: timeline.track, clientX: 200, clientY: 305 });
+  assert.ok(shown());
+  fire("click", { target: timeline.swap });
+  assert.equal(anyShown(), false, "switching the timeline to its table hides the list");
+  fire("click", { target: timeline.swap });
+  fire("pointermove", { target: timeline.track, clientX: 200, clientY: 305 });
+  assert.ok(shown());
+  dialog.dispatch("close");
+  assert.equal(anyShown(), false, "closing the timeline hides the list");
 });

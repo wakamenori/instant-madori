@@ -213,13 +213,18 @@ dialog h2 { font-size: 15px; margin-bottom: 8px; }
 `;
 export const script = String.raw`
 const form = document.querySelector(".filters");
-function selectCombo() {
-  const target = form.elements.target.value, span = form.elements.span.value;
-  for (const panel of document.querySelectorAll(".combo"))
-    panel.hidden = panel.dataset.span !== span || panel.dataset.target !== target;
-  hideTip();
+// Every action that changes what is on screen goes through here first, so no value list outlives its chart.
+function changeView(apply) {
+  hideLists();
+  apply();
 }
-form.addEventListener("change", selectCombo);
+form.addEventListener("change", () =>
+  changeView(() => {
+    const target = form.elements.target.value, span = form.elements.span.value;
+    for (const panel of document.querySelectorAll(".combo"))
+      panel.hidden = panel.dataset.span !== span || panel.dataset.target !== target;
+  }),
+);
 const dialog = document.querySelector("dialog");
 // Each surface owns its list: a modal dialog hides anything moved into it once it closes.
 const chartTip = document.querySelector("#chart-tip"), laneTip = document.querySelector("#lane-tip");
@@ -232,12 +237,15 @@ const hours = (ms) => (ms / 3600000).toLocaleString("ja-JP", { maximumFractionDi
 document.addEventListener("click", (event) => {
   const button = event.target.closest("button");
   if (!button || button.disabled) return;
+  changeView(() => press(button));
+});
+function press(button) {
   if (button.matches(".swap")) {
     const host = button.closest("article, .chart");
     const on = button.getAttribute("aria-pressed") !== "true";
     for (const figure of host.querySelectorAll("figure")) {
       figure.querySelector(".chart-table").hidden = !on;
-      for (const part of figure.querySelectorAll(":scope > .plot, :scope > .xaxis")) part.hidden = on;
+      for (const part of figure.children) if (part.matches(".plot, .xaxis")) part.hidden = on;
     }
     button.setAttribute("aria-pressed", String(on));
     button.textContent = on ? "グラフで見る" : "表で見る";
@@ -268,21 +276,21 @@ document.addEventListener("click", (event) => {
     state.textContent = active ? button.getAttribute("aria-label").replace("で絞り込む", "") + "の時間が長い順" : "";
     panel.querySelector(".empty-issues").hidden = count !== 0;
   } else if (button.matches(".issue")) {
-    dialog.querySelector("div").replaceChildren(
+    dialog.querySelector(".issue-body").replaceChildren(
       document.querySelector("#issue-" + button.dataset.issue).content.cloneNode(true),
     );
     dialog.showModal();
   }
-});
-dialog.addEventListener("close", () => hideTip());
-function hideTip() {
+}
+dialog.addEventListener("close", () => changeView(() => {}));
+function hideLists() {
   chartTip.hidden = laneTip.hidden = true;
   for (const line of document.querySelectorAll(".cross")) line.hidden = true;
 }
 function showTip(layer, index, anchor) {
   const chart = JSON.parse(layer.dataset.chart);
   const row = chart.rows[index];
-  if (!row) return hideTip();
+  if (!row) return hideLists();
   const line = layer.querySelector(".cross");
   line.hidden = false;
   line.style.left = (100 * (row.a + row.b)) / 2 + "%";
@@ -319,7 +327,7 @@ document.addEventListener("pointermove", (event) => {
     const track = lanes.querySelector(".track");
     if (!track) return;
     const box = track.getBoundingClientRect(), f = (event.clientX - box.left) / box.width;
-    if (f < 0 || f > 1) return hideTip();
+    if (f < 0 || f > 1) return hideLists();
     const time = Number(lanes.dataset.start) + f * (Number(lanes.dataset.end) - Number(lanes.dataset.start));
     const head = document.createElement("p");
     head.textContent = new Date(time).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" }) + " JST";
@@ -334,17 +342,17 @@ document.addEventListener("pointermove", (event) => {
     place(laneTip, event.clientX, event.clientY + 14);
     return;
   }
-  hideTip();
+  hideLists();
 });
 document.addEventListener("focusin", (event) => {
   const layer = event.target.closest?.(".probe[data-chart]");
   if (layer) showTip(layer, JSON.parse(layer.dataset.chart).rows.length - 1);
 });
 document.addEventListener("focusout", (event) => {
-  if (event.target.closest?.(".probe[data-chart]")) hideTip();
+  if (event.target.closest?.(".probe[data-chart]")) hideLists();
 });
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") return hideTip();
+  if (event.key === "Escape") return hideLists();
   const layer = event.target.closest?.(".probe[data-chart]");
   if (!layer || (event.key !== "ArrowLeft" && event.key !== "ArrowRight")) return;
   event.preventDefault();
