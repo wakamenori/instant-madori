@@ -80,3 +80,5 @@ export type JobWorkflowDeps = StoreDeps<
     ai: Ai;
     testHold: JobTestHold | null;
   };
+
+export type AiCostDeps = StoreDeps<"aiCost", "reserve" | "settle"> & Pick<ServiceDeps, "runtime">;
