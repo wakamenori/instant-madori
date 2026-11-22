@@ -10,7 +10,8 @@ pub(crate) struct Index {
     pub boundaries: BTreeMap<BoundaryId, usize>,
     pub rooms: BTreeMap<RoomId, (usize, StoreyId)>,
     pub incident: BTreeMap<VertexId, Vec<usize>>,
-    pub openings: BTreeMap<BoundaryId, Vec<usize>>,
+    pub openings: BTreeMap<OpeningId, usize>,
+    pub openings_by_wall: BTreeMap<BoundaryId, Vec<usize>>,
     pub sides: BTreeMap<BoundaryId, Sides>,
 }
 
@@ -285,13 +286,17 @@ impl Index {
 
     fn index_openings(&mut self, data: &HouseData, checks: &mut Checks) {
         for (i, row) in data.openings.iter().enumerate() {
+            self.openings.insert(row.id.clone(), i);
             let id = row.id.as_str();
             checks.number(Kind::Opening, id, "distance", row.distance, Nonnegative);
             checks.number(Kind::Opening, id, "width", row.width, Positive);
             checks.number(Kind::Opening, id, "height", row.height, Positive);
             checks.number(Kind::Opening, id, "sill", row.sill, Nonnegative);
             if self.boundaries.contains_key(&row.wall) {
-                self.openings.entry(row.wall.clone()).or_default().push(i);
+                self.openings_by_wall
+                    .entry(row.wall.clone())
+                    .or_default()
+                    .push(i);
             } else {
                 checks.reject(
                     Kind::Opening,

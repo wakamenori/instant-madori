@@ -45,6 +45,9 @@ impl IdScope {
             });
         Self(format!("{:010x}", hash >> 24))
     }
+    pub fn opening(&self) -> OpeningId {
+        OpeningId::new(format!("{}:o1", self.0))
+    }
     pub fn storey(&self) -> StoreyId {
         StoreyId::new(format!("{}:s1", self.0))
     }

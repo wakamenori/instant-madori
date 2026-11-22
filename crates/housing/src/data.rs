@@ -118,6 +118,42 @@ pub struct Opening {
     pub sill: f64,
     pub fitting: Fitting,
 }
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct OpeningSpec {
+    pub wall: BoundaryId,
+    pub from: WallEnd,
+    /// Distance along the wall from the reference end to the nearer jamb.
+    pub distance: f64,
+    pub width: f64,
+    pub height: f64,
+    /// Height of the bottom of the opening above the floor.
+    pub sill: f64,
+    pub fitting: Fitting,
+}
+impl OpeningSpec {
+    pub(crate) fn with_id(&self, id: OpeningId) -> Opening {
+        let Self {
+            wall,
+            from,
+            distance,
+            width,
+            height,
+            sill,
+            fitting,
+        } = self;
+        Opening {
+            id,
+            wall: wall.clone(),
+            from: *from,
+            distance: *distance,
+            width: *width,
+            height: *height,
+            sill: *sill,
+            fitting: *fitting,
+        }
+    }
+}
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Fitting {
