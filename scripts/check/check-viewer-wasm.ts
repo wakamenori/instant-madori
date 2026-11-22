@@ -11,6 +11,7 @@ class WasmFormatError extends Error {}
 type WasmFunction = {
   index: number;
   name: string | undefined;
+  exportNames: readonly string[];
   bodySize: number;
 };
 
@@ -19,7 +20,7 @@ type WasmModule = {
   imports: number;
   functions: WasmFunction[];
   hasFunctionNames: boolean;
-  exportedFunctions: Set<number>;
+  bindgenCrates: ReadonlyMap<string, string>;
 };
 
 type Cursor = { bytes: Uint8Array; pos: number; end: number };
@@ -77,6 +78,30 @@ function skipLimits(c: Cursor) {
   if (flags & 1) skipLeb(c);
 }
 
+function readBindgenPackages(c: Cursor, packages: Map<string, string>) {
+  // The crate identifier is length-prefixed inside opaque wasm-bindgen metadata.
+  while (c.pos < c.end) {
+    const length = byte(c);
+    const end = c.pos + length;
+    if (length < 18 || end > c.end || c.bytes[end - 17] !== 0x2d) continue;
+    let identifier: string;
+    try {
+      identifier = utf8.decode(c.bytes.subarray(c.pos, end));
+    } catch {
+      continue;
+    }
+    const match = /^([A-Za-z0-9_-]+)-([0-9a-f]{16})$/u.exec(identifier);
+    if (!match) continue;
+    const [, pkg, hash] = match;
+    if (pkg === undefined || hash === undefined) continue;
+    const previous = packages.get(hash);
+    if (previous !== undefined && previous !== pkg) {
+      throw fail(c, `wasm-bindgen crate hash ${hash} names both ${previous} and ${pkg}`);
+    }
+    packages.set(hash, pkg);
+  }
+}
+
 function readWasmModule(bytes: Uint8Array): WasmModule {
   const top: Cursor = { bytes, pos: 0, end: bytes.length };
   const header = [0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00];
@@ -88,7 +113,8 @@ function readWasmModule(bytes: Uint8Array): WasmModule {
   const bodySizes: number[] = [];
   let hasFunctionNames = false;
   const names = new Map<number, string>();
-  const exportedFunctions = new Set<number>();
+  const exportNames = new Map<number, string[]>();
+  const bindgenPackages = new Map<string, string>();
   while (top.pos < top.end) {
     const id = byte(top);
     const size = u32(top);
@@ -97,6 +123,7 @@ function readWasmModule(bytes: Uint8Array): WasmModule {
     top.pos = c.end;
     if (id === 0) {
       const section = name(c);
+      if (section === "__wasm_bindgen_unstable") readBindgenPackages(c, bindgenPackages);
       if (section !== "name") continue;
       while (c.pos < c.end) {
         const sub = byte(c);
@@ -141,10 +168,14 @@ function readWasmModule(bytes: Uint8Array): WasmModule {
     } else if (id === 7) {
       const count = u32(c);
       for (let i = 0; i < count; i++) {
-        name(c);
+        const exportName = name(c);
         const kind = byte(c);
         const index = u32(c);
-        if (kind === 0) exportedFunctions.add(index);
+        if (kind === 0) {
+          const names = exportNames.get(index) ?? [];
+          names.push(exportName);
+          exportNames.set(index, names);
+        }
       }
     } else if (id === 10) {
       const count = u32(c);
@@ -170,10 +201,13 @@ function readWasmModule(bytes: Uint8Array): WasmModule {
     functions: bodySizes.map((bodySize, i) => ({
       index: imports + i,
       name: names.get(imports + i),
+      exportNames: exportNames.get(imports + i) ?? [],
       bodySize,
     })),
     hasFunctionNames,
-    exportedFunctions,
+    bindgenCrates: new Map(
+      [...bindgenPackages].map(([hash, pkg]) => [hash, pkg.replaceAll("-", "_")]),
+    ),
   };
 }
 
@@ -188,7 +222,6 @@ const checkedFamilies = [
 ];
 
 type Usage = { functions: number; bytes: number };
-type Bucket = "wasm-bindgen glue" | "exported, unmangled" | "other unmangled";
 type FamilyFinding = {
   family: CrateFamily;
   crates: { name: string; usage: Usage; examples: string[] }[];
@@ -203,7 +236,6 @@ type ViewerWasmContents = {
     viewerHashes: ReadonlySet<string>;
   };
   crates: [string, Usage][];
-  buckets: [Bucket, Usage][];
   descriptors: Usage;
   families: FamilyFinding[];
   violations: string[];
@@ -212,7 +244,7 @@ type ViewerWasmContents = {
 type Origin =
   | { kind: "crate"; symbol: RustSymbol }
   | { kind: "descriptor" }
-  | { kind: "bucket"; bucket: Bucket }
+  | { kind: "unmangled"; crate: string }
   | { kind: "unattributable"; reason: string };
 
 function matchesFamily(crate: string, family: CrateFamily): boolean {
@@ -220,31 +252,101 @@ function matchesFamily(crate: string, family: CrateFamily): boolean {
   return pattern.test(crate) || pattern.test(crate.replaceAll("_", "-"));
 }
 
-function originOf(fn: WasmFunction, exported: boolean): Origin {
-  if (fn.name === undefined) {
+const unmangledOwners = {
+  compiler_builtins: {
+    exported: false,
+    names: [
+      "__ashlti3",
+      "__lshrti3",
+      "__multi3",
+      "__udivti3",
+      "__umodti3",
+      "acosf",
+      "atan2f",
+      "cos",
+      "cosf",
+      "exp",
+      "fma",
+      "fmod",
+      "hypot",
+      "round",
+      "roundf",
+      "sin",
+      "sinf",
+      "tan",
+      "memcmp",
+    ],
+  },
+  wasm_bindgen: {
+    exported: true,
+    names: [
+      "__wbindgen_malloc",
+      "__wbindgen_realloc",
+      "__wbindgen_free",
+      "__wbindgen_exn_store",
+      "__wbindgen_destroy_closure",
+      "__wbindgen_jspi_set_rejected",
+      "__wbindgen_skip_interpret_calls",
+      "__externref_table_alloc",
+      "__externref_table_dealloc",
+      "__externref_drop_slice",
+    ],
+  },
+  js_sys: { exported: true, names: ["__wbg_jspi_task_poll"] },
+} as const satisfies Record<string, { exported: boolean; names: readonly string[] }>;
+
+const ownerByName = new Map<string, { crate: string; exported: boolean }>();
+for (const [crate, { exported, names }] of Object.entries(unmangledOwners)) {
+  for (const name of names) {
+    if (ownerByName.has(name)) throw new Error(`${name} appears twice in unmangledOwners`);
+    ownerByName.set(name, { crate, exported });
+  }
+}
+
+function originOf(
+  name: string | undefined,
+  fn: WasmFunction,
+  bindgenCrates: ReadonlyMap<string, string>,
+): Origin {
+  if (name === undefined) {
     return { kind: "unattributable", reason: `function ${fn.index} has no name` };
   }
-  if (fn.name.startsWith("_ZN")) {
+  if (name.startsWith("_ZN")) {
     return {
       kind: "unattributable",
-      reason: `${fn.name}: legacy mangling; the check reads v0 names only`,
+      reason: `${name}: legacy mangling; the check reads v0 names only`,
     };
   }
-  if (fn.name.startsWith("_R")) {
+  if (name.startsWith("_R")) {
     try {
-      return { kind: "crate", symbol: v0Crates(fn.name) };
+      return { kind: "crate", symbol: v0Crates(name) };
     } catch (error) {
       if (!(error instanceof V0SymbolError)) throw error;
-      return { kind: "unattributable", reason: `${fn.name}: ${error.message}` };
+      return { kind: "unattributable", reason: `${name}: ${error.message}` };
     }
   }
-  if (fn.name.startsWith("__wbindgen_describe")) return { kind: "descriptor" };
-  const bucket = /^__(?:wbindgen|wbg|externref)/u.test(fn.name)
-    ? "wasm-bindgen glue"
-    : exported
-      ? "exported, unmangled"
-      : "other unmangled";
-  return { kind: "bucket", bucket };
+  const exported = fn.exportNames.length > 0;
+  if (exported && name.startsWith("__wbindgen_describe_")) return { kind: "descriptor" };
+  const hash = /_([0-9a-f]{16})$/u.exec(name)?.[1];
+  const crate = hash === undefined ? undefined : bindgenCrates.get(hash);
+  if (exported && crate !== undefined) return { kind: "unmangled", crate };
+  const owner = ownerByName.get(name);
+  const status = exported ? "exported" : "not exported";
+  if (owner) {
+    if (exported === owner.exported) return { kind: "unmangled", crate: owner.crate };
+    return {
+      kind: "unattributable",
+      reason: `${name}: ${status}, but ${owner.crate} ${owner.exported ? "exports it" : "does not export it"}, so another crate defines it`,
+    };
+  }
+  const suffix =
+    hash !== undefined && crate === undefined
+      ? "; its suffix matches no wasm-bindgen crate identifier"
+      : "";
+  return {
+    kind: "unattributable",
+    reason: `${name} (${status}): unmangled name with no known origin${suffix}`,
+  };
 }
 
 function add<K extends string>(map: Map<K, Usage>, key: K, bytes: number) {
@@ -260,7 +362,7 @@ const byBytes = <K extends string>(a: [K, Usage], b: [K, Usage]) =>
 export function inspectViewerWasm(bytes: Uint8Array, bindings?: Uint8Array): ViewerWasmContents {
   const module = readWasmModule(bytes);
   const crates = new Map<string, Usage>();
-  const buckets = new Map<Bucket, Usage>();
+  const familyUsage = new Map<string, Usage>();
   const descriptors: Usage = { functions: 0, bytes: 0 };
   const findings = new Map<CrateFamily, FamilyFinding>(
     checkedFamilies.map((family) => [family, { family, crates: [], mentions: new Map() }]),
@@ -276,26 +378,20 @@ export function inspectViewerWasm(bytes: Uint8Array, bindings?: Uint8Array): Vie
     );
   }
   for (const fn of module.functions) {
-    const origin = originOf(fn, module.exportedFunctions.has(fn.index));
-    switch (origin.kind) {
-      case "unattributable":
-        unattributed.push(origin.reason);
-        break;
-      case "descriptor":
-        descriptors.functions++;
-        descriptors.bytes += fn.bodySize;
-        break;
-      case "bucket":
-        add(buckets, origin.bucket, fn.bodySize);
-        break;
-      case "crate": {
+    const owners = new Map<string, string>();
+    const reasons: string[] = [];
+    for (const name of new Set([fn.name, ...fn.exportNames])) {
+      const origin = originOf(name, fn, module.bindgenCrates);
+      if (origin.kind === "unattributable") {
+        reasons.push(origin.reason);
+        continue;
+      }
+      if (origin.kind === "descriptor" || name === undefined) continue;
+      const crate = origin.kind === "crate" ? origin.symbol.owner.name : origin.crate;
+      if (!owners.has(crate)) owners.set(crate, name);
+      if (origin.kind === "crate" && name === fn.name) {
         const { owner, pathCrates } = origin.symbol;
-        const crate = owner.name;
-        add(crates, crate, fn.bodySize);
         if (crate === viewerCrate) viewerHashes.add(owner.disambiguator.toString(16));
-        const list = examples.get(crate) ?? [];
-        if (list.length < 5 && fn.name !== undefined) list.push(fn.name);
-        examples.set(crate, list);
         for (const finding of findings.values()) {
           if (
             !matchesFamily(crate, finding.family) &&
@@ -304,11 +400,27 @@ export function inspectViewerWasm(bytes: Uint8Array, bindings?: Uint8Array): Vie
             finding.mentions.set(crate, (finding.mentions.get(crate) ?? 0) + 1);
           }
         }
-        break;
       }
     }
+    if (reasons.length > 0) {
+      unattributed.push(...reasons);
+      continue;
+    }
+    const first = owners.keys().next();
+    if (first.done) {
+      descriptors.functions++;
+      descriptors.bytes += fn.bodySize;
+      continue;
+    }
+    add(crates, first.value, fn.bodySize);
+    for (const [crate, symbol] of owners) {
+      add(familyUsage, crate, fn.bodySize);
+      const list = examples.get(crate) ?? [];
+      if (list.length < 5) list.push(symbol);
+      examples.set(crate, list);
+    }
   }
-  for (const [crate, usage] of crates) {
+  for (const [crate, usage] of familyUsage) {
     for (const finding of findings.values()) {
       if (matchesFamily(crate, finding.family)) {
         finding.crates.push({ name: crate, usage, examples: examples.get(crate) ?? [] });
@@ -340,7 +452,7 @@ export function inspectViewerWasm(bytes: Uint8Array, bindings?: Uint8Array): Vie
   }
   if (unattributed.length > 0) {
     problems.push(
-      `${unattributed.length} function names cannot be attributed to a crate:\n  ${unattributed.slice(0, 10).join("\n  ")}`,
+      `${unattributed.length} function names cannot be attributed to a crate:\n  ${unattributed.slice(0, 10).join("\n  ")}\n  To attribute an unmangled name, list it in unmangledOwners in scripts/check/check-viewer-wasm.ts under the crate that defines it. The family check applies to that crate.`,
     );
   }
   const violations = problems.map((problem) => `[${viewerWasmBoundary.id}] ${problem}`);
@@ -360,7 +472,6 @@ export function inspectViewerWasm(bytes: Uint8Array, bindings?: Uint8Array): Vie
       viewerHashes,
     },
     crates: [...crates].sort(byBytes),
-    buckets: [...buckets].sort(byBytes),
     descriptors,
     families: [...findings.values()],
     violations,
@@ -370,10 +481,7 @@ export function inspectViewerWasm(bytes: Uint8Array, bindings?: Uint8Array): Vie
 const n = (value: number) => value.toLocaleString("en-US");
 
 function formatContents(path: string, contents: ViewerWasmContents): string {
-  const rows: [string, Usage][] = [
-    ...contents.crates,
-    ...contents.buckets.map(([bucket, usage]): [string, Usage] => [`(${bucket})`, usage]),
-  ];
+  const rows = contents.crates;
   const total = rows.reduce(
     (sum, [, usage]) => ({
       functions: sum.functions + usage.functions,
