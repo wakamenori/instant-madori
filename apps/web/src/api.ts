@@ -1,15 +1,12 @@
 import {
-  acceptInstructionResponseSchema,
+  projectListResponseSchema,
+  patternListResponseSchema,
   apiErrorSchema,
   createProjectResponseSchema,
   displayContentType,
   patternStateResponseSchema,
 } from "@madori/contracts";
-import type {
-  AcceptInstructionRequest,
-  ApiErrorCode,
-  CreateProjectRequest,
-} from "@madori/contracts";
+import type { ApiErrorCode, CreateProjectRequest } from "@madori/contracts";
 
 export class ApiError extends Error {
   readonly code: ApiErrorCode | "network" | "unexpected_response";
@@ -25,7 +22,7 @@ async function request<T>(
   path: string,
   signal: AbortSignal,
   decode: (response: Response) => Promise<T>,
-  body?: CreateProjectRequest | AcceptInstructionRequest,
+  body?: CreateProjectRequest,
 ): Promise<T> {
   signal.throwIfAborted();
   try {
@@ -66,27 +63,28 @@ export function createProject(body: CreateProjectRequest, signal: AbortSignal) {
     async (response) => {
       const result = createProjectResponseSchema.safeParse(await jsonBody(response));
       if (!result.success) throw new ApiError("unexpected_response");
-      return result.data.pattern;
+      return result.data;
     },
     body,
   );
 }
 
-export function sendInstruction(
-  patternId: string,
-  body: AcceptInstructionRequest,
-  signal: AbortSignal,
-) {
-  return request(
-    `/api/patterns/${patternId}/messages`,
-    signal,
-    async (response) => {
-      const result = acceptInstructionResponseSchema.safeParse(await jsonBody(response));
-      if (!result.success) throw new ApiError("unexpected_response");
-      return result.data.job;
-    },
-    body,
-  );
+export function listProjects(cursor: string | null, signal: AbortSignal) {
+  const path =
+    cursor === null ? "/api/projects" : `/api/projects?cursor=${encodeURIComponent(cursor)}`;
+  return request(path, signal, async (response) => {
+    const result = projectListResponseSchema.safeParse(await jsonBody(response));
+    if (!result.success) throw new ApiError("unexpected_response");
+    return result.data;
+  });
+}
+
+export function listPatterns(projectId: string, signal: AbortSignal) {
+  return request(`/api/projects/${projectId}/patterns`, signal, async (response) => {
+    const result = patternListResponseSchema.safeParse(await jsonBody(response));
+    if (!result.success) throw new ApiError("unexpected_response");
+    return result.data.patterns;
+  });
 }
 
 export function readPatternState(patternId: string, signal: AbortSignal) {
