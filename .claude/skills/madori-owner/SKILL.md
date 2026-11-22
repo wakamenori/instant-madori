@@ -90,4 +90,6 @@ Agent ツールに `isolation: "worktree"` を付けて立てた subagent（inte
 
 ## マージの後
 
-Issue の終わった証拠に staging での確認があれば、マージの後に verify-madori の「マージの後に staging を確かめる」で確かめる。記録が要る Issue では、記録の PR も作る。
+担当のスレッドは PR のマージで settled になり、PR の見張りも消える。Issue の終わった証拠にマージの後の staging での確認があれば、デプロイが終わったときに指揮役がこのスレッドへ知らせる。知らせを受けたら、verify-madori の「マージの後に staging を確かめる」で確かめる。記録が要る Issue では、記録の PR も作る。
+
+PR の変更がすべて `deploy-staging.yml` の `paths-ignore` に入ると、マージしてもデプロイは動かず、知らせも来ない。`node .claude/skills/madori-coordinator/scripts/deploy-files.mjs before <PR の番号> <head の SHA>` が0で終わって何も出さなければ、その PR はデプロイを起こさない。そのような PR で staging での確認が要るなら、マージの後を待たずに、「PR を出す」のとおりマージの前の確認として指揮役に頼む。staging は前にデプロイした版のままで、マージはデプロイが読むファイルを変えないので、マージの前に確かめた結果がマージの後もそのまま当てはまる。

@@ -33,7 +33,7 @@ Rustは、rustupのcargoで動かします。`rust-toolchain.toml` の版とWasm
 
 `pnpm dev`は、ローカルのD1へマイグレーションを適用してから次のプロセスを起動し、Ctrl-Cでまとめて終了します。ContainerとプロキシはWranglerが終了時に削除します。終了処理の失敗は報告し、起動・実行結果と終了コードを維持します。
 
-`pnpm dev` は、何も指定しなければ5173番（画面）と8787番（Worker）を使います。別のworktreeの `pnpm dev` と同時に動かすときは、`MADORI_DEV_PORTS=auto pnpm dev` で起動します。20000〜32767番から、空いている二つのポートを選びます。どちらの場合も、使うポートを起動の初め（マイグレーションの前）に `Web: http://127.0.0.1:<画面のポート> | Worker: http://127.0.0.1:<Workerのポート>` の行で表示します。既定のポートに `127.0.0.1` か `localhost` で応答するプロセスがあれば、その時点で止まり、別のポートへは移りません。同じチェックアウトでは、`pnpm dev` を同時に一つしか起動できません。二つ目は `.local/dev.lock` のロックを取れずに止まります。ローカルのD1と `apps/worker/.dev.vars` は、チェックアウトごとに一つしかないためです。
+`pnpm dev` は、何も指定しなければ5173番（画面）と8787番（Worker）を使います。別のworktreeの `pnpm dev` と同時に動かすときは、`MADORI_DEV_PORTS=auto pnpm dev` で起動します。20000〜32767番から、空いている二つのポートを選びます。どちらの場合も、使うポートを起動の初め（マイグレーションの前）に `Web: http://127.0.0.1:<画面のポート> | Worker: http://127.0.0.1:<Workerのポート>` の行で表示します。既定のポートに `127.0.0.1` か `localhost` で応答するプロセスがあれば、その時点で止まり、別のポートへは移りません。同じチェックアウトでは、`pnpm dev` を同時に一つしか起動できません。二つ目は `.local/dev.lock` のロックを取れずに止まります。ローカルのD1と `apps/worker/.dev.vars` は、チェックアウトごとに一つしかないためです。このロックはmacOSでだけ働きます。Linuxでは二つ目も止まらずに起動するので、同じチェックアウトで二つ起動しないでください。
 
 Containerを使うローカルセッション（別worktreeの `pnpm dev`、実Containerテスト、別worktreeやself-hosted runnerでの `pnpm check --full`）は同時に起動できます。Miniflareがセッションごとに異なるIDをContainerの名前（`workerd-<ID>-instant-madori-GeometryContainer-...`）に付けるためです。クラッシュしたセッションのContainerは残ることがあります。`docker ps -a --format '{{.ID}} {{.Names}}'` で `workerd-` で始まる名前を確かめ、動いているセッションがないときに `docker rm --force <ID>...` で削除します。
 
