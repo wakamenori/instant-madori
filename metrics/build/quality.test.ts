@@ -129,7 +129,7 @@ void test("compares equal active windows around clustered improvements, samples 
  CREATE TABLE issue_classification(issue,pr,merged_at,kind);
  CREATE TABLE stg_github_issue(number,target,type);
  INSERT INTO stg_github_issue(number,target) VALUES(1,'activity.ci'),(2,'activity.ci'),(3,'slot.resource_limit'),(4,'absent'),(5,'操作できる'),(6,'prevention.r2_create_only'),
- (9,'approval.wait'),(10,'quality.first_pass'),(11,'slot.awaiting_dispatch');
+ (9,'approval.wait'),(10,'quality.first_pass'),(11,'slot.awaiting_dispatch'),(12,NULL);
  INSERT INTO issue_classification SELECT number,number+10,datetime(CASE number WHEN 2 THEN 600 WHEN 3 THEN 0 ELSE 540 END,'unixepoch'),'開発の仕組みの改善' FROM stg_github_issue;
  INSERT INTO stg_github_issue VALUES(7,'activity.ci','開発の仕組みの改善'),(8,'activity.ci','開発の仕組みの改善');
  INSERT INTO issue_classification VALUES(7,17,NULL,NULL),(8,18,NULL,'開発の仕組みの不具合');
@@ -253,8 +253,18 @@ void test("compares equal active windows around clustered improvements, samples 
     rows("SELECT change FROM mart_improvement_effect WHERE target='slot.resource_limit'"),
     [[null]],
   );
-  assert.deepEqual(rows("SELECT issue FROM mart_record_gap"), [[4]]);
-  assert.deepEqual(rows("SELECT issue FROM improvement WHERE mode='manual'"), [[5]]);
+  assert.deepEqual(rows("SELECT issue,reason FROM mart_record_gap"), [[4, "unknown_target"]]);
+  assert.deepEqual(
+    rows(
+      "SELECT issue,mode FROM improvement WHERE mode IN ('unknown_target','manual','no_target') ORDER BY issue",
+    ),
+    [
+      [4, "unknown_target"],
+      [5, "manual"],
+      [12, "no_target"],
+    ],
+    "a missing target leaves the comparison without being an unknown target",
+  );
   assert.deepEqual(rows("SELECT catches,main_runs,main_failures FROM mart_prevention"), [
     [1, 1, 1],
   ]);
