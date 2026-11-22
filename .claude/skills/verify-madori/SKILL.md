@@ -57,6 +57,8 @@ EVIDENCE="<スクラッチパッド>/verify-madori/<名前>"
 mkdir -p "$EVIDENCE"
 ```
 
+検証する機能がすべて Container 不要なら、次の `perl` の行の先頭に `MADORI_DEV_CONTAINERS=0 ` を足して起動する。この起動は Docker の枠を取らないので、ほかの担当の `pnpm check --full` や実 Container の試験がこの起動のために待たずに済む。`dev.log` に `[docker-slot]` の行は出ない。`node scripts/shared/docker-slots.ts status` にも、この worktree が使う枠は出ない。
+
 Bash ツールの `run_in_background` で、新しいプロセスグループとして起動する。片付けでは、このグループに Ctrl-C と同じ SIGINT を送るので、グループの番号を残す。`set -m` はこの zsh では使えない。
 
 ```sh
@@ -65,7 +67,7 @@ echo $! >| "$EVIDENCE/dev.pgid"
 wait
 ```
 
-`pnpm dev` は Wasm と Web をビルドしてから、ポートを選んで `Web: … | Worker: …` の行を出し、ローカルの D1 にマイグレーションを当てる。Container を有効にしていれば、マシン全体で共有する Docker の枠（AGENTS.md「検査と引き継ぎ」）を取ってから、選んだポートで Worker と Vite を起動する。枠が埋まっている間は、`dev.log` に `[docker-slot] <時刻> waiting …` の行を一分ごとに出して待ち、取れたら `[docker-slot] <時刻> acquired …` を出す。待つのは正常な動作なので、止めずに待つ。初回は amd64 イメージのビルドに数分かかる。次の二つが通れば使える。
+`pnpm dev` は Wasm と Web をビルドしてから、ポートを選んで `Web: … | Worker: …` の行を出し、ローカルの D1 にマイグレーションを当てる。Container を有効にしていれば、マシン全体で共有する Docker の枠（AGENTS.md「検査と引き継ぎ」）を取ってから、選んだポートで Worker と Vite を起動する。枠が埋まっている間は、`dev.log` に `[docker-slot] <時刻> waiting …` の行を一分ごとに出して待ち、取れたら `[docker-slot] <時刻> acquired …` を出す。待つのは正常な動作なので、止めずに待つ。初回は amd64 イメージのビルドに数分かかる。Container が有効なら、次の二つが通れば使える。
 
 一つ目の繰り返しは、`Web: … | Worker: …` の行から `$EVIDENCE/dev.env` を作り直し、`WEB_PORT`・`WORKER_PORT`・`API`・`O` を読む。自分の `dev.log` に、Worker の `Ready on http://127.0.0.1:<Worker のポート>` と Vite の `Local:   http://127.0.0.1:<画面のポート>/` が出るまでは、`curl` を送らない。どちらの行も、そのポートを取れたときだけ出る。ほかの回が先に同じポートを取っていれば、自分の Vite か Worker が起動に失敗して `pnpm dev` が終わり、繰り返しはログの末尾を出して止まる。`curl` だけで待つと、ほかの回のアプリの応答で通ってしまう。枠を待っている間（`waiting` の行があり、`acquired` の行がまだ無い間）の試行は数えない。
 
@@ -95,7 +97,13 @@ cat "$EVIDENCE/dev.env"
   for i in {1..210}; do
     state=$(curl -fsS "$api/patterns/$pattern/state")
     if jq -e --arg job "$job" '.lastFinishedJob.jobId == $job' <<< "$state" >/dev/null; then
-      revision=$(jq -er '.lastFinishedJob | select(.state == "completed") | .revision.id' <<< "$state")
+      job_state=$(jq -r '.lastFinishedJob.state' <<< "$state")
+      if [ "$job_state" != completed ]; then
+        echo "Job $job $job_state" >&2
+        grep -F "\"jobId\":\"$job\"" "$EVIDENCE/dev.log" | grep -F '"event":"job.finished"' | tail -n 1 >&2
+        exit 1
+      fi
+      revision=$(jq -er '.lastFinishedJob.revision.id' <<< "$state")
       curl -sS -o /dev/null -w '%{http_code} %{content_type}\n' "$api/revisions/$revision/view"
       exit
     fi
@@ -107,6 +115,8 @@ cat "$EVIDENCE/dev.env"
 ```
 
 `cat` が出す `WEB_PORT` と `WORKER_PORT` が、この回のポートである。二つ目が `200 application/vnd.madori.display; version=1` なら、自分の画面のポートで受け付けた指示がジョブとしてパターンの Durable Object と Container まで届き、確定した案の表示データを取得できた。Container の起動待ちは最大 60 秒。`$EVIDENCE/dev.log` に `Container image(s) ready` と `Ready on http://127.0.0.1:<Worker のポート>` が、枠を取ってから 10 分過ぎても出なければ、ログの末尾を報告して止まる。枠を待っている間は、`waiting` の行に枠を持つプロセスの目的、pid、経過時間、チェックアウトが出る。長く待つときは、その行を指揮役に伝える。
+
+Container を無効にしても一つ目の確認は通る。二つ目は `Job <id> failed` と `"reason":"containers_disabled"` を含む `job.finished` の行を出し、終了コード 1 で終わる。これがこの起動の期待する結果である。理由が異なる場合や確認できない場合、または Container が有効なのに同じ出力が出た場合は、起動確認の失敗とする。
 
 ## 状態確認
 

@@ -13,7 +13,10 @@
 
 ## Driving it with curl
 
-Preconditions: Containerを有効にして `pnpm dev` を起動し、検証マップの前提を満たしていること。
+Preconditions:
+
+- Container が必要。
+- 検証マップの前提を満たしている。
 
 新しい案件を作り、そのパターンに指示を二つ送る。案件は201、各指示は202を返す。
 

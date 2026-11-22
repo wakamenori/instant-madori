@@ -20,6 +20,7 @@
 
 Preconditions:
 
+- Container は不要。Container の要る地図と同じ回で確かめないなら、[SKILL.md の「起動」](../SKILL.md#起動)の手順で `MADORI_DEV_CONTAINERS=0` を付けて起動する。
 - 状態確認が通っている。
 - `. "$EVIDENCE/dev.env"` で `API` と `O` を読み込み、`D="$EVIDENCE/sign-in"` と `J='content-type: application/json'` を設定し、`$D` がある。
 
