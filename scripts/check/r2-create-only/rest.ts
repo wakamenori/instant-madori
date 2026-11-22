@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { setTimeout as sleep } from "node:timers/promises";
 import { z } from "zod";
 import { original, prefix } from "./protocol.ts";
 import type { Step } from "./protocol.ts";
@@ -8,22 +9,56 @@ export const credentialsSchema = z.object({
   CLOUDFLARE_ACCOUNT_ID: z.string().regex(/^[a-f0-9]{32}$/u),
 });
 
+const timeoutMs = 30_000;
+const retryWaitsMs = [1_000, 2_000];
+
+function transient(outcome: Response | TypeError) {
+  return outcome instanceof TypeError || outcome.status >= 500;
+}
+
 export function stagingR2Rest(
   credentials: z.infer<typeof credentialsSchema>,
   bucket: string,
   fetcher: typeof fetch = fetch,
+  delay: (ms: number, signal: AbortSignal) => Promise<unknown> = (ms, signal) =>
+    sleep(ms, undefined, { signal }),
 ) {
   const base = `https://api.cloudflare.com/client/v4/accounts/${credentials.CLOUDFLARE_ACCOUNT_ID}`;
+  const headers = { authorization: `Bearer ${credentials.CLOUDFLARE_API_TOKEN}` };
   const objects = `/r2/buckets/${encodeURIComponent(bucket)}/objects`;
-  async function request(path: string, method = "GET") {
-    return fetcher(`${base}${path}`, {
-      method,
-      headers: { authorization: `Bearer ${credentials.CLOUDFLARE_API_TOKEN}` },
-      signal: AbortSignal.timeout(30_000),
-    });
+  async function get(path: string): Promise<Response> {
+    const signal = AbortSignal.timeout(timeoutMs);
+    const send = () =>
+      fetcher(`${base}${path}`, { method: "GET", headers, signal }).catch((error: unknown) => {
+        if (error instanceof TypeError && error.message === "fetch failed") return error;
+        throw error;
+      });
+    let outcome = await send();
+    for (const [retry, wait] of retryWaitsMs.entries()) {
+      if (!transient(outcome)) break;
+      if (outcome instanceof Response) await outcome.body?.cancel().catch(() => undefined);
+      try {
+        await delay(wait, signal);
+      } catch {
+        break;
+      }
+      const failure =
+        outcome instanceof Response ? `returned ${outcome.status}` : "failed with a network error";
+      console.log(
+        `::warning title=R2 check REST retry::REST ${path} ${failure}; waited ${wait} ms, sending attempt ${retry + 2} of ${retryWaitsMs.length + 1}`,
+      );
+      try {
+        outcome = await send();
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "TimeoutError") break;
+        throw error;
+      }
+    }
+    if (outcome instanceof TypeError) throw outcome;
+    return outcome;
   }
   async function json(path: string) {
-    const response = await request(path);
+    const response = await get(path);
     assert.equal(response.status, 200, `REST ${path} must succeed`);
     const body: unknown = await response.json();
     return body;
@@ -75,10 +110,14 @@ export function stagingR2Rest(
         cursors.add(cursor);
       }
       for (const key of stale) {
-        const response = await request(`${objects}/${encodeURIComponent(key)}`, "DELETE");
+        const response = await fetcher(`${base}${objects}/${encodeURIComponent(key)}`, {
+          method: "DELETE",
+          headers,
+          signal: AbortSignal.timeout(timeoutMs),
+        });
         assert(response.ok, `REST recovery delete must succeed (${response.status})`);
         assert.equal(
-          (await request(`${objects}/${encodeURIComponent(key)}`)).status,
+          (await get(`${objects}/${encodeURIComponent(key)}`)).status,
           404,
           "recovered key must be absent",
         );
@@ -87,7 +126,7 @@ export function stagingR2Rest(
       console.log(`REST recovery passed: ${stale.length} stale probes deleted`);
     },
     async observe(key: string, step: Step) {
-      const response = await request(`${objects}/${encodeURIComponent(key)}`);
+      const response = await get(`${objects}/${encodeURIComponent(key)}`);
       if (step === "delete") {
         assert.equal(response.status, 404, "REST must confirm deletion");
         console.log(`REST ${step}: 404, key absent`);
