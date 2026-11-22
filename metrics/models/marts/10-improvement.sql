@@ -14,12 +14,12 @@ INSERT INTO improvement_target VALUES
  ('prevention.r2_create_only','R2の上書き防止','deploy-stagingの専用stepが失敗したrunとheadの組数','件','up',1);
 
 CREATE TABLE improvement AS
-SELECT c.issue,c.merged_at,i.target,CASE WHEN t.id LIKE 'prevention.%' THEN 'prevention'
+SELECT c.issue,c.merged_at,i.target,CASE WHEN i.target IS NULL THEN 'no_target' WHEN t.id LIKE 'prevention.%' THEN 'prevention'
  WHEN t.id IS NOT NULL THEN 'compare' WHEN i.target GLOB '*[^a-zA-Z0-9._-]*' THEN 'manual' ELSE 'unknown_target' END mode,
  (SELECT count(*) FROM mart_active_minute WHERE minute<unixepoch(c.merged_at)) pos
 FROM issue_classification c JOIN stg_github_issue i ON i.number=c.issue LEFT JOIN improvement_target t ON t.id=i.target
 WHERE c.kind='開発の仕組みの改善' AND c.merged_at IS NOT NULL;
-INSERT INTO mart_record_gap SELECT issue,mode FROM improvement WHERE mode='unknown_target' AND target IS NOT NULL AND merged_at>=(SELECT effective FROM record_policy);
+INSERT INTO mart_record_gap SELECT issue,mode FROM improvement WHERE mode='unknown_target' AND merged_at>=(SELECT effective FROM record_policy);
 
 CREATE TABLE active_clock AS SELECT minute,row_number() OVER(ORDER BY minute) pos FROM mart_active_minute;
 CREATE UNIQUE INDEX clock_minute ON active_clock(minute);
