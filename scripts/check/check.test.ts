@@ -146,6 +146,7 @@ void test("full checks hold one Docker slot across container integration and pru
         ...nodeTestFlags(resultsDir, "container"),
         "apps/worker/tests/container.e2e.ts",
       ].join(" "),
+      "Prune geometry service images scripts/dev/prune-images.ts",
       "Prune Docker build cache scripts/dev/prune-build-cache.ts",
     ]);
     assert.deepEqual(
