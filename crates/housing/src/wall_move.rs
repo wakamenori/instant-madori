@@ -361,25 +361,6 @@ impl House {
             &picked.start().data().storey,
             &mut errors,
         );
-        let unfitted: BTreeSet<_> = errors
-            .iter()
-            .filter(|e| matches!(e.reason, Reason::OpeningCannotFit { .. }))
-            .map(|e| e.id.clone())
-            .collect();
-        for opening in run
-            .neighbours
-            .iter()
-            .filter_map(|n| moved.boundary(&n.wall.data().id))
-            .flat_map(|w| w.openings())
-            .filter(|o| !unfitted.contains(o.data().id.as_str()))
-        {
-            errors.extend(opening.misfits().into_iter().filter(|e| {
-                matches!(
-                    e.reason,
-                    Reason::PastWallEnd { .. } | Reason::OverlapsOpening { .. }
-                )
-            }));
-        }
         check(errors)?;
         Ok((
             moved,
