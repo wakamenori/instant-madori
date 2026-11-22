@@ -177,9 +177,10 @@ impl Index {
         data: &HouseData,
         wall: &BoundaryId,
         face: &FaceRole,
+        element: Kind,
     ) -> Result<Side, Rejection> {
         let reject = |reason| Rejection {
-            element: Kind::WallColor,
+            element,
             id: wall.as_str().into(),
             reason,
         };
@@ -207,7 +208,7 @@ impl Index {
             if self.sides.get(&row.wall).is_some_and(Sides::crowded) {
                 continue;
             }
-            match self.resolve_face(data, &row.wall, &row.face) {
+            match self.resolve_face(data, &row.wall, &row.face, Kind::WallColor) {
                 Ok(side) => {
                     if self.colors.insert((row.wall.clone(), side), i).is_some() {
                         checks.reject(

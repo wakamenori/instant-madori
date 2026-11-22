@@ -110,6 +110,10 @@ impl Bounds {
     }
 }
 
+pub(crate) fn minimum_room_width(thicknesses: impl IntoIterator<Item = f64>) -> f64 {
+    thicknesses.into_iter().fold(1.0, f64::max)
+}
+
 impl RoomLayout {
     fn rejection(
         &self,
@@ -159,10 +163,7 @@ impl RoomLayout {
             ));
             return errors;
         }
-        let minimum = walls
-            .exterior_thickness
-            .max(walls.interior_thickness)
-            .max(1.0);
+        let minimum = minimum_room_width([walls.exterior_thickness, walls.interior_thickness]);
         for (i, room) in self.rooms.iter().enumerate() {
             for (axis, low, high, low_field, high_field) in [
                 (Axis::X, room.min.x, room.max.x, "min.x", "max.x"),

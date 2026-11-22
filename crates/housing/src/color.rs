@@ -1,4 +1,4 @@
-use crate::{BoundaryId, FaceRole, House, Rejections, Srgb, WallColor};
+use crate::{BoundaryId, ElementKind, FaceRole, House, Rejections, Srgb, WallColor};
 
 impl House {
     pub fn set_wall_color(
@@ -7,7 +7,9 @@ impl House {
         face: &FaceRole,
         color: Srgb,
     ) -> Result<House, Rejections> {
-        let side = self.index.resolve_face(self.data(), wall, face)?;
+        let side = self
+            .index
+            .resolve_face(self.data(), wall, face, ElementKind::WallColor)?;
         let mut data = self.data().clone();
         if let Some(row) = self
             .index
@@ -31,7 +33,8 @@ impl House {
         wall: &BoundaryId,
         face: &FaceRole,
     ) -> Result<House, Rejections> {
-        self.index.resolve_face(self.data(), wall, face)?;
+        self.index
+            .resolve_face(self.data(), wall, face, ElementKind::WallColor)?;
         let mut data = self.data().clone();
         data.wall_colors
             .retain(|row| &row.wall != wall || &row.face != face);
