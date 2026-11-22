@@ -183,13 +183,22 @@ workerd は Container を作るたびに、`dev.log` へ `containerName = worker
 
 ## マージの後に staging を確かめる
 
-main へマージすると、staging へ自動でデプロイされる。ただし、変えたファイルがすべて `deploy-staging.yml` の `paths-ignore`（`.claude/` や `docs/` の下など）に入るマージでは、デプロイは起きない。staging は前にデプロイしたコミットのまま残る。ブランチを試すときに workflow を手で実行する方法は、README「stagingへデプロイする」にある。マージの後は、まずデプロイの実行を確かめる。
+main へマージすると、staging へ自動でデプロイされる。ただし、変えたファイルがすべて `deploy-staging.yml` の `paths-ignore`（`.claude/` や `docs/` の下など）に入るマージでは、デプロイは起きない。staging は前にデプロイしたコミットのまま残る。ブランチを試すときに workflow を手で実行する方法は、README「stagingへデプロイする」にある。マージの後は、まずそのマージがデプロイを起こすかを判定する。マージコミットとその第一親の差分を、マージコミットの `deploy-staging.yml` の一覧で判定する。
 
 ```sh
-gh run list --workflow deploy-staging.yml --commit "$MERGE_SHA" --json status,conclusion,url
+node .claude/skills/madori-coordinator/scripts/deploy-files.mjs after "$PR"
 ```
 
-`[]` が返ったら、そのマージはデプロイを起こしていない。実行は後からも来ないので、待たない。staging で確かめるのは、前にデプロイした版の振る舞いになる。このマージはデプロイが読むファイルを変えていないので、その版のまま確かめられる確認はそのまま続ける。終わった証拠が、このマージのデプロイそのもの（デプロイの実行、入れ替わった Container）を求めるなら、ここでは確かめられない。デプロイが動く次のマージの後に確かめるか、指揮役に頼む。
+- 0で終わって何も出なければ、そのマージはデプロイを起こさない。実行は後からも来ないので、待たない。staging は前にデプロイした版のままで、このマージはデプロイが読むファイルを変えていないので、その版のまま確かめられる確認はそのまま続ける。終わった証拠が、このマージのデプロイそのもの（デプロイの実行、入れ替わった Container）を求めるなら、ここでは確かめられない。デプロイが動く次のマージの後に確かめるか、指揮役に頼む。
+- ファイルが出たら、デプロイが動く。標準エラーに出た `merge commit <マージ SHA>` で、push の実行を探す。手で始めた実行は、同じ SHA でも数えない。
+
+  ```sh
+  gh run list --workflow deploy-staging.yml --branch main --event push --commit "$MERGE_SHA" --json status,conclusion,url
+  ```
+
+  実行が終わって成功していれば、staging で確かめる。`[]` は、GitHub がまだ実行を作っていないだけかもしれないので、まだ確かめられていないとして扱い、更新前の staging を確かめて終えない。担当は、デプロイが終わったときに指揮役から来る知らせを待つ。
+
+- 0以外で終わったら、判定できていない。表示された理由を直して打ち直し、それまで判定を保留する。
 
 計画6.1bの障害の試験（再送、確定の後と待ちの間の停止、再デプロイをまたぐ指示、保留と再開）をまとめて行うときは、下の節を一つずつ動かさず、README「stagingへデプロイする」の `scripts/check/staging-faults/main.ts` を使う。このスクリプトは、指揮役が起動した再デプロイの run を受け取って動く。
 
