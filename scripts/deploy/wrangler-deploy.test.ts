@@ -5,6 +5,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { test, type TestContext } from "node:test";
+import { setTimeout as sleep } from "node:timers/promises";
 import { z } from "zod";
 
 const wrapper = resolve(import.meta.dirname, "wrangler-deploy.ts");
@@ -19,6 +20,17 @@ const exhausted =
 const success = (n: number) => `wrangler deploy succeeded on attempt ${n} of 3.`;
 const failure = (reason: string, n = 1) =>
   `wrangler deploy failed on attempt ${n} of 3 (${reason}); not running it again.`;
+
+function errorCode(action: () => void) {
+  try {
+    action();
+    return undefined;
+  } catch (error) {
+    if (error instanceof Error && "code" in error && typeof error.code === "string")
+      return error.code;
+    throw error;
+  }
+}
 
 async function fixture(t: TestContext) {
   const cwd = await mkdtemp(join(tmpdir(), "wrangler-test-"));
@@ -40,11 +52,8 @@ async function fixture(t: TestContext) {
     const pid = child.pid;
     function stop() {
       if (pid === undefined) return;
-      try {
-        process.kill(-pid, "SIGKILL");
-      } catch (error) {
-        if (!(error instanceof Error && "code" in error && error.code === "ESRCH")) throw error;
-      }
+      const code = errorCode(() => process.kill(-pid, "SIGKILL"));
+      if (code !== undefined && code !== "ESRCH" && code !== "EPERM") throw new Error(code);
     }
     signal.addEventListener("abort", stop);
     let output = "";
@@ -64,7 +73,11 @@ async function fixture(t: TestContext) {
     }).finally(() => signal.removeEventListener("abort", stop));
     if (signal.aborted) {
       assert.ok(pid);
-      assert.throws(() => process.kill(-pid, 0), { code: "ESRCH" });
+      // macOS reports EPERM for a group whose members are unreaped zombies.
+      for (let i = 0; errorCode(() => process.kill(-pid, 0)) !== "ESRCH"; i++) {
+        assert.ok(i < 100, "process group outlived the abort");
+        await sleep(20);
+      }
       signal.throwIfAborted();
     }
     assert.ok(!output.includes(client), "client ID appeared in logs");
