@@ -46,7 +46,7 @@ await test("Stop orders against commit on real D1 and R2", async (t) => {
       body: "案を作って",
     });
     assert(result.kind === "accepted");
-    return { jobId: result.job.id, messageId: result.message.id, number: result.message.number };
+    return result.job;
   }
   const stop = async (jobId: string, requestId = crypto.randomUUID(), owner = ownerId) =>
     db.store.jobs.stopOnce(await requestKey(owner, requestId, "job.stop", { jobId }), {

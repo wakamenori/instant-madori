@@ -4,20 +4,6 @@ import type { OwnerId } from "../owner.ts";
 import { foundSchema, rows, jsonRows } from "./d1.ts";
 import type { D1 } from "./d1.ts";
 import { revisionJson } from "./revisions.ts";
-import { z } from "zod";
-
-export const messageSchema = z.object({
-  id: z.uuid(),
-  patternId: z.uuid(),
-  number: z.number().int().positive(),
-  body: z.string(),
-  createdAt: z.iso.datetime(),
-});
-
-export function messageJson(t: string) {
-  return `json_object('id', ${t}.id, 'patternId', ${t}.pattern_id,
-    'number', ${t}.number, 'body', ${t}.body, 'createdAt', ${t}.created_at)`;
-}
 
 export const messagePageSql = `SELECT json_object('id', m.id, 'kind', m.kind, 'number', m.number, 'body', m.body,
     'createdAt', m.created_at, 'jobId', coalesce(m.job_id, j.id),

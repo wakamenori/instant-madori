@@ -20,20 +20,13 @@ export const messageRoutes: Route[] = [
       const outcome = await acceptInstruction(deps, { ownerId: user.id, patternId, ...input });
       switch (outcome.kind) {
         case "accepted":
-          log["jobId"] = outcome.job.id;
-          log["messageId"] = outcome.message.id;
-          log["messageNumber"] = outcome.message.number;
+          log["jobId"] = outcome.job.jobId;
+          log["messageId"] = outcome.job.messageId;
+          log["messageNumber"] = outcome.job.number;
           log["acceptance"] = outcome.acceptance;
-          return Response.json(
-            {
-              job: {
-                jobId: outcome.job.id,
-                messageId: outcome.message.id,
-                number: outcome.message.number,
-              },
-            } satisfies AcceptInstructionResponse,
-            { status: 202 },
-          );
+          return Response.json({ job: outcome.job } satisfies AcceptInstructionResponse, {
+            status: 202,
+          });
         case "invalid_message":
           throw new ApiFailure("invalid_request");
         case "not_found":

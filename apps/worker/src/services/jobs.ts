@@ -13,14 +13,15 @@ import type {
 } from "./deps.ts";
 import { instructionBodySchema, nameSchema } from "@madori/contracts";
 import type { OwnerId } from "../owner.ts";
-import type { Acceptance, JobStop } from "../storage/jobs.ts";
+import type { AcceptedJob } from "@madori/contracts";
+import type { JobStop } from "../storage/jobs.ts";
 import type { ServiceDeps, StoreDeps } from "./deps.ts";
 import { requestKey } from "./requests.ts";
 import type { JobExecutionReference, JobExecutionRight } from "../storage/job-execution.ts";
 import type { Snapshot } from "../storage/snapshots.ts";
 
 export type AcceptInstructionOutcome =
-  | ({ kind: "accepted"; acceptance: "applied" | "replayed" } & Acceptance)
+  | { kind: "accepted"; acceptance: "applied" | "replayed"; job: AcceptedJob }
   | { kind: "invalid_message" }
   | { kind: "not_found" }
   | { kind: "request_id_reused" };
@@ -49,7 +50,7 @@ export async function acceptInstruction(
     case "applied":
     case "replayed":
       await wakePattern(patternId);
-      return { kind: "accepted", acceptance: once.kind, ...once.result };
+      return { kind: "accepted", acceptance: once.kind, job: once.result };
     case "not_applied":
       return { kind: "not_found" };
     case "request_id_reused":

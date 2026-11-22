@@ -46,30 +46,29 @@ await test("Instruction acceptance on real D1", async (t) => {
     body,
   });
 
+  const storedResult = (requestId: string) =>
+    db.raw
+      .prepare("SELECT result FROM requests WHERE owner_id = ? AND request_id = ?")
+      .bind(ownerId, requestId)
+      .first<string>("result");
+
   await t.test("a resend returns the exact acceptance, even after the job progresses", async () => {
     const request = input(" \t間取りを作って\n　");
     const before = await counts();
     const first = await acceptInstruction(deps, request);
     assert.equal(first.kind, "accepted");
     if (first.kind !== "accepted") throw new Error("Not accepted");
-    assert.equal(first.message.number, 1);
-    assert.equal(first.message.body, request.body);
-    assert.equal(first.job.messageId, first.message.id);
-    assert.equal(first.job.state, "queued");
-    assert.equal(first.job.generation, 0);
-    assert.equal(first.job.baseRevisionId, null);
+    assert.equal(first.job.number, 1);
+    assert.deepEqual(Object.keys(first.job), ["jobId", "messageId", "number"]);
     assert.equal(first.acceptance, "applied");
     assert.deepEqual(await acceptInstruction(deps, request), { ...first, acceptance: "replayed" });
     await db.raw
       .prepare("UPDATE jobs SET state = 'running', generation = 1 WHERE id = ?")
-      .bind(first.job.id)
+      .bind(first.job.jobId)
       .run();
     assert.deepEqual(await acceptInstruction(deps, request), { ...first, acceptance: "replayed" });
-    const record = await db.raw
-      .prepare("SELECT result FROM requests WHERE owner_id = ? AND request_id = ?")
-      .bind(ownerId, request.requestId)
-      .first("result");
-    assert.equal(record, JSON.stringify({ message: first.message, job: first.job }));
+    const record = await storedResult(request.requestId);
+    assert.equal(record, JSON.stringify(first.job));
     const after = await counts();
     assert.deepEqual(
       after,
@@ -82,6 +81,27 @@ await test("Instruction acceptance on real D1", async (t) => {
       assert.deepEqual(await acceptInstruction(deps, changed), { kind: "request_id_reused" });
     }
     assert.deepEqual(await counts(), after);
+  });
+  await t.test("stored acceptance size is independent of instruction body length", async () => {
+    async function acceptAndRead(body: string) {
+      const request = input(body, await pattern());
+      const first = await acceptInstruction(deps, request);
+      assert(first.kind === "accepted");
+      assert.equal(first.acceptance, "applied");
+      const record = await storedResult(request.requestId);
+      assert(record);
+      const { jobId, messageId } = first.job;
+      assert.deepEqual(JSON.parse(record), { jobId, messageId, number: 1 });
+      assert(!record.includes(JSON.stringify(body).slice(1, -1)));
+      return { request, first, record };
+    }
+    const large = await acceptAndRead("\u0001".repeat(16384));
+    const small = await acceptAndRead("雪");
+    assert.equal(large.record.length, small.record.length);
+    assert.deepEqual(await acceptInstruction(deps, large.request), {
+      ...large.first,
+      acceptance: "replayed",
+    });
   });
   await t.test(
     "twenty concurrent identical requests create one message and one queued job",
@@ -115,7 +135,7 @@ await test("Instruction acceptance on real D1", async (t) => {
       assert.deepEqual(await acceptInstruction(deps, request), {
         kind: "accepted",
         acceptance: "replayed",
-        ...applied.result,
+        job: applied.result,
       });
       assert.deepEqual(
         await counts(),
@@ -131,7 +151,7 @@ await test("Instruction acceptance on real D1", async (t) => {
     const numbers = results.map((result) => {
       assert.equal(result.kind, "accepted");
       if (result.kind !== "accepted") throw new Error("Not accepted");
-      return result.message.number;
+      return result.job.number;
     });
     assert.deepEqual(
       numbers.sort((a, b) => a - b),
@@ -200,7 +220,7 @@ await test("Instruction acceptance on real D1", async (t) => {
         assert.equal(
           await db.raw
             .prepare("SELECT body FROM messages WHERE id = ?")
-            .bind(result.message.id)
+            .bind(result.job.messageId)
             .first("body"),
           body,
         );
@@ -217,7 +237,7 @@ await test("Instruction acceptance on real D1", async (t) => {
       let next = 0;
       const runtime = {
         ...db.runtime,
-        newId: () => (next++ === 0 ? accepted.job.id : crypto.randomUUID()),
+        newId: () => (next++ === 0 ? accepted.job.jobId : crypto.randomUUID()),
       };
       const request = input("rollback");
       await assert.rejects(

@@ -1,37 +1,36 @@
-import {
-  activeJobStates,
-  jobStateSchema,
-  stoppableJobStates,
-  finishedJobStates,
-} from "./job-states.ts";
+import { activeJobStates, stoppableJobStates, finishedJobStates } from "./job-states.ts";
 import { holdsQueueOnEnd, releaseWhenLastQueuedJobStops, releaseEmptyQueue } from "./job-queue.ts";
 import { z } from "zod";
 import { foundSchema, jsonRows, rows, write } from "./d1.ts";
 import type { D1 } from "./d1.ts";
-import { revisionSchema, cancelledJobSchema, finishedJobSchema } from "@madori/contracts";
+import {
+  acceptedJobSchema,
+  revisionSchema,
+  cancelledJobSchema,
+  finishedJobSchema,
+} from "@madori/contracts";
 import { readJobExecutionRight } from "./job-execution.ts";
 import type { JobExecutionRight } from "./job-execution.ts";
 import { revisionJson, finishedJobJson } from "./revisions.ts";
 import { verifyJobSnapshot } from "./snapshots.ts";
 import type { Snapshot } from "./snapshots.ts";
 import type { R2 } from "./r2.ts";
-import { messageJson, messageSchema } from "./messages.ts";
 import { createOnceStatements, updateOnceStatements, runOnce } from "./requests.ts";
 import type { RequestKey } from "./requests.ts";
 
-const jobSchema = z.object({
-  id: z.uuid(),
-  patternId: z.uuid(),
-  messageId: z.uuid(),
-  state: jobStateSchema,
-  generation: z.number().int().nonnegative(),
-  baseRevisionId: z.uuid().nullable(),
-  createdAt: z.iso.datetime(),
-  updatedAt: z.iso.datetime(),
-});
-
-const acceptanceSchema = z.object({ message: messageSchema, job: jobSchema });
-export type Acceptance = z.infer<typeof acceptanceSchema>;
+// Rows written by the previous Worker contain the full message and job.
+const acceptanceSchema = acceptedJobSchema.or(
+  z
+    .object({
+      message: z.object({ id: z.uuid(), number: z.int().positive() }),
+      job: z.object({ id: z.uuid() }),
+    })
+    .transform(({ message, job }) => ({
+      jobId: job.id,
+      messageId: message.id,
+      number: message.number,
+    })),
+);
 
 export interface NewInstruction {
   id: string;
@@ -63,10 +62,7 @@ export async function acceptInstructionOnce(db: D1, key: RequestKey, input: NewI
       },
     ],
     result: {
-      sql: `SELECT json_object('message', ${messageJson("m")},
-        'job', json_object('id', j.id, 'patternId', j.pattern_id, 'messageId', j.message_id,
-          'state', j.state, 'generation', j.generation, 'baseRevisionId', j.base_revision_id,
-          'createdAt', j.created_at, 'updatedAt', j.updated_at))
+      sql: `SELECT json_object('jobId', j.id, 'messageId', m.id, 'number', m.number)
         FROM jobs j JOIN messages m ON m.id = j.message_id AND m.pattern_id = j.pattern_id
         WHERE j.id = ? AND j.owner_id = ?`,
       bindings: [input.id, key.ownerId],
