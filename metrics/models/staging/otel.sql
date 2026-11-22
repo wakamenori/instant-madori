@@ -23,7 +23,10 @@ WITH codex AS (
  SELECT session,at,event,sse_kind,
   lead(at) OVER w next_at,lead(event) OVER w next_event,lead(sse_kind) OVER w next_kind
  FROM stg_otel_event
+ -- Codex streams tool decisions and results before the response completes, so only requests and
+ -- completions take part in the pairing.
  WHERE provider='codex' AND session IS NOT NULL
+  AND (event='codex.websocket_request' OR (event='codex.sse_event' AND sse_kind='response.completed'))
  WINDOW w AS (PARTITION BY session ORDER BY at,ingest_id)
 )
 SELECT 'claude' provider,session,strftime('%Y-%m-%dT%H:%M:%fZ',julianday(at)-duration_ms/86400000.0) start,at end

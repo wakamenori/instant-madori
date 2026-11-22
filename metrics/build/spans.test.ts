@@ -58,10 +58,12 @@ void test("derives measured execution, CI queues and staging occupancy from sour
         log_record: { attributes },
       });
     }
-    for (const kind of ["request", "completed", "request", "request", "completed"]) {
-      event("codex", kind === "request" ? "codex.websocket_request" : "codex.sse_event", {
-        "event.kind": "response.completed",
-      });
+    for (const kind of ["request", "completed", "request", "request", "decision", "completed"]) {
+      if (kind === "decision") event("codex", "codex.tool_decision");
+      else
+        event("codex", kind === "request" ? "codex.websocket_request" : "codex.sse_event", {
+          "event.kind": "response.completed",
+        });
     }
     for (const name of ["exec", "write_stdin"])
       event("codex", "codex.tool_result", { tool_name: name, duration_ms: "100" });
