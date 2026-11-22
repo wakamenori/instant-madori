@@ -174,32 +174,50 @@ const digestSchema = z.object({
 });
 function digest(text: string) {
   const uuid = /\b[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\b/giu;
+  // Stored digests pass through telemetry() again on every replay, so keep only values that
+  // survive redaction and still match digestSchema.
+  const stable = (value: string | undefined) =>
+    value !== undefined && redact(value) === value ? value : null;
+  const relay =
+    /^\[T3 Code: the agent in T3 thread "([a-f0-9-]{36})" sent this message, not the user\.\]/iu.exec(
+      text,
+    )?.[1];
   return {
-    v: 1,
+    v: 1 as const,
     length: text.length,
     lines: text.split("\n").length,
-    command: /^\/([a-z0-9:_-]+)(?:\s|$)/u.exec(text)?.[1] ?? null,
-    leading_tag: /^<([a-z-]+)>/u.exec(text)?.[1] ?? null,
-    relay_from_thread:
-      /^\[T3 Code: the agent in T3 thread "([a-f0-9-]{36})" sent this message, not the user\.\]/iu.exec(
-        text,
-      )?.[1] ?? null,
+    command: stable(/^\/([a-z0-9:_-]+)(?:\s|$)/u.exec(text)?.[1]),
+    leading_tag: stable(/^<([a-z-]+)>/u.exec(text)?.[1]),
+    relay_from_thread: digestSchema.shape.relay_from_thread.safeParse(relay).data ?? null,
     refs: [
       ...new Set([...text.matchAll(/(?:#|\/(?:issues|pull)\/)(\d+)/gu)].map((m) => Number(m[1]))),
-    ].sort((a, b) => a - b),
+    ]
+      .filter(Number.isSafeInteger)
+      .sort((a, b) => a - b),
     uuids: [...new Set(text.match(uuid) ?? [])].sort(),
     markers: markers.filter((k) =>
       /^[\w-]+$/u.test(k) ? new RegExp("\\b" + k + "\\b", "u").test(text) : text.includes(k),
     ),
   };
 }
+function pick(data: Obj, keys: string[]) {
+  return Object.fromEntries(
+    Object.entries(data).filter(
+      ([k, v]) => keys.includes(k) && (typeof v === "string" || typeof v === "boolean"),
+    ),
+  );
+}
+function addDigests(input: Obj, facts: Obj) {
+  for (const key of ["prompt", "last_assistant_message"]) {
+    const name = key + "_digest";
+    if (typeof input[key] === "string") facts[name] = digest(input[key]);
+    else {
+      const stored = digestSchema.safeParse(input[name]);
+      if (stored.success) facts[name] = stored.data;
+    }
+  }
+}
 export function hookPrivacy(p: Obj) {
-  const pick = (data: Obj, keys: string[]) =>
-    Object.fromEntries(
-      Object.entries(data).filter(
-        ([k, v]) => keys.includes(k) && (typeof v === "string" || typeof v === "boolean"),
-      ),
-    );
   const input = object(p.input),
     facts: Obj = pick(input, [
       "hook_event_name",
@@ -215,14 +233,7 @@ export function hookPrivacy(p: Obj) {
       "reason",
       "stop_hook_active",
     ]);
-  for (const key of ["prompt", "last_assistant_message"]) {
-    const name = key + "_digest";
-    if (typeof input[key] === "string") facts[name] = digest(input[key]);
-    else {
-      const stored = digestSchema.safeParse(input[name]);
-      if (stored.success) facts[name] = stored.data;
-    }
-  }
+  addDigests(input, facts);
   for (const key of ["background_tasks", "session_crons"]) {
     const name = key + "_count";
     if (Array.isArray(input[key])) facts[name] = input[key].length;
@@ -254,5 +265,49 @@ export function hookPrivacy(p: Obj) {
             "permission_mode",
           ])
         : facts,
+  });
+}
+
+/** Codex sends the whole patch as `command`; keep only the file header lines, not the file bodies. */
+function patchPaths(value: Json): Json {
+  const input = object(value);
+  if (typeof input.command !== "string") return value;
+  const header = /^\*\*\* (?:(?:Add|Update|Delete) File|Move to): /u;
+  return {
+    ...input,
+    command: input.command
+      .split("\n")
+      .filter((line) => header.test(line))
+      .join("\n"),
+  };
+}
+export function codexHookPrivacy(p: Obj) {
+  const input = object(p.input);
+  const facts = pick(input, [
+    "hook_event_name",
+    "session_id",
+    "turn_id",
+    "cwd",
+    "transcript_path",
+    "model",
+    "permission_mode",
+    "source",
+    "agent_id",
+    "agent_type",
+    "tool_name",
+    "tool_use_id",
+    "stop_hook_active",
+  ]);
+  addDigests(input, facts);
+  if (input.tool_input !== undefined) {
+    const reduced = tool(input.tool_input, "");
+    facts.tool_input = input.tool_name === "apply_patch" ? patchPaths(reduced) : reduced;
+  }
+  return telemetry({
+    v: 1,
+    ...pick(p, ["id", "at"]),
+    project: p.project ?? null,
+    env: pick(object(p.env), ["T3CODE_THREAD_ID", "CODEX_THREAD_ID"]),
+    input: facts,
   });
 }

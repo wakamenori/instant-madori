@@ -10,7 +10,7 @@ export const project = z.object({
     z.object({ kind: z.literal("missing") }),
   ]),
 });
-const spool = z.object({
+export const spool = z.object({
   v: z.literal(1),
   id: z.uuid(),
   at: z.iso.datetime(),

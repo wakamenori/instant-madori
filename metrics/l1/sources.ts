@@ -1,4 +1,4 @@
-import { hookPrivacy, logPrivacy, telemetry } from "./privacy.ts";
+import { codexHookPrivacy, hookPrivacy, logPrivacy, telemetry } from "./privacy.ts";
 import type { Candidate, Rejection } from "./envelope.ts";
 const event = { kind: "event", sanitize: telemetry } as const;
 const observation = { ...event, kind: "observation" } as const;
@@ -7,6 +7,7 @@ export const registry = {
   "claude.otel.metric": event,
   "codex.otel.log": { ...event, sanitize: logPrivacy },
   "codex.otel.metric": event,
+  "codex.hook": { ...event, sanitize: codexHookPrivacy },
   "claude.hook": { ...event, sanitize: hookPrivacy },
   "docker.slot": event,
   otlp: event,

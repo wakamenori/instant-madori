@@ -19,6 +19,8 @@
         "scripts/check/r2-create-only/worker.ts",
         "scripts/deploy/registry-retention.ts",
         "metrics/hook/hook.ts",
+        "metrics/hook/codex.ts",
+        "scripts/dev/agent-guard.ts",
         "metrics/receiver/receiver.ts",
         "metrics/build/build.ts",
         "metrics/import/classifications.ts",

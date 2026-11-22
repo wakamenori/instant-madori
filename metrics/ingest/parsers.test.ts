@@ -1,7 +1,12 @@
+import { execFileSync, spawnSync } from "node:child_process";
+import { tmpdir } from "node:os";
+import { z } from "zod";
+import { parseCodexHook } from "./codex-hook.ts";
+import { object } from "../l1/privacy.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, rmSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { parseOtlp } from "./otlp.ts";
 import { parseSlot } from "./docker-slot.ts";
@@ -181,4 +186,123 @@ void test("a runner checkout can prove its repository with an Actions run and at
     { pool: "development" },
   ])
     assert.equal(parse(override).drops[0]?.reason, "foreign");
+});
+
+void test("Codex recorder and receiver preserve turn and approval facts across replay", (t) => {
+  const root = resolve(import.meta.dirname, "../..");
+  const dir = mkdtempSync(join(tmpdir(), "codex-hook-"));
+  t.after(() => rmSync(dir, { recursive: true }));
+  const ready = join(dir, "spool/ready");
+  const identity = execFileSync(
+    "git",
+    ["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    { cwd: root, encoding: "utf8" },
+  ).trim();
+  const config = z
+    .object({
+      hooks: z.record(
+        z.string(),
+        z.array(z.object({ hooks: z.array(z.object({ command: z.string() })) })),
+      ),
+    })
+    .parse(JSON.parse(readFileSync(join(root, ".codex/hooks.json"), "utf8")));
+  const session = "test-session";
+  const base = {
+    session_id: session,
+    cwd: root,
+    transcript_path: "/tmp/session",
+    model: "test-model",
+    permission_mode: "default",
+    unknown_field: "discard-me",
+  };
+  const turn = { turn_id: "test-turn" };
+  const call = {
+    ...turn,
+    tool_use_id: "tool-id",
+    tool_name: "apply_patch",
+    tool_input: {
+      command:
+        "*** Begin Patch\n*** Update File: notes/hello.txt\n*** Move to: notes/moved.txt\n@@\n-private patch body\n+private patch body\n*** End Patch",
+    },
+  };
+  const examples = {
+    SessionStart: { source: "startup" },
+    UserPromptSubmit: {
+      ...turn,
+      agent_id: "owner",
+      agent_type: "default",
+      prompt: "/madori-owner #547 #99999999999999999 secret=private-prompt-body",
+    },
+    PreToolUse: call,
+    PostToolUse: { ...call, tool_response: "private tool output" },
+    PermissionRequest: { ...turn, tool_name: "Bash", tool_input: { command: "git status" } },
+    Stop: {
+      ...turn,
+      last_assistant_message: "検証役 PASS #552 private final message",
+      stop_hook_active: false,
+    },
+  };
+  function run(event: string, fields: object, cwd: string) {
+    const recorder = config.hooks[event]?.[0]?.hooks[0];
+    assert.ok(recorder);
+    assert.equal(recorder.command, `node metrics/hook/codex.ts ${event} >/dev/null 2>&1 || true`);
+    const result = spawnSync("/bin/sh", ["-c", recorder.command], {
+      cwd,
+      env: { ...process.env, INSTANT_MADORI_METRICS_HOME: dir },
+      input: JSON.stringify({ ...base, hook_event_name: event, ...fields }),
+      encoding: "utf8",
+    });
+    assert.deepEqual([result.status, result.stdout, result.stderr], [0, "", ""]);
+  }
+  run("SessionStart", examples.SessionStart, root);
+  assert.deepEqual(readdirSync(dir), []);
+  mkdirSync(ready, { recursive: true });
+  mkdirSync(join(dir, "spool/tmp"));
+  run("SessionStart", examples.SessionStart, dir);
+  assert.deepEqual(readdirSync(ready), []);
+  for (const [event, fields] of Object.entries(examples)) {
+    run(event, fields, root);
+    const files = readdirSync(ready);
+    assert.equal(files.length, 1);
+    const [name] = files;
+    assert.ok(name && name.startsWith("codex-hook-") && name.endsWith(".json"));
+    const path = join(ready, name);
+    assert.equal(statSync(path).mode & 0o777, 0o600);
+    const bytes = readFileSync(path);
+    rmSync(path);
+    assert.doesNotMatch(bytes.toString(), /tool_response|private tool output|unknown_field/u);
+    assert.deepEqual(parseCodexHook(bytes, "/other/.git").drops, [
+      { source: "codex.hook", reason: "foreign" },
+    ]);
+    const row = parseCodexHook(bytes, identity).records[0];
+    assert.ok(row);
+    assert.equal(row.source, "codex.hook");
+    assert.deepEqual(row.scope, { kind: "gated", subject: "codex.conversation:" + session });
+    const sanitize = registry["codex.hook"].sanitize;
+    const payload = sanitize(row.payload);
+    assert.deepEqual(sanitize(payload), payload);
+    assert.doesNotMatch(
+      JSON.stringify(payload),
+      /private-prompt-body|private tool output|private patch body|private final message/u,
+    );
+    const facts = object(payload.input);
+    assert.equal(facts.hook_event_name, event);
+    if ("turn_id" in fields) assert.equal(facts.turn_id, fields.turn_id);
+    if ("tool_use_id" in fields) {
+      assert.equal(facts.tool_use_id, fields.tool_use_id);
+      assert.deepEqual(facts.tool_input, {
+        command: "*** Update File: notes/hello.txt\n*** Move to: notes/moved.txt",
+      });
+    }
+    if (event === "PermissionRequest")
+      assert.deepEqual(facts.tool_input, examples.PermissionRequest.tool_input);
+    if (event === "UserPromptSubmit") {
+      assert.deepEqual(object(facts.prompt_digest).refs, [547]);
+      assert.deepEqual(object(facts.prompt_digest).markers, ["madori-owner"]);
+    }
+    if (event === "Stop") {
+      assert.deepEqual(object(facts.last_assistant_message_digest).refs, [552]);
+      assert.deepEqual(object(facts.last_assistant_message_digest).markers, ["検証役", "PASS"]);
+    }
+  }
 });

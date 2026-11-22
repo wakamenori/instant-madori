@@ -1,0 +1,100 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node metrics/hook/codex.ts SessionStart >/dev/null 2>&1 || true",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "node scripts/dev/agent-guard.ts SessionStart",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node metrics/hook/codex.ts UserPromptSubmit >/dev/null 2>&1 || true",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "node scripts/dev/agent-guard.ts UserPromptSubmit",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node metrics/hook/codex.ts PreToolUse >/dev/null 2>&1 || true",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "node scripts/dev/agent-guard.ts PreToolUse",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node metrics/hook/codex.ts PostToolUse >/dev/null 2>&1 || true",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "node scripts/dev/agent-guard.ts PostToolUse",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node metrics/hook/codex.ts PermissionRequest >/dev/null 2>&1 || true",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "node scripts/dev/agent-guard.ts PermissionRequest",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node metrics/hook/codex.ts Stop >/dev/null 2>&1 || true",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "node scripts/dev/agent-guard.ts Stop",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}
