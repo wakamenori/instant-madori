@@ -89,6 +89,7 @@ fn two_rooms() -> HouseData {
                 ],
             ),
         ],
+        wall_colors: vec![],
         openings: vec![Opening {
             id: OpeningId::new("door"),
             wall: BoundaryId::new("mid"),
@@ -332,6 +333,34 @@ fn room_requires_a_closed_outline() {
         ElementKind::Room,
         "left",
         Reason::NotCounterClockwise { signed_area: 0.0 },
+    );
+}
+
+#[test]
+fn a_color_on_a_side_with_two_rooms_reports_only_the_side_conflict() {
+    let mut data = two_rooms();
+    data.rooms[1].edges[3] = forward("mid");
+    data.wall_colors = vec![WallColor {
+        wall: BoundaryId::new("mid"),
+        face: FaceRole::Room {
+            room: RoomId::new("right"),
+        },
+        color: Srgb { r: 0, g: 0, b: 0 },
+    }];
+    let errors = House::new(data).unwrap_err();
+    assert!(
+        errors
+            .as_slice()
+            .iter()
+            .any(|error| matches!(error.reason, Reason::SideTaken { .. })),
+        "{errors}"
+    );
+    assert!(
+        errors
+            .as_slice()
+            .iter()
+            .all(|error| error.element != ElementKind::WallColor),
+        "{errors}"
     );
 }
 

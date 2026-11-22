@@ -1,5 +1,6 @@
 //! A house stores each wall on its boundary. Rooms reference those boundaries in
 //! counterclockwise order. Coordinates, elevations, and lengths are millimetres.
+mod color;
 mod data;
 mod error;
 mod house;

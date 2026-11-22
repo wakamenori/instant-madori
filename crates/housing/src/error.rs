@@ -1,4 +1,4 @@
-use crate::{Point, Side};
+use crate::{FaceRole, Point, Side};
 use schemars::JsonSchema;
 use serde::Serialize;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema)]
@@ -11,6 +11,7 @@ pub enum ElementKind {
     Room,
     Wall,
     Opening,
+    WallColor,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, JsonSchema)]
 pub struct Rejections(Vec<Rejection>);
@@ -67,6 +68,13 @@ pub enum Reason {
     },
     UnknownWall {
         wall: String,
+    },
+    MissingFace {
+        face: FaceRole,
+        faces: Vec<FaceRole>,
+    },
+    DuplicateFace {
+        face: FaceRole,
     },
     UnknownBoundary {
         boundary: String,

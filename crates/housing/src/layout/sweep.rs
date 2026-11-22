@@ -264,6 +264,7 @@ impl Walls {
             rooms: vec![],
             boundaries: vec![],
             vertices: vec![],
+            wall_colors: vec![],
             openings: vec![],
         };
         let mut vertices = BTreeMap::new();

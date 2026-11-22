@@ -3,7 +3,7 @@ use crate::{OpeningView, data::*, error::*, id::*, topology::Index};
 #[derive(Debug)]
 pub struct House {
     data: HouseData,
-    index: Index,
+    pub(crate) index: Index,
 }
 
 impl PartialEq for House {
@@ -134,14 +134,11 @@ impl<'a> BoundaryView<'a> {
         self.end
     }
     pub fn room(self, side: Side) -> Option<RoomView<'a>> {
-        let row = self
+        let room = self
             .house
             .index
-            .sides
-            .get(&self.data.id)?
-            .get(side)
-            .first()?;
-        self.house.room(&self.house.data.rooms.get(*row)?.id)
+            .side_room(self.house.data(), &self.data.id, side)?;
+        self.house.room(&room.id)
     }
     pub fn rooms(self) -> impl Iterator<Item = RoomView<'a>> {
         [Side::Left, Side::Right]
@@ -150,6 +147,10 @@ impl<'a> BoundaryView<'a> {
     }
     pub fn face(self, side: Side) -> Face<'a> {
         self.room(side).map_or(Face::Exterior, Face::Room)
+    }
+    pub fn color(self, side: Side) -> Option<Srgb> {
+        let row = self.house.index.colors.get(&(self.data.id.clone(), side))?;
+        Some(self.house.data.wall_colors.get(*row)?.color)
     }
     pub fn openings(self) -> impl Iterator<Item = OpeningView<'a>> {
         self.house
@@ -167,6 +168,15 @@ impl<'a> BoundaryView<'a> {
 pub enum Face<'a> {
     Room(RoomView<'a>),
     Exterior,
+}
+
+impl Face<'_> {
+    pub fn role(self) -> FaceRole {
+        FaceRole::from_room(match self {
+            Self::Room(view) => Some(view.data()),
+            Self::Exterior => None,
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
