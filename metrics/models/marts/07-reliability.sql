@@ -20,8 +20,6 @@ SELECT s.source,coalesce(q.records,0) recent_quarantined,a.last_append,b.last_po
  coalesce(b.failed_cycles,0) failed_cycles,coalesce(b.skipped_cycles,0) skipped_cycles,'1' definition_version
 FROM raw.l1_source s LEFT JOIN arrivals a USING(source) LEFT JOIN beats b USING(source) LEFT JOIN recent_quarantine q USING(source);
 
-CREATE VIEW record_policy AS SELECT '2026-11-22T01:04:44.000Z' effective,'43c2075b0' revision;
-
 CREATE VIEW required_issue_yaml AS
 SELECT c.issue FROM issue_classification c JOIN stg_github_issue i ON i.number=c.issue
 WHERE (c.closed_at IS NOT NULL AND i.created_at>=(SELECT effective FROM record_policy)
