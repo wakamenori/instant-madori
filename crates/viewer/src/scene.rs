@@ -7,7 +7,6 @@ pub struct ShownScene {
     pub key: u64,
     pub slot: SceneSlot,
     pub bounds: Aabb3,
-    pub radius: f64,
 }
 pub fn scene(model: &DisplayModel) -> (Scene, Aabb3) {
     let mut scene = Scene::default();
@@ -54,7 +53,6 @@ pub fn build(model: &DisplayModel, key: u64) -> ShownScene {
         key,
         slot: Arc::new(Mutex::new(Some(scene_geometry(&scene)))),
         bounds,
-        radius: scene.radius,
     }
 }
 #[cfg(test)]
@@ -74,7 +72,6 @@ mod tests {
         let shown = build(&model, 7);
         assert_eq!(shown.key, 7);
         assert_eq!(shown.bounds, bounds);
-        assert_eq!(shown.radius, bounds.diagonal());
         assert!(shown.slot.lock().map_err(|_| "poisoned")?.is_some());
         Ok(())
     }

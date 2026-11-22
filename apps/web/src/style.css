@@ -45,6 +45,11 @@ p {
   height: 100%;
   touch-action: none;
 }
+.viewport-reset {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+}
 .viewport > p {
   position: absolute;
   inset: 1rem;
