@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { stack } from "./chart.ts";
 import { script } from "./page.ts";
+import { renderDashboard } from "./render.ts";
 
 // The repository has no DOM library; this covers exactly the DOM surface the page script touches.
 type Box = { left: number; top: number; width: number; height: number };
@@ -83,13 +84,31 @@ class FakeElement {
   }
 }
 type Listener = (event: object) => void;
+/** Builds the page skeleton from the rendered markup, so the value lists sit where the page puts them. */
 function page() {
   const body = new FakeElement("body");
   const dialog = new FakeElement("dialog");
-  const tooltip = new FakeElement("div");
-  tooltip.id = "tooltip";
-  tooltip.hidden = true;
-  body.append(new FakeElement("form", ["filters"]), dialog, tooltip);
+  body.append(new FakeElement("form", ["filters"]), dialog);
+  const html = renderDashboard({
+    generatedAt: null,
+    timelines: {},
+    quality: [],
+    breaks: [],
+    combos: [],
+    effects: [],
+    prevention: [],
+    health: [],
+    gaps: [],
+    verification: [],
+    inactive: [],
+  });
+  const [opened, closed] = [html.indexOf("<dialog"), html.indexOf("</dialog>")];
+  for (const m of html.matchAll(/<div([^>]*) id="([^"]+)" role="status"/gu)) {
+    const tip = new FakeElement("div", /class="([^"]+)"/u.exec(m[1] ?? "")?.[1]?.split(" ") ?? []);
+    tip.id = m[2] ?? "";
+    tip.hidden = true;
+    (m.index > opened && m.index < closed ? dialog : body).append(tip);
+  }
   const listeners = new Map<string, Listener[]>();
   const document = {
     body,
@@ -109,9 +128,16 @@ function page() {
   const fire = (type: string, event: object) => {
     for (const fn of listeners.get(type) ?? []) fn({ preventDefault() {}, ...event });
   };
-  return { body, dialog, tooltip, fire };
+  /** The one value list on screen; it must not sit inside a closed dialog. */
+  const shown = () => {
+    const tips = body.querySelectorAll("div").filter((d) => /tip/u.test(d.id) && !d.hidden);
+    assert.equal(tips.length, 1, "exactly one value list is visible");
+    return tips[0] as FakeElement;
+  };
+  const anyShown = () => body.querySelectorAll("div").some((d) => /tip/u.test(d.id) && !d.hidden);
+  return { body, dialog, fire, shown, anyShown };
 }
-const lines = (tooltip: FakeElement) => tooltip.children.map((c) => c.textContent);
+const lines = (tip: FakeElement) => tip.children.map((c) => c.textContent);
 
 function chartLayer() {
   const html = stack(
@@ -145,35 +171,33 @@ function chartLayer() {
 }
 
 void test("pointing at a time chart lists every series at that period and marks it", () => {
-  const { body, tooltip, fire } = page();
+  const { body, fire, shown, anyShown } = page();
   const { layer, cross } = chartLayer();
   body.append(layer);
   fire("pointermove", { target: layer, clientX: 100 + 300 * 0.5, clientY: 220 });
-  assert.equal(tooltip.hidden, false);
   assert.equal(cross.hidden, false);
   assert.equal(cross.style.left, "50%");
-  const shown = lines(tooltip);
-  assert.match(shown[0] ?? "", /JST まで$/u);
-  assert.deepEqual(shown.slice(1), ["0.7 h/件作業", "0.2 h/件待ち"]);
+  const list = lines(shown());
+  assert.match(list[0] ?? "", /JST まで$/u);
+  assert.deepEqual(list.slice(1), ["0.7 h/件作業", "0.2 h/件待ち"]);
   fire("pointermove", { target: body, clientX: 10, clientY: 10 });
-  assert.equal(tooltip.hidden, true);
+  assert.equal(anyShown(), false);
 });
 
 void test("arrow keys step through periods from the latest and Escape hides the list", () => {
-  const { body, tooltip, fire } = page();
+  const { body, fire, shown, anyShown } = page();
   const { layer } = chartLayer();
   body.append(layer);
   fire("focusin", { target: layer });
-  assert.deepEqual(lines(tooltip).slice(1), ["0.9 h/件作業", "0.3 h/件待ち"]);
+  assert.deepEqual(lines(shown()).slice(1), ["0.9 h/件作業", "0.3 h/件待ち"]);
   fire("keydown", { target: layer, key: "ArrowLeft" });
   fire("keydown", { target: layer, key: "ArrowLeft" });
-  assert.deepEqual(lines(tooltip).slice(1), ["0.5 h/件作業", "0.1 h/件待ち"]);
+  assert.deepEqual(lines(shown()).slice(1), ["0.5 h/件作業", "0.1 h/件待ち"]);
   fire("keydown", { target: layer, key: "Escape" });
-  assert.equal(tooltip.hidden, true);
+  assert.equal(anyShown(), false);
 });
 
-void test("moving across an issue timeline keeps updating the time without touching chart probes", () => {
-  const { dialog, tooltip, fire } = page();
+function timelineIn(dialog: FakeElement) {
   const lanes = new FakeElement("figure", ["lanes"]);
   lanes.dataset.start = String(Date.UTC(2026, 10, 23, 0));
   lanes.dataset.end = String(Date.UTC(2026, 10, 23, 2));
@@ -194,13 +218,34 @@ void test("moving across an issue timeline keeps updating the time without touch
   dialog.append(lanes);
   const track = lanes.querySelector(".track");
   assert.ok(track);
+  return { lanes, track };
+}
+
+void test("moving across an issue timeline keeps updating the time without touching chart probes", () => {
+  const { dialog, fire, shown } = page();
+  const { lanes, track } = timelineIn(dialog);
   fire("pointermove", { target: track, clientX: 100 + 400 * 0.25, clientY: 305 });
-  const first = lines(tooltip);
+  const first = lines(shown());
   assert.equal(lanes.closest(".probe[data-chart]"), null);
   fire("pointermove", { target: track, clientX: 100 + 400 * 0.75, clientY: 305 });
-  const second = lines(tooltip);
-  assert.equal(tooltip.hidden, false);
+  const second = lines(shown());
   assert.notEqual(second[0], first[0]);
   assert.deepEqual([first.slice(1), second.slice(1)], [["作業"], ["待ち"]]);
   assert.equal(lanes.style["--cursor"], "75%");
+});
+
+void test("after an issue timeline closes with Escape, a chart behind it shows its list outside the dialog", () => {
+  const { body, dialog, fire, shown, anyShown } = page();
+  const { track } = timelineIn(dialog);
+  fire("pointermove", { target: track, clientX: 200, clientY: 305 });
+  assert.notEqual(shown().closest("dialog"), null);
+  fire("keydown", { target: track, key: "Escape" });
+  dialog.hidden = true;
+  assert.equal(anyShown(), false);
+  const { layer } = chartLayer();
+  body.append(layer);
+  fire("pointermove", { target: layer, clientX: 101, clientY: 220 });
+  const list = shown();
+  assert.equal(list.closest("dialog"), null, "the list is not left inside the closed dialog");
+  assert.deepEqual(lines(list).slice(1), ["0.5 h/件作業", "0.1 h/件待ち"]);
 });

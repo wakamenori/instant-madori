@@ -112,7 +112,7 @@ export function renderDashboard(data: ViewerData) {
   ${Object.entries(data.timelines)
     .map(([issue, lanes]) => timeline(issue, lanes))
     .join("")}
-  <dialog><form method="dialog"><button class="close">閉じる</button></form><div></div></dialog><div id="tooltip" role="status" hidden></div>
+  <dialog><form method="dialog"><button class="close">閉じる</button></form><div></div><div class="tip" id="lane-tip" role="status" hidden></div></dialog><div class="tip" id="chart-tip" role="status" hidden></div>
   <section class="detail"><h2>改善の効果</h2>${table(
     ["改善のIssue", "狙い", "前後の稼働分", "改善前（95%区間）", "改善後（95%区間）"],
     data.effects.map((r) => [

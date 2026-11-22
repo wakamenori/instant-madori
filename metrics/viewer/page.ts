@@ -117,12 +117,12 @@ figure { margin: 0; }
 .probe { position: absolute; inset: 0; cursor: crosshair; }
 .probe:focus-visible { outline-offset: 0; }
 .cross { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px solid var(--ink-2); pointer-events: none; }
-#tooltip { position: fixed; z-index: 10; pointer-events: none; min-width: 140px; max-width: 280px; padding: 6px 8px; background: var(--surface); border: 1px solid var(--rule-strong); border-radius: 4px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12); font-size: 11px; }
-#tooltip p { color: var(--ink-3); margin-bottom: 2px; }
-#tooltip div { display: flex; align-items: center; gap: 6px; }
-#tooltip b { font-size: 12px; font-variant-numeric: tabular-nums; min-width: 3.5em; }
-#tooltip i { width: 10px; height: 2px; flex: none; }
-#tooltip span { color: var(--ink-2); }
+.tip { position: fixed; z-index: 10; pointer-events: none; min-width: 140px; max-width: 280px; padding: 6px 8px; background: var(--surface); border: 1px solid var(--rule-strong); border-radius: 4px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12); font-size: 11px; }
+.tip p { color: var(--ink-3); margin-bottom: 2px; }
+.tip div { display: flex; align-items: center; gap: 6px; }
+.tip b { font-size: 12px; font-variant-numeric: tabular-nums; min-width: 3.5em; }
+.tip i { width: 10px; height: 2px; flex: none; }
+.tip span { color: var(--ink-2); }
 
 .legend { display: flex; flex-wrap: wrap; gap: 2px 14px; margin: 2px 0 6px; padding: 0; list-style: none; font-size: 11px; color: var(--ink-2); }
 .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
@@ -221,7 +221,13 @@ function selectCombo() {
 }
 form.addEventListener("change", selectCombo);
 const dialog = document.querySelector("dialog");
-const tooltip = document.querySelector("#tooltip");
+// Each surface owns its list: a modal dialog hides anything moved into it once it closes.
+const chartTip = document.querySelector("#chart-tip"), laneTip = document.querySelector("#lane-tip");
+function place(tip, x, y) {
+  const left = x + 14 + tip.offsetWidth > innerWidth ? x - 14 - tip.offsetWidth : x + 14;
+  tip.style.left = Math.max(4, left) + "px";
+  tip.style.top = Math.max(4, Math.min(y, innerHeight - tip.offsetHeight - 4)) + "px";
+}
 const hours = (ms) => (ms / 3600000).toLocaleString("ja-JP", { maximumFractionDigits: ms < 36000000 ? 2 : 1 });
 document.addEventListener("click", (event) => {
   const button = event.target.closest("button");
@@ -268,8 +274,9 @@ document.addEventListener("click", (event) => {
     dialog.showModal();
   }
 });
+dialog.addEventListener("close", () => hideTip());
 function hideTip() {
-  tooltip.hidden = true;
+  chartTip.hidden = laneTip.hidden = true;
   for (const line of document.querySelectorAll(".cross")) line.hidden = true;
 }
 function showTip(layer, index, anchor) {
@@ -290,13 +297,11 @@ function showTip(layer, index, anchor) {
     div.append(key, value, name);
     return div;
   });
-  tooltip.replaceChildren(head, ...items.reverse());
-  tooltip.hidden = false;
+  laneTip.hidden = true;
+  chartTip.replaceChildren(head, ...items.reverse());
+  chartTip.hidden = false;
   const box = layer.getBoundingClientRect();
-  const x = anchor ?? box.left + (box.width * (row.a + row.b)) / 2;
-  const left = x + 14 + tooltip.offsetWidth > innerWidth ? x - 14 - tooltip.offsetWidth : x + 14;
-  tooltip.style.left = Math.max(4, left) + "px";
-  tooltip.style.top = Math.max(4, Math.min(box.top, innerHeight - tooltip.offsetHeight - 4)) + "px";
+  place(chartTip, anchor ?? box.left + (box.width * (row.a + row.b)) / 2, box.top);
   layer.dataset.index = index;
 }
 function nearest(layer, clientX) {
@@ -323,14 +328,12 @@ document.addEventListener("pointermove", (event) => {
       .map((lane) => { const d = document.createElement("div"); d.textContent = lane.querySelector("b").textContent; return d; });
     lanes.style.setProperty("--cursor", 100 * f + "%");
     lanes.classList.add("tracking");
-    dialog.append(tooltip);
-    tooltip.replaceChildren(head, ...active);
-    tooltip.hidden = false;
-    tooltip.style.left = Math.min(event.clientX + 14, innerWidth - tooltip.offsetWidth - 4) + "px";
-    tooltip.style.top = Math.min(event.clientY + 14, innerHeight - tooltip.offsetHeight - 4) + "px";
+    chartTip.hidden = true;
+    laneTip.replaceChildren(head, ...active);
+    laneTip.hidden = false;
+    place(laneTip, event.clientX, event.clientY + 14);
     return;
   }
-  if (tooltip.parentElement !== document.body) document.body.append(tooltip);
   hideTip();
 });
 document.addEventListener("focusin", (event) => {
