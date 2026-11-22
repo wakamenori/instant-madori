@@ -321,14 +321,14 @@ viewerは、持ち主がときどき開いて、工場が速くなっている�
 
 - 受け口は、launchdで常駐し、OTLP/HTTPとhookの記録を受ける。L1に書くのは受け口だけにして、書き手を一つにする。hookは受け口に送らず、いつも一時ファイル（spool）に書いて終わる。受け口は1秒ごとにspoolを取り込み、書き込みが成功した後にファイルを消す。受け口が止まっている間はspoolに溜まり、戻ったときに、OTLPを受け始める前に取り込む。受け口がこのマシンで一度も動いていなければ、hookは何も書かない。受け口のポートはOTLP/HTTPの既定の4318で、`pnpm dev` が使う5173と8787を避ける。
 - ポーラーは、GitHub（Issue、依存、PR、コメント、コミットのステータス、Issueの出来事（ラベルの付け外し、閉じた、開き直した）、Actionsのjobとstep）を数分ごとに、T3のDBを1分ごとに読む。T3のDBは読み取り専用で開く。
-- Claude Codeのhookは、リポジトリの `.claude/settings.json` に置く。SessionStartは、`session_id` とT3のスレッド（`T3CODE_THREAD_ID`）とcwdを結ぶ。UserPromptSubmitとStopは、ターンの始まりと終わりを記録する。承認の要求と回答はT3の承認ごとの記録から取る（`approval.wait` の項を参照）。PermissionRequestのhookの記録は集計に使わない。バックグラウンドで起動したBashは、PostToolUseの `backgroundTaskId` と、終わったときにUserPromptSubmitに届く通知（作業のID、`tool_use_id`、状態、終了コード）で結び、終わりの時刻は通知にある出力ファイルの更新時刻から取る。PreToolUseとStopは、決まった道具を通さない操作と、決まった形の出力が欠けたときだけ止める（「計測に要る記録は、作業の副作用として残す」）。ツールとモデルの時間はOTelが出すので、hookでは測らない。
+- Claude Codeのhookは、リポジトリの `.claude/settings.json` に置く。SessionStartは、`session_id` とT3のスレッド（`T3CODE_THREAD_ID`）とcwdを結ぶ。UserPromptSubmitとStopは、ターンの始まりと終わりを記録する。承認の要求と回答はT3の承認ごとの記録から取る（`approval.wait` の項を参照）。PermissionRequestのhookの記録は集計に使わない。バックグラウンドで起動したBashは、PostToolUseの `backgroundTaskId` と、終わったときにUserPromptSubmitに届く通知（作業のID、`tool_use_id`、状態、終了コード）で結び、終わりの時刻は通知にある出力ファイルの更新時刻から取る。見張りもUserPromptSubmit、PreToolUse、Stopに登録する。UserPromptSubmitで検証役への指示からPR番号、head、試行番号を控え、Stopでその判定を確かめる。ツールとモデルの時間はOTelが出すので、hookでは測らない。
 
 OTelは、リポジトリではなくこのマシンの設定で有効にする。Claude Codeは、プロジェクトの `.claude/settings.json` の `env` に書いたテレメトリーの設定を使わないためである。
 
 - Claude Codeは、`~/.claude_personal/settings.json` の `env` で有効にする。T3は、このフォルダーを `CLAUDE_CONFIG_DIR` としてClaude Codeを起動する。
 - Codexは、`~/.codex/config.toml` の `[otel]` で有効にする。リポジトリの `.codex/hooks.json` は、SessionStart、UserPromptSubmit、PreToolUse、PostToolUse、PermissionRequest、Stopを登録する。worktreeのセッションも本体のチェックアウトの `.codex/hooks.json` を読み、コマンドはセッションのcwd（worktree）で動く。そのため、定義の承認と変更は本体のチェックアウトに入ってから効き、スクリプトは各worktreeの版が動く。承認は定義のハッシュに結び付くため、各イベントのコマンドは次の2行に固定し、`<Event>` にはイベント名を入れる。
   1. `node metrics/hook/codex.ts <Event> >/dev/null 2>&1 || true` は、ツールの出力を除いてspoolに書く。記録に失敗してもセッションに出力を返さず、作業を続ける。
-  2. `node scripts/dev/agent-guard.ts <Event>` は、標準入力を読み終えて成功する。今後の検査が判定を返せるよう、出力と終了コードはそのままCodexに渡す。
+  2. `node scripts/dev/agent-guard.ts <Event>` は、検証対象のheadが変わらず、その試行の `verify` ステータスがないとき、Stopで一度だけ判定コマンドの実行を促す。GitHubに確認できないときは終了を許す。
 
 受け口はCodexのhookからイベントやターンなどの事実、指示と最終応答から取り出したIssue番号や役割などの要約、コマンドやパスを残したツール入力だけを保存する。Codexは `apply_patch` のパッチ全体を `command` で送るので、`*** Add File:` などのファイルの見出しの行だけを残し、ファイルの中身は捨てる。cwdのgit共通ディレクトリがこのリポジトリと違えば破棄し、一致すれば会話を `t3.codex_link` で照合してから `codex.hook` としてL1に入れる。
 

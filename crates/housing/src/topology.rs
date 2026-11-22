@@ -12,6 +12,7 @@ pub(crate) struct Index {
     pub incident: BTreeMap<VertexId, Vec<usize>>,
     pub openings: BTreeMap<OpeningId, usize>,
     pub openings_by_wall: BTreeMap<BoundaryId, Vec<usize>>,
+    pub colors: BTreeMap<(BoundaryId, Side), usize>,
     pub sides: BTreeMap<BoundaryId, Sides>,
 }
 
@@ -32,6 +33,9 @@ impl Sides {
             Side::Left => self.left.push(room),
             Side::Right => self.right.push(room),
         }
+    }
+    fn crowded(&self) -> bool {
+        self.left.len() > 1 || self.right.len() > 1
     }
 }
 
@@ -147,6 +151,7 @@ impl Index {
         for boundary in &data.boundaries {
             checks.sides(boundary, index.sides.get(&boundary.id), &data.rooms);
         }
+        index.index_colors(data, &mut checks);
         for vertex in &data.vertices {
             if !index.incident.contains_key(&vertex.id) {
                 checks.reject(Kind::Vertex, vertex.id.as_str(), Reason::UnusedVertex {});
@@ -157,6 +162,68 @@ impl Index {
             None => Ok(index),
         }
     }
+    pub(crate) fn side_room<'a>(
+        &self,
+        data: &'a HouseData,
+        wall: &BoundaryId,
+        side: Side,
+    ) -> Option<&'a Room> {
+        let row = self.sides.get(wall)?.get(side).first()?;
+        data.rooms.get(*row)
+    }
+
+    pub(crate) fn resolve_face(
+        &self,
+        data: &HouseData,
+        wall: &BoundaryId,
+        face: &FaceRole,
+    ) -> Result<Side, Rejection> {
+        let reject = |reason| Rejection {
+            element: Kind::WallColor,
+            id: wall.as_str().into(),
+            reason,
+        };
+        if !self.boundaries.contains_key(wall) {
+            return Err(reject(Reason::UnknownWall {
+                wall: wall.as_str().into(),
+            }));
+        }
+        let faces = [Side::Left, Side::Right]
+            .map(|side| (side, FaceRole::from_room(self.side_room(data, wall, side))));
+        for (side, role) in &faces {
+            if role == face {
+                return Ok(*side);
+            }
+        }
+        Err(reject(Reason::MissingFace {
+            face: face.clone(),
+            faces: faces.into_iter().map(|(_, role)| role).collect(),
+        }))
+    }
+
+    fn index_colors(&mut self, data: &HouseData, checks: &mut Checks) {
+        for (i, row) in data.wall_colors.iter().enumerate() {
+            // A side with two rooms has no face role; the boundary check already rejects it.
+            if self.sides.get(&row.wall).is_some_and(Sides::crowded) {
+                continue;
+            }
+            match self.resolve_face(data, &row.wall, &row.face) {
+                Ok(side) => {
+                    if self.colors.insert((row.wall.clone(), side), i).is_some() {
+                        checks.reject(
+                            Kind::WallColor,
+                            row.wall.as_str(),
+                            Reason::DuplicateFace {
+                                face: row.face.clone(),
+                            },
+                        );
+                    }
+                }
+                Err(error) => checks.0.push(error),
+            }
+        }
+    }
+
     fn index_vertices<'a>(
         &mut self,
         data: &'a HouseData,
