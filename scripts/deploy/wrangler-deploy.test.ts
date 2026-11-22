@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
@@ -20,6 +21,14 @@ const exhausted =
 const success = (n: number) => `wrangler deploy succeeded on attempt ${n} of 3.`;
 const failure = (reason: string, n = 1) =>
   `wrangler deploy failed on attempt ${n} of 3 (${reason}); not running it again.`;
+const interrupted = (signal: NodeJS.Signals) =>
+  `wrangler deploy interrupted by ${signal}; not running it again.`;
+const cancels = [
+  ["SIGINT", 130],
+  ["SIGTERM", 143],
+  ["SIGHUP", 129],
+] as const;
+type Cancel = { signal: NodeJS.Signals; beforeFirstAttempt?: boolean };
 
 function errorCode(action: () => void) {
   try {
@@ -32,6 +41,25 @@ function errorCode(action: () => void) {
   }
 }
 
+async function pauseBeforeFirstAttempt(cwd: string, signal: NodeJS.Signals) {
+  const hook = join(cwd, "hold-mkdtemp.cjs");
+  const name = JSON.stringify(signal);
+  await writeFile(
+    hook,
+    `const fsp = require("node:fs/promises");
+const mkdtemp = fsp.mkdtemp;
+fsp.mkdtemp = (...args) => new Promise((resolve) => {
+  const pending = setInterval(() => {}, 60000);
+  const wrapperHandlesSignal = process.listenerCount(${name}) > 0;
+  if (wrapperHandlesSignal)
+    process.once(${name}, () => { clearInterval(pending); resolve(mkdtemp(...args)); });
+  console.log("ready for a signal");
+});
+`,
+  );
+  return hook;
+}
+
 async function fixture(t: TestContext) {
   const cwd = await mkdtemp(join(tmpdir(), "wrangler-test-"));
   t.after(() => rm(cwd, { recursive: true, force: true }));
@@ -39,11 +67,14 @@ async function fixture(t: TestContext) {
   await mkdir(runner);
   async function run(
     env: NodeJS.ProcessEnv,
-    { interrupt = false, abort }: { interrupt?: boolean; abort?: AbortSignal } = {},
+    { cancel, abort }: { cancel?: Cancel | undefined; abort?: AbortSignal } = {},
   ) {
     const signal = abort ? AbortSignal.any([t.signal, abort]) : t.signal;
     signal.throwIfAborted();
-    const child = spawn(process.execPath, [wrapper, ...args], {
+    const node = cancel?.beforeFirstAttempt
+      ? ["--require", await pauseBeforeFirstAttempt(cwd, cancel.signal)]
+      : [];
+    const child = spawn(process.execPath, [...node, wrapper, ...args], {
       cwd,
       env: { ...env, RUNNER_TEMP: runner },
       stdio: ["ignore", "pipe", "pipe"],
@@ -57,11 +88,12 @@ async function fixture(t: TestContext) {
     }
     signal.addEventListener("abort", stop);
     let output = "";
+    let pending = cancel?.signal;
     child.stdout.setEncoding("utf8").on("data", (part: string) => {
       output += part;
-      if (interrupt && output.includes("ready for SIGTERM\n")) {
-        interrupt = false;
-        child.kill("SIGTERM");
+      if (pending && output.includes("ready for a signal\n")) {
+        child.kill(pending);
+        pending = undefined;
       }
     });
     child.stderr.setEncoding("utf8").on("data", (part: string) => {
@@ -80,6 +112,7 @@ async function fixture(t: TestContext) {
       }
       signal.throwIfAborted();
     }
+    assert.equal(pending, undefined, "the wrapper never became ready for the cancel");
     assert.ok(!output.includes(client), "client ID appeared in logs");
     assert.deepEqual(await readdir(runner), []);
     return { code, lines: output.split("\n") };
@@ -95,7 +128,7 @@ const partial = { code: 1, lines: [entry(settings)] };
 const other = { code: 1, lines: [entry("different error")] };
 const callSchema = z.object({ args: z.array(z.string()), path: z.string(), existed: z.boolean() });
 
-async function fake(t: TestContext, plan: Step[]) {
+async function fake(t: TestContext, plan: Step[], cancel?: Cancel) {
   const { cwd, run, runner } = await fixture(t);
   const bin = join(cwd, "bin");
   await mkdir(bin);
@@ -117,15 +150,16 @@ function finish() {
   process.exit(step.code);
 }
 if (step.wait) {
-  process.on("SIGTERM", () => { fs.writeFileSync("signal","SIGTERM"); finish(); });
+  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"])
+    process.on(signal, () => { fs.writeFileSync("signal", signal); finish(); });
   setInterval(()=>{},1000);
-  console.log("ready for SIGTERM");
+  console.log("ready for a signal");
 } else finish();
 `,
       { mode: 0o755 },
     );
-  const { code, lines } = await run({ PATH: bin }, { interrupt: plan.some((step) => step.wait) });
-  const calls = plan.length
+  const { code, lines } = await run({ PATH: bin }, { cancel });
+  const calls = existsSync(join(cwd, "calls"))
     ? (await readFile(join(cwd, "calls"), "utf8"))
         .trimEnd()
         .split("\n")
@@ -189,29 +223,29 @@ void test("stops on another error after retry", async (t) => {
   assert.equal(r.code, 1);
   assert.deepEqual(r.lines, [warning, failure("another error", 2), ""]);
 });
-void test("forwards SIGTERM and cleans up", { timeout: 10000 }, async (t) => {
-  const r = await fake(t, [{ ...partial, code: 143, wait: true }]);
-  assert.equal(await readFile(join(r.cwd, "signal"), "utf8"), "SIGTERM");
-  assert.equal(r.code, 143);
-  assert.equal(r.count, 1);
-  assert.ok(r.lines.includes("wrangler deploy interrupted by SIGTERM; not running it again."));
-});
-
-void test(
-  "does not re-run after SIGTERM when wrangler reports the Container settings failure",
-  { timeout: 10000 },
-  async (t) => {
-    const r = await fake(t, [{ ...partial, wait: true }, deployed]);
-    assert.equal(await readFile(join(r.cwd, "signal"), "utf8"), "SIGTERM");
-    assert.equal(r.count, 1);
-    assert.equal(r.code, 143);
-    assert.deepEqual(r.lines, [
-      "ready for SIGTERM",
-      "wrangler deploy interrupted by SIGTERM; not running it again.",
-      "",
-    ]);
-  },
-);
+for (const [signal, code] of cancels) {
+  void test(
+    `forwards ${signal} and does not re-run when wrangler then reports the Container settings failure`,
+    { timeout: 10000 },
+    async (t) => {
+      const r = await fake(t, [{ ...partial, wait: true }, deployed], { signal });
+      assert.equal(await readFile(join(r.cwd, "signal"), "utf8"), signal);
+      assert.equal(r.count, 1);
+      assert.equal(r.code, code);
+      assert.deepEqual(r.lines, ["ready for a signal", interrupted(signal), ""]);
+    },
+  );
+  void test(
+    `ends on ${signal} before the first attempt without starting wrangler`,
+    { timeout: 10000 },
+    async (t) => {
+      const r = await fake(t, [deployed], { signal, beforeFirstAttempt: true });
+      assert.deepEqual(r.lines, ["ready for a signal", interrupted(signal), ""]);
+      assert.equal(r.count, 0);
+      assert.equal(r.code, code);
+    },
+  );
+}
 
 async function realWrangler(t: TestContext, mode: "accept" | "reject" | "hang") {
   const { cwd, run } = await fixture(t);
