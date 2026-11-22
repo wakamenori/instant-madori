@@ -26,7 +26,7 @@ Preconditions:
 - [案件](./projects.md)の「作る」を済ませ、`PAT=$(jq -r .pattern.id "$EVIDENCE/projects/create.json")` を設定している。
 - `. "$EVIDENCE/dev.env"` で `API` と `O` を読み込み、`J='content-type: application/json'` と `D="$EVIDENCE/queue-hold"` を設定し、`$D` がある。
 - [指示を止める](./stop.md)の `send`・`stop`・`state` を、出力先を `$D` にして定義している。
-- 再開と取り消しの関数 `release() { curl -sS -o "$D/$1.json" -w '%{http_code}\n' -X POST "$API/patterns/$PAT/queue/$2" -H "$J" -H "$O" -d "{\"requestId\":\"$3\",\"heldBy\":\"$4\"}"; }` を定義している。`$2` は `resume` か `cancel`。
+- 再開と取り消しの関数 `release() { curl -sS -o "$D/${1}.json" -w '%{http_code}\n' -X POST "$API/patterns/$PAT/queue/${2}" -H "$J" -H "$O" -d "{\"requestId\":\"${3}\",\"heldBy\":\"${4}\"}"; }` を定義している。`${2}` は `resume` か `cancel`。
 - [指示を送る](./instructions.md)の `settle` を、出力先を `$D` にして定義している。
 - 案の件数を数える関数 `revisions() { curl -sS "$API/patterns/$PAT/revisions" | jq '.revisions | length'; }` を定義している。
 
