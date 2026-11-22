@@ -200,21 +200,21 @@ node .claude/skills/madori-coordinator/scripts/rank-ready.mjs
   - Opus：`{providerInstanceId: <instance>, model: "claude-opus-5-5", options: {effort: "high"}}`。`<instance>` は「担当を立てる」と同じく、指揮役自身のスレッドの `providerInstanceId` を写す。
   - Codex：`{providerInstanceId: "codex", model: <モデル>, options: {reasoningEffort: "high"}}`。モデルは [pstack-models.md](../../rules/pstack-models.md) の、PR の playbook の行から取る。該当する playbook の行が無いときは、`feature, refactoring` の行を使う。
 - `delegate_task` に `isolation: "worktree"` を付けて、指揮役のスレッドの子として立てる。指示は [verifier-brief.md](verifier-brief.md) の `{…}` を埋めて渡す。
-- `delegate_task` の `title` を `PR #<PR>（#<Issue>）の検証（<回>回目）` にする。`<回>` は下の yaml の `attempt` と同じ数である。計測（`metrics/ingest/polled.ts` の `threadTitle`）はこの形で検証役のスレッドを見分け、Issue と PR に結ぶので、ほかの形にしない。
+- `delegate_task` の `title` を `PR #<PR>（#<Issue>）の検証（<回>回目）` にする。`<回>` は指示の `{ATTEMPT}` と同じ数である。計測（`metrics/ingest/polled.ts` の `threadTitle`）はこの形で検証役のスレッドを見分け、Issue と PR に結ぶので、ほかの形にしない。
 - 指示に足してよいのは、試す入力と確かめ方だけにする。合否の基準を足すなら、先に Issue に書く。普段の手順と食い違う禁止は書かない。足した基準に拠る不合格が出たら、その基準を見直してから、同じ検証役に判定し直させる。
 - 同じ仕組みの端の場合で二回目の不合格が出たら、直しを重ねる前に、その仕組みを確かな情報源に切り替えるか、テストのあるスクリプトに移すかを決めて、担当に伝える。
 - 検証役のスレッドには PR を紐付けない。
-- 検証役を立てるたびに、その PR で何回目かを数える。検証役の報告を受けたら、判定のコメントの先頭に次の形の yaml を置く。`decided_at` は検証役が判定を出した UTC の時刻である。投稿の時刻で代用しない。`head` は検証した完全な SHA を写す。`failed_checks` は報告から写し、PASS なら空の配列にする。投稿前に `node .claude/skills/madori-coordinator/scripts/records.mjs verdict <コメントファイル>` で確かめる。
+- 検証役を立てるたびに、その PR で何回目かを数え、指示の `{ATTEMPT}` に入れる。
+- 判定は、検証役が `scripts/dev/verdict.ts` で、確かめた head に付ける。コマンドは、head にコミットのステータス `verify` を付け、判定の記録（`attempt`、`head`、`verdict`、`decided_at`、`failed_checks` の yaml）を先頭に置いた報告を PR のコメントに残す。ステータスの `state` は、合格なら `success`、不合格なら `failure` である。`description` は `attempt <回>: PASS` か `attempt <回>: FAIL <落ちた確認を「, 」でつないだもの>` で、`target_url` はそのコメントである。指揮役は判定を書き写さない。
+- 検証役の報告を受けたら、判定を head のステータスで読む。GitHub は新しいものから返すので、`verify` の最初の行が最新の判定である。
 
-```yaml
-attempt: 2
-head: "0123456789abcdef0123456789abcdef01234567"
-verdict: FAIL
-decided_at: 2026-11-22T00:00:00Z
-failed_checks: [地図, 終わった証拠]
+```sh
+gh api repos/wakamenori/instant-madori/commits/<head>/statuses \
+  --jq '.[] | select(.context == "verify") | [.state, .description, .target_url] | @tsv'
 ```
 
-- 判定を PR に書いたら、検証役のスレッドを `t3_thread_organize`（`action: "settle"`）で settled にする。見回りの片付けは、settled でないスレッドの worktree を残すため。
+- `verify` が無ければ（head が変わっていた、コマンドが失敗した、打たずに終えた）、報告で理由を確かめる。head が変わっていたなら、新しい head で検証役を立て直す。ほかの理由なら、同じ検証役に理由を直して打ち直させる。
+- 判定のステータスを確かめたら、検証役のスレッドを `t3_thread_organize`（`action: "settle"`）で settled にする。見回りの片付けは、settled でないスレッドの worktree を残すため。
 
 ## ブランチを staging で試す
 
@@ -254,7 +254,7 @@ ended_at: 2026-11-22T01:30:00Z
 
 次のすべてがそろったら、マージする。
 
-- 検証役が、PR の今の head で合格を出した。
+- PR の今の head の最新の `verify` のステータスが `success` である（「検証役を立てる」）。
 - self-hosted runner の `check` が、同じ head で成功した。ブランチ保護が無いので、`gh pr checks` で自分で確かめる。
 - 自分で差分を読んだ。
 - D1 のマイグレーションを加える PR なら、今の main のマイグレーションと番号が衝突しない。PR の `check` は分岐点と比べるので、先に main へ入った同じ番号には、マージ後の main の `check` で初めて気づく。
@@ -296,8 +296,8 @@ node .claude/skills/madori-coordinator/scripts/deploy-files.mjs after <番号>
 
 ## 記録と、見つかった問題の行き先
 
-- 判断と結果は、その Issue か PR にコメントで書く。誰の判定か、どの head か、何で確かめたかを書く。検証役の判定とマージは PR に書く。
-- 画像は、AGENTS.md「Issue と PR の画像」のとおり `images` に置いたリンクで貼る。検証役の報告にある画像の Markdown は、判定のコメントにそのまま貼る。
+- 判断と結果は、その Issue か PR にコメントで書く。誰の判定か、どの head か、何で確かめたかを書く。検証役の判定は、判定のコマンドが PR に書く。マージは指揮役が PR に書く。
+- 画像は、AGENTS.md「Issue と PR の画像」のとおり `images` に置いたリンクで貼る。検証役は、画像の Markdown を判定のコマンドに渡す報告に入れる。
 - 担当や検証役が範囲の外で見つけた問題は、根拠を確かめてから行き先を決める。関係する Issue があり、種類も同じなら、その Issue にコメントで書き足す。yaml を使う種類ではコメントの先頭に本文と同じ項目を置き、今回見つけた経緯を記す。続けて根拠を書く。投稿前に `node .claude/skills/madori-coordinator/scripts/records.mjs addition <コメントファイル> <元の種類のラベル>` で確かめる。種類が違うか、関係する Issue が無ければ、その種類のテンプレートで新しい Issue を作り、「Issue の置き場」で決めた milestone に入れて、「依存を登録する」のとおりに依存を登録する。
 - 不安定な試験の Issue には、直すか消すかを決めて書かずに、「その試験が守る振る舞いを守り続ける」と書く。直すか消すかは、その試験だけが守る振る舞いの一覧で決める。消すなら、一覧の一行ずつについて、代わりに守る試験が今あって動くことを確かめてからにする。
 

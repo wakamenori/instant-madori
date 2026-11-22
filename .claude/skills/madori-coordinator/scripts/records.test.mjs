@@ -99,28 +99,6 @@ test("issue and addition enforce label, first block, discovery and type-specific
   }
 });
 
-test("verdict binds an attempt and event time to one head and its failed checks", () => {
-  const record = {
-    attempt: 1,
-    head: "1".repeat(40),
-    decided_at: "2026-11-22T00:00:00Z",
-    verdict: "PASS",
-    failed_checks: [],
-  };
-  checkRecord("verdict", block(record));
-  checkRecord("verdict", block({ ...record, verdict: "FAIL", failed_checks: ["地図", "検査"] }));
-  for (const change of [
-    { attempt: 0 },
-    { head: "abc" },
-    { decided_at: "昨日" },
-    { verdict: "FAIL" },
-    { failed_checks: ["地図"] },
-    { verdict: "FAIL", failed_checks: ["別の項目"] },
-    { verdict: "FAIL", failed_checks: ["検査", "検査"] },
-  ])
-    assert.throws(() => checkRecord("verdict", block({ ...record, ...change })));
-});
-
 test("staging records the start immediately and the same start with the release time", () => {
   const started_at = "2026-11-22T01:00:00Z";
   checkRecord("staging-start", block({ started_at }));
