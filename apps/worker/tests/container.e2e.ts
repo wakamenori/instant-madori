@@ -41,7 +41,12 @@ void test(
     const worker = await startLocalWorker({
       containers: true,
       readyTimeoutMs: 800_000,
-      vars: { GEOMETRY_IDLE_TIMEOUT_MS: String(idleTimeoutMs), JOB_TEST_HOLD: "before_commit:15" },
+      vars: {
+        GEOMETRY_IDLE_TIMEOUT_MS: String(idleTimeoutMs),
+        // Local workerd evicts a DO 10 s after its last call closes, so with this hold a job
+        // reaches a fresh DO only if the previous job's DO call closed.
+        JOB_TEST_HOLD: "before_commit:15",
+      },
     });
     const bootMs = performance.now() - started;
     let session: string | undefined;
@@ -62,6 +67,7 @@ void test(
       assert.equal(created.status, 201);
       const { pattern } = createProjectResponseSchema.parse(await created.json());
       const revisions: Revision[] = [];
+      const jobIds: string[] = [];
       async function accept() {
         const response = await worker.call(`/api/patterns/${pattern.id}/messages`, {
           method: "POST",
@@ -69,7 +75,9 @@ void test(
           body: { requestId: crypto.randomUUID(), body: "次の案を作って" },
         });
         assert.equal(response.status, 202);
-        return acceptInstructionResponseSchema.parse(await response.json()).job;
+        const { job } = acceptInstructionResponseSchema.parse(await response.json());
+        jobIds.push(job.jobId);
+        return job;
       }
       async function commitAndView(start: "cold" | "warm") {
         const requested = performance.now();
@@ -301,6 +309,16 @@ void test(
         assert.deepEqual(after.currentRevision, revision);
         assert.deepEqual(after.lastFinishedJob, expected);
       });
+      await t.test("no job reached a DO kept alive by the previous job's call", () => {
+        const modes = jobIds.map(
+          (id) =>
+            worker
+              .logEntries()
+              .find((e) => e["event"] === "container.ready" && e["traceId"] === id)?.["mode"] ??
+            "reused a live DO",
+        );
+        assert.deepEqual(modes, ["cold", "adopted", "cold", "adopted", "adopted"]);
+      });
       await t.test(
         "a Container killed outside the gateway is replaced by the next job",
         async () => {
@@ -330,6 +348,19 @@ void test(
             const started = await worker.logLine(job.jobId, "container.started");
             assert.equal(started["image"], image);
             assert.equal((await worker.logLine(job.jobId, "job.finished"))["outcome"], "committed");
+            assert.deepEqual(
+              worker
+                .logEntries()
+                .filter(
+                  (e) =>
+                    e["jobId"] === job.jobId &&
+                    e["event"] === "job.step" &&
+                    e["step"] === "render snapshot",
+                )
+                .map((e) => [e["attempt"], e["outcome"]]),
+              [[1, "saved"]],
+              "the first render attempt reached a working Container and no retry hid a failed one",
+            );
             return job;
           }
           const first = await runJob();
