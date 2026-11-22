@@ -10,6 +10,38 @@ pub struct HouseData {
     pub boundaries: Vec<Boundary>,
     pub rooms: Vec<Room>,
     pub openings: Vec<Opening>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub wall_colors: Vec<WallColor>,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WallColor {
+    pub wall: BoundaryId,
+    pub face: FaceRole,
+    pub color: Srgb,
+}
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum FaceRole {
+    Room { room: RoomId },
+    Exterior {},
+}
+impl FaceRole {
+    pub(crate) fn from_room(room: Option<&Room>) -> Self {
+        match room {
+            Some(room) => Self::Room {
+                room: room.id.clone(),
+            },
+            None => Self::Exterior {},
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Srgb {
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
