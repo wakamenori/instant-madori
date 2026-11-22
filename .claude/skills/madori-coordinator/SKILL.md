@@ -184,9 +184,9 @@ node .claude/skills/madori-coordinator/scripts/rank-ready.mjs
 担当から報告が来たら、PR の今の状態を `gh pr view` と `gh pr checks` で確かめてから、検証役を立てる。「資源の枠」が埋まっていれば、空くまで立てない。ディスクの空きは、「担当を立てる」と同じく毎回確かめる。
 
 - 検証役は、差分の大部分を書いた系統と別の系統のモデルにする。実装は Codex が書くので、普段は Claude Code の Opus にする。差分の大部分を Claude が書いた PR は、Codex に確かめさせる。
-- `delegate_task` の `target` で、モデルと effort を明示する。effort は xhigh に固定し、Issue によって変えない。poteto-mode が検証を上げ下げの例外にしているため。
-  - Opus：`{providerInstanceId: <instance>, model: "claude-opus-5-5", options: {effort: "xhigh"}}`。`<instance>` は「担当を立てる」と同じく、指揮役自身のスレッドの `providerInstanceId` を写す。
-  - Codex：`{providerInstanceId: "codex", model: <モデル>, options: {reasoningEffort: "xhigh"}}`。モデルは [pstack-models.md](../../rules/pstack-models.md) の、PR の playbook の行から取る。該当する playbook の行が無いときは、`feature, refactoring` の行を使う。
+- `delegate_task` の `target` で、モデルと effort を明示する。effort は high に固定し、Issue によって変えない。poteto-mode が検証を上げ下げの例外にしているため。high にするのは、Anthropic が確かめや例外ケースが大事な作業に high を勧め、xhigh を30分を超える長い作業に取っておくよう勧めているため（[Effort](https://platform.claude.com/docs/en/build-with-claude/effort)）。
+  - Opus：`{providerInstanceId: <instance>, model: "claude-opus-5-5", options: {effort: "high"}}`。`<instance>` は「担当を立てる」と同じく、指揮役自身のスレッドの `providerInstanceId` を写す。
+  - Codex：`{providerInstanceId: "codex", model: <モデル>, options: {reasoningEffort: "high"}}`。モデルは [pstack-models.md](../../rules/pstack-models.md) の、PR の playbook の行から取る。該当する playbook の行が無いときは、`feature, refactoring` の行を使う。
 - `delegate_task` に `isolation: "worktree"` を付けて、指揮役のスレッドの子として立てる。指示は [verifier-brief.md](verifier-brief.md) の `{…}` を埋めて渡す。
 - `delegate_task` の `title` を `PR #<PR>（#<Issue>）の検証（<回>回目）` にする。`<回>` は下の yaml の `attempt` と同じ数である。計測（`metrics/ingest/polled.ts` の `threadTitle`）はこの形で検証役のスレッドを見分け、Issue と PR に結ぶので、ほかの形にしない。
 - 指示に足してよいのは、試す入力と確かめ方だけにする。合否の基準を足すなら、先に Issue に書く。普段の手順と食い違う禁止は書かない。足した基準に拠る不合格が出たら、その基準を見直してから、同じ検証役に判定し直させる。
