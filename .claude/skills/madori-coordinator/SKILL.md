@@ -7,6 +7,8 @@ description: instant-madori の計画を指揮役として進める。計画を 
 
 pstack の poteto-mode の Orchestrate に従い、各 PR は Autopilot-full の形で進める。このファイルには、このリポジトリと T3 で違うところだけを書く。担当の手順は [madori-owner](../madori-owner/SKILL.md)、アプリの確かめ方は [verify-madori](../verify-madori/SKILL.md) にある。
 
+ユーザーへの報告と、Issue と PR のコメントは、見回りと通知のターンでも日本語で書く。ユーザーに判断を求めるときは一件ずつ聞き、何が変わるか、得るもの、失うもの、元に戻せるかを書く。
+
 引数が「見回り」なら、「見回り」の節だけを行う。
 
 ## pstack と違うところ
@@ -22,7 +24,7 @@ pstack の poteto-mode の Orchestrate に従い、各 PR は Autopilot-full の
 
 ## 始めるとき
 
-指揮役のセッションを新しく始めたら、まずメインのチェックアウトを `git pull --ff-only` で main に合わせる。このスキルとスクリプトは、そこから読み込まれる。引き継ぎのメモは探さずに、状態を次から読み直す。
+指揮役のセッションを新しく始めたら、まずメインのチェックアウトを `git pull --ff-only` で main に合わせる。このスキルとスクリプトは、そこから読み込まれる。続けて、`node .claude/skills/madori-coordinator/scripts/poteto-mode.mjs` が出す poteto-mode の `SKILL.md` を全部読む。検証役への指示に入れるのも、このパスである。引き継ぎのメモは探さずに、状態を次から読み直す。
 
 - 開いている PR と、それぞれの head と `check`（`gh pr list --state open`、`gh pr checks <番号>`）
 - T3 のスレッドの一覧（`t3_thread_list`）。担当のスレッドの題は `#<番号> <Issue の題>` にしてある
@@ -88,21 +90,21 @@ node .claude/skills/madori-coordinator/scripts/blocked-by.mjs <番号> <依存�
 
 ## Issue の置き場
 
-Issue の milestone は期限で決める。担当や検証役が範囲の外で見つけた問題も同じにする。
+Issue の milestone は期限で決める。担当や検証役が範囲の外で見つけた問題も同じにする。段階の milestone に置くのは、その段階の完了条件を塞ぐものと、その前提になる作業だけにする。表を上から読み、最初に当たる行に置く。
 
-| 期限                                                                                                                             | 置き場                                                                                              |
-| -------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| 今すぐ（担当と検証役の待ち時間、事故、やり直しを減らす）                                                                         | 「開発基盤」、ラベル「スループット」                                                                |
-| 今の段階の完了まで（今の段階の完了条件、今の段階で作ったものの不具合、検査・デプロイ・データを壊すもの、計画とコードの食い違い） | 今の段階                                                                                            |
-| 後の段階の完了まで                                                                                                               | その段階。テストや検査の穴は、守っているコードを次に変える段階に入れ、その段階の Issue の依存にする |
-| 期限なし                                                                                                                         | 「期限なし」                                                                                        |
+| 期限                                                                                                     | 置き場                               |
+| -------------------------------------------------------------------------------------------------------- | ------------------------------------ |
+| 今すぐ（担当と検証役の待ち時間、事故、やり直しを減らす。検査・デプロイ・データを壊すものを含む）         | 「開発基盤」、ラベル「スループット」 |
+| 今の段階の完了まで（今の段階の完了条件か、その前提を塞ぐ）                                               | 今の段階                             |
+| 後の段階の完了まで（その段階の完了条件か、その前提を塞ぐ）                                               | その段階                             |
+| どの段階の完了条件も塞がない開発の仕組み（CI、デプロイ、検査の道具、開発環境、進め方、テストや検査の穴） | 「開発基盤」                         |
+| 期限なし                                                                                                 | 「期限なし」                         |
 
 - 「壊す」は、実際に起きたものか、今の段階の作業で起きる経路があるものに限る。
+- テストや検査の穴は、守っているコードを段階の Issue が変えるなら、その Issue の依存にする。置き場は「開発基盤」のままにする。
 - 計画との食い違いは、その記述を後の段階で決め直すなら、その段階に入れる。
 - 利用者にだけ当たる後退（性能や型の甘さ）は、利用者を招く段階に入れる。
-- 今の段階の別の Issue が同じコードを変えるなら、今の段階に入れ、その Issue との順番を依存にする。
-
-段階の milestone には、その段階の完了条件と、その前提になる作業だけを置く。表で段階に入るものでも、CI、デプロイ、検査の道具、開発環境、進め方の改善は、その段階の完了条件を塞がない限り、閉じない milestone「開発基盤」に置く。開発基盤に置いたテストや検査の穴でも、守っているコードを段階の Issue が変えるなら、その Issue の依存にする。
+- 今の段階の別の Issue と同じコードを変えるだけでは、今の段階に入れない。置き場は表で決める。
 
 「期限なし」の Issue は、次のとおりに扱う。
 
@@ -159,8 +161,9 @@ node .claude/skills/madori-coordinator/scripts/rank-ready.mjs
 ## 担当を立てる
 
 - Issue の「人の判断」が決まっていなければ、担当を立てずにユーザーに聞く。
+- 立てる前に毎回 `df -h /` を見る。準備で使う数 GB を引いて 20 GiB が残らなければ立てず、「見回り」の手順2のとおりに片付ける。
 - Issue 一つにつき、担当のスレッドを一つ立てる。`t3_thread_launch` で worktree を origin/main から作る。題は `#<番号> <Issue の題>` にする。
-- `modelSelection` を `{instanceId: "claudeAgent", model: "claude-opus-5-5", options: [{id: "effort", value: <effort>}]}` にし、effort を省かない。effort は次で決める。
+- `modelSelection` を `{instanceId: <instance>, model: "claude-opus-5-5", options: [{id: "effort", value: <effort>}]}` にし、effort を省かない。`<instance>` は、`t3_thread_list` の `currentThreadId` のスレッド（指揮役自身）の `providerInstanceId` を写す。`claudeAgent` と決め打ちしない。effort は次で決める。
   - 基準は high。
   - 「PRで決めること」がある Issue と、AGENTS.md が Docker での `pnpm check --full` を求める経路（Container・表示データ）を触る Issue は xhigh。
   - 判断がほとんど要らない機械的な Issue は medium。
@@ -178,13 +181,15 @@ node .claude/skills/madori-coordinator/scripts/rank-ready.mjs
 
 ## 検証役を立てる
 
-担当から報告が来たら、PR の今の状態を `gh pr view` と `gh pr checks` で確かめてから、検証役を立てる。「資源の枠」が埋まっていれば、空くまで立てない。
+担当から報告が来たら、PR の今の状態を `gh pr view` と `gh pr checks` で確かめてから、検証役を立てる。「資源の枠」が埋まっていれば、空くまで立てない。ディスクの空きは、「担当を立てる」と同じく毎回確かめる。
 
 - 検証役は、差分の大部分を書いた系統と別の系統のモデルにする。実装は Codex が書くので、普段は Claude Code の Opus にする。差分の大部分を Claude が書いた PR は、Codex に確かめさせる。
 - `delegate_task` の `target` で、モデルと effort を明示する。effort は xhigh に固定し、Issue によって変えない。poteto-mode が検証を上げ下げの例外にしているため。
-  - Opus：`{providerInstanceId: "claudeAgent", model: "claude-opus-5-5", options: {effort: "xhigh"}}`
+  - Opus：`{providerInstanceId: <instance>, model: "claude-opus-5-5", options: {effort: "xhigh"}}`。`<instance>` は「担当を立てる」と同じく、指揮役自身のスレッドの `providerInstanceId` を写す。
   - Codex：`{providerInstanceId: "codex", model: <モデル>, options: {reasoningEffort: "xhigh"}}`。モデルは [pstack-models.md](../../rules/pstack-models.md) の、PR の playbook の行から取る。該当する playbook の行が無いときは、`feature, refactoring` の行を使う。
 - `delegate_task` に `isolation: "worktree"` を付けて、指揮役のスレッドの子として立てる。指示は [verifier-brief.md](verifier-brief.md) の `{…}` を埋めて渡す。
+- 指示に足してよいのは、試す入力と確かめ方だけにする。合否の基準を足すなら、先に Issue に書く。普段の手順と食い違う禁止は書かない。足した基準に拠る不合格が出たら、その基準を見直してから、同じ検証役に判定し直させる。
+- 同じ仕組みの端の場合で二回目の不合格が出たら、直しを重ねる前に、その仕組みを確かな情報源に切り替えるか、テストのあるスクリプトに移すかを決めて、担当に伝える。
 - 検証役のスレッドには PR を紐付けない。
 - 検証役を立てるたびに、その PR で何回目かを数える。検証役の報告を受けたら、判定のコメントの先頭に次の形の yaml を置く。`decided_at` は検証役が判定を出した UTC の時刻である。投稿の時刻で代用しない。`head` は検証した完全な SHA を写す。`failed_checks` は報告から写し、PASS なら空の配列にする。投稿前に `node .claude/skills/madori-coordinator/scripts/records.mjs verdict <コメントファイル>` で確かめる。
 
@@ -256,9 +261,11 @@ gh pr merge <番号> --merge --match-head-commit <head>
 
 続けてマージするときも、PR ごとに、判定とマージを、番号と head を書き込んだ別々のコマンドで打つ。
 
+main が進んだ後に `check` をやり直しても、GitHub は最初のマージのコミットで検査する。新しい main と合わせて検査するには、担当に main を取り込ませて head を新しくする。
+
 ## マージの後
 
-マージで main に入った変更に `paths-ignore` に入らないファイルがあれば、staging へ自動でデプロイされる。結果は見回りで読む。マージの後は PR の head が main の祖先になるので、`before` ではなく次のコマンドで判定する。マージコミットとその第一親の差分を、マージコミットの `deploy-staging.yml` の一覧で判定する。
+マージで main に入った変更に `paths-ignore` に入らないファイルがあれば、staging へ自動でデプロイされる。結果は見回りで読む。早く読みたいときは、ポーリングせずに、`schedule_task` の一回きりの予定（`schedule: {type: "once", runAt}`、`bindToCurrentThread: true`）で見回りを前倒しする。マージの後は PR の head が main の祖先になるので、`before` ではなく次のコマンドで判定する。マージコミットとその第一親の差分を、マージコミットの `deploy-staging.yml` の一覧で判定する。
 
 ```sh
 node .claude/skills/madori-coordinator/scripts/deploy-files.mjs after <番号>
@@ -267,7 +274,11 @@ node .claude/skills/madori-coordinator/scripts/deploy-files.mjs after <番号>
 - ファイルが出たら、デプロイが動く。そのとき標準エラーに `merge commit <マージ SHA>` が出る。その実行は、マージ SHA で特定する（`gh run list --workflow deploy-staging.yml --branch main --event push --commit <マージ SHA>`）。手で始めた実行は、同じ SHA でも数えない。
 - 0で終わって何も出なければ、デプロイは動かない。そのマージでは、デプロイの結果を待たず、担当にもデプロイを知らせない。
 - 0以外で終わったら、判定できていない。表示された理由を直して打ち直す。
-- デプロイか疎通の確認が失敗したら、原因を確かめる。環境の問題なら、「staging の占有」に従って `gh run rerun <run> --failed` でやり直す。コードの問題なら、直す担当をすぐに立てる。
+- デプロイか疎通の確認が失敗したら、原因を環境、コード、不安定な試験のどれかに分ける。分ける前に、落ちた試験の直近の合否を、`node scripts/check/test-history.ts --test <試験名>` で `check` と `deploy-staging` の両方について数え、手元で動かした結果も足す。
+  - 環境なら、「staging の占有」に従って `gh run rerun <run> --failed` でやり直す。
+  - コードなら、直す担当をすぐに立てる。
+  - 不安定なら、AGENTS.md「検査と引き継ぎ」のとおり不具合の Issue にする。やり直しは、不安定か常に落ちるかを見分けるためだけに使う。
+- 落ちる見込みだけを理由に、デプロイを取り消さない。取り消したマージと、検証役が確かめられなかった検査を残したマージは、その結果を読むまで見回りの手順6で追う。
 - Issue の終わった証拠がマージの後の staging での確認を求めるなら、デプロイが終わったら、指揮役が担当のスレッドへ `t3_thread_send` で知らせる。担当のスレッドはマージで settled になり、担当の見張りは消えているため。知らせを受けた担当が確かめて、記録が要るなら記録の PR を作る。
 
 ## 記録と、見つかった問題の行き先
@@ -275,14 +286,15 @@ node .claude/skills/madori-coordinator/scripts/deploy-files.mjs after <番号>
 - 判断と結果は、その Issue か PR にコメントで書く。誰の判定か、どの head か、何で確かめたかを書く。検証役の判定とマージは PR に書く。
 - 画像は、AGENTS.md「Issue と PR の画像」のとおり `images` に置いたリンクで貼る。検証役の報告にある画像の Markdown は、判定のコメントにそのまま貼る。
 - 担当や検証役が範囲の外で見つけた問題は、根拠を確かめてから行き先を決める。関係する Issue があり、種類も同じなら、その Issue にコメントで書き足す。yaml を使う種類ではコメントの先頭に本文と同じ項目を置き、今回見つけた経緯を記す。続けて根拠を書く。投稿前に `node .claude/skills/madori-coordinator/scripts/records.mjs addition <コメントファイル> <元の種類のラベル>` で確かめる。種類が違うか、関係する Issue が無ければ、その種類のテンプレートで新しい Issue を作り、「Issue の置き場」で決めた milestone に入れて、「依存を登録する」のとおりに依存を登録する。
+- 不安定な試験の Issue には、直すか消すかを決めて書かずに、「その試験が守る振る舞いを守り続ける」と書く。直すか消すかは、その試験だけが守る振る舞いの一覧で決める。消すなら、一覧の一行ずつについて、代わりに守る試験が今あって動くことを確かめてからにする。
 
 ## 見回り
 
-T3 の定期タスクが、1時間ごとに `/madori-coordinator 見回り` を送る。次を順に行う。何も変わっていなければ、ユーザーへ報告せずに終える。
+T3 の定期タスクが、1時間ごとに `/madori-coordinator 見回り` を送る。次を順に行う。何も変わっていなければ、ユーザーへ報告せずに終える。見回りと進み具合の報告は、次の段階へ進むのに残る Issue と、今の段階で作った Issue と閉じた Issue の数から始める。
 
 1. メインのチェックアウトを `git pull --ff-only` で main に合わせる。
-2. `df -h /` で空きを確かめる。20 GiB を切っていたら、次を片付けてから進む。空きが戻るまで、新しいスレッドを立てない。
-   - `~/.t3/worktrees/instant-madori/` のうち、HEAD が main に入っていて、未コミットの変更が無い worktree。ただし、settled でないスレッドの worktree は残す。作ったばかりの担当の worktree も、HEAD が main に入っていて変更が無いため。
+2. `df -h /` で空きを確かめる。20 GiB を切っていたら、次を片付けてから進む。空きが戻るまで、新しいスレッドを立てない。片付けるのは次の二つだけにする。ユーザーの個人のデータやキャッシュの削除は頼まない。二つ目の `docker image prune -a -f` は、どのプロジェクトのものかを問わず、使われていないイメージをすべて消す（#402）。
+   - `~/.t3/worktrees/instant-madori/` のうち、HEAD が main に入っていて、未コミットの変更が無い worktree。ただし、settled でないスレッドの worktree と、「資源の枠」でまだ数えている担当（マージの後の staging での確認を終えていない担当）の worktree は残す。作ったばかりの担当の worktree も、HEAD が main に入っていて変更が無いため。担当のスレッドはマージで settled になるので、settled だけを理由に消さない。
      - settled でないスレッドは、`t3_thread_list` に `settled: false` を付けて最後のページまで出す。
      - 各スレッドの worktree は、`t3_thread_read` が返す `thread.worktreePath` で調べる。`creationSource` が `provider` のスレッドは読まない。Claude Code や Codex が自分で立てた subagent で、親のスレッドと同じ `worktreePath` を返す。
      - `t3_worktree_list` は使わない。検証役が PR の head を detached で取り出した worktree を返さない。
@@ -290,7 +302,7 @@ T3 の定期タスクが、1時間ごとに `/madori-coordinator 見回り` を�
 3. 担当ごとに、コミット、push、PR、`check` の動きを確かめる。報告の来た PR と、報告は無いが `check` の通った PR には、検証役を立てる。止まった担当は、新しい担当に入れ替える。
 4. `node scripts/shared/docker-slots.ts status` で、Docker の枠を持つプロセスを見る。`pnpm dev` が枠を持っていて、それを起動したスレッドがターンを終えて待っているなら、そのスレッドに `pnpm dev` を止めるよう頼む。
 5. 終わった検証役の判定を読み、「マージを決める」に進む。
-6. 前の見回りの後にしたマージと、前の見回りまでにデプロイの結果の確認か担当への知らせが済んでいないマージについて、「マージの後」の判定でデプロイが動いたかを確かめる。動いたマージは、その実行の結果を読み、「マージの後」のとおりに扱う。実行が終わっていなければ、次の見回りでまた確かめる。動かないマージは待たない。
+6. 前の見回りの後にしたマージと、前の見回りまでにデプロイの結果の確認か担当への知らせが済んでいないマージ、「マージの後」で追うと決めたマージについて、「マージの後」の判定でデプロイが動いたかを確かめる。動いたマージは、その実行の結果を読み、「マージの後」のとおりに扱う。実行が終わっていなければ、次の見回りでまた確かめる。動かないマージは待たない。
 7. 動いている担当が五人より少なければ、「次の Issue を選ぶ」で選んで担当を立てる。
 
 ## milestone を閉じる
