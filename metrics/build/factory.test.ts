@@ -8,6 +8,7 @@ import { test } from "node:test";
 import { registry, type RecordInput } from "../l1/sources.ts";
 import { openL1Writer } from "../l1/store.ts";
 import { parseClassifications } from "../ingest/classification.ts";
+import { readViewerData } from "../viewer/data.ts";
 import { poissonBounds } from "./poisson.ts";
 
 void test("zero and one completion retain exact two-sided Poisson limits", () => {
@@ -248,6 +249,48 @@ void test("hourly and eight active hour windows count releases, owner gaps and m
   });
   const out = new DatabaseSync(join(root, "metrics-derived.sqlite"), { readOnly: true });
   t.after(() => out.close());
+  const viewer = readViewerData(out);
+  const eight = viewer.windows.find((w) => w.length === 8);
+  assert.ok(eight);
+  assert.ok(eight.points.some((p) => p.features > 0 && p.active_minutes === 480));
+  for (const point of eight.points) {
+    const rolling = out
+      .prepare("SELECT * FROM mart_kpi WHERE window='rolling' AND end=?")
+      .get(point.end);
+    assert.ok(rolling);
+    for (const key of [
+      "start",
+      "active_minutes",
+      "issue_minutes",
+      "feature_minutes",
+      "features",
+      "open_start",
+      "open_end",
+      "throughput",
+      "parallelism",
+      "feature_share",
+      "hours_per_feature",
+      "throughput_low",
+      "throughput_high",
+      "hours_per_feature_low",
+      "hours_per_feature_high",
+    ] as const)
+      assert.equal(point[key], rolling[key], key);
+    assert.equal(
+      point.kinds.reduce((sum, r) => sum + r.minutes, 0),
+      point.issue_minutes,
+    );
+    assert.equal(
+      point.states.reduce((sum, r) => sum + r.minutes, 0),
+      point.feature_minutes,
+    );
+    const completed = out
+      .prepare(
+        "SELECT count(*) n FROM mart_quality_issue q JOIN issue_classification c USING(issue) WHERE unixepoch(c.closed_at)>=? AND unixepoch(c.closed_at)<? AND q.area='product'",
+      )
+      .get(point.start, point.end);
+    assert.equal(point.quality.find((q) => q.area === "product")?.total, completed?.n);
+  }
   const skill = ".claude/skills/madori-coordinator/SKILL.md";
   const repo = join(import.meta.dirname, "../..");
   const policy = readFileSync(join(repo, skill), "utf8");
