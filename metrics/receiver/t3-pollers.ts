@@ -40,8 +40,7 @@ const queries = {
   "t3.approval": {
     table: "runtime_requests",
     id: "runtime_request_id",
-    cursor: `r.payload_json ->> '$.nativeRequestRef.driver' = 'codex'
-      and r.kind in ('command','file-read','file-change','permission','mcp-elicitation') and (r.resolved_at is null or r.resolved_at >= ?)`,
+    cursor: `r.kind in ('command','file-read','file-change','permission','mcp-elicitation') and (r.resolved_at is null or r.resolved_at >= ?)`,
     fields: `r.thread_id, r.provider_turn_id, r.kind, r.status, r.created_at, r.resolved_at,
       case when r.payload_json ->> '$.decision' in ('accept','acceptForSession','acceptAlways','decline','cancel')
       then r.payload_json ->> '$.decision' end decision`,
@@ -54,15 +53,18 @@ const queries = {
       "r.thread_id,r.child_thread_id,r.provider,r.origin,r.status,r.started_at,r.completed_at",
   },
 } as const;
+const checkpointVersions: Partial<Record<keyof typeof queries, string>> = {
+  "t3.thread": ".verifier-3",
+  "t3.message": ".verifier-3",
+  "t3.approval": ".all-providers-1",
+};
+
 export function t3Pollers(file: string, root: string, home: string): Poller[] {
   return (Object.keys(queries) as (keyof typeof queries)[]).map((name) => {
     const query = queries[name];
     let since = "",
       next = "";
-    const checkpoint = join(
-      home,
-      name + (name === "t3.thread" || name === "t3.message" ? ".verifier-3" : "") + ".cursor",
-    );
+    const checkpoint = join(home, name + (checkpointVersions[name] ?? "") + ".cursor");
     try {
       since = z.iso.datetime().parse(readFileSync(checkpoint, "utf8"));
     } catch {

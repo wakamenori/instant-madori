@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { DatabaseSync } from "node:sqlite";
@@ -63,7 +63,7 @@ void test("T3 message checkpoints persist only after commit and exclude foreign 
   assert.equal((await poller().poll(signal)).length, 0);
 });
 
-void test("Codex approval requests retain resolution updates and exclude other prompts and projects", async (t) => {
+void test("T3 approval requests retain resolution updates and exclude other prompts and projects", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "approval-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const file = join(root, "t3.sqlite");
@@ -83,6 +83,7 @@ void test("Codex approval requests retain resolution updates and exclude other p
     ["b", "local", "user_input", "codex"],
     ["c", "other", "command", "codex"],
     ["d", "local", "command", "claudeAgent"],
+    ["e", "local", "user_input", "claudeAgent"],
   ] as const)
     input.run(
       id,
@@ -91,15 +92,25 @@ void test("Codex approval requests retain resolution updates and exclude other p
       at,
       JSON.stringify({ nativeRequestRef: { driver }, instructions: "secret" }),
     );
+  const cancelledAt = "2026-01-01T00:02:00.000Z";
+  db.prepare(
+    "UPDATE orchestration_v2_projection_runtime_requests SET status='cancelled',created_at=?,resolved_at=? WHERE runtime_request_id='d'",
+  ).run("2026-01-01T00:00:00.000Z", cancelledAt);
+  writeFileSync(join(root, "t3.approval.cursor"), "2099-01-01T00:00:00.000Z");
   const poller = t3Pollers(file, "/repo", root).find((p) => p.name === "t3.approval");
   assert.ok(poller);
   const signal = new AbortController().signal;
   const pending = await poller.poll(signal);
   assert.deepEqual(
     pending.map((r) => [r.naturalKey, r.payload.status, r.payload.resolved_at]),
-    [["a", "pending", null]],
+    [
+      ["a", "pending", null],
+      ["d", "cancelled", cancelledAt],
+    ],
   );
+  assert.doesNotMatch(JSON.stringify(pending), /secret/u);
   poller.committed?.();
+  assert.ok(existsSync(join(root, "t3.approval.all-providers-1.cursor")));
   db.prepare(
     "UPDATE orchestration_v2_projection_runtime_requests SET status='resolved',resolved_at=?,payload_json=json_set(payload_json,'$.decision','accept') WHERE runtime_request_id='a'",
   ).run(at);

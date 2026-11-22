@@ -149,6 +149,7 @@ void test("hourly and eight active hour windows count releases, owner gaps and m
     add("t3.run", "implement", { thread_id: "codex", started_at: at(-69), completed_at: at(-68) });
     add("t3.thread", "coord", { created_at: at(-70) });
     add("t3.thread", "inspect", {
+      provider: "claudeAgent",
       title_kind: "verifier",
       parent_thread_id: "coord",
       issue: 20,
@@ -167,15 +168,13 @@ void test("hourly and eight active hour windows count releases, owner gaps and m
       started_at: at(-68),
       completed_at: at(-67),
     });
-    add("claude.hook", "permission", {
-      at: at(-68),
-      env: { T3CODE_THREAD_ID: "inspect" },
-      input: {
-        hook_event_name: "PermissionRequest",
-        session_id: "s",
-        prompt_id: "p",
-        tool_name: "Bash",
-      },
+    add("t3.approval", "permission", {
+      thread_id: "inspect",
+      kind: "command",
+      status: "resolved",
+      decision: "accept",
+      created_at: at(-68),
+      resolved_at: at(-67),
     });
     add("t3.run", "coord-run", { thread_id: "coord", started_at: at(-64), completed_at: at(-61) });
     add("github.comment", 202, {
@@ -526,7 +525,7 @@ void test("hourly and eight active hour windows count releases, owner gaps and m
   );
   assert.deepEqual(all("SELECT issue,kind,start,end FROM mart_turn_detail ORDER BY start"), [
     { issue: 20, kind: "approval", start: at(-70), end: at(-69) },
-    { issue: 20, kind: "approval", start: at(-68), end: null },
+    { issue: 20, kind: "approval", start: at(-68), end: at(-67) },
   ]);
   assert.deepEqual(all("SELECT unit,direction FROM improvement_target WHERE id='approval.wait'"), [
     { unit: "割合", direction: "down" },
