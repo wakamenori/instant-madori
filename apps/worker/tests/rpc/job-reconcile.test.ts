@@ -87,7 +87,7 @@ await test("Pattern reconciliation on D1", async (t) => {
         requestId: crypto.randomUUID(),
       });
       assert(a.kind === "accepted");
-      return a.job.id;
+      return a.job.jobId;
     }
     async function claim() {
       const c = await claimNextJob(deps, { patternId });

@@ -11,7 +11,6 @@ import {
 import { z } from "zod";
 import { createOnceStatements, updateOnceStatements, runOnce } from "../../src/storage/requests.ts";
 import { d1 } from "../../src/storage/d1.ts";
-import { messageJson } from "../../src/storage/messages.ts";
 import { finishedJobJson } from "../../src/storage/revisions.ts";
 
 // Keep the previous Worker's job writes fixed so deploy overlap is tested against its SQL.
@@ -68,7 +67,8 @@ try {
         { sql: jobSql, bindings: [job, now, now, message, id, ownerId] },
       ],
       result: {
-        sql: `SELECT json_object('message', ${messageJson("m")},
+        sql: `SELECT json_object('message', json_object('id', m.id, 'patternId', m.pattern_id,
+          'number', m.number, 'body', m.body, 'createdAt', m.created_at),
         'job', json_object('id', j.id, 'patternId', j.pattern_id, 'messageId', j.message_id,
           'state', j.state, 'generation', j.generation, 'baseRevisionId', j.base_revision_id,
           'createdAt', j.created_at, 'updatedAt', j.updated_at))

@@ -82,7 +82,7 @@ await test("Job runs restore D1 execution rights across retries and lost respons
         assert.deepEqual(key, { kind: "pattern", patternId });
         return {
           sampleDisplay(call) {
-            assert.equal(call.traceId, accepted.id);
+            assert.equal(call.traceId, accepted.jobId);
             calls.push(call.traceId);
             const result = results[Math.min(calls.length - 1, results.length - 1)];
             assert(result);

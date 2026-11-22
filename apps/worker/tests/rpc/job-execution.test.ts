@@ -98,12 +98,16 @@ await test("Job execution through services on real D1 and R2", async (t) => {
         assert.equal(results.filter((r) => r.kind === "not_claimed").length, 19);
         const winner = results.find((r) => r.kind === "claimed");
         assert(winner?.kind === "claimed");
-        assert.deepEqual(winner.right.reference, { patternId, jobId: first.job.id, generation: 1 });
+        assert.deepEqual(winner.right.reference, {
+          patternId,
+          jobId: first.job.jobId,
+          generation: 1,
+        });
         assert.equal(readJobExecutionRight(winner.right).baseRevisionId, null);
         assert.deepEqual(await claimNextJob(deps, { patternId }), { kind: "not_claimed" });
         assert((await complete(winner.right, await save(winner.right))).kind === "committed");
         const next = await claim(patternId);
-        assert.equal(next.reference.jobId, second.job.id);
+        assert.equal(next.reference.jobId, second.job.jobId);
       }
       assert.deepEqual(await claimNextJob(deps, { patternId: crypto.randomUUID() }), {
         kind: "not_claimed",
@@ -332,7 +336,7 @@ await test("Job execution through services on real D1 and R2", async (t) => {
         assert.equal(
           await db.raw
             .prepare("SELECT state FROM jobs WHERE id = ?")
-            .bind(queued.job.id)
+            .bind(queued.job.jobId)
             .first("state"),
           "queued",
         );
@@ -345,7 +349,7 @@ await test("Job execution through services on real D1 and R2", async (t) => {
     async () => {
       const patternId = await pattern();
       const accepted = await accept(patternId);
-      const zero = { patternId, jobId: accepted.job.id, generation: 0 };
+      const zero = { patternId, jobId: accepted.job.jobId, generation: 0 };
       assert.deepEqual(await readCurrentJobExecution(deps, zero), { kind: "invalid" });
       assert.equal(await readActiveJob(deps, { patternId }), null);
       await claimNextJob(deps, { patternId });
@@ -413,7 +417,7 @@ await test("Job execution through services on real D1 and R2", async (t) => {
             .prepare("SELECT conversation_number FROM revisions WHERE id = ?")
             .bind(done.revision.id)
             .first("conversation_number"),
-          first.message.number,
+          first.job.number,
         );
         const second = await claim(patternId);
         const next = await complete(second, await save(second));

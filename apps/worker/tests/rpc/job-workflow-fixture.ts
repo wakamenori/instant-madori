@@ -95,11 +95,7 @@ try {
       body: "fixture",
     });
     assert(accepted.kind === "accepted");
-    return {
-      jobId: accepted.job.id,
-      messageId: accepted.message.id,
-      number: accepted.message.number,
-    };
+    return accepted.job;
   };
   if (input.kind === "rows") {
     const rows = await db

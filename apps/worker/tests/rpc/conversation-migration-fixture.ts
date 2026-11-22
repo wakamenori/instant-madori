@@ -316,8 +316,20 @@ try {
     body: "fixture",
     now,
   });
-  const originalAcceptance: unknown = JSON.parse(committed.stored);
-  assert.deepEqual(replay, { kind: "replayed", result: originalAcceptance });
+  const originalAcceptance = z
+    .object({
+      job: z.object({ id: z.uuid() }),
+      message: z.object({ id: z.uuid(), number: z.int().positive() }),
+    })
+    .parse(JSON.parse(committed.stored));
+  assert.deepEqual(replay, {
+    kind: "replayed",
+    result: {
+      jobId: originalAcceptance.job.id,
+      messageId: originalAcceptance.message.id,
+      number: originalAcceptance.message.number,
+    },
+  });
   await exercisePreviousWorker();
   await instructionsOnly();
   let number = 100;
