@@ -8,6 +8,8 @@
 
 # `<model> <effort>` such as `opus xhigh`: spawn with Agent `model` and `effort`.
 
+# Never spawn below `medium`. When poteto-mode's "Match the model to the job" would lower a role below `medium`, use `medium`. This floor also applies to Codex `reasoningEffort`.
+
 # A `gpt-*` value runs on Codex. In T3, start it with `delegate_task`: `target.providerInstanceId` "codex", `target.model` the slug, and `target.options.reasoningEffort` the effort. Outside T3, omit `model` so the role runs on the session model.
 
 feature, refactoring: gpt-6.2-astra medium
@@ -25,5 +27,5 @@ reflect judgment, divergent, synthesizer: opus xhigh
 arena runners: opus xhigh, inherit-parent
 arena cross-judge pool: opus xhigh, inherit-parent
 swarm workers: inherit-parent
-architect runners: opus xhigh, inherit-parent
-interrogate reviewers: opus xhigh, inherit-parent
+architect runners: opus medium, opus medium
+interrogate reviewers: opus high, opus high
