@@ -6,7 +6,7 @@ import { z } from "zod";
 
 const exec = promisify(execFile);
 const defaultMountLimitBytes = 8 * 1024 ** 3;
-const defaultLayerLimitBytes = 4 * 1024 ** 3;
+const defaultLayerLimitBytes = 6 * 1024 ** 3;
 const layerKinds = new Set(["regular", "frontend"]);
 const discardedKinds = new Set(["internal", "source.local", "source.git.checkout"]);
 const byteLimit = z
@@ -15,9 +15,14 @@ const byteLimit = z
   .transform(Number)
   .pipe(z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER));
 const timestamp = z.iso.datetime({ offset: true });
+const cacheId = z.string().regex(/^[a-z0-9]{1,128}$/u);
+const parentIds = z.array(cacheId).nullish();
 const recordSchema = z
   .object({
-    ID: z.string().regex(/^[a-z0-9]{1,128}$/u),
+    ID: cacheId,
+    // Docker Engine 29's JSON tag includes a leading space.
+    " Parents": parentIds,
+    Parents: parentIds,
     Type: z.string().min(1),
     Size: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
     InUse: z.boolean(),
@@ -26,6 +31,7 @@ const recordSchema = z
   })
   .transform((record) => ({
     id: record.ID,
+    parents: [...new Set([...(record[" Parents"] ?? []), ...(record.Parents ?? [])])],
     kind: record.Type,
     sizeBytes: record.Size,
     inUse: record.InUse,
@@ -37,34 +43,84 @@ export function parseBuildCache(output: string): CacheRecord[] {
   const data: unknown = JSON.parse(output);
   const { BuildCache } = z.object({ BuildCache: z.array(recordSchema).nullable() }).parse(data);
   const records = BuildCache ?? [];
-  if (new Set(records.map(({ id }) => id)).size !== records.length) {
+  const ids = new Set(records.map(({ id }) => id));
+  if (ids.size !== records.length) {
     throw new Error("Duplicate Docker cache IDs; no cache pruned");
   }
+  for (const record of records) record.parents = record.parents.filter((id) => ids.has(id));
+  rankRecords(records);
   return records;
 }
 
-export function selectBuildCache(input: {
-  records: readonly CacheRecord[];
-  mountLimitBytes: number;
-  layerLimitBytes: number;
-}): CacheRecord[] {
-  const remove = input.records.filter(({ kind, inUse }) => discardedKinds.has(kind) && !inUse);
-  for (const budget of [
-    { kinds: new Set(["exec.cachemount"]), bytes: input.mountLimitBytes },
-    { kinds: layerKinds, bytes: input.layerLimitBytes },
-  ]) {
-    const records = input.records.filter(({ kind }) => budget.kinds.has(kind));
-    let bytes = records.reduce((sum, record) => sum + record.sizeBytes, 0);
-    const unused = records
-      .filter(({ inUse }) => !inUse)
-      .sort((a, b) => a.usedAt - b.usedAt || a.id.localeCompare(b.id));
-    for (const record of unused) {
-      if (bytes <= budget.bytes) break;
-      remove.push(record);
-      bytes -= record.sizeBytes;
+function rankRecords(records: readonly CacheRecord[]) {
+  const nodes = new Map(
+    records.map((record) => [
+      record.id,
+      {
+        record,
+        subtreeUsedAt: record.usedAt,
+        height: 0,
+        remainingChildren: 0,
+      },
+    ]),
+  );
+  for (const { parents } of records) {
+    for (const id of parents) {
+      const parent = nodes.get(id);
+      if (parent) parent.remainingChildren++;
     }
   }
-  return remove;
+  const ready = [...nodes.values()].filter((node) => node.remainingChildren === 0);
+  for (const child of ready) {
+    for (const id of child.record.parents) {
+      const parent = nodes.get(id);
+      if (!parent) continue;
+      parent.subtreeUsedAt = Math.max(parent.subtreeUsedAt, child.subtreeUsedAt);
+      parent.height = Math.max(parent.height, child.height + 1);
+      if (--parent.remainingChildren === 0) ready.push(parent);
+    }
+  }
+  if (ready.length !== records.length)
+    throw new Error("Cycle in Docker cache parents; no cache pruned");
+  return ready;
+}
+
+type CacheLimits = { mountLimitBytes: number; layerLimitBytes: number };
+
+function planBuildCache(records: readonly CacheRecord[], limits: CacheLimits) {
+  const ranked = rankRecords(records).sort(
+    (a, b) =>
+      a.subtreeUsedAt - b.subtreeUsedAt ||
+      a.height - b.height ||
+      a.record.id.localeCompare(b.record.id),
+  );
+  let { cacheMountBytes, layerBytes } = summary(records);
+  const keptParents = new Set<string>();
+  const remove: (CacheRecord & { subtreeUsedAt: number })[] = [];
+  const keep: (CacheRecord & { subtreeUsedAt: number })[] = [];
+  for (const { record, subtreeUsedAt } of ranked) {
+    const mount = record.kind === "exec.cachemount";
+    const layer = layerKinds.has(record.kind);
+    const wanted =
+      discardedKinds.has(record.kind) ||
+      (mount && cacheMountBytes > limits.mountLimitBytes) ||
+      (layer && layerBytes > limits.layerLimitBytes);
+    if (wanted && !record.inUse && !keptParents.has(record.id)) {
+      remove.push({ ...record, subtreeUsedAt });
+      if (mount) cacheMountBytes -= record.sizeBytes;
+      if (layer) layerBytes -= record.sizeBytes;
+    } else {
+      keep.push({ ...record, subtreeUsedAt });
+      for (const parent of record.parents) keptParents.add(parent);
+    }
+  }
+  return { remove, keep };
+}
+
+export function selectBuildCache(
+  input: { records: readonly CacheRecord[] } & CacheLimits,
+): CacheRecord[] {
+  return planBuildCache(input.records, input).remove;
 }
 
 async function inventory(socketPath: string) {
@@ -87,7 +143,7 @@ async function inventory(socketPath: string) {
   return parseBuildCache(output);
 }
 
-function summary(records: CacheRecord[]) {
+function summary(records: readonly CacheRecord[]) {
   return {
     records: records.length,
     totalBytes: records.reduce((sum, record) => sum + record.sizeBytes, 0),
@@ -112,7 +168,7 @@ async function main() {
   if (values.help) {
     console.info(
       "Usage: pnpm docker:prune-build-cache [--dry-run] [--mount-limit-bytes N] [--layer-limit-bytes N]\n" +
-        "Retain up to 8 GiB of cache mounts and 4 GiB of recent regular/frontend layers by default.",
+        "Retain up to 8 GiB of cache mounts and 6 GiB of recent regular/frontend layers by default.",
     );
     return;
   }
@@ -146,8 +202,7 @@ async function main() {
       JSON.stringify({ event: "docker.cache.prune.unknown", retainedKinds: unknownKinds }),
     );
   }
-  const remove = selectBuildCache({ records, mountLimitBytes, layerLimitBytes });
-  const removedIds = new Set(remove.map(({ id }) => id));
+  const { remove, keep } = planBuildCache(records, { mountLimitBytes, layerLimitBytes });
   console.info(
     JSON.stringify({
       event: "docker.cache.prune.plan",
@@ -156,7 +211,8 @@ async function main() {
       layerLimitBytes,
       before: summary(records),
       remove,
-      keep: records.filter(({ id }) => !removedIds.has(id)),
+      keep,
+      expectedAfter: summary(keep),
     }),
   );
   if (values["dry-run"]) return;
@@ -184,12 +240,15 @@ async function main() {
     );
     console.info(stdout.trim());
   }
+  const after = await inventory(socketPath);
+  const remaining = new Set(after.map(({ id }) => id));
   console.info(
     JSON.stringify({
       event: "docker.cache.prune.result",
       mountLimitBytes,
       layerLimitBytes,
-      after: summary(await inventory(socketPath)),
+      after: summary(after),
+      notRemoved: remove.map(({ id }) => id).filter((id) => remaining.has(id)),
     }),
   );
 }
