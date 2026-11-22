@@ -55,6 +55,32 @@ await test("Schema constraints", async (t) => {
     );
   });
 
+  await t.test(
+    "AI reservations require a job, positive amount, canonical UTC time and complete settlement",
+    async () => {
+      await db.execute(`
+      INSERT INTO messages (id, pattern_id, owner_id, number, body, created_at)
+        VALUES ('m', 't2', 'u1', 1, 'Hi', '${now}');
+      INSERT INTO jobs (id, pattern_id, owner_id, message_id, state, created_at, updated_at)
+        VALUES ('j', 't2', 'u1', 'm', 'queued', '${now}', '${now}');
+    `);
+      const insert = (id: string, job: string, reserve: number, at: string) =>
+        db.execute(`INSERT INTO ai_attempts (id, job_id, generation, reserved, estimated_input_tokens, estimated_output_tokens, reserved_at)
+        VALUES ('${id}', '${job}', 1, ${reserve}, 0, 0, '${at}')`);
+      await insert("canonical", "j", 1, now);
+      await assert.rejects(insert("zero", "j", 0, now), /CHECK constraint failed: reserved > 0/);
+      await assert.rejects(
+        insert("offset", "j", 1, "2026-11-15T09:00:00+09:00"),
+        /CHECK constraint failed: strftime/,
+      );
+      await assert.rejects(insert("orphan", "missing", 1, now), /FOREIGN KEY constraint failed/);
+      await assert.rejects(
+        db.execute("UPDATE ai_attempts SET charged = 0 WHERE id = 'canonical'"),
+        /CHECK constraint failed: ai_attempts_settlement/,
+      );
+    },
+  );
+
   await t.test("pattern numbers are unique within a project", async () => {
     await assert.rejects(
       db.execute(

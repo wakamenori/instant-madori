@@ -16,8 +16,14 @@ export const conversationMigration = new URL(
   "../../migrations/0005_conversation_kinds.sql",
   import.meta.url,
 );
+const aiAttemptsMigration = new URL("../../migrations/0006_ai_attempts.sql", import.meta.url);
 export async function applyJobMigrations(db: Awaited<ReturnType<typeof openJobDatabase>>) {
-  for (const migration of [jobMigration, queueHoldMigration, conversationMigration])
+  for (const migration of [
+    jobMigration,
+    queueHoldMigration,
+    conversationMigration,
+    aiAttemptsMigration,
+  ])
     await db.apply(await readFile(migration, "utf8"));
 }
 export const now = "2026-11-15T00:00:00.000Z";

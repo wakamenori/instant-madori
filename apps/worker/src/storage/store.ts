@@ -1,3 +1,4 @@
+import { reserveAiAttempt, settleAiAttempt } from "./ai-cost.ts";
 import type { D1 } from "./d1.ts";
 import type { R2 } from "./r2.ts";
 import * as projects from "./projects.ts";
@@ -12,6 +13,16 @@ import { upsertAccessUser } from "./users.ts";
 
 export function createStore(db: D1, bucket: R2) {
   return {
+    aiCost: {
+      reserve: (
+        right: Parameters<typeof reserveAiAttempt>[1],
+        input: Parameters<typeof reserveAiAttempt>[2],
+      ) => reserveAiAttempt(db, right, input),
+      settle: (
+        job: Parameters<typeof settleAiAttempt>[1],
+        input: Parameters<typeof settleAiAttempt>[2],
+      ) => settleAiAttempt(db, job, input),
+    },
     users: {
       upsertAccess: (input: Parameters<typeof upsertAccessUser>[1]) => upsertAccessUser(db, input),
     },
