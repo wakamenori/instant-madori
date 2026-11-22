@@ -127,7 +127,7 @@ esac
       assert.equal(result.stderr, "");
       return result.stdout;
     }
-    const stop = () => run("Stop", { stop_hook_active: false });
+    const stop = () => run("Stop", {});
     const calls = () => readFileSync(resolve(cwd, "calls"), "utf8");
     const fixture = (name: string, data: unknown) =>
       writeFileSync(resolve(cwd, name), JSON.stringify(data));

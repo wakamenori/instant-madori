@@ -49,7 +49,10 @@ const rememberTarget: Handler = (input, session, schema) => {
 };
 
 const checkVerdict: Handler = (input, session, schema) => {
-  if (schema.object({ stop_hook_active: schema.boolean() }).parse(input).stop_hook_active)
+  if (
+    schema.object({ stop_hook_active: schema.boolean().default(false) }).parse(input)
+      .stop_hook_active
+  )
     return allow;
   const { pr, head, attempt } = targetSchema(schema).parse(
     JSON.parse(readFileSync(statePath(session), "utf8")),
