@@ -9,7 +9,7 @@ import { openL1Writer } from "../l1/store.ts";
 import { registry, type RecordInput } from "../l1/sources.ts";
 import { readViewerData, qualityRates } from "./data.ts";
 import { renderDashboard } from "./render.ts";
-import { date, fmt } from "./chart.ts";
+import { date, esc, fmt } from "./chart.ts";
 
 void test("each rendered operating-hour point and latest breakdown match the rolling marts for all six selections", (t) => {
   const root = mkdtempSync(join(tmpdir(), "metrics-rolling-"));
@@ -98,12 +98,12 @@ void test("each rendered operating-hour point and latest breakdown match the rol
     ...data,
     combos: [{ ...firstCombo, points: [firstPoint], issues: [], kinds: [] }],
   });
-  assert.ok(early.includes("完了なし · %"));
+  assert.ok(early.includes("期間内に完了が無いため、割合で示しています"));
   const shares = Array.from(early.matchAll(/data-cell="[^"]+" data-value="([^"]+)"/gu), (m) =>
     Number(m[1]),
   );
   assert.ok(Math.abs(shares.reduce((a, b) => a + b, 0) - 100) < 1e-10);
-  const panels = renderDashboard(data).split('<section class="combo"').slice(1);
+  const panels = renderDashboard(data).split('<div class="combo"').slice(1);
   assert.equal(panels.length, 6);
   for (const span of [4, 8, 24])
     for (const target of ["機能", "全種類"]) {
@@ -123,7 +123,7 @@ void test("each rendered operating-hour point and latest breakdown match the rol
       const latest = rows.at(-1);
       assert.ok(latest && Number(latest.completions) > 0);
       const tiles = panel
-        .split('<article class="tile"')
+        .split(/<article class="tile(?: hero)?"/u)
         .slice(1)
         .map((s) => s.split("</article>")[0] ?? "");
       assert.equal(tiles.length, target === "機能" ? 4 : 3);
@@ -151,10 +151,16 @@ void test("each rendered operating-hour point and latest breakdown match the rol
         assert.ok(tile.includes(`<strong>${read(latest[key])}</strong> ${unit}`));
         for (const r of rows) {
           const values = [r[key], ...(bounded ? [r[key + "_low"], r[key + "_high"]] : [])];
-          const context = `${date(Number(r.start))} JST 開始 · 稼働 ${Number(r.active_minutes)} 分 · 工数 ${Number(r.issue_minutes)} 分 · 完了 ${Number(r.completions)} 件 · 境目の未完了 ${Number(r.open_start)} → ${Number(r.open_end)} 件`;
+          const context = [
+            date(Number(r.start)),
+            Number(r.active_minutes),
+            Number(r.issue_minutes),
+            Number(r.completions),
+            `${Number(r.open_start)} → ${Number(r.open_end)}`,
+          ];
           assert.ok(
             tile.includes(
-              `<tr><td>${date(Number(r.end))}</td>${values.map((v) => `<td>${read(v)} ${unit}</td>`).join("")}<td>${context}</td></tr>`,
+              `<tr><td>${date(Number(r.end))}</td>${[...values.map(read), ...context].map((v) => `<td class="num">${esc(v)}</td>`).join("")}</tr>`,
             ),
           );
         }
@@ -204,7 +210,7 @@ void test("each rendered operating-hour point and latest breakdown match the rol
           if (p.hour === latest.hour)
             assert.ok(
               panel.includes(
-                `${area === "product" ? "製品" : "開発の仕組み"} · 観察完了 ${quality.observed}/${quality.total}</h3>`,
+                `${area === "product" ? "製品" : "開発の仕組み"}<small>観察完了 ${quality.observed}/${quality.total}</small></h3>`,
               ),
             );
         }

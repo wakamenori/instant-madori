@@ -224,20 +224,29 @@ export function readViewerData(db: DatabaseSync) {
     `SELECT tag,start,end FROM mart_effort_tag WHERE issue=?
     AND (tag LIKE 'tier:%' OR tag LIKE 'run:%' OR tag IN ('queue:ci','approval')) ORDER BY tag,start`,
   );
-  const timelines: Record<number, { name: string; intervals: [number, number][] }[]> = {};
+  const timelines: Record<number, { name: string; intervals: [number, number][]; ms: number }[]> =
+    {};
   for (const { issue } of combos.find((c) => c.span === 24 && c.target === "全種類")?.issues ??
     []) {
-    const lanes = new Map<string, [number, number][]>();
-    for (const row of tags(issue)) {
-      const lane = lanes.get(row.tag) ?? [];
-      const start = Date.parse(row.start),
-        end = Date.parse(row.end),
-        last = lane.at(-1);
-      if (last && last[1] === start) last[1] = end;
-      else lane.push([start, end]);
+    const rows = tags(issue).map((r) => ({
+      tag: r.tag,
+      start: Date.parse(r.start),
+      end: Date.parse(r.end),
+    }));
+    const first = Math.min(...rows.map((r) => r.start)),
+      last = Math.max(...rows.map((r) => r.end));
+    // Gaps shorter than one pixel of a 1500px track cannot be seen, and keeping them makes the page megabytes larger.
+    const join = (last - first) / 1500;
+    const lanes = new Map<string, { intervals: [number, number][]; ms: number }>();
+    for (const row of rows) {
+      const lane = lanes.get(row.tag) ?? { intervals: [], ms: 0 };
+      const previous = lane.intervals.at(-1);
+      if (previous && row.start - previous[1] <= join) previous[1] = Math.max(previous[1], row.end);
+      else lane.intervals.push([row.start, row.end]);
+      lane.ms += row.end - row.start;
       lanes.set(row.tag, lane);
     }
-    timelines[issue] = Array.from(lanes, ([name, intervals]) => ({ name, intervals }));
+    timelines[issue] = Array.from(lanes, ([name, lane]) => ({ name, ...lane }));
   }
   const effects = query(
     db,

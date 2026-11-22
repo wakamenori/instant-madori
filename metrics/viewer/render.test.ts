@@ -59,6 +59,6 @@ void test("record gap totals are visible above the collapsed issue list", () => 
       { issue: 42, reason: "missing_dispatch_target" },
     ],
   });
-  assert.match(html, /<td>改善の担当を立てた時点の狙いなし<\/td><td>2<\/td>/u);
+  assert.match(html, /<td>改善の担当を立てた時点の狙いなし<\/td><td class="num">2<\/td>/u);
   assert.match(html, /<details><summary>該当するIssueの一覧<\/summary>.*<td>41<\/td>/u);
 });

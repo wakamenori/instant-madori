@@ -83,7 +83,8 @@ void test("the viewer CLI publishes the derived snapshot and preserves it on sch
   assert.equal(statSync(output).mode & 0o777, 0o600);
   const html = readFileSync(output, "utf8");
   assert.match(html, /デリバリーの振り返り/u);
-  assert.match(html, /<option value="8" selected>/u);
+  assert.match(html, /<input type="radio" name="span" value="8" checked>/u);
+  assert.match(html, /<input type="radio" name="target" value="全種類" checked>/u);
   const custom = join(root, "morning.html");
   execFileSync(process.execPath, [viewer, "--out", custom], options);
   assert.match(readFileSync(custom, "utf8"), /デリバリーの振り返り/u);
