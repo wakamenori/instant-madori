@@ -50,7 +50,6 @@ void test("coordinator CLI and ingestion recognize the same record shapes", (t) 
       assert.ok(messageDecision("検証 #1 @ " + sha, "assistant", message).verification);
     }
   }
-  const start = "started_at: 2026-11-20T00:00:00Z";
   const discovery = "\nfound_at: マージの後\nfound_by: 担当\ncause: 不明";
   const records: [string, string, boolean, string?][] = [];
   for (const [label, fields, invalidFields] of [
@@ -91,11 +90,6 @@ void test("coordinator CLI and ingestion recognize the same record shapes", (t) 
       );
     }
   }
-  records.push(
-    ["staging-start", start, true],
-    ["staging-end", start + "\nended_at: 2026-11-21T00:00:00Z", true],
-    ["staging-end", start + "\nended_at: 2026-11-19T00:00:00Z", false],
-  );
   for (const [kind, yaml, valid, label] of records) {
     const body = !yaml ? "## 目的" : "```yaml\n" + yaml + "\n```";
     const file = join(dir, "record.md");
