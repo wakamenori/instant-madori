@@ -25,6 +25,7 @@ pub struct Viewer {
     lost: Arc<AtomicBool>,
     loss: js_sys::Promise,
     scene: Option<ShownScene>,
+    size: camera::ViewSize,
     camera: Camera,
     fitted: bool,
     key: u64,
@@ -102,6 +103,7 @@ impl Viewer {
             lost,
             loss,
             scene: None,
+            size: camera::ViewSize::default(),
             camera: Camera::default(),
             fitted: false,
             key: 0,
@@ -115,20 +117,18 @@ impl Viewer {
         let model = decoded(bytes)?;
         self.key = self.key.wrapping_add(1);
         let scene = scene::build(&model, self.key);
-        camera::fit_first(
-            &mut self.camera,
-            &mut self.fitted,
-            &scene.bounds,
-            f64::from(self.config.width) / f64::from(self.config.height),
-        );
+        let aspect = self.aspect();
+        camera::fit_first(&mut self.camera, &mut self.fitted, &scene.bounds, aspect);
         self.scene = Some(scene);
         self.dirty = true;
         Ok(summary(&model))
     }
-    pub fn resize(&mut self, width: u32, height: u32) {
-        let max = self.device.limits().max_texture_dimension_2d;
-        let width = width.clamp(1, max);
-        let height = height.clamp(1, max);
+    pub fn resize(&mut self, width: f64, height: f64, scale: f64) {
+        let Some(size) = camera::ViewSize::new(width, height, scale) else {
+            return;
+        };
+        self.size = size;
+        let [width, height] = size.device(self.device.limits().max_texture_dimension_2d);
         if [width, height] == [self.config.width, self.config.height] {
             return;
         }
@@ -136,6 +136,19 @@ impl Viewer {
         self.config.height = height;
         self.reconfigure();
         self.dirty = true;
+    }
+    pub fn pan(&mut self, dx: f32, dy: f32) {
+        camera::pan(&mut self.camera, dx, dy, &self.size);
+        self.dirty = true;
+    }
+    pub fn reset_view(&mut self) {
+        let Some(scene) = &self.scene else {
+            return;
+        };
+        let aspect = self.aspect();
+        if camera::reset(&mut self.camera, &scene.bounds, aspect) {
+            self.dirty = true;
+        }
     }
     pub fn orbit(&mut self, dx: f32, dy: f32) {
         camera::orbit(&mut self.camera, dx, dy);
@@ -185,7 +198,12 @@ impl Viewer {
                 ));
             }
         };
-        let frame = frame(&self.camera, [self.config.width, self.config.height], scene);
+        let frame = frame(
+            &self.camera,
+            self.aspect(),
+            [self.config.width, self.config.height],
+            scene,
+        );
         let view = output.texture.create_view(&Default::default());
         let mut encoder = self.device.create_command_encoder(&Default::default());
         self.renderer
@@ -236,6 +254,9 @@ impl Viewer {
     }
 }
 impl Viewer {
+    fn aspect(&self) -> f64 {
+        f64::from(self.config.width) / f64::from(self.config.height)
+    }
     fn reconfigure(&mut self) {
         self.surface.configure(&self.device, &self.config);
         self.depth = depth_texture(&self.device, &self.config, self.depth_format);
@@ -263,7 +284,7 @@ fn depth_texture(
         })
         .create_view(&Default::default())
 }
-fn frame(camera: &Camera, [width, height]: [u32; 2], scene: &ShownScene) -> Frame {
+fn frame(camera: &Camera, aspect: f64, [width, height]: [u32; 2], scene: &ShownScene) -> Frame {
     let empty = || Arc::new(Mutex::new(None));
     let eye = camera.eye().to_f32();
     Frame {
@@ -280,9 +301,7 @@ fn frame(camera: &Camera, [width, height]: [u32; 2], scene: &ShownScene) -> Fram
         pv_slot: empty(),
         pv_hide: false,
         preview_bounds: None,
-        view_proj: camera
-            .view_proj(f64::from(width) / f64::from(height), scene.radius)
-            .to_f32(),
+        view_proj: camera::view_proj(camera, aspect, &scene.bounds).to_f32(),
         turned_depth: None,
         back: camera.back().to_f32(),
         size_px: [width as f32, height as f32],
