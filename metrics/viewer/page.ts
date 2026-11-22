@@ -117,7 +117,7 @@ figure { margin: 0; }
 .probe { position: absolute; inset: 0; cursor: crosshair; }
 .probe:focus-visible { outline-offset: 0; }
 .cross { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px solid var(--ink-2); pointer-events: none; }
-.tip { position: absolute; top: 0; z-index: 10; pointer-events: none; min-width: 140px; max-width: 280px; padding: 6px 8px; background: var(--surface); border: 1px solid var(--rule-strong); border-radius: 4px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12); font-size: 11px; }
+.tip { position: absolute; top: 0; z-index: 10; pointer-events: none; width: max-content; min-width: 140px; max-width: 280px; padding: 6px 8px; background: var(--surface); border: 1px solid var(--rule-strong); border-radius: 4px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12); font-size: 11px; }
 .tip p { color: var(--ink-3); margin-bottom: 2px; }
 .tip div { display: flex; align-items: center; gap: 6px; }
 .tip b { font-size: 12px; font-variant-numeric: tabular-nums; min-width: 3.5em; }
@@ -211,7 +211,23 @@ dialog h2 { font-size: 15px; margin-bottom: 8px; }
   .combo > section > * + * { margin-top: 14px; }
 }
 `;
-export const script = String.raw`
+/**
+ * Where a value list goes, in viewport coordinates: right and below the pointer, flipped to the left or
+ * above when that side leaves the visible area, and pinned to the area's edge when neither side fits.
+ * Plain JavaScript so the page embeds it unchanged.
+ */
+export const placeTipSource = String.raw`
+function placeTip(x, y, width, height, area) {
+  const gap = 14, edge = 4;
+  const axis = (pointer, size, low, high) => {
+    if (pointer + gap + size <= high - edge) return pointer + gap;
+    if (pointer - gap - size >= low + edge) return pointer - gap - size;
+    return Math.max(low + edge, Math.min(high - edge - size, pointer + gap));
+  };
+  return { left: axis(x, width, area.left, area.right), top: axis(y, height, area.top, area.bottom) };
+}
+`;
+export const script = String.raw`${placeTipSource}
 const form = document.querySelector(".filters");
 // Every action that changes what is on screen goes through here first, so no value list outlives its chart.
 function changeView(apply) {
@@ -227,11 +243,26 @@ form.addEventListener("change", () =>
 );
 const dialog = document.querySelector("dialog");
 // Each chart frame owns its value list and positions it relative to itself, so the list scrolls away with the chart.
+// The viewport, narrowed by every ancestor that clips its content, such as the timeline dialog.
+function visibleArea(element) {
+  let area = { left: 0, top: 0, right: innerWidth, bottom: innerHeight };
+  for (let node = element.parentElement; node; node = node.parentElement) {
+    if (!node.matches("dialog") && getComputedStyle(node).overflow === "visible") continue;
+    const box = node.getBoundingClientRect();
+    area = {
+      left: Math.max(area.left, box.left),
+      top: Math.max(area.top, box.top),
+      right: Math.min(area.right, box.right),
+      bottom: Math.min(area.bottom, box.bottom),
+    };
+  }
+  return area;
+}
 function place(tip, x, y) {
-  const box = tip.parentElement.getBoundingClientRect();
-  const right = x - box.left + 14;
-  tip.style.left = (box.left + right + tip.offsetWidth > innerWidth - 4 ? right - 28 - tip.offsetWidth : right) + "px";
-  tip.style.top = y - box.top + "px";
+  const frame = tip.parentElement.getBoundingClientRect();
+  const at = placeTip(x, y, tip.offsetWidth, tip.offsetHeight, visibleArea(tip));
+  tip.style.left = at.left - frame.left + "px";
+  tip.style.top = at.top - frame.top + "px";
 }
 const hours = (ms) => (ms / 3600000).toLocaleString("ja-JP", { maximumFractionDigits: ms < 36000000 ? 2 : 1 });
 document.addEventListener("click", (event) => {
@@ -289,7 +320,7 @@ function hideLists() {
   for (const tip of document.querySelectorAll(".tip")) tip.hidden = true;
   for (const line of document.querySelectorAll(".cross")) line.hidden = true;
 }
-function showTip(layer, index, anchor) {
+function showTip(layer, index, pointerX, pointerY) {
   const chart = JSON.parse(layer.dataset.chart);
   const row = chart.rows[index];
   if (!row) return hideLists();
@@ -313,7 +344,7 @@ function showTip(layer, index, anchor) {
   tip.replaceChildren(head, ...items.reverse());
   tip.hidden = false;
   const box = layer.getBoundingClientRect();
-  place(tip, anchor ?? box.left + (box.width * (row.a + row.b)) / 2, box.top);
+  place(tip, pointerX ?? box.left + (box.width * (row.a + row.b)) / 2, pointerY ?? box.top + box.height / 2);
   layer.dataset.index = index;
 }
 function nearest(layer, clientX) {
@@ -326,7 +357,7 @@ document.addEventListener("pointermove", (event) => {
   const layer = event.target.closest(".probe[data-chart]");
   const lanes = event.target.closest(".lanes");
   for (const chart of document.querySelectorAll(".lanes.tracking")) chart.classList.remove("tracking");
-  if (layer) return showTip(layer, nearest(layer, event.clientX), event.clientX);
+  if (layer) return showTip(layer, nearest(layer, event.clientX), event.clientX, event.clientY);
   if (lanes) {
     const track = lanes.querySelector(".track");
     if (!track) return;
@@ -344,7 +375,7 @@ document.addEventListener("pointermove", (event) => {
     hideLists();
     tip.replaceChildren(head, ...active);
     tip.hidden = false;
-    place(tip, event.clientX, event.clientY + 14);
+    place(tip, event.clientX, event.clientY);
     return;
   }
   hideLists();

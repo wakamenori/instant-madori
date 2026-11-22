@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { runInNewContext } from "node:vm";
 import { stack } from "./chart.ts";
-import { script } from "./page.ts";
+import { placeTipSource, script } from "./page.ts";
 import { renderDashboard } from "./render.ts";
 
 // The repository has no DOM library; this covers exactly the DOM surface the page script touches.
@@ -141,6 +141,7 @@ function page() {
     innerWidth: 1280,
     innerHeight: 800,
     addEventListener: (type: string, fn: Listener) => win.addEventListener(type, fn),
+    getComputedStyle: () => ({ overflow: "visible" }),
   });
   const fire = (type: string, event: object) => {
     for (const fn of listeners.get(type) ?? []) fn({ preventDefault() {}, ...event });
@@ -363,4 +364,44 @@ void test("each chart frame holds its own value list, so a jump within the page 
   fire("pointermove", { target: chart.layer, clientX: 250, clientY: 220 });
   win.dispatch("hashchange");
   assert.equal(anyShown(), false, "a hash change from the keyboard or history hides the list");
+});
+
+type Area = { left: number; top: number; right: number; bottom: number };
+const placeTip = runInNewContext(placeTipSource + "; placeTip") as (
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  area: Area,
+) => { left: number; top: number };
+
+void test("a value list stays inside the visible area at every corner and in the middle", () => {
+  const area = { left: 100, top: 50, right: 1100, bottom: 650 };
+  const [width, height] = [200, 100];
+  const cases = {
+    middle: [600, 350, { left: 614, top: 364 }],
+    "top left": [110, 60, { left: 124, top: 74 }],
+    "top right": [1090, 60, { left: 876, top: 74 }],
+    "bottom left": [110, 640, { left: 124, top: 526 }],
+    "bottom right": [1090, 640, { left: 876, top: 526 }],
+  } as const;
+  for (const [name, [x, y, expected]] of Object.entries(cases)) {
+    const at = placeTip(x, y, width, height, area);
+    assert.deepEqual({ ...at }, expected, name);
+    assert.ok(at.left >= area.left && at.top >= area.top, name + " starts inside the area");
+    assert.ok(
+      at.left + width <= area.right && at.top + height <= area.bottom,
+      name + " ends inside the area",
+    );
+  }
+  assert.deepEqual(
+    { ...placeTip(250, 300, 250, 100, { left: 0, top: 0, right: 300, bottom: 600 }) },
+    { left: 46, top: 314 },
+    "pinned to the edge when neither side of the pointer fits",
+  );
+  assert.deepEqual(
+    { ...placeTip(500, 300, 1200, 700, area) },
+    { left: 104, top: 54 },
+    "a list larger than the area starts at its top left",
+  );
 });
