@@ -34,10 +34,12 @@ SELECT target,grp,json_group_array(issue ORDER BY pos,issue) issues,min(merged_a
 FROM grouped GROUP BY target,grp;
 
 CREATE TABLE approval_wait AS
-SELECT d.issue,d.start,coalesce(d.end,(SELECT min(iif(s.start<=d.start,s.end,s.start)) FROM span s
- WHERE s.actor=d.actor AND coalesce(s.end,'9999')>d.start),'9999') end
+SELECT d.issue,d.start,
+ min(i.end,coalesce(d.end,(SELECT min(iif(s.start<=d.start,s.end,s.start)) FROM span s
+  WHERE s.actor=d.actor AND coalesce(s.end,'9999')>d.start),'9999')) end
 FROM mart_turn_detail d JOIN actor a ON a.id=d.actor
-WHERE d.kind='approval' AND a.role IN ('owner','verifier');
+JOIN owner_interval i ON i.issue=d.issue AND i.start<=a.created_at AND i.end>a.created_at
+WHERE d.kind='approval' AND a.role IN ('owner','verifier') AND d.start>=i.start AND d.start<i.end;
 
 CREATE TABLE target_sample AS
 SELECT 'activity.'||state target,minute,count(*) hits FROM mart_minute GROUP BY state,minute

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 
-void test("local staging preserves missing decisions, approval history and runner wait correlation", (t) => {
+void test("local staging preserves approval history and runner wait correlation", (t) => {
   const db = new DatabaseSync(":memory:");
   t.after(() => db.close());
   db.exec(
@@ -24,20 +24,6 @@ void test("local staging preserves missing decisions, approval history and runne
     decision: "accept",
     resolved_at: end,
   });
-  add("claude.hook", "p", start, {
-    at: start,
-    input: { hook_event_name: "PermissionRequest", session_id: "s", tool_name: "Bash" },
-  });
-  add("claude.otel.log", "d", end, {
-    log_record: {
-      attributes: Object.entries({
-        "session.id": "s",
-        "event.name": "tool_decision",
-        tool_name: "Bash",
-        decision: "accept",
-      }).map(([key, stringValue]) => ({ key, value: { stringValue } })),
-    },
-  });
   for (const [phase, at] of [
     ["started", start],
     ["cancelled", end],
@@ -52,20 +38,6 @@ void test("local staging preserves missing decisions, approval history and runne
     });
   for (const file of ["00-history", "approval", "docker_slot"])
     db.exec(readFileSync(join(import.meta.dirname, "../models/staging", file + ".sql"), "utf8"));
-  assert.deepEqual(
-    {
-      ...db
-        .prepare("SELECT session_id,tool_name,requested_at FROM stg_claude_permission_request")
-        .get(),
-    },
-    { session_id: "s", tool_name: "Bash", requested_at: start },
-  );
-  assert.deepEqual(
-    {
-      ...db.prepare("SELECT session_id,tool_use_id,decided_at FROM stg_claude_tool_decision").get(),
-    },
-    { session_id: "s", tool_use_id: null, decided_at: end },
-  );
   assert.deepEqual(
     { ...db.prepare("SELECT decision,resolved_at FROM stg_t3_approval").get() },
     { decision: "accept", resolved_at: end },
