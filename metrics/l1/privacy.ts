@@ -268,6 +268,19 @@ export function hookPrivacy(p: Obj) {
   });
 }
 
+/** Codex sends the whole patch as `command`; keep only the file header lines, not the file bodies. */
+function patchPaths(value: Json): Json {
+  const input = object(value);
+  if (typeof input.command !== "string") return value;
+  const header = /^\*\*\* (?:(?:Add|Update|Delete) File|Move to): /u;
+  return {
+    ...input,
+    command: input.command
+      .split("\n")
+      .filter((line) => header.test(line))
+      .join("\n"),
+  };
+}
 export function codexHookPrivacy(p: Obj) {
   const input = object(p.input);
   const facts = pick(input, [
@@ -286,7 +299,10 @@ export function codexHookPrivacy(p: Obj) {
     "stop_hook_active",
   ]);
   addDigests(input, facts);
-  if (input.tool_input !== undefined) facts.tool_input = tool(input.tool_input, "");
+  if (input.tool_input !== undefined) {
+    const reduced = tool(input.tool_input, "");
+    facts.tool_input = input.tool_name === "apply_patch" ? patchPaths(reduced) : reduced;
+  }
   return telemetry({
     v: 1,
     ...pick(p, ["id", "at"]),

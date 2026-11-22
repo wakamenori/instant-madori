@@ -220,7 +220,10 @@ void test("Codex recorder and receiver preserve turn and approval facts across r
     ...turn,
     tool_use_id: "tool-id",
     tool_name: "apply_patch",
-    tool_input: { input: "private patch body" },
+    tool_input: {
+      command:
+        "*** Begin Patch\n*** Update File: notes/hello.txt\n*** Move to: notes/moved.txt\n@@\n-private patch body\n+private patch body\n*** End Patch",
+    },
   };
   const examples = {
     SessionStart: { source: "startup" },
@@ -287,7 +290,9 @@ void test("Codex recorder and receiver preserve turn and approval facts across r
     if ("turn_id" in fields) assert.equal(facts.turn_id, fields.turn_id);
     if ("tool_use_id" in fields) {
       assert.equal(facts.tool_use_id, fields.tool_use_id);
-      assert.deepEqual(facts.tool_input, { input: "[dropped 18 chars]" });
+      assert.deepEqual(facts.tool_input, {
+        command: "*** Update File: notes/hello.txt\n*** Move to: notes/moved.txt",
+      });
     }
     if (event === "PermissionRequest")
       assert.deepEqual(facts.tool_input, examples.PermissionRequest.tool_input);
