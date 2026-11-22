@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { globSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
+import { repositoryRoot } from "../shared/repository.ts";
 import { checkSqlFiles, checkSqlSource } from "./check-sql.ts";
 
 for (const name of ["changes", "total_changes", "last_insert_rowid"]) {
@@ -290,7 +291,10 @@ void test("SQL CLI exits successfully and reports the clean file count", (t) => 
   const result = spawnSync(process.execPath, [sqlScript, root], { encoding: "utf8" });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stderr, "");
-  assert.equal(result.stdout, "SQL connection-state and request-write checks passed: 2 files.\n");
+  assert.equal(
+    result.stdout,
+    "SQL connection-state, request-write and result-nesting checks passed: 2 files.\n",
+  );
 });
 
 void test("SQL CLI fails when neither target set contains files", (t) => {
@@ -303,4 +307,293 @@ void test("SQL CLI fails when neither target set contains files", (t) => {
       `apps/worker/migrations/*.sql: no files found under ${root}.\n`,
   );
   assert.equal(result.stdout, "");
+});
+
+const rule =
+  "build the whole object in one json_object expression and keep subqueries out of the select list and FROM (see recordStatement in apps/worker/src/storage/requests.ts).";
+const subquery = `result SQL builds its value from a subquery; ${rule}`;
+const cte = `result SQL uses a CTE; ${rule}`;
+const helperPath = "apps/worker/src/storage/revisions.ts";
+const nested =
+  "(SELECT json_object('id', r.id) FROM revisions r WHERE r.pattern_id = ? ORDER BY r.number DESC LIMIT 1)";
+function interpolates(owner: string) {
+  return `result SQL interpolates ${owner}, which builds its value from a subquery or CTE; ${rule}`;
+}
+function diagnostic(source: string, needle: string, message: string, path = storagePath) {
+  const position = source.lastIndexOf(needle);
+  assert.ok(position >= 0, needle);
+  const prefix = source.slice(0, position);
+  return `${path}:${prefix.split("\n").length}:${position - prefix.lastIndexOf("\n")}: ${message}`;
+}
+function call(sql: string, callee = "createOnceStatements") {
+  return `${callee}(db, key, { result: { sql: ${sql}, bindings } });`;
+}
+for (const callee of ["createOnceStatements", "updateOnceStatements"]) {
+  for (const [sql, message] of [
+    [
+      "SELECT json_object('pattern', (SELECT json_object('id', t.id) FROM patterns t WHERE t.id = ?))",
+      subquery,
+    ],
+    [`SELECT json_object('revision', ${nested})`, subquery],
+    [
+      "SELECT json_object('pattern', x.pattern) FROM (SELECT json_object('id', t.id) AS pattern FROM patterns t WHERE t.id = ?) x",
+      subquery,
+    ],
+    [
+      "WITH x AS (SELECT json_object('id', t.id) AS pattern FROM patterns t WHERE t.id = ?) SELECT json_object('pattern', x.pattern) FROM x",
+      cte,
+    ],
+    ["SELECT a FROM jobs JOIN (SELECT id FROM revisions) r ON r.id = jobs.id", subquery],
+    ["SELECT * FROM (VALUES (1))", subquery],
+    ["SELECT id FROM jobs WHERE done UNION SELECT (SELECT 1)", subquery],
+    ["select json_object( -- revision\n (select 1))", subquery],
+  ] as const) {
+    for (const literal of [JSON.stringify(sql), "`" + sql + "`"]) {
+      void test(`${callee} rejects ${literal}`, () => {
+        const source = call(literal, callee);
+        assert.deepEqual(checkSqlSource(storagePath, source), [
+          diagnostic(source, literal, message),
+        ]);
+      });
+    }
+  }
+}
+
+for (const sql of [
+  "SELECT id FROM jobs WHERE EXISTS (SELECT 1) AND id IN (SELECT id FROM tasks) AND n = (SELECT max(n) FROM tasks)",
+  "SELECT id FROM jobs JOIN revisions ON r.id = (SELECT max(id) FROM revisions)",
+  "SELECT id FROM jobs ORDER BY (SELECT 1) LIMIT (SELECT 2)",
+  "SELECT json_group_array(json_object('id', m.id) ORDER BY m.number) FROM m",
+  "SELECT row_number() OVER (ORDER BY t.id) FROM t",
+  "SELECT '(SELECT 1)' /* (SELECT 1) */ -- (SELECT 1)",
+]) {
+  void test(`allows ${sql}`, () =>
+    assert.deepEqual(checkSqlSource(storagePath, call(JSON.stringify(sql))), []));
+}
+
+for (const [setup, sql, span, name] of [
+  [
+    `function latest() { return \`${nested}\`; }`,
+    "SELECT json_object('r', ${latest()})",
+    "latest()",
+    "latest",
+  ],
+  [
+    `const second = () => "${nested}"; function first() { return \`prefix \${second()}\`; }`,
+    "SELECT json_object('r', ${first()})",
+    "first()",
+    "second",
+  ],
+  ["", "SELECT json_object('state', ${part({state: \"(SELECT 'cancelled')\"})})", "part({", ""],
+  ["", "SELECT json_object('r', ${ready ? '(SELECT 1)' : 'NULL'})", "ready ?", ""],
+  ...['let latest = "NULL"', "let latest: string"].map(
+    (decl) =>
+      [
+        `${decl}; if (flag) latest = \`${nested}\`;`,
+        "SELECT json_object('r', ${latest})",
+        "latest",
+        "latest",
+      ] as const,
+  ),
+  [
+    `function latestRevision(j) { return {sql: "${nested}"} } const {sql: latestSql} = latestRevision("j");`,
+    "SELECT json_object('r', ${latestSql})",
+    "latestSql",
+    "latestRevision",
+  ],
+  [
+    `function latest(j:string):string; function latest(j:string){return "${nested}"}`,
+    "SELECT json_object('r', ${latest(j)})",
+    "latest(j)",
+    "latest",
+  ],
+  [
+    "const revisionJoin = j => `LEFT JOIN (SELECT r.job_id, ${revisionJson('r')} AS doc FROM revisions r ORDER BY r.number DESC LIMIT 1) cr ON cr.job_id = ${j}.id`;",
+    "SELECT j.id FROM j JOIN t ON t.id = j.id ${revisionJoin('j')}",
+    "revisionJoin('j')",
+    "revisionJoin",
+  ],
+  [
+    "let pieces = []; pieces += '(SELECT 1)';",
+    "SELECT json_object('r', ${pieces.join(',')})",
+    "pieces.join",
+    "pieces",
+  ],
+  ["", "SELECT json_object('r', ${xs.map(() => '(SELECT 1)').join(',')})", "xs.map", ""],
+] as const) {
+  void test(`follows ${span} in ${setup}`, () => {
+    const source = setup + "\n" + call("`" + sql + "`");
+    assert.deepEqual(checkSqlSource(storagePath, source), [
+      diagnostic(source, span, interpolates(name ? `${name} in ${storagePath}` : "an expression")),
+    ]);
+  });
+}
+
+const revisionModule =
+  "export const revisionJson = p => `(SELECT json_object('id', r.id) FROM revisions r WHERE r.pattern_id = ${p}.id ORDER BY r.number DESC LIMIT 1)`;";
+function importedSource(specifier: string) {
+  return (
+    `import { revisionJson as doc } from "${specifier}";\n` +
+    call("`SELECT json_object('r', ${doc('j')})`")
+  );
+}
+for (const [specifier, path] of [
+  ["./revisions.ts", helperPath],
+  ["./revisions", helperPath],
+  ["./revisions", helperPath.replace(".ts", "/index.ts")],
+] as const) {
+  void test(`resolves ${specifier} to ${path}`, () => {
+    const source = importedSource(specifier);
+    assert.deepEqual(checkSqlSource(storagePath, source, new Map([[path, revisionModule]])), [
+      diagnostic(source, "doc('j')", interpolates(`revisionJson in ${path}`)),
+    ]);
+  });
+}
+
+const joinHelper = "const joined = 'JOIN revisions r ON r.id = (SELECT max(id) FROM revisions)';";
+for (const [setup, sql] of [
+  [
+    "const owned = 'WHERE j.pattern_id IN (SELECT p.id FROM patterns p)';",
+    "SELECT j.id FROM j ${owned}",
+  ],
+  [joinHelper, "SELECT j.id FROM j ${joined}"],
+  [joinHelper, "SELECT j.id FROM j JOIN t ON j.id = t.id ${joined}"],
+  [
+    "const current = await db.first({sql: '(SELECT locked FROM jobs)'});",
+    "SELECT json_object('id', id ${current.locked ? \", 'locked', 1\" : ''})",
+  ],
+  [
+    "const part = '(SELECT 1)'; function wrap({part}) { return part }",
+    "SELECT json_object('r', ${wrap({part:'NULL'})})",
+  ],
+  [
+    "const states = ['held'].filter(x => x).map(x => x).join(', '); function roles() { if (!states) throw new Error('Call it with at least one role'); return states }",
+    "SELECT json_object('s', ${roles()})",
+  ],
+  [
+    "const notHeld = '(SELECT 1)'; const sub = 'SELECT 1';",
+    "SELECT id FROM jobs WHERE (${notHeld}) AND x IN (${sub})",
+  ],
+  ["const a: string = b; const b: string = a;", "SELECT json_object('r', ${a})"],
+  ["const sub = '(SELECT 1)';", "SELECT json_object('r', '${sub}')"],
+  ["let part = 'NULL'; { let part; part = '(SELECT 1)' }", "SELECT json_object('r', ${part})"],
+] as const) {
+  void test(`allows ${sql} with ${setup}`, () => {
+    assert.deepEqual(checkSqlSource(storagePath, setup + "\n" + call("`" + sql + "`")), []);
+  });
+}
+
+for (const [args, needle] of [
+  [", { result }", "result"],
+  [", { result: build(id) }", "result:"],
+  [", { result: {sql: a+b} }", "result:"],
+  [", { result: {sql, bindings} }", "result:"],
+  [", input", "input"],
+  ["", "createOnceStatements"],
+  [", { result: {sql:'SELECT 1'}, ...input }", "result:"],
+  [", { result: {sql:'SELECT 1', ...part} }", "result:"],
+] as const) {
+  void test(`rejects unreadable result in (db, key${args})`, () => {
+    const source = `createOnceStatements(db, key${args});`;
+    assert.deepEqual(checkSqlSource(storagePath, source), [
+      diagnostic(
+        source,
+        needle,
+        "createOnceStatements needs result: { sql: `...` } written inline so check-sql can read its result SQL.",
+      ),
+    ]);
+  });
+}
+
+for (const source of [
+  "createOnceStatements(db,key, { result: { sql: 'SELECT (SELECT 1)' } as SqlPart });",
+  "createOnceStatements(db,key, { ...common, result: { sql: 'SELECT (SELECT 1)' } });",
+  'import {updateOnceStatements as update} from "./requests.ts";\n' +
+    call("'SELECT (SELECT 1)'", "update"),
+  call("'SELECT (SELECT 1)'", "requests.createOnceStatements"),
+]) {
+  void test(`locates the inline SQL in ${source}`, () => {
+    assert.deepEqual(checkSqlSource(storagePath, source), [
+      diagnostic(source, "'SELECT", subquery),
+    ]);
+  });
+}
+for (const source of [
+  call("'SELECT (SELECT 1)'", "other"),
+  "updateOnceStatements(db,key, ({result: {sql: 'SELECT 1'} satisfies SqlPart})!);",
+]) {
+  void test(`accepts ${source}`, () => assert.deepEqual(checkSqlSource(storagePath, source), []));
+}
+
+void test("detects a planted CTE at every Worker result template", () => {
+  const root = fileURLToPath(repositoryRoot);
+  const modules = new Map(
+    globSync("apps/worker/src/**/*.ts", { cwd: root }).map((path) => [
+      path,
+      readFileSync(join(root, path), "utf8"),
+    ]),
+  );
+  let sites = 0;
+  for (const [path, source] of modules) {
+    assert.deepEqual(checkSqlSource(path, source, modules), []);
+    for (const match of source.matchAll(/\bresult: \{\s*sql: `/g)) {
+      const end = match.index + match[0].length;
+      const planted = source.slice(0, end) + "WITH nested AS (SELECT 1) " + source.slice(end);
+      assert.deepEqual(checkSqlSource(path, planted, modules), [
+        diagnostic(planted, "`WITH nested AS", cte, path),
+      ]);
+      sites++;
+    }
+  }
+  assert.ok(sites > 0);
+});
+
+void test("checkSqlFiles resolves SQL helpers across the target files", async (t) => {
+  const source = importedSource("./revisions");
+  const root = sqlTree(t, { ...cleanFiles, [storagePath]: source, [helperPath]: revisionModule });
+  assert.deepEqual(await checkSqlFiles(root), {
+    files: 4,
+    violations: [diagnostic(source, "doc('j')", interpolates(`revisionJson in ${helperPath}`))],
+  });
+});
+
+for (const span of [
+  "('' + bad)",
+  "(maybe ?? bad)",
+  "(maybe || bad)",
+  "(maybe && bad)",
+  "(unused, bad)",
+  "[...items, bad].join(',')",
+  "({...parts, bad}).bad",
+  "[bad][0]",
+  "(await bad as string)!",
+]) {
+  void test(`follows SQL values through ${span}`, () => {
+    const source =
+      "const bad = '(SELECT 1)';\n" + call("`SELECT json_object('v', ${" + span + "})`");
+    assert.deepEqual(checkSqlSource(storagePath, source), [
+      diagnostic(source, span, interpolates(`bad in ${storagePath}`)),
+    ]);
+  });
+}
+
+for (const span of ["(bad, 'NULL')", "(bad === other)", "parts[bad]", "safe()"]) {
+  void test(`ignores literals that do not contribute to ${span}`, () => {
+    const source =
+      "const bad = '(SELECT 1)'; function safe() {function unused() { return bad } return 'NULL'}\n" +
+      call("`SELECT json_object('v', ${" + span + "})`");
+    assert.deepEqual(checkSqlSource(storagePath, source), []);
+  });
+}
+
+void test("reports the canonical name of an aliased call with an unreadable result", () => {
+  const source =
+    'import {updateOnceStatements as update} from "./requests.ts";\nupdate(db, key, input)';
+  assert.deepEqual(checkSqlSource(storagePath, source), [
+    diagnostic(
+      source,
+      "input",
+      "updateOnceStatements needs result: { sql: `...` } written inline so check-sql can read its result SQL.",
+    ),
+  ]);
 });
