@@ -36,6 +36,7 @@ pstack の poteto-mode の Orchestrate に従い、各 PR は Autopilot-full の
 - 段階の milestone は plan.md 6章の段階に一つずつ作る。名前に節の番号を付けない（例：サービス基盤）。milestone の番号は、6章の節と同じ順にする。このほかに、常設の milestone「開発基盤」と「期限なし」がある。
 - 計画にある作業は、着手する前にすべて Issue にする。plan.md にだけ書かれた作業を残さない。
 - Issue は一つの PR で終わる作業にし、[種類別のテンプレート](../../../.github/ISSUE_TEMPLATE/)の欄をすべて埋める。milestone は「Issue の置き場」で決める。
+- 利用者に見える振る舞いを変える Issue は、「触ってよいパス」に verify-madori の `features/` を入れる。担当は同じ PR で地図を直すため（madori-owner「確かめる」）。
 
 ### 種類とラベル
 
@@ -300,11 +301,20 @@ T3 の定期タスクが、1時間ごとに `/madori-coordinator 見回り` を�
      - 各スレッドの worktree は、`t3_thread_read` が返す `thread.worktreePath` で調べる。`creationSource` が `provider` のスレッドは読まない。Claude Code や Codex が自分で立てた subagent で、親のスレッドと同じ `worktreePath` を返す。
      - `t3_worktree_list` は使わない。検証役が PR の head を detached で取り出した worktree を返さない。
    - 使っていない Docker のイメージ（`docker image prune -a -f`）
-3. 担当ごとに、コミット、push、PR、`check` の動きを確かめる。報告の来た PR と、報告は無いが `check` の通った PR には、検証役を立てる。止まった担当は、新しい担当に入れ替える。
+3. 担当ごとに、コミット、push、PR、`check` の動きを確かめる。報告の来た PR と、報告は無いが `check` の通った PR には、検証役を立てる。承認待ちで止まったスレッドは「承認待ちで止まったとき」のとおりに扱う。ほかの理由で止まった担当は、新しい担当に入れ替える。
 4. `node scripts/shared/docker-slots.ts status` で、Docker の枠を持つプロセスを見る。`pnpm dev` が枠を持っていて、それを起動したスレッドがターンを終えて待っているなら、そのスレッドに `pnpm dev` を止めるよう頼む。
 5. 終わった検証役の判定を読み、「マージを決める」に進む。
 6. 前の見回りの後にしたマージと、前の見回りまでにデプロイの結果の確認か担当への知らせが済んでいないマージ、「マージの後」で追うと決めたマージについて、「マージの後」の判定でデプロイが動いたかを確かめる。動いたマージは、その実行の結果を読み、「マージの後」のとおりに扱う。実行が終わっていなければ、次の見回りでまた確かめる。動かないマージは待たない。
 7. 動いている担当が五人より少なければ、「次の Issue を選ぶ」で選んで担当を立てる。
+
+## 承認待ちで止まったとき
+
+担当、担当が任せた Codex、検証役は、シェルのコマンドの承認の要求で止まることがある。承認は T3 の画面からしか出せず、`t3_pending_request` では答えられない。止まったスレッドは、`status` が `running` のまま進まない。避ける書き方は madori-owner「シェルで止まらない」にある。
+
+- 見回りの手順3と、検証役の報告が遅いときに、`t3_thread_list` に `includeSubagents: true` と `statuses: ["running"]` を付けて、動いているスレッドを出す。担当が任せた Codex のスレッドは、`parentThreadId` が担当のスレッドである。
+- それぞれを `t3_thread_read` で読む。`thread.pendingRequestCount` が1以上なら止まっている。`view: "activity"` の中で `type` が `approval_request` で `status` が `waiting` の項目の本文が、止めたコマンドである。Claude Code のサブエージェントの要求は、親のスレッドに出る。
+- 承認せずに立て直す。検証役は `task_cancel` で止め、止めたコマンドと代わりの書き方を指示に足して、新しい検証役を立てる。担当が任せた Codex なら、担当のスレッドへ `t3_thread_send` で知らせ、その Codex を止めて、代わりの書き方を指示に書いて任せ直させる。担当自身なら、`t3_thread_interrupt` で止めてから、代わりの書き方で続けるよう送る。
+- 止めたコマンドの書き方が madori-owner「シェルで止まらない」に無ければ、そのスキルを直す Issue を作る。
 
 ## milestone を閉じる
 

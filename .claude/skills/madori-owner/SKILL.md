@@ -21,6 +21,14 @@ node .claude/skills/madori-coordinator/scripts/poteto-mode.mjs
 2. Issue をコメントまで読み（`gh issue view <番号> --json title,body,comments`）、それが指す plan.md の節を読む。依存の欄の Issue がすべて閉じているか確かめる。開いていれば、指揮役に報告して止まる。
 3. [verify-madori](../verify-madori/SKILL.md) の「準備」のとおりに準備する。ディスクが足りずにビルドが失敗したら、worktree の外を消さずに指揮役に報告する。
 
+## シェルで止まらない
+
+シェルのコマンドの承認は T3 の画面からしか出せず、出るまで止まる。次の書き方を守る。
+
+- 行の一覧を引数にするときは、`xargs <コマンド> < <ファイル>` か `$(cat <ファイル>)` を使う。zsh のフラグ付きの展開（`${(f)…}`、`${(s.:.)…}`）を書かない。Claude Code はこのコマンドを読み切れないとして、拒むか承認を求める。拒まれたら、何も消さないコマンドは、bash と zsh の両方で読める書き方に直して送り直す。
+- 消すときは `command rm -r <パス>` を使う。Claude Code の Bash では `rm` が `rm -i` の別名で、何も消さずに続く。Codex は `-f` の付いた `rm` で承認を求めるので、`rm -f` と `rm -rf` を使わない。
+- 長い検査を裏で動かしたら、`t3_background_wait` にその ID を渡し、結果を読んでからターンを終える。
+
 ## 設計を決める
 
 Issue の範囲に「PRで決めること」があれば、コードを書く前に設計を決める。
@@ -32,7 +40,7 @@ Issue の範囲に「PRで決めること」があれば、コードを書く前
 
 - コードは Codex に書かせる。`delegate_task` の `target` を `{providerInstanceId: "codex", model: <モデル>, options: {reasoningEffort: <effort>}}` にし、`reasoningEffort` を省かない。自分の worktree で書かせ、`isolation` は付けない。
 - モデルと基準の effort は、[pstack-models.md](../../rules/pstack-models.md) のうち、進めている playbook の行（`feature, refactoring`、`bug-fix`、`perf-issue`、`hillclimb`）から取る。該当する playbook の行が無いときは、`feature, refactoring` の行を使う。そこから poteto-mode の「Match the model to the job」で上げ下げする。込み入った設計、並行処理、微妙なアルゴリズムは一段上げ、定型の機械的な変更は下げる。ただし、どの役も medium より下げない。
-- 指示には、Issue の番号、範囲、触ってよいパス、決めたデータの形、終わった証拠を書く。
+- 指示には、Issue の番号、範囲、触ってよいパス、決めたデータの形、終わった証拠を書く。「シェルで止まらない」の、消すときの書き方も書く。長い検査は、裏で動かさずに終わるまで待たせる。
 - 書き終わったら、差分を自分で読む。範囲の外の変更は戻させる。
 
 ## 確かめる
