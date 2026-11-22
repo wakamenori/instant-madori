@@ -673,7 +673,7 @@ git worktreeで並行して開発するときは、worktreeごとにRustの `tar
 
 サービスの依存解決はルートのCargo.lockとpnpm-lock.yamlで固定する。Cargoのプロファイル・依存パッチは利用側ルートで必要な設定を管理し、SolidCraft側の設定が自動で引き継がれるとは仮定しない。devプロファイルはincrementalコンパイルを無効にする。Cargoはincrementalの有無を成果物のハッシュに含めるので、有効にすると、環境変数の `CARGO_INCREMENTAL=0` や `CI` を設定した実行と設定しない実行が、同じコードの成果物を二組作るためである。キャッシュを利用する場合は、識別値に実際の依存解決とビルド条件を反映する。誤った再利用を避けるため、サービスから使うSolidCraftの評価キャッシュを無効にする。SolidCraftのbuild.rsには、このリポジトリのgitの状態を読ませない。このリポジトリのHEADはSolidCraftのソースを表さず、読むとコミットやcheckoutのたびにsolidcraft-ioとそれに依存するcrateを作り直すためである。
 
-配信するWasmはreleaseプロファイルでビルドする。`pnpm setup`・`pnpm dev`・`pnpm build`・`pnpm check --full` は同じ生成スクリプトを使い、開発・検査・配信のWasmをそろえる。スクリプト内の一つのプロファイル値からCargoの `--profile` とwasm-bindgenの入力先を導き、`target/wasm32-unknown-unknown/release/` の出力からバインディングを生成する。プロファイルと入力先をログへ出す。バインディングを生成する前に、Wasmに入る自作のクレートがすべてそのチェックアウトの `target/` でコンパイルされたことを、rustcがクレートごとに書くdep-infoで確かめ、違えば止める。初回はdebugよりコンパイルに時間がかかり、再ビルドでは依存のキャッシュを再利用する。RustのテストとClippyはdebugのままにする。通常・軽い検査は生成済みの型定義を使い、全体検査はreleaseのWasmを再生成して、ローカル配信と実Containerの接続を確かめる。
+配信するWasmはreleaseプロファイルでビルドする。`pnpm setup`・`pnpm dev`・`pnpm build`・`pnpm check --full` は同じ生成スクリプトを使い、開発・検査・配信のWasmをそろえる。スクリプト内の一つのプロファイル値からCargoの `--profile` とwasm-bindgenの入力先を導き、`target/wasm32-unknown-unknown/release/` の出力からバインディングを生成する。プロファイルと入力先をログへ出す。バインディングを生成する前に、Wasmに入る自作のクレートがすべてそのチェックアウトの `target/` でコンパイルされたことを、rustcがクレートごとに書くdep-infoで確かめ、違えば止める。開発用worktreeでは、ローカル依存のソース、マニフェストとロックファイル、設定、ツールチェーン、ビルド手順が一致すると、ユーザーごとのキャッシュから変換前のWasmとバインディングをまとめて復元する。GitHub Actionsではキャッシュを使わず生成経路を検査する。RustのテストとClippyはdebugのままにする。通常・軽い検査は生成済みの型定義を使い、全体検査はreleaseのWasmを準備して、ローカル配信と実Containerの接続を確かめる。
 
 開発では `pnpm dev` がWeb画面、Worker・D1、Wasmと、`wrangler dev` 経由のDocker Containerを接続する。画面だけを扱うときは `MADORI_DEV_CONTAINERS=0` でContainerを無効にする。
 
