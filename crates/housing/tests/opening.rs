@@ -349,6 +349,49 @@ fn touching_jambs_and_transoms_fit() {
 }
 
 #[test]
+fn end_measured_openings_overlap_and_touch_start_measured_ones() {
+    let house = layout(&[0.0, 5000.0]);
+    let wall = wall(&house, (0.0, 0.0), (5000.0, 0.0));
+    let start = OpeningSpec {
+        distance: 2500.0,
+        ..window(wall.clone())
+    };
+    let (house, first) = house
+        .attach_opening(&OperationId::new("first"), &start)
+        .unwrap();
+    let touching = OpeningSpec {
+        from: WallEnd::End,
+        ..start
+    };
+    let op = OperationId::new("layout");
+    house.attach_opening(&op, &touching).unwrap();
+
+    let overlapping = OpeningSpec {
+        distance: 2100.0,
+        ..touching
+    };
+    let prefix = house.data().rooms[0]
+        .id
+        .as_str()
+        .strip_suffix(":r1")
+        .unwrap();
+    let id = OpeningId::new(format!("{prefix}:o1"));
+    assert_rejected(
+        &house,
+        &[expected(
+            &id,
+            Reason::OverlapsOpening {
+                wall: wall.as_str().into(),
+                other: first.as_str().into(),
+                along: 400.0,
+                up: 1000.0,
+            },
+        )],
+        || house.attach_opening(&op, &overlapping),
+    );
+}
+
+#[test]
 fn decimal_wall_length_allows_a_window_to_reach_the_end() {
     let house = layout(&[456.4, 4096.4]);
     let spec = OpeningSpec {
