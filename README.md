@@ -25,9 +25,11 @@ mise exec -- pnpm dev
 
 Rustは、rustupのcargoで動かします。`rust-toolchain.toml` の版とWasmのターゲットは、rustupを通したときだけ使われます。`mise exec` とmiseを有効にしたシェルでは、`mise.toml` が `$CARGO_HOME/bin`（既定は `~/.cargo/bin`）をPATHの先頭に置くので、Homebrewなどで入れた別のrustがPATHの前の方にあっても、rustupのcargoを使います。`pnpm setup` は、cargoを使う前に、PATHで最初に見つかるcargoがrustupのものかを確かめ、違えばそのcargoの場所と直し方を表示して止まります。miseを使わない場合は、rustupのcargoがあるフォルダーを、ほかのcargoより前にPATHに置いてください。`$CARGO_HOME/bin` はmiseで固定したツールよりも前に来るので、そこに `cargo install` で入れた `cargo-deny` や `cargo-machete` があると、固定した版の代わりにそれが動きます。
 
-`git worktree add` で作った別のworktreeでは、`pnpm setup` が、cargoを確かめた直後に、メインのチェックアウトの `target/` と `.tools/` をcopy-on-write（macOSはAPFSのclonefile、Linuxはreflink）で複製します。複製した後、自作のRustのクレート（workspaceのクレートと、path依存のSolidCraftのクレート）のソースの更新時刻を進めます。Cargoはpath依存のクレートが新しいかどうかをソースの更新時刻だけで判断し、クレートを見分けるハッシュもworkspaceからの相対パスで作るので、このままでは別のチェックアウトがコンパイルしたクレートを再利用してしまうためです。Cargoでビルドするときは、外部のクレートは複製を使い、自作のクレートをそのworktreeでビルドし直します。Wasmは、同じ入力で生成済みなら、ユーザーごとのキャッシュから復元します。worktreeごとに `target/` を持つので、複数のworktreeで同時にCargoを使えます。`target/` がシンボリックリンクなら、リンクだけを外して複製に置き換えます。`target/` のディレクトリがすでにあれば、何もしません。空の `target/` を作っておくと、複製せずに最初からビルドします。複製元と別のファイルシステムにあるworktreeでは、全体のコピーになるので止まります。Gitのフックは全worktreeで共有なので、メインのチェックアウトでだけ登録します。
+新しいworktreeで `pnpm setup` を実行すると、メインのチェックアウトから `.tools/` をcopy-on-writeで複製します。Rustの `target/` は各worktreeで空から始めます。手元のRustの検査とreleaseのWasmビルドは、miseで固定したmbxを通して、別のworktreeでコンパイルした同じ入力の成果物を再利用します。mbxは初めて使うときにmiseがインストールします。
 
-手元の単発の値（2026-11-20）では、26 GB・約1.9万ファイルの `target/` の複製は5〜9秒で終わり、ディスクの空きはほとんど変わりませんでした。Wasmキャッシュ導入前の `pnpm setup` は複製の後に312秒かかり、自作の11のクレートだけをWasmのreleaseでビルドし直し、外部のクレートはビルドしませんでした。続く `pnpm check` は536秒でした。この二つの時間は、別のworktreeで検証が動いていた間に測ったので、ほかの負荷の分だけ伸びている可能性があります。worktreeごとに増えるディスクは、複製の後に書かれたファイルの合計で、`pnpm setup` の後で0.60 GB、`pnpm check` の後で3.94 GBでした。worktreeを消すと戻ります。メインのチェックアウトの `target/` が古くなるほど、複製と共有できる部分が減り、外部のクレートもworktreeごとにビルドし直すことになります。
+共有ストアは `$XDG_CACHE_HOME/instant-madori/mbx`（未設定なら `~/.cache/instant-madori/mbx`）です。mbxの自動回収に8 GiBの予算と、ディスクに残す空き容量20 GiBを設定しています。回収は定期的に行われ、ビルド中は予算を超えることがあります。worktreeの `target/` はこの予算とは別です。
+
+`MADORI_MBX=0 mise exec -- pnpm setup` で通常のCargoを使えます。検査も同じ環境変数を付けて実行してください。mbxが使えないときも、新しいworktreeでは従来どおり `target/` を複製し、自作クレートのソースの更新時刻を進めます。既存の `target/` ディレクトリは保持し、共有先へのシンボリックリンクだけを外します。複製にはmacOSのAPFSまたはLinuxのreflinkが必要です。Gitフックはメインのチェックアウトでだけ登録します。GitHub Actionsはrunnerに保存したtargetと通常のCargoを使います。
 
 `pnpm dev`は、ローカルのD1へマイグレーションを適用してから次のプロセスを起動し、Ctrl-Cでまとめて終了します。ContainerとプロキシはWranglerが終了時に削除します。終了処理の失敗は報告し、起動・実行結果と終了コードを維持します。
 
@@ -120,7 +122,7 @@ Cargoのdevプロファイルは、incrementalコンパイルを無効にして�
 
 `pnpm setup`・`pnpm dev`・`pnpm build`・`pnpm check --full` は同じスクリプトでreleaseのWasmを準備します。入力が一致すると、サイズ検査に使う `target/wasm32-unknown-unknown/release/madori_viewer.wasm` とWebが読む `crates/viewer/pkg/` をまとめて復元します。初めての入力ではCargoでビルドし、自作の全クレートのdep-infoにこのチェックアウトの出力先が記録されていることを確かめてから、wasm-bindgenでバインディングを生成します。
 
-キャッシュの鍵は、Wasm向けの依存に含まれるローカルクレートのファイル（未コミット・未追跡のソースも含む）、親workspaceのマニフェスト、Cargo.lock、CargoとRustの設定、ツールの版、ビルドスクリプト、ビルドに関わる環境変数のSHA-256です。既定の置き場は `$XDG_CACHE_HOME/instant-madori/wasm`（未設定なら `~/.cache/instant-madori/wasm`）です。`MADORI_WASM_CACHE_DIR` で変更できます。一組32 MiB以下の成果物を保存し、保存時刻の新しい8組を残します。`MADORI_WASM_CACHE=0 pnpm setup` で復元と保存を止め、Cargoとwasm-bindgenを実行します。Cargoの外部設定、独自のコンパイラ・リンカーなど、入力を列挙できない設定でもこのビルド経路を使います。GitHub Actionsでは毎回この経路を検査します。
+キャッシュの鍵は、Wasm向けの依存に含まれるローカルクレートのファイル（未コミット・未追跡のソースも含む）、親workspaceのマニフェスト、Cargo.lock、CargoとRustの設定、ツールの版、mbxの使用有無・版・設定、ビルドスクリプト、ビルドに関わる環境変数のSHA-256です。既定の置き場は `$XDG_CACHE_HOME/instant-madori/wasm`（未設定なら `~/.cache/instant-madori/wasm`）です。`MADORI_WASM_CACHE_DIR` で変更できます。一組32 MiB以下の成果物を保存し、保存時刻の新しい8組を残します。`MADORI_WASM_CACHE=0 pnpm setup` で復元と保存を止め、Cargoとwasm-bindgenを実行します。Cargoの外部設定、独自のコンパイラ・リンカーなど、入力を列挙できない設定でもこのビルド経路を使います。GitHub Actionsでは毎回この経路を検査します。
 
 `pnpm setup` で生成したWasmの型定義を通常・軽いモードで使います。初期生成がなければ準備手順を示して停止します。Wasmの公開API・依存・ビルド設定・upstreamを変更した場合は `--full` を実行してください。全体モードではreleaseのWasmを再生成してからTypeScriptを検査し、配信用のWasmもローカル配信と実Containerの接続テストで確認します。
 

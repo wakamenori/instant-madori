@@ -9,6 +9,7 @@ import {
   unlinkSync,
 } from "node:fs";
 import { dirname, join, relative } from "node:path";
+import { rustBuildTool } from "../shared/rust-build.ts";
 import { z } from "zod";
 
 type Checkout = { root: string; main: string };
@@ -62,7 +63,11 @@ function entryState(path: string) {
 
 export function prepareCheckout(
   { root, main }: Checkout,
-  deps: { localPackageDirs: (root: string) => string[]; installHooks: (root: string) => void },
+  deps: {
+    mbx: boolean;
+    localPackageDirs: (root: string) => string[];
+    installHooks: (root: string) => void;
+  },
 ) {
   if (root === main) {
     deps.installHooks(root);
@@ -80,6 +85,7 @@ export function prepareCheckout(
       case "absent":
         break;
     }
+    if (name === "target" && deps.mbx) continue;
     const src = join(main, name);
     if (!existsSync(src)) {
       console.info(`Nothing to clone at ${src}`);
@@ -114,6 +120,7 @@ export function prepareCheckout(
 if (import.meta.main) {
   try {
     prepareCheckout(findCheckout(process.cwd()), {
+      mbx: rustBuildTool().command === "mbx",
       localPackageDirs,
       installHooks: (cwd) =>
         execFileSync("pnpm", ["exec", "lefthook", "install"], { cwd, stdio: "inherit" }),

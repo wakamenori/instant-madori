@@ -38,7 +38,7 @@ test "$(git rev-parse HEAD)" = "$HEAD_SHA" || exit 1
 gh pr view "$PR" --json headRefOid --jq .headRefOid
 ```
 
-`pnpm setup` は、worktree に `target` と `.tools` が無ければ、メインのチェックアウトのものを copy-on-write で複製し、同じ入力の Wasm がユーザーのキャッシュにあれば復元する。無ければ自作の crate をこの worktree でビルドし直す（README「開発を始める」）。worktree ごとに `target` を持つので、ほかの worktree と同時に cargo を使ってよい。Git のフックはメインのチェックアウトでだけ登録されるので、入れ直さない。
+`pnpm setup` はメインのチェックアウトから `.tools` を複製する。新しい worktree の `target` は空から始め、mbx のストアを共有する。mbx が使えない場合と `MADORI_MBX=0` の場合は、従来どおり `target` も複製する。同じ入力の Wasm はユーザーのキャッシュから復元する（README「開発を始める」）。Git のフックはメインのチェックアウトでだけ登録されるので、入れ直さない。
 
 ```sh
 MAIN=$(git worktree list --porcelain | sed -n '1s/^worktree //p')

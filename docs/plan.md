@@ -669,7 +669,7 @@ SolidCraft一式を保持することと、通常のビルド・テスト対象�
 
 Rustの版とWasmのターゲットは `rust-toolchain.toml` で固定し、rustupを通して使う。ほかのrustがPATHの前にある環境（T3のエージェントのシェルなど）でも、miseの実行では `mise.toml` が `$CARGO_HOME/bin` をPATHの先頭に置き、rustupのcargoを使う。`pnpm setup` は、cargoを使う前に、PATHで最初に見つかるcargoが同じフォルダーのrustupと同じ実行ファイル（rustupのproxy）かを確かめ、違えば理由と直し方を示して止まる。
 
-git worktreeで並行して開発するときは、worktreeごとにRustの `target/` を持つ。Cargoはpath依存のクレートの新しさをソースの更新時刻だけで判断し、クレートのハッシュもworkspaceからの相対パスで作る。そのため、`target/` を共有すると、古いチェックアウトのworktreeが別のworktreeのコンパイルしたクレートを再利用する。worktreeの `pnpm setup` は、メインのチェックアウトの `target/` をcopy-on-writeで複製し、自作のクレートのソースの更新時刻を進める。外部のクレートは複製を再利用し、自作のクレートだけを各worktreeでビルドし直す。Gitのフックは全worktreeで共有なので、メインのチェックアウトでだけ登録する。
+worktreeごとに専用の `target/` を持つ。手元のRustの検査とreleaseのWasmビルドはstable Rustとmbxを使う。新しいworktreeは `.tools/` だけを複製し、mbxはworkspaceのルートを正規化してコンパイル結果をユーザーごとに共有する。target viewsとlearned incrementalを無効にし、ストアはmbxの自動回収で8 GiBを目安に保つ。mbxを使えないときと `MADORI_MBX=0` のときは、従来どおりtargetを複製し、ローカルクレートの更新時刻を進めてCargoでビルドする。GitHub Actionsはrunnerのtargetを使い続ける。契約生成器の出力先は呼び出し時に渡す。
 
 サービスの依存解決はルートのCargo.lockとpnpm-lock.yamlで固定する。Cargoのプロファイル・依存パッチは利用側ルートで必要な設定を管理し、SolidCraft側の設定が自動で引き継がれるとは仮定しない。devプロファイルはincrementalコンパイルを無効にする。Cargoはincrementalの有無を成果物のハッシュに含めるので、有効にすると、環境変数の `CARGO_INCREMENTAL=0` や `CI` を設定した実行と設定しない実行が、同じコードの成果物を二組作るためである。キャッシュを利用する場合は、識別値に実際の依存解決とビルド条件を反映する。誤った再利用を避けるため、サービスから使うSolidCraftの評価キャッシュを無効にする。SolidCraftのbuild.rsには、このリポジトリのgitの状態を読ませない。このリポジトリのHEADはSolidCraftのソースを表さず、読むとコミットやcheckoutのたびにsolidcraft-ioとそれに依存するcrateを作り直すためである。
 

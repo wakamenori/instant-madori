@@ -42,8 +42,9 @@ function fixture(t: TestContext) {
   const old = new Date("2000-01-01T00:00:00Z");
   utimesSync(source, old, old);
   const hooks: string[] = [];
-  const prepare = (cwd: string) =>
+  const prepare = (cwd: string, mbx = false) =>
     prepareCheckout(findCheckout(cwd), {
+      mbx,
       localPackageDirs: (checkout) => [join(checkout, "pkg")],
       installHooks: (checkout) => hooks.push(checkout),
     });
@@ -94,4 +95,14 @@ void test("an absent main target leaves the linked target absent", (t) => {
   assert(!existsSync(join(f.root, "target")));
   assert.equal(statSync(f.source).mtimeMs, f.old.getTime());
   assert.equal(readFileSync(join(f.root, ".tools/bin/tool"), "utf8"), "tool");
+});
+
+void test("mbx clones tools and removes a shared target link without touching sources", (t) => {
+  const f = fixture(t);
+  symlinkSync(join(f.main, "target"), join(f.root, "target"));
+  f.prepare(f.root, true);
+  assert(!lstatSync(join(f.root, "target"), { throwIfNoEntry: false }));
+  assert.equal(statSync(f.source).mtimeMs, f.old.getTime());
+  assert.equal(readFileSync(join(f.root, ".tools/bin/tool"), "utf8"), "tool");
+  assert.equal(readFileSync(join(f.main, "target/x/y.txt"), "utf8"), "cached");
 });
