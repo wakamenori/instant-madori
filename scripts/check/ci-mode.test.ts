@@ -107,7 +107,7 @@ async function scriptsRunBy(mode: "default" | "--full"): Promise<Set<string>> {
             scripts.add(arg);
         return Promise.resolve();
       },
-      (stage) => stage(),
+      { dockerStage: (stage) => stage(), rustStage: () => {} },
       join(sandbox, "results"),
     );
     return scripts;

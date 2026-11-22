@@ -1,5 +1,5 @@
 import { rustBuildTool } from "../shared/rust-build.ts";
-import { machineSlots, withDockerSlot } from "../shared/docker-slots.ts";
+import { machineSlots, requireFreeDisk, withDockerSlot } from "../shared/docker-slots.ts";
 import { access, glob } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,11 +17,16 @@ const usage = `Usage: pnpm check [--fast | --full] [--rust]
 All modes modify service source through formatters and automatic lint fixes.
 Run pnpm setup once before checking. No mode stages files or deploys resources.`;
 
+export type CheckGates = {
+  dockerStage: (stage: () => Promise<void>) => Promise<void>;
+  rustStage: (label: string) => void;
+};
+
 export async function runChecks(
   mode: "--fast" | "default" | "--full",
   crates: ReturnType<typeof serviceCrates>,
   run: (label: string, command: string, args: string[], env?: NodeJS.ProcessEnv) => Promise<void>,
-  inDockerSlot: (stage: () => Promise<void>) => Promise<void>,
+  gates: CheckGates,
   resultsDir = resolve(process.env.MADORI_TEST_RESULTS_DIR ?? "target/test-results"),
   forceRust = false,
 ): Promise<void> {
@@ -37,8 +42,10 @@ export async function runChecks(
   await resetResults(resultsDir);
   const pnpm = (label: string, ...commandArgs: string[]) => run(label, "pnpm", commandArgs);
   const tool = rustBuildTool();
-  const cargo = (label: string, ...commandArgs: string[]) =>
-    run(label, tool.command, commandArgs, tool.env);
+  const cargo = (label: string, ...commandArgs: string[]) => {
+    gates.rustStage(label);
+    return run(label, tool.command, commandArgs, tool.env);
+  };
   const script = (label: string, path: string) => run(label, process.execPath, [path]);
   const format = () =>
     pnpm("Format service files", "exec", "prettier", "--write", ".", "--log-level", "warn");
@@ -63,6 +70,7 @@ export async function runChecks(
     );
   await script("Generate internal body validators", "scripts/generate/generate-geometry.ts");
   if (mode === "--full") {
+    gates.rustStage("Build Wasm bindings");
     await script("Build Wasm bindings", "scripts/build/build-wasm.ts");
     await script("Viewer Wasm contents", "scripts/check/check-viewer-wasm.ts");
   } else {
@@ -154,6 +162,7 @@ export async function runChecks(
     ]))
       tests.push(path);
     if (tests.length === 0) throw new Error("No TypeScript tests found");
+    if (!base) gates.rustStage("TypeScript tests");
     await run("TypeScript tests", process.execPath, [
       ...nodeTestFlags(resultsDir, "typescript"),
       ...(base
@@ -180,7 +189,7 @@ export async function runChecks(
       "staging",
       "--containers-rollout=none",
     );
-    await inDockerSlot(async () => {
+    await gates.dockerStage(async () => {
       await run("Container integration", process.execPath, [
         ...nodeTestFlags(resultsDir, "container"),
         "apps/worker/tests/container.e2e.ts",
@@ -250,18 +259,22 @@ async function main() {
     console.log(`[check] ${label}: ${((performance.now() - stepStarted) / 1000).toFixed(1)}s`);
   }
   const crates = serviceCrates();
+  const slots = machineSlots();
 
   try {
     await runChecks(
       mode,
       crates,
       run,
-      (stage) =>
-        withDockerSlot(
-          machineSlots(),
-          { purpose: "pnpm check --full", signal: interruption.signal },
-          stage,
-        ),
+      {
+        dockerStage: (stage) =>
+          withDockerSlot(
+            slots,
+            { purpose: "pnpm check --full", signal: interruption.signal },
+            stage,
+          ),
+        rustStage: (label) => requireFreeDisk(slots, label),
+      },
       undefined,
       args.includes("--rust"),
     );

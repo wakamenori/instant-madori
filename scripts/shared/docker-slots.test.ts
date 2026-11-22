@@ -1,18 +1,34 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdirSync, readdirSync, readFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
-import { machineSlots, withDockerSlot, type DockerSlots } from "./docker-slots.ts";
+import {
+  machineSlots,
+  minimumFreeBytes,
+  requireFreeDisk,
+  withDockerSlot,
+  type DockerSlots,
+} from "./docker-slots.ts";
 
 function fixture(t: TestContext) {
-  const directory = mkdtempSync(join(tmpdir(), "docker-slots-"));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const root = mkdtempSync(join(tmpdir(), "docker-slots-"));
+  const directory = join(root, "slots");
+  const state = { free: 100 * 1024 ** 3 };
+  t.after(() => rmSync(root, { recursive: true, force: true }));
   const previousHome = process.env.INSTANT_MADORI_METRICS_HOME;
-  process.env.INSTANT_MADORI_METRICS_HOME = directory;
+  process.env.INSTANT_MADORI_METRICS_HOME = root;
   t.after(() => {
     if (previousHome === undefined) delete process.env.INSTANT_MADORI_METRICS_HOME;
     else process.env.INSTANT_MADORI_METRICS_HOME = previousHome;
@@ -26,7 +42,7 @@ function fixture(t: TestContext) {
     signal = AbortSignal.any([controller.signal, AbortSignal.timeout(5000)]),
   ) {
     return withDockerSlot(
-      { kind: "flock", directory, pool },
+      { kind: "flock", directory, pool, freeBytes: () => state.free },
       { purpose, signal, log: (line) => lines.push(line), pace: { pollMs: 10, reportEveryMs: 50 } },
       work,
     );
@@ -44,7 +60,7 @@ function fixture(t: TestContext) {
     t.after(finish);
     return finish;
   }
-  return { run, hold, lines, controller, directory };
+  return { run, hold, lines, controller, directory, root, state };
 }
 const immediate = (name: string | undefined) => Promise.resolve(name);
 
@@ -95,7 +111,7 @@ void test(
     const children = [];
     for (const purpose of ["first", "second"]) {
       const source = `import {withDockerSlot} from ${JSON.stringify(new URL("./docker-slots.ts", import.meta.url).href)};
-    await withDockerSlot({kind:"flock",directory:process.argv[1],pool:"development"},{purpose:process.argv[2],signal:AbortSignal.timeout(5000),log:()=>{}},()=>{console.log("ready");return new Promise(()=>setInterval(()=>{},60000));});`;
+    await withDockerSlot({kind:"flock",directory:process.argv[1],pool:"development",freeBytes:()=>100*1024**3},{purpose:process.argv[2],signal:AbortSignal.timeout(5000),log:()=>{}},()=>{console.log("ready");return new Promise(()=>setInterval(()=>{},60000));});`;
       const child = spawn(
         process.execPath,
         ["--input-type=module", "-e", source, directory, purpose],
@@ -269,6 +285,7 @@ void test("machine slots depend on the platform and reserve the runner pool for 
   assert.deepEqual(machineSlots({}, "linux"), { kind: "none", platform: "linux" });
   const defaults = machineSlots({}, "darwin");
   assert.equal(defaults.kind, "flock");
+  assert(defaults.freeBytes() > 0);
   assert.equal(defaults.pool, "development");
   assert.deepEqual(machineSlots({ GITHUB_ACTIONS: "true" }, "darwin"), {
     ...defaults,
@@ -282,10 +299,10 @@ void test(
   "slot acquisition, release and cancellation spool only lifecycle data",
   { skip: process.platform !== "darwin" },
   async (t) => {
-    const { run, directory } = fixture(t);
-    const ready = join(directory, "spool/ready");
+    const { run, root } = fixture(t);
+    const ready = join(root, "spool/ready");
     mkdirSync(ready, { recursive: true });
-    mkdirSync(join(directory, "spool/tmp"));
+    mkdirSync(join(root, "spool/tmp"));
     await run("private command", immediate, "runner");
     await assert.rejects(
       run("private command", immediate, "runner", AbortSignal.abort(new Error("stop"))),
@@ -307,8 +324,8 @@ void test(
   "a broken spool preserves the work result and cancellation reason",
   { skip: process.platform !== "darwin" },
   async (t) => {
-    const { run, directory } = fixture(t);
-    mkdirSync(join(directory, "spool/ready"), { recursive: true });
+    const { run, root } = fixture(t);
+    mkdirSync(join(root, "spool/ready"), { recursive: true });
     assert.equal(await run("work", immediate), "development-1");
     const reason = new Error("cancel");
     await assert.rejects(
@@ -317,3 +334,79 @@ void test(
     );
   },
 );
+
+void test("pnpm dev stops before creating its slot directory when disk is low", async (t) => {
+  const { run, state, lines, directory, root } = fixture(t);
+  state.free = minimumFreeBytes - 1;
+  await assert.rejects(
+    run("pnpm dev", () => assert.fail("work started")),
+    {
+      message:
+        "Not enough free disk space before taking a development slot for pnpm dev (11.9 GiB free, below 12.0 GiB)",
+    },
+  );
+  assert.equal(lines.length, 1);
+  assert.match(
+    lines[0] ?? "",
+    /^\[docker-slot\] \d{2}:\d{2}:\d{2} stopped before taking a development slot for pnpm dev: 11\.9 GiB free, below 12\.0 GiB\. Nothing was deleted\./,
+  );
+  assert(!existsSync(directory));
+  assert.deepEqual(readdirSync(root), []);
+});
+
+void test(
+  "disk at the floor allows slot acquisition",
+  { skip: process.platform !== "darwin" },
+  async (t) => {
+    const { run, state } = fixture(t);
+    state.free = minimumFreeBytes;
+    assert.equal(await run("pnpm dev", immediate), "development-1");
+  },
+);
+
+void test(
+  "a waiter stops if disk falls below the floor",
+  { skip: process.platform !== "darwin" },
+  async (t) => {
+    const { hold, run, lines, state } = fixture(t);
+    const release = hold("first");
+    hold("second");
+    const waiter = run("third", () => assert.fail("waiter entered"));
+    assert(lines.some((line) => line.includes(" waiting ")));
+    state.free = minimumFreeBytes - 1;
+    await assert.rejects(
+      waiter,
+      /Not enough free disk space while waiting .* for a development slot for third/,
+    );
+    assert(
+      lines.some((line) =>
+        /stopped while waiting .* for a development slot for third: 11\.9 GiB free/.test(line),
+      ),
+    );
+    state.free = minimumFreeBytes;
+    await release();
+    assert.equal(await run("replacement", immediate), "development-1");
+  },
+);
+
+void test("Rust stages stop below the floor and proceed silently at the floor or off macOS", (t) => {
+  const { directory, state, lines } = fixture(t);
+  const config = {
+    kind: "flock",
+    directory,
+    pool: "development",
+    freeBytes: () => state.free,
+  } as const;
+  const log = (line: string) => lines.push(line);
+  state.free = minimumFreeBytes - 1;
+  assert.throws(() => requireFreeDisk(config, "Rust tests", log), {
+    message: "Not enough free disk space before Rust tests (11.9 GiB free, below 12.0 GiB)",
+  });
+  assert.equal(lines.length, 1);
+  assert.match(lines[0] ?? "", / stopped before Rust tests: 11\.9 GiB free, below 12\.0 GiB/);
+  lines.length = 0;
+  state.free = minimumFreeBytes;
+  requireFreeDisk(config, "Rust tests", log);
+  requireFreeDisk({ kind: "none", platform: "linux" }, "Rust tests", log);
+  assert.deepEqual(lines, []);
+});

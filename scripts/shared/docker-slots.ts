@@ -5,6 +5,7 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  statfsSync,
   writeFileSync,
 } from "node:fs";
 import { randomUUID } from "node:crypto";
@@ -16,17 +17,23 @@ import { z } from "zod";
 import { start, stop } from "./processes.ts";
 
 const poolSizes = { development: 2, runner: 1 } as const;
+export const minimumFreeBytes = 12 * 1024 ** 3;
 export type DockerSlots =
-  | { kind: "flock"; directory: string; pool: keyof typeof poolSizes }
+  | { kind: "flock"; directory: string; pool: keyof typeof poolSizes; freeBytes: () => number }
   | { kind: "none"; platform: NodeJS.Platform };
 const slots = Object.entries(poolSizes).flatMap(([pool, size]) =>
   Array.from({ length: size }, (_, i) => ({ pool, name: `${pool}-${i + 1}` })),
 );
 const home = userInfo().homedir;
+function freeBytesOnThisMac() {
+  const { bavail, bsize } = statfsSync(home);
+  return bavail * bsize;
+}
 export function machineSlots(env = process.env, platform = process.platform): DockerSlots {
   if (platform !== "darwin") return { kind: "none", platform };
   return {
     kind: "flock",
+    freeBytes: freeBytesOnThisMac,
     directory: join(home, ".local/state/instant-madori/docker-slots"),
     pool: env["GITHUB_ACTIONS"] === "true" ? "runner" : "development",
   };
@@ -99,6 +106,37 @@ type SlotRequest = {
   pace?: { pollMs: number; reportEveryMs: number };
 };
 
+function reporter(log: (line: string) => void) {
+  return (message: string) =>
+    log(`[docker-slot] ${new Date().toTimeString().slice(0, 8)} ${message}`);
+}
+
+function gib(bytes: number) {
+  return `${(Math.floor((bytes / 1024 ** 3) * 10) / 10).toFixed(1)} GiB`;
+}
+
+function checkFreeDisk(
+  config: Extract<DockerSlots, { kind: "flock" }>,
+  when: string,
+  report: (message: string) => void,
+) {
+  const free = config.freeBytes();
+  if (free >= minimumFreeBytes) return;
+  const reason = `${gib(free)} free, below ${gib(minimumFreeBytes)}`;
+  report(
+    `stopped ${when}: ${reason}. Nothing was deleted. Free disk space, then run it again. Agents: report to the coordinator and delete nothing outside your worktree.`,
+  );
+  throw new Error(`Not enough free disk space ${when} (${reason})`);
+}
+
+export function requireFreeDisk(
+  config: DockerSlots,
+  stage: string,
+  log: (line: string) => void = console.log,
+): void {
+  if (config.kind === "flock") checkFreeDisk(config, `before ${stage}`, reporter(log));
+}
+
 export async function withDockerSlot<T>(
   config: DockerSlots,
   {
@@ -109,8 +147,7 @@ export async function withDockerSlot<T>(
   }: SlotRequest,
   work: (slotName: string | undefined) => Promise<T>,
 ): Promise<T> {
-  const report = (message: string) =>
-    log(`[docker-slot] ${new Date().toTimeString().slice(0, 8)} ${message}`);
+  const report = reporter(log);
   if (config.kind === "none") {
     report(`Docker slots work only on macOS; running without a slot on ${config.platform}`);
     return await work(undefined);
@@ -121,6 +158,7 @@ export async function withDockerSlot<T>(
     throw new Error(
       `Already inside Docker slot ${inherited}; do not wrap pnpm check --full or pnpm dev in docker-slots run`,
     );
+  checkFreeDisk(config, `before taking a ${pool} slot for ${purpose}`, report);
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   const started = Date.now();
   const waitId = randomUUID();
@@ -169,6 +207,18 @@ export async function withDockerSlot<T>(
       await sleep(pace.pollMs, undefined, { signal });
     } catch (error) {
       if (!signal.aborted) throw error;
+    }
+    if (!signal.aborted) {
+      try {
+        checkFreeDisk(
+          config,
+          `while waiting ${duration(Date.now() - started)} for a ${pool} slot for ${purpose}`,
+          report,
+        );
+      } catch (error) {
+        recordSlot(waitId, "cancelled", Date.now(), pool, cwd);
+        throw error;
+      }
     }
   }
   recordSlot(waitId, "cancelled", Date.now(), pool, cwd);
