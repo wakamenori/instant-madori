@@ -6,6 +6,7 @@ INSERT INTO improvement_target SELECT 'activity.'||state,name,name||'の分数 �
 WITH reasons(reason,name) AS (VALUES ('no_ready_issue','着手できるIssueが無い'),('resource_limit','資源の枠で選べない'),('awaiting_dispatch','指揮役がまだ立てていない'))
 INSERT INTO improvement_target SELECT 'slot.'||reason,name,name||'の枠・分 ÷ 全枠・分','割合','down',1 FROM reasons;
 INSERT INTO improvement_target VALUES
+ ('approval.wait','承認待ち','担当と検証役が承認の要求で止まっていた分数 ÷ 延べ時間','割合','down',1),
  ('quality.first_pass','一度で合格','最初の検証で合格 ÷ 判定可能な完了Issue','割合','up',1),
  ('quality.rework','作りの見直し','観察を終えた原因Issueのうち見直しあり','割合','down',1),
  ('quality.escape','不具合漏れ','観察を終えた原因Issueのうち漏れあり','割合','down',1),
@@ -32,19 +33,27 @@ SELECT target,grp,json_group_array(issue ORDER BY pos,issue) issues,min(merged_a
  min((SELECT window_minutes FROM settings),min(pos),(SELECT count(*) FROM active_clock)-max(pos)) minutes
 FROM grouped GROUP BY target,grp;
 
+CREATE TABLE approval_wait AS
+SELECT d.issue,d.start,coalesce(d.end,(SELECT min(iif(s.start<=d.start,s.end,s.start)) FROM span s
+ WHERE s.actor=d.actor AND coalesce(s.end,'9999')>d.start),'9999') end
+FROM mart_turn_detail d JOIN actor a ON a.id=d.actor
+WHERE d.kind='approval' AND a.role IN ('owner','verifier');
+
 CREATE TABLE target_sample AS
 SELECT 'activity.'||state target,minute,count(*) hits FROM mart_minute GROUP BY state,minute
-UNION ALL SELECT 'slot.'||reason,minute,slots FROM mart_empty_slot;
+UNION ALL SELECT 'slot.'||reason,minute,slots FROM mart_empty_slot
+UNION ALL SELECT 'approval.wait',m.minute,count(DISTINCT m.issue) FROM mart_minute m
+JOIN approval_wait w ON w.issue=m.issue AND w.start<=m.at AND w.end>m.at GROUP BY m.minute;
 CREATE INDEX target_sample_lookup ON target_sample(target,minute);
 CREATE TABLE improvement_observation AS
 WITH sides(side) AS (VALUES ('before'),('after')), windows AS (
  SELECT w.*,side,CASE side WHEN 'before' THEN first-minutes ELSE last END start FROM improvement_window w CROSS JOIN sides
 ), minute_values AS (
  SELECT w.target,w.grp,w.side,sum(coalesce(s.hits,0)) hits,
- sum(CASE WHEN w.target LIKE 'activity.%' THEN a.owners ELSE a.owners+a.slots END) total
+ sum(iif(w.target LIKE 'slot.%',a.owners+a.slots,a.owners)) total
  FROM windows w JOIN active_clock k ON k.pos>w.start AND k.pos<=w.start+w.minutes
  JOIN owner_capacity_minute a USING(minute) LEFT JOIN target_sample s ON s.target=w.target AND s.minute=k.minute
- WHERE w.target LIKE 'activity.%' OR (w.target LIKE 'slot.%' AND a.slots IS NOT NULL) GROUP BY 1,2,3
+ WHERE w.target NOT LIKE 'quality.%' AND (w.target NOT LIKE 'slot.%' OR a.slots IS NOT NULL) GROUP BY 1,2,3
 ), quality_values AS (
  SELECT w.target,w.grp,w.side,sum(CASE w.target WHEN 'quality.first_pass' THEN q.first_pass WHEN 'quality.escape' THEN q.escaped ELSE q.rework END) hits,
  count(*) total FROM windows w JOIN mart_quality_issue q ON w.target LIKE 'quality.%'

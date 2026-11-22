@@ -113,6 +113,16 @@ void test("hourly and eight active hour windows count releases, owner gaps and m
       started_at: at(-68),
       completed_at: at(-67),
     });
+    add("claude.hook", "permission", {
+      at: at(-68),
+      env: { T3CODE_THREAD_ID: "inspect" },
+      input: {
+        hook_event_name: "PermissionRequest",
+        session_id: "s",
+        prompt_id: "p",
+        tool_name: "Bash",
+      },
+    });
     add("t3.run", "coord-run", { thread_id: "coord", started_at: at(-64), completed_at: at(-61) });
     add("github.comment", 202, {
       issue_or_pr: 30,
@@ -360,9 +370,20 @@ void test("hourly and eight active hour windows count releases, owner gaps and m
     all("SELECT minutes FROM mart_inactive_stretch WHERE start<unixepoch('2026-11-21')"),
     [{ minutes: 46 }],
   );
-  assert.deepEqual(all("SELECT issue,kind,start,end FROM mart_turn_detail"), [
+  assert.deepEqual(all("SELECT issue,kind,start,end FROM mart_turn_detail ORDER BY start"), [
     { issue: 20, kind: "approval", start: at(-70), end: at(-69) },
+    { issue: 20, kind: "approval", start: at(-68), end: null },
   ]);
+  assert.deepEqual(all("SELECT unit,direction FROM improvement_target WHERE id='approval.wait'"), [
+    { unit: "割合", direction: "down" },
+  ]);
+  assert.deepEqual(
+    all("SELECT minute,hits FROM target_sample WHERE target='approval.wait' ORDER BY minute"),
+    [
+      { minute: Date.parse(at(-70)) / 1000, hits: 1 },
+      { minute: Date.parse(at(-68)) / 1000, hits: 1 },
+    ],
+  );
   assert.deepEqual(all("SELECT count(*) n FROM issue_minute WHERE issue=1"), [{ n: 12 }]);
   assert.deepEqual(all("SELECT state,minutes FROM mart_issue_wait WHERE issue=1 ORDER BY state"), [
     { state: "owner_turn", minutes: 7 },
