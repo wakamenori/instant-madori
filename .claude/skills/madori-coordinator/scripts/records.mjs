@@ -11,22 +11,7 @@ import {
 export { labels };
 const text = z.string().trim().min(1);
 
-const check = z.enum(["検査", "振る舞い", "地図", "差分", "終わった証拠"]);
 const time = z.iso.datetime();
-const verdict = z
-  .strictObject({
-    attempt: z.int().positive(),
-    head: z.string().regex(/^[a-f0-9]{40}$/),
-    verdict: z.enum(["PASS", "FAIL"]),
-    decided_at: time,
-    failed_checks: z.array(check),
-  })
-  .refine(
-    ({ verdict, failed_checks }) =>
-      (verdict === "PASS") === (failed_checks.length === 0) &&
-      new Set(failed_checks).size === failed_checks.length,
-    "PASS requires no failed checks; FAIL requires distinct failed checks",
-  );
 const stagingStart = z.strictObject({ started_at: time });
 const stagingEnd = stagingStart
   .extend({ ended_at: time })
@@ -48,8 +33,7 @@ export function checkRecord(kind, markdown, label) {
     return;
   }
   const raw = leadingBlock(markdown);
-  if (kind === "verdict") verdict.parse(raw);
-  else if (kind === "staging-start") stagingStart.parse(raw);
+  if (kind === "staging-start") stagingStart.parse(raw);
   else if (kind === "staging-end") stagingEnd.parse(raw);
   else throw new Error("unknown record kind");
 }
@@ -80,7 +64,7 @@ if (import.meta.main) {
     const [kind, file, label, ...rest] = process.argv.slice(2);
     if (!file || rest.length || ["issue", "addition"].includes(kind) !== Boolean(label))
       throw new Error(
-        "usage: records.mjs draft|verdict|staging-start|staging-end <file> OR issue|addition <file> <Issue label>",
+        "usage: records.mjs draft|staging-start|staging-end <file> OR issue|addition <file> <Issue label>",
       );
     const markdown = readFileSync(file, "utf8");
     if (kind === "draft") process.stdout.write(renderDraft(markdown));

@@ -13,10 +13,39 @@ void test("coordinator CLI and ingestion recognize the same record shapes", (t) 
   const dir = mkdtempSync(join(tmpdir(), "record-contract-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const head = "a".repeat(40);
-  const verdict =
-    "attempt: 1\nhead: " +
-    head +
-    "\ndecided_at: 2026-11-20T00:00:00Z\nverdict: PASS\nfailed_checks: []";
+  const report = join(dir, "report.md");
+  writeFileSync(report, "Commands and results");
+  for (const [sha, flags, valid] of [
+    [head, ["--pass"], true],
+    [head, ["--fail", "地図"], true],
+    [head, ["--fail"], false],
+    [head, ["--fail", "unknown"], false],
+    [head, ["--pass", "--fail", "地図"], false],
+    [head.slice(1), ["--pass"], false],
+  ] as const) {
+    const result = spawnSync(
+      process.execPath,
+      [
+        resolve(import.meta.dirname, "../../scripts/dev/verdict.ts"),
+        "--dry-run",
+        "--pr",
+        "1",
+        "--head",
+        sha,
+        "--attempt",
+        "1",
+        "--report",
+        report,
+        ...flags,
+      ],
+      { encoding: "utf8" },
+    );
+    assert.equal(result.status === 0, valid, result.stderr);
+    if (valid) {
+      const { comment } = z.object({ comment: z.string() }).parse(JSON.parse(result.stdout));
+      assert.ok(commentFacts(comment, [])[0] != null);
+    }
+  }
   const start = "started_at: 2026-11-20T00:00:00Z";
   const discovery = "\nfound_at: マージの後\nfound_by: 担当\ncause: 不明";
   const records: [string, string, boolean, string?][] = [];
@@ -59,9 +88,6 @@ void test("coordinator CLI and ingestion recognize the same record shapes", (t) 
     }
   }
   records.push(
-    ["verdict", verdict, true],
-    ["verdict", verdict.replace("PASS", "FAIL"), false],
-    ["verdict", verdict.replace("00Z", "00+00:00"), false],
     ["staging-start", start, true],
     ["staging-end", start + "\nended_at: 2026-11-21T00:00:00Z", true],
     ["staging-end", start + "\nended_at: 2026-11-19T00:00:00Z", false],
