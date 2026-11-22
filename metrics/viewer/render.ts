@@ -81,7 +81,7 @@ export function renderDashboard(data: ViewerData) {
   const gapCounts = new Map<string, number>();
   for (const { reason } of data.gaps) gapCounts.set(reason, (gapCounts.get(reason) ?? 0) + 1);
   const alert = data.health.some((r) => r.stopped || r.recent_quarantined > 0)
-    ? '<aside><a href="#health">記録が届いていない出どころがあります。計測の信頼性を確認してください</a></aside>'
+    ? '<aside><a href="#health">記録が届いていない出どころがあります</a></aside>'
     : "";
   const radio = (name: string, options: [string, string][], checked: string) =>
     options
@@ -90,8 +90,8 @@ export function renderDashboard(data: ViewerData) {
           `<label><input type="radio" name="${name}" value="${value}"${value === checked ? " checked" : ""}><span>${text}</span></label>`,
       )
       .join("");
-  return `<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light dark"><title>デリバリーの振り返り</title><style>${style}</style><main>${alert}
-  <header><h1>デリバリーの振り返り</h1><p>${data.generatedAt ? date(Date.parse(data.generatedAt) / 1000) + " JST 時点" : "集計時刻不明"}</p>
+  return `<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light dark"><title>デリバリーの振り返り</title><style>${style}</style><main>
+  <header><h1>デリバリーの振り返り</h1><p>${data.generatedAt ? date(Date.parse(data.generatedAt) / 1000) + " JST 時点" : "集計時刻不明"}</p>${alert}
   <form class="filters"><fieldset><legend>集計対象</legend>${radio(
     "target",
     [

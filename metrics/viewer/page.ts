@@ -61,7 +61,7 @@ p { margin: 0; }
 a { color: inherit; text-underline-offset: 2px; }
 button { font: inherit; color: inherit; }
 :focus-visible { outline: 2px solid var(--work); outline-offset: 2px; }
-aside { margin: 0 0 8px; padding: 6px 10px; background: var(--alert); border-radius: 4px; }
+aside { padding: 2px 8px; background: var(--alert); border-radius: 4px; font-size: 12px; white-space: nowrap; }
 
 header { display: flex; align-items: baseline; gap: 14px; padding-bottom: 10px; border-bottom: 1px solid var(--rule-strong); }
 header > p { color: var(--ink-3); font-size: 12px; }
@@ -114,8 +114,8 @@ figure { margin: 0; }
 .xaxis .end { right: 0; transform: none; }
 .xaxis .resume { top: 15px; padding-left: 4px; border-left: 1px solid var(--rule-strong); transform: none; }
 .xaxis .resume.left { padding: 0 4px 0 0; border-left: 0; border-right: 1px solid var(--rule-strong); transform: translateX(-100%); }
-.hover { position: absolute; inset: 0; cursor: crosshair; }
-.hover:focus-visible { outline-offset: 0; }
+.probe { position: absolute; inset: 0; cursor: crosshair; }
+.probe:focus-visible { outline-offset: 0; }
 .cross { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px solid var(--ink-2); pointer-events: none; }
 #tooltip { position: fixed; z-index: 10; pointer-events: none; min-width: 140px; max-width: 280px; padding: 6px 8px; background: var(--surface); border: 1px solid var(--rule-strong); border-radius: 4px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12); font-size: 11px; }
 #tooltip p { color: var(--ink-3); margin-bottom: 2px; }
@@ -129,7 +129,7 @@ figure { margin: 0; }
 .legend b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
 
 .effort { grid-template-columns: 5fr 4fr 3fr; }
-.breakdown .plot { --h: 150px; }
+.breakdown .plot { --h: 140px; }
 .note { font-size: 11px; color: var(--ink-3); }
 .phases { grid-column: 2 / 4; display: grid; grid-template-columns: 4fr 3fr; gap: 6px 28px; align-content: start; }
 .phases h2 { grid-column: 1 / -1; }
@@ -147,14 +147,14 @@ figure { margin: 0; }
 .matrix button:disabled { color: var(--ink-3); cursor: default; }
 .lists { display: grid; gap: 10px; align-content: start; }
 .bars { list-style: none; margin: 0; padding: 0; font-size: 12px; }
-.bars li { display: grid; grid-template-columns: 1fr auto; column-gap: 8px; padding: 1px 0 2px; line-height: 1.35; }
+.bars li { position: relative; display: grid; grid-template-columns: 1fr auto; column-gap: 8px; padding: 1px 0 4px; line-height: 1.35; }
 .bars span { color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .bars b { font-weight: 600; font-variant-numeric: tabular-nums; }
 .bars small { font-weight: 400; color: var(--ink-3); }
-.bars i { grid-column: 1 / -1; height: 3px; border-radius: 0 2px 2px 0; margin-top: 1px; min-width: 2px; }
+.bars i { position: absolute; left: 0; bottom: 1px; height: 3px; border-radius: 0 2px 2px 0; min-width: 2px; }
 
 .flow { grid-template-columns: 4fr 3fr 5fr; }
-.capacity .plot { --h: 104px; }
+.capacity .plot { --h: 96px; }
 .kinds .bars { margin-top: 6px; }
 .issues ol { list-style: none; margin: 0; padding: 0; }
 .issue { display: grid; grid-template-columns: 3.4em 1fr 72px 4.2em; align-items: center; gap: 8px; width: 100%; padding: 3px 4px; border: 0; border-bottom: 1px solid var(--rule); background: none; text-align: left; cursor: pointer; font-size: 12px; }
@@ -197,7 +197,7 @@ dialog h2 { font-size: 15px; margin-bottom: 8px; }
 .lane b { font-weight: 400; color: var(--ink-2); }
 .track { position: relative; height: 10px; background: var(--hover); border-radius: 2px; }
 .track i { position: absolute; top: 0; bottom: 0; min-width: 1px; }
-.lanes.hover .track::after { content: ""; position: absolute; left: var(--cursor); top: -5px; bottom: -5px; border-left: 1px solid var(--ink); }
+.lanes.tracking .track::after { content: ""; position: absolute; left: var(--cursor); top: -5px; bottom: -5px; border-left: 1px solid var(--ink); }
 
 @media (max-width: 900px) {
   main { padding: 10px 16px 40px; }
@@ -306,9 +306,9 @@ function nearest(layer, clientX) {
   return i === -1 ? rows.length - 1 : i;
 }
 document.addEventListener("pointermove", (event) => {
-  const layer = event.target.closest(".hover");
+  const layer = event.target.closest(".probe[data-chart]");
   const lanes = event.target.closest(".lanes");
-  for (const chart of document.querySelectorAll(".lanes.hover")) chart.classList.remove("hover");
+  for (const chart of document.querySelectorAll(".lanes.tracking")) chart.classList.remove("tracking");
   if (layer) return showTip(layer, nearest(layer, event.clientX), event.clientX);
   if (lanes) {
     const track = lanes.querySelector(".track");
@@ -322,7 +322,7 @@ document.addEventListener("pointermove", (event) => {
       .filter((lane) => Array.from(lane.querySelectorAll("i")).some((i) => Number(i.dataset.start) <= time && time < Number(i.dataset.end)))
       .map((lane) => { const d = document.createElement("div"); d.textContent = lane.querySelector("b").textContent; return d; });
     lanes.style.setProperty("--cursor", 100 * f + "%");
-    lanes.classList.add("hover");
+    lanes.classList.add("tracking");
     dialog.append(tooltip);
     tooltip.replaceChildren(head, ...active);
     tooltip.hidden = false;
@@ -334,15 +334,15 @@ document.addEventListener("pointermove", (event) => {
   hideTip();
 });
 document.addEventListener("focusin", (event) => {
-  const layer = event.target.closest?.(".hover");
+  const layer = event.target.closest?.(".probe[data-chart]");
   if (layer) showTip(layer, JSON.parse(layer.dataset.chart).rows.length - 1);
 });
 document.addEventListener("focusout", (event) => {
-  if (event.target.closest?.(".hover")) hideTip();
+  if (event.target.closest?.(".probe[data-chart]")) hideTip();
 });
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") return hideTip();
-  const layer = event.target.closest?.(".hover");
+  const layer = event.target.closest?.(".probe[data-chart]");
   if (!layer || (event.key !== "ArrowLeft" && event.key !== "ArrowRight")) return;
   event.preventDefault();
   const last = JSON.parse(layer.dataset.chart).rows.length - 1;
