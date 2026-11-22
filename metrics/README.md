@@ -321,14 +321,14 @@ viewerは、持ち主がときどき開いて、工場が速くなっている�
 
 - 受け口は、launchdで常駐し、OTLP/HTTPとhookの記録を受ける。L1に書くのは受け口だけにして、書き手を一つにする。hookは受け口に送らず、いつも一時ファイル（spool）に書いて終わる。受け口は1秒ごとにspoolを取り込み、書き込みが成功した後にファイルを消す。受け口が止まっている間はspoolに溜まり、戻ったときに、OTLPを受け始める前に取り込む。受け口がこのマシンで一度も動いていなければ、hookは何も書かない。受け口のポートはOTLP/HTTPの既定の4318で、`pnpm dev` が使う5173と8787を避ける。
 - ポーラーは、GitHub（Issue、依存、PR、コメント、コミットのステータス、Issueの出来事（ラベルの付け外し、閉じた、開き直した）、Actionsのjobとstep）を数分ごとに、T3のDBを1分ごとに読む。T3のDBは読み取り専用で開く。
-- Claude Codeのhookは、リポジトリの `.claude/settings.json` に置く。SessionStartは、`session_id` とT3のスレッド（`T3CODE_THREAD_ID`）とcwdを結ぶ。UserPromptSubmitとStopは、ターンの始まりと終わりを記録する。PermissionRequestは、承認を求めたときだけ動き、承認待ちの始まりを記録する。終わりは、同じツールと入力の次のPreToolUseか、PermissionDeniedの時刻で決める。バックグラウンドで起動したBashは、PostToolUseの `backgroundTaskId` と、終わったときにUserPromptSubmitに届く通知（作業のID、`tool_use_id`、状態、終了コード）で結び、終わりの時刻は通知にある出力ファイルの更新時刻から取る。PreToolUseとStopは、決まった道具を通さない操作と、決まった形の出力が欠けたときだけ止める（「計測に要る記録は、作業の副作用として残す」）。ツールとモデルの時間はOTelが出すので、hookでは測らない。
+- Claude Codeのhookは、リポジトリの `.claude/settings.json` に置く。SessionStartは、`session_id` とT3のスレッド（`T3CODE_THREAD_ID`）とcwdを結ぶ。UserPromptSubmitとStopは、ターンの始まりと終わりを記録する。承認の要求と回答はT3の承認ごとの記録から取る（`approval.wait` の項を参照）。PermissionRequestのhookの記録は集計に使わない。バックグラウンドで起動したBashは、PostToolUseの `backgroundTaskId` と、終わったときにUserPromptSubmitに届く通知（作業のID、`tool_use_id`、状態、終了コード）で結び、終わりの時刻は通知にある出力ファイルの更新時刻から取る。見張りもUserPromptSubmit、PreToolUse、Stopに登録する。UserPromptSubmitで検証役への指示からPR番号、head、試行番号を控え、Stopでその判定を確かめる。ツールとモデルの時間はOTelが出すので、hookでは測らない。
 
 OTelは、リポジトリではなくこのマシンの設定で有効にする。Claude Codeは、プロジェクトの `.claude/settings.json` の `env` に書いたテレメトリーの設定を使わないためである。
 
 - Claude Codeは、`~/.claude_personal/settings.json` の `env` で有効にする。T3は、このフォルダーを `CLAUDE_CONFIG_DIR` としてClaude Codeを起動する。
 - Codexは、`~/.codex/config.toml` の `[otel]` で有効にする。リポジトリの `.codex/hooks.json` は、SessionStart、UserPromptSubmit、PreToolUse、PostToolUse、PermissionRequest、Stopを登録する。worktreeのセッションも本体のチェックアウトの `.codex/hooks.json` を読み、コマンドはセッションのcwd（worktree）で動く。そのため、定義の承認と変更は本体のチェックアウトに入ってから効き、スクリプトは各worktreeの版が動く。承認は定義のハッシュに結び付くため、各イベントのコマンドは次の2行に固定し、`<Event>` にはイベント名を入れる。
   1. `node metrics/hook/codex.ts <Event> >/dev/null 2>&1 || true` は、ツールの出力を除いてspoolに書く。記録に失敗してもセッションに出力を返さず、作業を続ける。
-  2. `node scripts/dev/agent-guard.ts <Event>` は、標準入力を読み終えて成功する。今後の検査が判定を返せるよう、出力と終了コードはそのままCodexに渡す。
+  2. `node scripts/dev/agent-guard.ts <Event>` は、検証対象のheadが変わらず、その試行の `verify` ステータスがないとき、Stopで一度だけ判定コマンドの実行を促す。GitHubに確認できないときは終了を許す。
 
 受け口はCodexのhookからイベントやターンなどの事実、指示と最終応答から取り出したIssue番号や役割などの要約、コマンドやパスを残したツール入力だけを保存する。Codexは `apply_patch` のパッチ全体を `command` で送るので、`*** Add File:` などのファイルの見出しの行だけを残し、ファイルの中身は捨てる。cwdのgit共通ディレクトリがこのリポジトリと違えば破棄し、一致すれば会話を `t3.codex_link` で照合してから `codex.hook` としてL1に入れる。
 
@@ -416,6 +416,7 @@ metrics/
 有効にした後で確かめた前提は次のとおり。
 
 - Claude Code 2.1.330では、`bypassPermissions` のモードでも、PreToolUseのhookがBashの入力を書き換え、実行を止められる。バックグラウンドで起動したBashは、起動した時点でPostToolUseが出て、`tool_response` に `backgroundTaskId` が入る。終わると、作業のID、`tool_use_id`、状態、終了コードを含む通知がUserPromptSubmitのhookに届く。
+- Claude Code 2.1.330では、同じツール呼び出しのPreToolUseがPermissionRequestより先に動く。PermissionRequestの入力には `tool_use_id` がない。回答する人がいないために拒否された要求では、PermissionDeniedは動かなかった。T3は人に示した承認ごとに `runtime_requests` に1行作る。Claude Codeでは `nativeRequestRef.nativeId` が呼び出しの `tool_use_id` に一致する。`resolved_at` には回答の時刻か、ターンの中断で要求を取り下げた時刻が入る。Claude Codeがその場で拒否した要求には行がない。
 - Codex 0.169.0のプロジェクトのhookは、本体のチェックアウトで承認すれば、そのworktreeでも、承認を飛ばす指定なしに動く。コマンドはセッションの作業ディレクトリで動くので、相対パスで書けばworktreeのスクリプトが動く。PreToolUseはコマンドを書き換え、止められる。Stopのhookの入力には `last_assistant_message` が入る。承認のハッシュは定義だけから計算され、手元の承認済みのhookでも、定義から計算した値が記録された値と一致した。
 
 - `~/.codex/config.toml` の `[otel]` は、T3の `codex app-server` で効く。T3が立てたCodexのスレッドの記録が、`t3.codex_link` で結ばれてL1に入った。
@@ -453,7 +454,7 @@ T3はプロジェクトの最初のスレッドから、GitHubは2026年11月1�
 
 狙いは `improvement_target` の `id` を使う。一覧にない識別子（英数字、ピリオド、ハイフン、アンダースコア）は `unknown_target` として記録の抜けに出す。日本語の成功条件など、その文字種に収まらない自由文は `manual` として比較から外す。これは自由文と識別子を同じ YAML の欄に書く現行形式での判別方法である。
 
-`approval.wait` の値は、UTC の分ごとに、`mart_minute` の時刻 `at` に承認を待っていた Issue の数である。担当か検証役のスレッドの承認の要求（`mart_turn_detail` の `approval`）が `at` に答えを待っていれば、その Issue・分を数える。同じ分に要求が重なっても、担当と検証役が同時に待っていても、一度だけ数える。Claude Code のサブエージェントの要求は親のスレッドの記録になるので、担当のターンが終わった後の要求も担当の分に入る。答えの記録が無い要求は、そのスレッドの次のターンの区切りまで待っていたとする。区切りは、要求を出したターンの終わりで、ターンの外の要求なら次のターンの始まりである。担当の区間の外の要求と、T3 が別のスレッドとして立てた実装役と相談役の要求は数えない。`at` は要求と関係なく決まるので、二つの時刻の間に始まって終わる1分より短い要求は数えないが、多くの分を足した割合は、承認を待っていた時間の割合に偏らない。分ごとの狙いの分母は、`slot.*` が全枠・分で、品質を除くほかの狙いが工数である。
+`approval.wait` の値は、UTC の分ごとに、`mart_minute` の時刻 `at` に承認を待っていた Issue の数である。CodexとClaude Codeの承認は、どちらもT3から同じ形式で取る。要求から回答または取り下げまでが1行に収まるので、要求と回答を突き合わせる必要はない。対象はコマンド、ファイルの読み書き、権限、MCPの確認である。Codexの質問とClaude CodeのAskUserQuestionは除く。Claude Codeがその場で拒否した要求は人に表示されず、T3の記録にも残らない。担当か検証役のスレッドの承認の要求（`mart_turn_detail` の `approval`）が `at` に答えを待っていれば、その Issue・分を数える。同じ分に要求が重なっても、担当と検証役が同時に待っていても、一度だけ数える。Claude Code のサブエージェントの要求は親のスレッドの記録になるので、担当のターンが終わった後の要求も担当の分に入る。答えの記録が無い要求は、そのスレッドの次のターンの区切りまで待っていたとする。区切りは、要求を出したターンの終わりで、ターンの外の要求なら次のターンの始まりである。要求は、スレッドが作られた時点の担当区間に属する。担当なら自身の区間、検証役ならその時点でIssueを担当していたスレッドの区間である。その区間内に始まった要求だけを、区間の終わりまで数える。止まったスレッドの要求は、次の担当の分に入らない。T3が別のスレッドとして立てた実装役と相談役の要求は数えない。`at` は要求と関係なく決まるので、二つの時刻の間に始まって終わる1分より短い要求は数えないが、多くの分を足した割合は、承認を待っていた時間の割合に偏らない。分ごとの狙いの分母は、`slot.*` が全枠・分で、品質を除くほかの狙いが工数である。
 
 `mart_improvement_effect` は同じ狙いの連続したマージの間隔が集計期間（既定480稼働分）未満ならまとめる。最初のマージ前と最後のマージ後で、両側に取れる同じ分数を使う。狙いの観測分母がない側とその差は NULL になる。品質の見直しと漏れは観察完了済みの Issue で比べる。割合の差の参考範囲は両側の Wilson 95% 区間の端点の差で、同一 Issue 内の分同士の相関は補正していない。
 

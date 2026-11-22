@@ -2,7 +2,9 @@
 
 pub mod commands;
 pub mod display;
+mod model;
 pub mod sample;
+pub use model::{BodyDefect, BuildError, Entry, EntryKind, Model};
 
 use solidcraft_doc::Document;
 use solidcraft_engine::Session;

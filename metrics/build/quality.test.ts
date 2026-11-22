@@ -137,8 +137,12 @@ void test("compares equal active windows around clustered improvements, samples 
  CREATE TABLE mart_minute(issue,minute,at,state); INSERT INTO mart_minute SELECT 20,minute,minute+10,iif(minute<540,'ci','owner_turn') FROM mart_active_minute;
  INSERT INTO mart_minute VALUES(21,420,430,'ci'),(21,900,910,'owner_turn');
  CREATE TABLE owner_capacity_minute(minute,owners,slots); INSERT INTO owner_capacity_minute SELECT minute,iif(minute IN (420,900),2,1),iif(minute<540,2,NULL) FROM mart_active_minute;
- CREATE TABLE actor(id,role);
- INSERT INTO actor VALUES('o','owner'),('v','verifier'),('i','implementer'),('a','advisor'),('other','owner');
+ CREATE TABLE owner_interval(issue,id,start,end);
+ INSERT INTO owner_interval VALUES(20,'o',0,960),(21,'other',0,960),
+ (22,'owner-a',1200,1380),(22,'owner-b',1380,1560),(22,'owner-c',1620,1680);
+ CREATE TABLE actor(id,role,created_at);
+ INSERT INTO actor VALUES('o','owner',0),('v','verifier',0),('i','implementer',0),('a','advisor',0),('other','owner',0),
+ ('owner-a','owner',1200),('verifier-a','verifier',1210),('owner-b','owner',1380),('verifier-b','verifier',1390),('owner-c','owner',1620);
  CREATE TABLE span(actor,kind,start,end);
  INSERT INTO span VALUES('o','owner_turn',0,20),('v','verifier_run',0,20),
  ('o','owner_turn',420,490),('o','owner_turn',540,560),('o','owner_turn',670,680),('o','owner_turn',705,710),('o','owner_turn',840,NULL);
@@ -150,6 +154,13 @@ void test("compares equal active windows around clustered improvements, samples 
  (20,'o','approval',700,760),
  (20,'i','approval',780,800),(20,'a','approval',780,800),(20,'o','tool',780,800),
  (21,'other','approval',780,NULL),(20,'o','approval',850,NULL);
+ INSERT INTO span VALUES('owner-a','owner_turn',1200,NULL);
+ INSERT INTO mart_turn_detail VALUES
+ (22,'owner-a','approval',1205,NULL),(22,'verifier-a','approval',1215,NULL),(22,'owner-a','approval',1225,1420),
+ (22,'owner-a','approval',1380,NULL),(22,'verifier-a','approval',1385,1500),(22,'verifier-b','approval',1445,1460),
+ (22,'owner-b','approval',1570,NULL);
+ INSERT INTO mart_minute VALUES(22,1260,1270,'owner_turn'),(22,1380,1390,'owner_turn'),(22,1440,1450,'owner_turn'),
+ (22,1500,1510,'owner_turn'),(22,1620,1630,'owner_turn');
  CREATE TABLE mart_empty_slot(minute,reason,slots);CREATE TABLE mart_record_gap(issue,reason);
  CREATE TABLE mart_quality_issue(merged_at,first_pass,escaped,rework,observed);
  INSERT INTO mart_quality_issue VALUES(datetime(480,'unixepoch'),1,0,0,1),(datetime(600,'unixepoch'),0,0,0,1);
@@ -169,6 +180,33 @@ void test("compares equal active windows around clustered improvements, samples 
     db
       .prepare("SELECT hits FROM target_sample WHERE target='approval.wait' AND minute=?")
       .get(minute)?.hits ?? 0;
+  assert.deepEqual(
+    rows("SELECT start,end FROM approval_wait WHERE issue=22 ORDER BY start"),
+    [
+      [1205, 1380],
+      [1215, 1380],
+      [1225, 1380],
+      [1445, 1460],
+    ],
+    "waits stop at the requester's owner interval end and requests raised outside it are dropped",
+  );
+  assert.equal(hits(1260), 1, "an open request counts inside its owner's interval");
+  assert.equal(
+    hits(1380),
+    0,
+    "requests from a replaced owner's era do not count in the next owner's minutes",
+  );
+  assert.equal(
+    hits(1440),
+    1,
+    "a verifier created during the next owner counts in that owner's minutes",
+  );
+  assert.equal(
+    hits(1500),
+    0,
+    "a replaced owner's verifier request raised after the handover does not count",
+  );
+  assert.equal(hits(1620), 0, "a request raised between owner intervals does not count");
   assert.equal(hits(0), 1, "overlapping owner and verifier requests count once at the sample");
   assert.equal(hits(60), 0, "a request between samples does not count");
   assert.equal(hits(420), 1, "an interrupted request counts during its turn");

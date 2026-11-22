@@ -10,6 +10,7 @@ mod json;
 mod layout;
 mod measure;
 mod opening;
+mod planform;
 mod topology;
 mod wall_move;
 
@@ -20,5 +21,6 @@ pub use id::{BoundaryId, OpeningId, OperationId, RoomId, StoreyId, VertexId};
 pub use json::{ReadError, WriteError};
 pub use layout::*;
 pub use measure::*;
-pub use opening::{OpeningAdjustment, OpeningPlacement, OpeningView, Passage};
+pub use opening::{Elevation, OpeningAdjustment, OpeningPlacement, OpeningView, Passage};
+pub use planform::SimplePolygon;
 pub use wall_move::*;
