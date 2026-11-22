@@ -188,11 +188,32 @@ void test("hourly and eight active hour windows count releases, owner gaps and m
       run_id: 9,
       run_attempt: 1,
       head_sha: head,
-      created_at: at(-68),
-      started_at: at(-67),
+      created_at: at(-69),
+      started_at: at(-68),
       updated_at: at(-65),
       status: "completed",
       conclusion: "success",
+    });
+    const checkRun = {
+      workflow: "check",
+      run_id: 9,
+      run_attempt: 1,
+      head_sha: head,
+      pr_numbers: [30],
+    };
+    add("github.actions.job", 901, {
+      ...checkRun,
+      name: "mode",
+      created_at: at(-69),
+      started_at: at(-68),
+      completed_at: at(-67),
+    });
+    add("github.actions.job", 902, {
+      ...checkRun,
+      name: "check",
+      created_at: at(-67),
+      started_at: at(-66),
+      completed_at: at(-65),
     });
     add("github.comment", 203, {
       issue_or_pr: 21,
@@ -416,6 +437,23 @@ void test("hourly and eight active hour windows count releases, owner gaps and m
     all("SELECT issue FROM mart_record_gap WHERE reason='missing_kind' AND issue=2"),
     [],
   );
+  assert.deepEqual(
+    all("SELECT actor,kind FROM span WHERE kind IN ('ci_queue','ci_run') ORDER BY kind"),
+    [
+      { actor: "902", kind: "ci_queue" },
+      { actor: "902", kind: "ci_run" },
+    ],
+  );
+  assert.deepEqual(all("SELECT job_id FROM mart_ci_job WHERE workflow='check'"), [{ job_id: 902 }]);
+  assert.deepEqual(all("SELECT check_jobs FROM mart_issue_flow WHERE issue=20"), [
+    { check_jobs: 1 },
+  ]);
+  assert.deepEqual(all("SELECT start,end FROM check_period WHERE issue=20"), [
+    { start: at(-67), end: at(-65) },
+  ]);
+  assert.deepEqual(all("SELECT queued,end FROM check_gate WHERE issue=20"), [
+    { queued: at(-67), end: at(-65) },
+  ]);
   assert.deepEqual(all("SELECT DISTINCT shared_resources FROM issue_requirements WHERE issue=21"), [
     { shared_resources: '["staging を占有する"]' },
   ]);

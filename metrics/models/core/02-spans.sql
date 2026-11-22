@@ -6,9 +6,9 @@ WHERE role IN ('owner','implementer','advisor','coordinator','verifier') AND r.s
 UNION ALL SELECT a.id,a.issue,'advisor_run',s.started_at,s.completed_at FROM stg_t3_subagent s JOIN actor a ON a.id=s.id
 WHERE s.origin='provider_native'
 UNION ALL SELECT j.id,ij.issue,iif(workflow='check','ci_queue','deploy_queue'),j.created_at,coalesce(j.started_at,j.completed_at)
-FROM stg_actions_job j LEFT JOIN issue_job ij USING(id)
+FROM measured_actions_job j LEFT JOIN issue_job ij USING(id)
 UNION ALL SELECT j.id,ij.issue,iif(workflow='check','ci_run','deploy_run'),j.started_at,j.completed_at
-FROM stg_actions_job j LEFT JOIN issue_job ij USING(id)
+FROM measured_actions_job j LEFT JOIN issue_job ij USING(id)
 UNION ALL SELECT comment_id,issue_or_pr,'staging_occupancy',started_at,max(ended_at)
 FROM stg_github_comment_block WHERE started_at IS NOT NULL AND issue_or_pr NOT IN (SELECT number FROM stg_github_pr) GROUP BY issue_or_pr,started_at
 UNION ALL SELECT c.id,c.issue_or_pr,'staging_occupancy',c.created_at,(

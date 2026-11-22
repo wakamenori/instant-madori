@@ -6,7 +6,7 @@ SELECT CAST(id AS INTEGER) job_id,run_id,workflow,created_at,started_at,complete
  WHERE value->>'$.name' LIKE '%pnpm check%--full%'),'full','default') END mode,
  (SELECT json_group_array(json_object('name',value->>'$.name','minutes',
   (julianday(value->>'$.completed_at')-julianday(value->>'$.started_at'))*1440)) FROM json_each(steps)) steps,
- '1' definition_version FROM stg_actions_job;
+ '1' definition_version FROM measured_actions_job;
 CREATE TABLE mart_runner_hour AS
 WITH RECURSIVE hours(t,last) AS (
  SELECT unixepoch(min(started_at))/3600*3600,unixepoch(max(completed_at)) FROM mart_ci_job
