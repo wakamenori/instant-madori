@@ -86,6 +86,7 @@ export async function runChecks(
   await script("Migration immutability", "scripts/check/check-migrations.ts");
   await script("SQL connection state", "scripts/check/check-sql.ts");
   await script("Document paths", "scripts/check/check-doc-paths.ts");
+  await script("Skill argument placeholders", "scripts/check/check-skill-arguments.ts");
   await script("Secret scan", "scripts/check/check-secrets.ts");
 
   const native = ["--workspace", "--all-targets"];
