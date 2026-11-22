@@ -167,6 +167,22 @@ void test("forwards SIGTERM and cleans up", { timeout: 10000 }, async (t) => {
   assert.ok(r.lines.includes("wrangler deploy interrupted by SIGTERM; not running it again."));
 });
 
+void test(
+  "does not re-run after SIGTERM when wrangler reports the Container settings failure",
+  { timeout: 10000 },
+  async (t) => {
+    const r = await fake(t, [{ ...partial, wait: true }, deployed]);
+    assert.equal(await readFile(join(r.cwd, "signal"), "utf8"), "SIGTERM");
+    assert.equal(r.count, 1);
+    assert.equal(r.code, 143);
+    assert.deepEqual(r.lines, [
+      "ready for SIGTERM",
+      "wrangler deploy interrupted by SIGTERM; not running it again.",
+      "",
+    ]);
+  },
+);
+
 async function realWrangler(t: TestContext, rejectUpload: boolean) {
   const { cwd, run } = await fixture(t);
   const staging = {
