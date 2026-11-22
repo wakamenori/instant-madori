@@ -35,6 +35,7 @@ void test("Container, display, dependency, upstream and CI changes need the full
     "apps/worker/wrangler.jsonc",
     "apps/web/package.json",
     "crates/housing/Cargo.toml",
+    "crates/housing/src/lib.rs",
     "pnpm-lock.yaml",
     "third_party/solidcraft/crates/doc/src/lib.rs",
     ".github/workflows/check.yml",
@@ -50,7 +51,6 @@ void test("other service changes use the default check", () => {
       "apps/worker/src/api/projects.ts",
       "apps/worker/src/storage/d1.ts",
       "apps/web/src/App.tsx",
-      "crates/housing/src/lib.rs",
     ]),
     "default",
   );
