@@ -1,5 +1,10 @@
 import { machineSlots, withDockerSlot } from "../shared/docker-slots.ts";
-import { finishDevelopment } from "./dev-session.ts";
+import {
+  finishDevelopment,
+  holdCheckout,
+  resolveDevSession,
+  type DevSession,
+} from "./dev-session.ts";
 import { ensureDevAccess } from "./local-access.ts";
 import { assertSucceeded, start, stop } from "../shared/processes.ts";
 import type { ProcessOutcome } from "../shared/processes.ts";
@@ -35,8 +40,11 @@ async function setupStep(label: string, launch: () => ReturnType<typeof start>) 
   return true;
 }
 
+holdCheckout();
+const session = await resolveDevSession(process.env);
+console.log(session.banner);
 // Local Access settings for the Worker (.dev.vars) and the key the Vite proxy signs with.
-await ensureDevAccess();
+await ensureDevAccess(session.ports.web);
 // Bring the local D1 database (.wrangler/state) up to the latest migration.
 const migrated = await setupStep("Local D1 migration", () =>
   start(process.execPath, [wrangler, "d1", "migrations", "apply", "DB", "--local"], {
@@ -45,7 +53,7 @@ const migrated = await setupStep("Local D1 migration", () =>
   }),
 );
 
-async function develop() {
+async function develop(session: DevSession) {
   console.info(
     "Geometry runs in Docker; the first amd64 image build takes several minutes. MADORI_DEV_CONTAINERS=0 disables containers.",
   );
@@ -56,10 +64,7 @@ async function develop() {
         wrangler,
         "dev",
         "--local",
-        "--ip",
-        "127.0.0.1",
-        "--port",
-        "8787",
+        ...session.wranglerArgs,
         ...(jobTestHold === undefined ? [] : ["--var", `JOB_TEST_HOLD:${jobTestHold}`]),
         ...(!containers ? ["--enable-containers=false"] : []),
       ],
@@ -67,13 +72,11 @@ async function develop() {
         cwd: "apps/worker",
       },
     ),
-    start(
-      process.execPath,
-      ["node_modules/vite/bin/vite.js", "--host", "127.0.0.1", "--port", "5173", "--strictPort"],
-      { cwd: "apps/web" },
-    ),
+    start(process.execPath, ["node_modules/vite/bin/vite.js", ...session.viteArgs], {
+      cwd: "apps/web",
+      env: { ...process.env, ...session.viteEnv },
+    }),
   ];
-  console.log("Web: http://127.0.0.1:5173 | Worker: http://127.0.0.1:8787");
   const result = await Promise.race([...processes.map(({ finished }) => finished), interruption]);
   // Decide the exit status before stopping: a Ctrl-C during shutdown must not hide a crash.
   const stoppedByUser = controller.signal.aborted;
@@ -83,13 +86,11 @@ async function develop() {
 if (migrated) {
   if (containers) {
     try {
-      await withDockerSlot(
-        machineSlots(),
-        { purpose: "pnpm dev", signal: controller.signal },
-        develop,
+      await withDockerSlot(machineSlots(), { purpose: "pnpm dev", signal: controller.signal }, () =>
+        develop(session),
       );
     } catch (error) {
       if (error !== interrupted) throw error;
     }
-  } else await develop();
+  } else await develop(session);
 }

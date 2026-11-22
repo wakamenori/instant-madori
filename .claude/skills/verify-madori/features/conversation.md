@@ -18,8 +18,7 @@ Preconditions: Containerを有効にして `pnpm dev` を起動し、検証マ�
 新しい案件を作り、そのパターンに指示を二つ送る。案件は201、各指示は202を返す。
 
 ```sh
-API=http://127.0.0.1:5173/api
-O='origin: http://127.0.0.1:5173'
+. "$EVIDENCE/dev.env"
 J='content-type: application/json'
 D="$EVIDENCE/conversation"
 mkdir -p "$D"

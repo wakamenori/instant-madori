@@ -19,8 +19,7 @@
 Preconditions:
 
 - [案件](./projects.md)の「作る」を済ませ、`PID=$(jq -r .project.id "$EVIDENCE/projects/create.json")` を設定している。
-- `J='content-type: application/json'` と `O='origin: http://127.0.0.1:5173'` を設定している。
-- `API=http://127.0.0.1:5173/api` と `D="$EVIDENCE/patterns"` を設定し、`$D` がある。
+- `. "$EVIDENCE/dev.env"` で `API` と `O` を読み込み、`J='content-type: application/json'` と `D="$EVIDENCE/patterns"` を設定し、`$D` がある。
 
 - **一覧。** `curl -sS -o "$D/list.json" -w '%{http_code}\n' "$API/projects/$PID/patterns"`。`200` で、案件と一緒にできた最初のパターンが一件ある。
 - **足す。** `curl -sS -o "$D/create.json" -w '%{http_code}\n' -X POST "$API/projects/$PID/patterns" -H "$J" -H "$O" -d "{\"requestId\":\"$(uuidgen)\",\"name\":\"二つ目のパターン\"}"`。`201`。一覧を読み直すと二件になり、二件目が `二つ目のパターン`。

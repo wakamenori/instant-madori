@@ -23,7 +23,7 @@ Preconditions:
 
 - SKILL.md の「起動」の `pnpm dev` を、`MADORI_DEV_JOB_TEST_HOLD=before_render:30` を付けて起動している。起動し直し方は[指示を止める](./stop.md)の Preconditions にある。
 - [案件](./projects.md)の「作る」を済ませ、`PAT=$(jq -r .pattern.id "$EVIDENCE/projects/create.json")` を設定している。
-- `J='content-type: application/json'`、`O='origin: http://127.0.0.1:5173'`、`API=http://127.0.0.1:5173/api`、`D="$EVIDENCE/queue-hold"` を設定し、`$D` がある。
+- `. "$EVIDENCE/dev.env"` で `API` と `O` を読み込み、`J='content-type: application/json'` と `D="$EVIDENCE/queue-hold"` を設定し、`$D` がある。
 - [指示を止める](./stop.md)の `send`・`stop`・`state` を、出力先を `$D` にして定義している。
 - 再開と取り消しの関数 `release() { curl -sS -o "$D/$1.json" -w '%{http_code}\n' -X POST "$API/patterns/$PAT/queue/$2" -H "$J" -H "$O" -d "{\"requestId\":\"$3\",\"heldBy\":\"$4\"}"; }` を定義している。`$2` は `resume` か `cancel`。
 - [指示を送る](./instructions.md)の `settle` を、出力先を `$D` にして定義している。
