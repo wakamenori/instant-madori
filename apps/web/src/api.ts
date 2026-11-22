@@ -10,11 +10,9 @@ import type { ApiErrorCode, CreateProjectRequest } from "@madori/contracts";
 
 export class ApiError extends Error {
   readonly code: ApiErrorCode | "network" | "unexpected_response";
-  readonly retryAfter: number | undefined;
-  constructor(code: ApiErrorCode | "network" | "unexpected_response", retryAfter?: number) {
+  constructor(code: ApiErrorCode | "network" | "unexpected_response") {
     super(code);
     this.code = code;
-    this.retryAfter = retryAfter;
   }
 }
 
@@ -37,9 +35,7 @@ async function request<T>(
     const response = await fetch(path, { ...init, signal });
     if (!response.ok) {
       const error = apiErrorSchema.safeParse(await response.json().catch(() => undefined));
-      const hint = response.headers.get("retry-after");
-      const seconds = hint !== null && /^\d+$/.test(hint) ? Number(hint) : undefined;
-      throw new ApiError(error.success ? error.data.error : "unexpected_response", seconds);
+      throw new ApiError(error.success ? error.data.error : "unexpected_response");
     }
     return await decode(response);
   } catch (error) {
