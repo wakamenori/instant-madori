@@ -59,7 +59,6 @@ FROM stg_github_comment c,json_each(c.markers) m WHERE m.value='staging_occupy_s
  -- The coordinator opens and closes occupancy on the Issue; its merge comment on the PR repeats the
  -- opening line but never closes it.
  AND NOT EXISTS (SELECT 1 FROM stg_github_comment_block b WHERE b.issue_or_pr=c.issue_or_pr AND b.started_at IS NOT NULL AND (b.comment_id=c.id OR (b.started_at<=c.created_at AND coalesce(b.ended_at,'9999')>=c.created_at)))
- AND c.issue_or_pr NOT IN (SELECT number FROM stg_github_pr)
-;
+ AND c.issue_or_pr NOT IN (SELECT number FROM stg_github_pr);
 CREATE INDEX span_issue ON span(issue,kind,start);
 CREATE INDEX span_kind_time ON span(kind,start,end);
