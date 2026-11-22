@@ -11,6 +11,7 @@ mod layout;
 mod measure;
 mod opening;
 mod topology;
+mod wall_move;
 
 pub use data::*;
 pub use error::*;
@@ -19,4 +20,5 @@ pub use id::{BoundaryId, OpeningId, OperationId, RoomId, StoreyId, VertexId};
 pub use json::{ReadError, WriteError};
 pub use layout::*;
 pub use measure::*;
-pub use opening::{OpeningView, Passage};
+pub use opening::{OpeningAdjustment, OpeningPlacement, OpeningView, Passage};
+pub use wall_move::*;

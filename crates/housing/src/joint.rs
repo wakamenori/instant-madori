@@ -64,7 +64,7 @@ impl Vector {
     pub(crate) fn dot(self, b: Self) -> f64 {
         self.x * b.x + self.y * b.y
     }
-    fn left(self) -> Self {
+    pub(crate) fn left(self) -> Self {
         Self {
             x: -self.y,
             y: self.x,

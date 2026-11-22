@@ -125,6 +125,26 @@ pub enum Reason {
         vertex: String,
         boundary: String,
     },
+    NotPerpendicular {
+        wall: String,
+    },
+    CollapsesWall {
+        other: String,
+        length: f64,
+    },
+    CrossesWall {
+        other: String,
+    },
+    NarrowRoom {
+        wall: String,
+        width: f64,
+        minimum: f64,
+    },
+    OpeningCannotFit {
+        wall: String,
+        available: f64,
+        minimum: f64,
+    },
     NoFloor {},
     UnknownOpening {},
     PastWallEnd {

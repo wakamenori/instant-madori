@@ -1,3 +1,7 @@
+mod fit;
+pub(crate) use fit::fit_wall;
+pub use fit::{OpeningAdjustment, OpeningPlacement};
+
 use crate::{id::IdScope, *};
 use std::ops::Range;
 
