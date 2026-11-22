@@ -26,7 +26,7 @@ SELECT issue,at,CASE WHEN kind='verdict' AND attributes->>'$.verdict'='FAIL' THE
 FROM event WHERE kind IN ('launch','report','coordinator_message','verdict');
 CREATE INDEX handoff_issue ON handoff(issue,at);
 
-CREATE INDEX span_kind ON span(kind,start,end);
+
 CREATE TABLE minute_activity AS
 SELECT m.*,c.merged_at,p.merge_commit_sha,d.deployable,delivery.delivered,delivery.method,
  EXISTS(SELECT 1 FROM span s WHERE s.issue=m.issue AND kind='verifier_run' AND start<=at AND coalesce(end,'9999')>at) verifier,

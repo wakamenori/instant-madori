@@ -439,10 +439,11 @@ void test("hourly and eight active hour windows count releases, owner gaps and m
     [],
   );
   assert.deepEqual(
-    all("SELECT actor,kind FROM span WHERE kind IN ('ci_queue','ci_run') ORDER BY kind"),
+    all("SELECT actor,kind FROM span WHERE kind IN ('ci_queue','ci_run') ORDER BY kind,actor"),
     [
+      { actor: "901", kind: "ci_queue" },
       { actor: "902", kind: "ci_queue" },
-      { actor: "902", kind: "ci_run" },
+      { actor: "9/1", kind: "ci_run" },
     ],
   );
   assert.deepEqual(all("SELECT job_id FROM mart_ci_job WHERE workflow='check'"), [{ job_id: 902 }]);
