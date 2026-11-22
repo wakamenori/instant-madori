@@ -116,6 +116,13 @@ function outputTail(lines: readonly string[]): string {
 /** How long to wait for a stopped process's pipes to close before tearing them down. */
 const pipeCloseGraceMs = 2_000;
 
+/**
+ * How long `logLine` waits. Some lines follow Workflow progress, such as a JOB_TEST_HOLD
+ * sleep, which a loaded machine stretches by seconds. It stays below the 120 s suite
+ * timeouts, so a line that never comes still fails with its own message.
+ */
+const logLineDeadlineMs = 30_000;
+
 /** How long Wrangler gets to clean up its Container session before its group is stopped. */
 const wranglerExitGraceMs = 10_000;
 
@@ -341,10 +348,10 @@ export async function startLocalWorker({
     async logLine(traceId, event = "api.request") {
       if (traceId === "") throw new Error("logLine needs a trace ID");
       // Log lines travel workerd → wrangler → this pipe, so they can arrive after the
-      // response; wait for them briefly.
+      // response.
       const find = () =>
         entries.find((entry) => entry["traceId"] === traceId && entry["event"] === event);
-      const deadline = Date.now() + 5_000;
+      const deadline = Date.now() + logLineDeadlineMs;
       while (Date.now() < deadline) {
         const found = find();
         if (found) return found;
