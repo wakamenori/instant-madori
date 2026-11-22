@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { commentRecord, issueRecord, prRecord } from "./github.ts";
 import { messageDecision, threadTitle } from "./polled.ts";
@@ -138,4 +139,27 @@ void test("GitHub fields come only from the leading YAML and the shared resource
     attempt: 2,
   });
   assert.equal(messageDecision(title, "assistant", yaml(fields)).verdict, "FAIL");
+});
+
+void test("the coordinator skill's verifier thread title parses as a verifier thread", () => {
+  const skill = readFileSync(
+    new URL("../../.claude/skills/madori-coordinator/SKILL.md", import.meta.url),
+    "utf8",
+  );
+  const section = skill.split(/^## 検証役を立てる$/m)[1]?.split(/^## /m)[0];
+  assert.ok(section, "the coordinator skill has a verifier section");
+  const templates = [...section.matchAll(/`([^`\n]+)`/g)]
+    .map((match) => match[1])
+    .filter((span) => span?.includes("<PR>"));
+  assert.equal(templates.length, 1, "the verifier section documents one title template");
+  const [template] = templates;
+  assert.ok(template);
+  const title = template.replace("<PR>", "471").replace("<Issue>", "444").replace("<回>", "3");
+  assert.deepEqual(threadTitle(title), {
+    title_kind: "verifier",
+    issue: 444,
+    pr: 471,
+    sha: null,
+    attempt: 3,
+  });
 });
