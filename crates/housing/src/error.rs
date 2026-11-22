@@ -16,7 +16,7 @@ pub enum ElementKind {
 #[derive(Clone, Debug, PartialEq, Serialize, JsonSchema)]
 pub struct Rejections(Vec<Rejection>);
 impl Rejections {
-    pub(crate) fn from_errors(errors: Vec<Rejection>) -> Option<Self> {
+    pub fn from_errors(errors: Vec<Rejection>) -> Option<Self> {
         if errors.is_empty() {
             None
         } else {
@@ -142,6 +142,9 @@ pub enum Reason {
         other: String,
         along: f64,
         up: f64,
+    },
+    SelfIntersecting {
+        at: Point,
     },
 }
 

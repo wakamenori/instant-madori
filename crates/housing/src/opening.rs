@@ -68,9 +68,9 @@ pub enum Passage<'a> {
     Entrance(RoomView<'a>),
 }
 
-struct Elevation {
-    along: Range<f64>,
-    rise: Range<f64>,
+pub struct Elevation {
+    pub along: Range<f64>,
+    pub rise: Range<f64>,
 }
 
 impl Elevation {
@@ -113,6 +113,9 @@ impl<'a> OpeningView<'a> {
     }
     pub fn wall(self) -> BoundaryView<'a> {
         self.wall
+    }
+    pub fn elevation(self) -> Elevation {
+        Elevation::wall(self.wall).opening(self.data)
     }
     pub fn passage(self) -> Option<Passage<'a>> {
         if let Fitting::Window {} = self.data.fitting {
