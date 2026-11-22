@@ -433,7 +433,11 @@ T3はプロジェクトの最初のスレッドから、GitHubは2026年11月1�
 
 集計結果の `owner_interval` は担当スレッドごとの区間、`mart_minute` は Issue・UTC 分ごとの旧来の区分である。同じ Issue の立て直しが同じ分に入ったときは、その分を一度数える。`mart_turn_detail` は時間が分かるツールやモデル、承認、Docker 枠の記録を持つ。これらには重なりがあるので工数には足さない。
 
-`mart_kpi` と `mart_kind_period` の `hour` は UTC の正時を表す Unix 秒で、`hour` 期間はその1時間、`rolling` 期間はその時間の終わりからさかのぼった動いた時間である。長さは `INSTANT_MADORI_METRICS_WINDOW_MINUTES`（既定480）で指定できる。蓄積の短い期間は実際の分数を出す。スループットは件／稼働時間、1件あたりは工数／件である。区間は完了数の両側95%ポアソン信頼区間から求め、分母が0の値は NULL とする。「外の変化への追従」と「確かめと判断」は両方に共通なので、種類ごとに数え、製品・開発の区分は `unknown` に入れる。種類不明の工数も同時進行数の分子に入る。過去分の分類は `[{"issue":123,"kind":"機能"}]` の形の JSON ファイルを `node metrics/import/classifications.ts <file>` に渡す。不具合と作りの見直しの行には Issue と同じ `found_at`、`found_by`、`cause` を入れ、作りの見直しには `plan_change` も入れる。受け口は spool から L1 の `classification.backfill` に保存する。`issue_classification.kind_source` に `backfill` が残る。
+`mart_kpi` と `mart_kind_period` の `hour` は UTC の正時を表す Unix 秒である。`window='rolling'` の行は、その時間の終わりから、動いた時間を `span` 時間（4、8、24）さかのぼる。2026年11月21日12:21 UTC 以降の記録を使い、蓄積が短ければ実際の分数を出す。`mart_kpi.target` は「機能」か「全種類」で、「全種類」には種類不明の Issue も含む。工数がある期間は「全種類」の工数比率が1になる。
+
+`window='hour'` の行は、その正時からの1時間を開始日の制限なく集計し、`span` は NULL とする。現行のビューアーが使う `mart_kpi` の時間別集計は「機能」を対象に各時間1行を出す。`mart_kind_period` はどちらの期間でも種類・区分別の工数と完了数を持つ。`INSTANT_MADORI_METRICS_WINDOW_MINUTES`（既定480分）は改善効果を比べる期間だけを指定する。
+
+スループットは件／稼働時間、1件あたりは工数／件である。区間は完了数の両側95%ポアソン信頼区間から求め、分母が0の値は NULL とする。「外の変化への追従」と「確かめと判断」は両方に共通なので、種類ごとに数え、製品・開発の区分は `unknown` に入れる。種類不明の工数も同時進行数の分子に入る。過去分の分類は `[{"issue":123,"kind":"機能"}]` の形の JSON ファイルを `node metrics/import/classifications.ts <file>` に渡す。不具合と作りの見直しの行には Issue と同じ `found_at`、`found_by`、`cause` を入れ、作りの見直しには `plan_change` も入れる。受け口は spool から L1 の `classification.backfill` に保存する。`issue_classification.kind_source` に `backfill` が残る。
 
 `owner_limit` の各行には、指揮役の上限が変わったコミットとその時刻を記録する。上限が変わったら行を加える。`mart_slot_candidate` は選べる候補を段階・開発基盤の空きに優先して割り当て、余った枠を融通する。`mart_empty_slot.slots` は理由ごとの枠・分である。Issue の記録が初めて届くまでの共有資源と依存には、最初の観測値を使う。
 

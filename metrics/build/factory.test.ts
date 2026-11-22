@@ -340,7 +340,9 @@ void test("hourly and eight active hour windows count releases, owner gaps and m
   assert.ok(viewer.windows.every((w) => w.points.every((p) => p.active_minutes === w.length * 60)));
   for (const point of eight.points) {
     const rolling = out
-      .prepare("SELECT * FROM mart_kpi WHERE window='rolling' AND end=?")
+      .prepare(
+        "SELECT * FROM mart_kpi WHERE window='rolling' AND span=8 AND target='機能' AND end=?",
+      )
       .get(point.end);
     assert.ok(rolling);
     for (const key of [
@@ -354,13 +356,13 @@ void test("hourly and eight active hour windows count releases, owner gaps and m
       "throughput",
       "parallelism",
       "feature_share",
-      "hours_per_feature",
       "throughput_low",
       "throughput_high",
-      "hours_per_feature_low",
-      "hours_per_feature_high",
     ] as const)
       assert.equal(point[key], rolling[key], key);
+    assert.equal(point.hours_per_feature, rolling.hours_per_completion);
+    assert.equal(point.hours_per_feature_low, rolling.hours_per_completion_low);
+    assert.equal(point.hours_per_feature_high, rolling.hours_per_completion_high);
     assert.equal(
       point.kinds.reduce((sum, r) => sum + r.minutes, 0),
       point.issue_minutes,
@@ -554,15 +556,27 @@ void test("hourly and eight active hour windows count releases, owner gaps and m
   assert.deepEqual(all("SELECT previous_kind,kind FROM mart_kind_change"), [
     { previous_kind: "製品の不具合", kind: "機能" },
   ]);
+  for (const span of [4, 8, 24]) {
+    for (const target of ["機能", "全種類"]) {
+      const rows = out
+        .prepare(
+          `
+        SELECT abs(throughput-parallelism*target_share/hours_per_completion) error
+        FROM mart_kpi WHERE window='rolling' AND span=? AND target=? AND completions>0
+      `,
+        )
+        .all(span, target);
+      assert.ok(rows.length > 0, span + "h " + target);
+      for (const { error } of rows) assert.ok(typeof error === "number" && error < 1e-10);
+    }
+  }
   assert.deepEqual(
-    all(
-      "SELECT count(*) n FROM mart_kpi WHERE features>0 AND abs(throughput-parallelism*feature_share/hours_per_feature)>1e-10",
-    ),
-    [{ n: 0 }],
+    all("SELECT DISTINCT target_share FROM mart_kpi WHERE target='全種類' AND issue_minutes>0"),
+    [{ target_share: 1 }],
   );
   assert.deepEqual(
     all(
-      "SELECT active_minutes,features,feature_minutes,issue_minutes FROM mart_kpi WHERE window='rolling' ORDER BY hour DESC LIMIT 1",
+      "SELECT active_minutes,features,feature_minutes,issue_minutes FROM mart_kpi WHERE window='rolling' AND span=8 AND target='機能' ORDER BY hour DESC LIMIT 1",
     ),
     [{ active_minutes: 480, features: 1, feature_minutes: 7, issue_minutes: 483 }],
   );
@@ -576,25 +590,39 @@ void test("hourly and eight active hour windows count releases, owner gaps and m
   );
 });
 
-void test("a closure on the hour counts even when the factory stops at that boundary", (t) => {
-  const db = new DatabaseSync(":memory:");
-  t.after(() => db.close());
+function buildKpiFixture(db: DatabaseSync, records: string) {
   db.exec(`
- CREATE TABLE settings(window_minutes);INSERT INTO settings VALUES(480);
- CREATE TABLE issue_kind(kind);INSERT INTO issue_kind VALUES('機能');
- CREATE TABLE issue_classification(issue,closed_at,ownership,pr,kind,area);
- INSERT INTO issue_classification VALUES(1,'1970-01-01T01:00:00.000Z','owner',2,'機能','product');
- CREATE TABLE issue_minute(issue,minute);INSERT INTO issue_minute VALUES(1,3540);
- CREATE TABLE mart_active_minute(minute,owners,feature_minutes);INSERT INTO mart_active_minute VALUES(3540,1,1);
- CREATE TABLE owner_interval(issue,start,end);INSERT INTO owner_interval VALUES(1,'1970-01-01T00:59:00.000Z','1970-01-01T01:00:00.000Z');
- `);
+    CREATE TABLE issue_kind(kind); INSERT INTO issue_kind VALUES('機能');
+    CREATE TABLE issue_classification(issue,closed_at,ownership,pr,kind,area);
+    CREATE TABLE issue_minute(issue,minute);
+    CREATE TABLE mart_active_minute(minute,owners,feature_minutes);
+    CREATE TABLE owner_interval(issue,start,end);
+  `);
+  db.exec(records);
   for (const side of ["lower", "upper"] as const)
     db.function("poisson_" + side, (n) => poissonBounds(Number(n))[side]);
   db.exec(readFileSync(join(import.meta.dirname, "../models/marts/05-kpi.sql"), "utf8"));
+}
+
+void test("a closure on the hour counts even when the factory stops at that boundary", (t) => {
+  const db = new DatabaseSync(":memory:");
+  t.after(() => db.close());
+  buildKpiFixture(
+    db,
+    `
+    INSERT INTO issue_classification VALUES(1,'2026-11-22T01:00:00Z','owner',2,'機能','product');
+    INSERT INTO issue_minute VALUES(1,unixepoch('2026-11-22T00:59:00Z'));
+    INSERT INTO mart_active_minute SELECT minute,1,1 FROM issue_minute;
+  `,
+  );
   assert.deepEqual(
     db
       .prepare(
-        "SELECT window,features,active_minutes,throughput FROM mart_kpi WHERE hour=3600 ORDER BY window",
+        `
+      SELECT window,features,active_minutes,throughput FROM mart_kpi
+      WHERE hour=unixepoch('2026-11-22T01:00:00Z') AND target='機能' AND (span IS NULL OR span=8)
+      ORDER BY window
+    `,
       )
       .all()
       .map((row) => ({ ...row })),
@@ -603,4 +631,64 @@ void test("a closure on the hour counts even when the factory stops at that boun
       { window: "rolling", features: 1, active_minutes: 1, throughput: 60 },
     ],
   );
+});
+
+void test("rolling periods start at the cutoff while the viewer retains the full hour", (t) => {
+  const db = new DatabaseSync(":memory:");
+  t.after(() => db.close());
+  buildKpiFixture(
+    db,
+    `
+    INSERT INTO issue_classification VALUES
+      (1,'2026-11-21T12:20:59Z','owner',11,'機能','product'),
+      (2,'2026-11-21T12:21:00Z','owner',12,'機能','product'),
+      (3,'2026-11-21T12:22:00Z','owner',13,NULL,NULL);
+    INSERT INTO issue_minute VALUES(1,1795263660-3600),(1,1795263660-60),(2,1795263660),(3,1795263660+60);
+    INSERT INTO mart_active_minute SELECT minute,1,issue<>3 FROM issue_minute;
+  `,
+  );
+  assert.deepEqual(
+    db.prepare("SELECT hour FROM mart_kpi WHERE window='rolling' AND end<=1795263660").all(),
+    [],
+  );
+  const rows = db
+    .prepare(
+      `
+    SELECT window,span,target,active_minutes,issue_minutes,completions,target_minutes FROM mart_kpi
+    WHERE hour=unixepoch('2026-11-21T12:00:00Z') ORDER BY span,target
+  `,
+    )
+    .all()
+    .map((row) => ({ ...row }));
+  assert.deepEqual(rows, [
+    {
+      window: "hour",
+      span: null,
+      target: "機能",
+      active_minutes: 3,
+      issue_minutes: 3,
+      completions: 2,
+      target_minutes: 2,
+    },
+    ...[4, 8, 24].flatMap((span) => [
+      {
+        window: "rolling",
+        span,
+        target: "全種類",
+        active_minutes: 2,
+        issue_minutes: 2,
+        completions: 2,
+        target_minutes: 2,
+      },
+      {
+        window: "rolling",
+        span,
+        target: "機能",
+        active_minutes: 2,
+        issue_minutes: 2,
+        completions: 1,
+        target_minutes: 1,
+      },
+    ]),
+  ]);
 });
