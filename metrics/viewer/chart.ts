@@ -88,7 +88,7 @@ function plot(
   for (let h = 0; h < hours; h += tickStep) {
     const tickX = x(h * 60);
     tickMarks.push(`<path stroke="#c2d0ca" d="M${tickX} ${height - 4}v4"/>`);
-    if (h % labelStep === 0 && (h === 0 || hours - h > labelStep / 2))
+    if (h % labelStep === 0 && (h === 0 || hours - h > labelStep))
       labels.push(`<span style="left:${(100 * h) / hours}%">${h}</span>`);
   }
   return `<div class="graph"><small>${topLabel}</small><svg viewBox="-2 -2 724 100" preserveAspectRatio="none" aria-label="稼働時間ごとの推移"><svg x="0" y="0" width="${width}" height="${height}" overflow="hidden">${draw(x, y)}</svg>${breaks}${tickMarks.join("")}</svg><div class="axis">${labels.join("")}<span>${fmt(hours)} 稼働時間</span></div></div>`;
