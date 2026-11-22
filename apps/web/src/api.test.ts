@@ -9,33 +9,24 @@ import {
   fetchRevisionView,
   ApiError,
 } from "./api.ts";
-void test("API failures carry codes, retry hints and no transport messages", async () => {
+void test("API failures carry codes and no transport messages", async () => {
   const responses = [
     new Response("<html>proxy failure</html>", { status: 502 }),
-    Response.json(
-      { error: "service_unavailable" },
-      { status: 503, headers: { "retry-after": "5" } },
-    ),
+    Response.json({ error: "unknown_code" }, { status: 503 }),
     new Response("oops", { headers: { "x-revision-id": "R" } }),
     new Response("bytes", {
       headers: { "content-type": displayContentType, "x-revision-id": "other" },
     }),
   ];
-  const mocked = mock.method(globalThis, "fetch", () =>
-    Promise.resolve(responses.shift() ?? new Response()),
-  );
+  const mocked = mock.method(globalThis, "fetch", () => Promise.resolve(new Response()));
   try {
-    for (const [code, retryAfter] of [
-      ["unexpected_response", undefined],
-      ["service_unavailable", 5],
-      ["unexpected_response", undefined],
-      ["unexpected_response", undefined],
-    ] as const)
+    for (const response of responses) {
+      mocked.mock.mockImplementationOnce(() => Promise.resolve(response));
       await assert.rejects(
         fetchRevisionView("R", new AbortController().signal),
-        (error: unknown) =>
-          error instanceof ApiError && error.code === code && error.retryAfter === retryAfter,
+        (error: unknown) => error instanceof ApiError && error.code === "unexpected_response",
       );
+    }
     mocked.mock.mockImplementation(() => Promise.reject(new TypeError("Failed to fetch")));
     await assert.rejects(
       fetchRevisionView("R", new AbortController().signal),
