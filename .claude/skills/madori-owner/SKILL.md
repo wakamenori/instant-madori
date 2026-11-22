@@ -36,6 +36,23 @@ Issue の範囲に「PRで決めること」があれば、コードを書く前
 - poteto-mode のとおりに architect で案を出し、`/pstack:interrogate` にかけて決める。指揮役の返事は待たない。
 - 決めた設計、比べた案、選んだ理由を、PR の本文の Tradeoffs に書く。
 
+## subagent の worktree を消す
+
+Agent ツールに `isolation: "worktree"` を付けて立てた subagent（interrogate の反対役、architect の arena の候補）の worktree は、メインのチェックアウトの `.claude/worktrees/agent-<id>` にできる。subagent が再現のファイルなどの変更を残すと、Claude Code はこの worktree を消さない。見回りの片付けも、作られてから24時間を過ぎたものしか消さない。立てた担当が、使い終えたときに消す。
+
+- subagent の終わりの通知に `<worktreePath>` があれば、そのパスを控える。無ければ、Claude Code がもう消している。
+- interrogate では Verify を、architect では arena の Phase F を終えてから消す。全員の結果を使い終えるまで、先に終わった subagent の worktree も残す。残したい再現は、消す前に自分の worktree へ移す。
+- 控えたパスごとに、パスを書き込んだ次のコマンドを打つ。
+
+  ```sh
+  node .claude/skills/madori-coordinator/scripts/worktrees.mjs agent <パス>
+  ```
+
+  - 0で終われば、worktree は消えたか、もう無い。捨てた未コミットの変更は、標準エラーに `discard` の行で出る。
+  - 1で終わったら、理由が出て、worktree は残る。subagent がまだ動いている（`running`）なら、終わりの通知を待ってから打ち直す。ほかの理由なら、指揮役への報告に書く。
+
+- 自分の通知に出たパスだけを渡す。ほかの担当は、終わった subagent の worktree をまだ使っているかもしれない。
+
 ## 実装を Codex に任せる
 
 - コードは Codex に書かせる。`delegate_task` の `target` を `{providerInstanceId: "codex", model: <モデル>, options: {reasoningEffort: <effort>}}` にし、`reasoningEffort` を省かない。自分の worktree で書かせ、`isolation` は付けない。

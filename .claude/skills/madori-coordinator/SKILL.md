@@ -296,10 +296,23 @@ T3 の定期タスクが、1時間ごとに `/madori-coordinator 見回り` を�
 
 1. メインのチェックアウトを `git pull --ff-only` で main に合わせる。
 2. `df -h /` で空きを確かめる。20 GiB を切っていたら、次を片付けてから進む。空きが戻るまで、新しいスレッドを立てない。片付けるのは次の二つだけにする。ユーザーの個人のデータやキャッシュの削除は頼まない。二つ目の `docker image prune -a -f` は、どのプロジェクトのものかを問わず、使われていないイメージをすべて消す（#402）。
-   - `~/.t3/worktrees/instant-madori/` のうち、HEAD が main に入っていて、未コミットの変更が無い worktree。ただし、settled でないスレッドの worktree と、「資源の枠」でまだ数えている担当（マージの後の staging での確認を終えていない担当）の worktree は残す。作ったばかりの担当の worktree も、HEAD が main に入っていて変更が無いため。担当のスレッドはマージで settled になるので、settled だけを理由に消さない。
+   - 使い終わった worktree。残す worktree のパスを集め、一つずつ `--keep` に書いて次を実行する。残すものが一つも無ければ、`--keep` の代わりに `--keep-none` を付ける。
+
+     ```sh
+     node .claude/skills/madori-coordinator/scripts/worktrees.mjs sweep --keep <パス> --keep <パス>
+     ```
+
+     - 残すのは、settled でないスレッドの worktree、「資源の枠」でまだ数えている担当（マージの後の staging での確認を終えていない担当）の worktree、同じ検証役に判定し直させるつもりの検証役（「検証役を立てる」）の worktree である。担当のスレッドはマージで settled になるので、settled だけを理由に外さない。
      - settled でないスレッドは、`t3_thread_list` に `settled: false` を付けて最後のページまで出す。
      - 各スレッドの worktree は、`t3_thread_read` が返す `thread.worktreePath` で調べる。`creationSource` が `provider` のスレッドは読まない。Claude Code や Codex が自分で立てた subagent で、親のスレッドと同じ `worktreePath` を返す。
      - `t3_worktree_list` は使わない。検証役が PR の head を detached で取り出した worktree を返さない。
+     - スクリプトが見るのは、次の二か所だけである。`.claude/worktrees/` の `agent-` 以外と、ほかの場所の worktree には触らない。
+       - `~/.t3/worktrees/instant-madori/` の worktree は、`--keep` に無く、作られてから1時間を過ぎ、ロックも未コミットの変更も無く、HEAD が origin のどれかのブランチに入っているときに消す。detached なら、そこで作ったコミットが HEAD の履歴にだけ残っていないことも確かめる。settled の検証役が、まだマージされていない PR の head を取り出した worktree も、これで消える。
+       - メインのチェックアウトの `.claude/worktrees/agent-*` は、Claude Code の subagent が動いている間に置くロックが無く、作られてから24時間を過ぎていれば、未コミットの変更ごと消す。担当が消し忘れた subagent の worktree である（madori-owner「subagent の worktree を消す」）。
+     - 一行に一つ、消した worktree（`removed`）と、残した worktree（`kept` と理由）が出る。
+     - 2で終わり、`--keep` のパスが worktree でないと出たら、そのパスのスレッドを `t3_thread_read` で読み直す。返るパスが同じで `does not exist` と出ていれば、そのスレッドの worktree はもう無いので、`--keep` から外して打ち直す。返るパスが違えば写し間違いなので、直して打ち直す。
+     - 1で終わったら、`failed` の行を報告に書き、手で消さない。
+
    - 使っていない Docker のイメージ（`docker image prune -a -f`）
 3. 担当ごとに、コミット、push、PR、`check` の動きを確かめる。報告の来た PR と、報告は無いが `check` の通った PR には、検証役を立てる。承認待ちで止まったスレッドは「承認待ちで止まったとき」のとおりに扱う。ほかの理由で止まった担当は、新しい担当に入れ替える。
 4. `node scripts/shared/docker-slots.ts status` で、Docker の枠を持つプロセスを見る。`pnpm dev` が枠を持っていて、それを起動したスレッドがターンを終えて待っているなら、そのスレッドに `pnpm dev` を止めるよう頼む。
