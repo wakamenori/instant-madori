@@ -45,11 +45,15 @@ Dockerを使う重い作業は、マシン全体で共有する「Dockerの枠�
 
 cache mountのidを変えると、新しいcache mountは空から始まり、最初のビルドはすべての依存をコンパイルします。手元の計測（2026-11-22、runnerの検査と重なった状態）では795秒と1265秒かかり、実Containerの試験の起動待ちの期限（800秒）を超えることがあります。idを変えるPRでは、`pnpm check --full` の前に、`node scripts/shared/docker-slots.ts run -- docker build --platform linux/amd64 --output type=cacheonly -f apps/geometry/Dockerfile .` で一度ビルドしてcacheを温めてください。
 
-`pnpm check --full` は、実Containerの接続検査の直後に、同じDockerの枠を持ったまま、接続先のローカルDocker Engineの未使用ビルドキャッシュを回収します。Cargoのregistry・git・targetを含む `exec.cachemount` は合計8 GiBまで残します。それとは別に、`regular` と `frontend` は最近使った記録から合計4 GiBまで残します。形状サービスの一組の層は、Rustの基底層・aptのRUN・COPY・CargoのRUN・frontend・実行用のCOPYを合わせて約3.91 GBです。4 GiBの枠はこの一組を残しますが、更新時の余裕は残りません。BuildKitは、再利用した基底層とaptのRUNの最終使用時刻を更新しません。そのため、記録が枠を超えると、回収はRustの基底イメージの層を最も古い記録として選びます。計測では、選んだ基底層の記録は回収の後も残り、層の記録の合計は回収の前後とも約6.37 GBで、枠を超えたままでした。時間の範囲ではビルドが集中した際の容量を制限できないため、容量で制限します。
+`pnpm check --full` は、実Containerの接続検査の直後に、同じDockerの枠を持ったまま、接続先のローカルDocker Engineの未使用ビルドキャッシュを回収します。Cargoのregistry・git・targetを含む `exec.cachemount` は合計8 GiBまで残します。それとは別に、`regular` と `frontend` は合計6 GiBまで残します。形状サービスの一組の層は、Rustの基底層・aptのRUN・COPY・CargoのRUN・実行用の段・frontendを合わせて約3.0 GBです（2026-11-22の計測）。Rustの基底イメージを更新すると、各worktreeが新しいmainに追いつくまで、新旧の二組（約6.0 GB）が並びます。6 GiBの枠はこの二組を残せますが、5 GiBでは残せません。ただし、使用中の記録も枠に数えるので、並行するビルドがあると二組は収まりません。時間の範囲ではビルドが集中した際の容量を制限できないため、容量で制限します。
 
-各枠を超えた場合は最終使用時刻が古い未使用記録から丸ごと消し、`source.local`・`source.git.checkout`・`internal` の未使用記録はすべて消します。使用中の記録と未知の種類は残し、未知の種類は一行で報告します。Dockerは使用中のcache mountを0バイトと報告するため、その実容量は上限の計算に含められません。使用が終わった後や別のビルドで増えた後は、実容量が上限を超えることがあります。回収後の報告値も、使用中のmountの実容量を保証しません。ビルドキャッシュの回収は、イメージ・Container・ボリュームを対象にしません。Unixソケットで接続するローカルDockerを対象とし、独立したbuildx builderは対象にしません。
+BuildKitの記録は親子でつながっていて、ビルドの各段の層は前の段の層を親に持ちます。BuildKitは、子が残っている記録を、指定されても消しません。また、ビルドが読み込んだ記録の最終使用時刻だけを更新し、再利用した基底層とaptのRUNの時刻は古いまま残します。そのため、回収は記録自身の最終使用時刻では順位を決めません。各記録の順位には、その記録と子孫のうち最も新しい使用時刻を使います。この時刻が古い記録から、子を親より先に消します。基底層は、その上に作った最も新しいビルドと同じ順位になります。子が一つでも残る記録は選びません。各枠を超えた場合だけ消し、枠に収まったところで止めます。`source.local`・`source.git.checkout`・`internal` の未使用記録は、子が残らないかぎりすべて消します。使用中の記録と未知の種類の記録は、その祖先も含めて残し、未知の種類は一行で報告します。
 
-手で確かめる場合は `pnpm docker:prune-build-cache --dry-run` で保持・削除候補と容量を表示し、`pnpm docker:prune-build-cache` で回収します。上限を変える場合は `--mount-limit-bytes 8589934592 --layer-limit-bytes 4294967296` のようにバイト数を指定します。このオプションはその実行だけに適用します。
+すべての段がキャッシュに当たったビルドは、最後の段の記録の時刻だけを更新します。最後の段の `COPY --from=build` の記録は、ビルドの段の記録と親子でつながっていません。そのため、ビルドの段の順位は、そのソースで最後にビルドの段を実行した時刻になります。ソースを変えずにビルドし直すだけのworktreeでは、ビルドの段の枝が古く見え、回収されることがあります。枝を回収した後も、同じソースのビルドはすべての段がキャッシュに当たります。そのworktreeのソースが次に変わったときは、変わっていない `COPY` の段も作り直します。Rustの基底イメージを更新した後のように二組が並ぶと、ビルドの段を最後に実行した時刻が古いほうの組は、aptのRUNと基底層まで回収されることがあります。
+
+Dockerは使用中のcache mountを0バイトと報告するため、その実容量は上限の計算に含められません。使用が終わった後や別のビルドで増えた後は、実容量が上限を超えることがあります。回収後の報告値も、使用中のmountの実容量を保証しません。ビルドキャッシュの回収は、イメージ・Container・ボリュームを対象にしません。Unixソケットで接続するローカルDockerを対象とし、独立したbuildx builderは対象にしません。
+
+手で確かめる場合は `pnpm docker:prune-build-cache --dry-run` で保持・削除候補と容量を表示し、`pnpm docker:prune-build-cache` で回収します。上限を変える場合は `--mount-limit-bytes 8589934592 --layer-limit-bytes 6442450944` のようにバイト数を指定します。このオプションはその実行だけに適用します。計画の行（`docker.cache.prune.plan`）は、各記録の順位に使った時刻（`subtreeUsedAt`）と回収後の見込み（`expectedAfter`）を示します。結果の行（`docker.cache.prune.result`）は、回収後の容量（`after`）と、選んだのに残った記録（`notRemoved`）を示します。
 
 `pnpm check --full` は、実Containerの接続検査の直後、ビルドキャッシュの回収の前に、同じDockerの枠を持ったまま、このリポジトリの形状サービスのイメージを回収します。対象は、Wranglerが `pnpm dev` と実Containerの試験で付ける `cloudflare-dev/geometrycontainer-geometry-8788ff521eb5` のタグと、stagingへのデプロイが手元に残す `registry.cloudflare.com/<アカウントID>/instant-madori-staging-geometrycontainer-geometry` のタグだけです。ほかのリポジトリのタグは、同じイメージを指していても外しません。Wranglerはセッションを起動するたびに新しいタグを付けますが、ソースが同じならタグは同じイメージを指します。手元の計測（2026-11-22）では、192個のタグが2個のイメージを指していました。ディスクを使うのはイメージなので、イメージを単位にして、最後にタグを付けた時刻（`docker image inspect` の `Metadata.LastTagTime`）が新しい3個を残します。イメージ一つは、共有する基底の層113.6 MBのほかに、約308.5 MBを使います。
 
@@ -179,7 +183,7 @@ PRごとに `.github/workflows/check.yml` が、開発用Macのself-hosted runne
 
 checkoutは毎回clone直後と同じ状態から始めます。Rustの `target/` と `.tools/` だけは、`$RUNNER_TOOL_CACHE/madori` へのシンボリックリンクで実行の間に再利用します。runnerの `--full` は、runner用のDockerの枠（「開発を始める」）を使うので、手元の `pnpm dev` や `pnpm check --full` が開発用の枠を埋めていても待ちません。runnerは一度に一つのジョブしか動かさないので、stagingへのデプロイで `wrangler deploy` がイメージをビルドするときも、runnerのDockerの作業は一つまでです。
 
-runnerでも、`--full` の実Containerの接続検査の直後に、手元と同じ規則でDockerのビルドキャッシュを回収します。cache mountは合計8 GiBまで、最近使ったregularとfrontendは別枠で合計4 GiBまで残します。使用中の記録はBuildKitが保持するため、並行するビルドの記録は消しません。使用中のcache mountの0バイトという報告値では実容量を把握できません。runnerの `target/` と `.tools/` はこの回収の対象にしません。runnerの `--full` も、ビルドキャッシュの前に、手元と同じ規則で形状サービスのイメージを回収します。runnerと手元は同じDocker Engineを使うので、動いている手元のセッションのイメージは残ります。
+runnerでも、`--full` の実Containerの接続検査の直後に、手元と同じ規則でDockerのビルドキャッシュを回収します。cache mountは合計8 GiBまで、regularとfrontendは別枠で合計6 GiBまで残します。使用中の記録はBuildKitが保持するため、並行するビルドの記録は消しません。使用中のcache mountの0バイトという報告値では実容量を把握できません。runnerの `target/` と `.tools/` はこの回収の対象にしません。runnerの `--full` も、ビルドキャッシュの前に、手元と同じ規則で形状サービスのイメージを回収します。runnerと手元は同じDocker Engineを使うので、動いている手元のセッションのイメージは残ります。
 
 このリポジトリではブランチ保護を使えないため、検査の成功はマージの条件として強制されません。マージの前に、PRの最新のheadで `check` が成功していることを確かめます。
 
