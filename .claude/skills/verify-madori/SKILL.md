@@ -216,7 +216,7 @@ HDRS=$(mise exec -- node --env-file="$MAIN/.env" -e 'process.stdout.write(`CF-Ac
 AUTH=$(mise exec -- node --env-file="$MAIN/.env" -e 'process.stdout.write(`Authorization: Bearer ${process.env.CLOUDFLARE_API_TOKEN}\n`)')
 c() { printf '%s\n' "$HDRS" | curl -sS -H @- "$@"; }
 logs() {
-  body=$(jq -n --arg k "$1" --arg v "$2" --argjson from "$(( (SENT - 60) * 1000 ))" --argjson to "$(( $(date +%s) * 1000 ))" \
+  body=$(jq -n --arg k "${1}" --arg v "${2}" --argjson from "$(( (SENT - 60) * 1000 ))" --argjson to "$(( $(date +%s) * 1000 ))" \
     '{queryId: "adhoc", dry: true, view: "events", limit: 100, timeframe: {from: $from, to: $to},
       parameters: {filters: [{key: "$metadata.service", operation: "eq", type: "string", value: "instant-madori-staging"},
         {key: $k, operation: "eq", type: "string", value: $v}]}}')
