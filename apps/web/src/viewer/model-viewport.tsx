@@ -59,13 +59,30 @@ export function ModelViewport({ display, label }: { display: Uint8Array | null; 
     if (state.kind === "ready" && display) session.current?.show(display);
   }, [display, state.kind]);
   return (
-    <div className="viewport">
-      <div className="viewport-canvas" role="img" aria-label={label} ref={host} />
-      {state.kind !== "ready" && (
-        <p role={state.kind === "failed" ? "alert" : "status"}>
-          {state.kind === "opening" ? "3D表示を準備しています…" : state.message}
+    <>
+      <div className="viewport">
+        <div className="viewport-canvas" role="img" aria-label={label} ref={host} />
+        {state.kind !== "ready" && (
+          <p role={state.kind === "failed" ? "alert" : "status"}>
+            {state.kind === "opening" ? "3D表示を準備しています…" : state.message}
+          </p>
+        )}
+        {state.kind !== "failed" && (
+          <button
+            type="button"
+            className="viewport-reset"
+            disabled={state.kind !== "ready" || !display}
+            onClick={() => session.current?.resetView()}
+          >
+            視点を戻す
+          </button>
+        )}
+      </div>
+      {state.kind !== "failed" && (
+        <p className="note">
+          ドラッグで回転、右ドラッグかShift+ドラッグで移動、ホイールで拡大・縮小
         </p>
       )}
-    </div>
+    </>
   );
 }

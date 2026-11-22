@@ -33,4 +33,6 @@ void test("viewport uses the caller's label and exposes status outside the image
   );
   assert.match(html, /role="img" aria-label="Different model"/);
   assert.match(html, /<div[^>]*role="img"[^>]*><\/div><p role="status">/);
+  assert.match(html, /<button[^>]* disabled=""[^>]*>視点を戻す<\/button>/);
+  assert.match(html, /ドラッグで回転、右ドラッグかShift\+ドラッグで移動、ホイールで拡大・縮小/);
 });

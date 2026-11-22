@@ -1,7 +1,7 @@
 import { ViewerFailure } from "./wasm.ts";
 import type { Viewer } from "./wasm.ts";
 import { loadViewerModule } from "./wasm.ts";
-import { dragDelta, wheelSteps } from "./gestures.ts";
+import { dragDelta, dragKind, type DragKind, wheelSteps } from "./gestures.ts";
 
 /** One canvas per session isolates asynchronous StrictMode mounts. */
 export class ViewportSession {
@@ -29,12 +29,13 @@ export class ViewportSession {
       this.dispose();
     });
     const options = { signal: this.#events.signal };
-    let previous: { id: number; x: number; y: number } | null = null;
+    let previous: { id: number; x: number; y: number; kind: DragKind } | null = null;
     canvas.addEventListener(
       "pointerdown",
       (event) => {
-        if (event.button !== 0 || previous) return;
-        previous = { id: event.pointerId, x: event.clientX, y: event.clientY };
+        const kind = dragKind(event);
+        if (!kind || previous) return;
+        previous = { kind, id: event.pointerId, x: event.clientX, y: event.clientY };
         canvas.setPointerCapture(event.pointerId);
       },
       options,
@@ -43,10 +44,11 @@ export class ViewportSession {
       "pointermove",
       (event) => {
         if (!previous || previous.id !== event.pointerId) return;
-        const next = { id: event.pointerId, x: event.clientX, y: event.clientY };
+        const next = { x: event.clientX, y: event.clientY };
         const delta = dragDelta(previous, next);
-        previous = next;
-        this.#viewer.orbit(delta.dx, delta.dy);
+        previous.x = next.x;
+        previous.y = next.y;
+        this.#viewer[previous.kind](delta.dx, delta.dy);
         this.#requestFrame();
       },
       options,
@@ -65,12 +67,10 @@ export class ViewportSession {
       },
       { ...options, passive: false },
     );
+    canvas.addEventListener("contextmenu", (event) => event.preventDefault(), options);
     const resize = () => {
       const { width, height } = canvas.getBoundingClientRect();
-      this.#viewer.resize(
-        Math.round(width * devicePixelRatio),
-        Math.round(height * devicePixelRatio),
-      );
+      this.#viewer.resize(width, height, devicePixelRatio);
       this.#requestFrame();
     };
     this.#observer = new ResizeObserver(resize);
@@ -113,6 +113,11 @@ export class ViewportSession {
     } catch (error) {
       this.#onFailure(error);
     }
+  }
+  resetView(): void {
+    if (this.#disposed) return;
+    this.#viewer.reset_view();
+    this.#requestFrame();
   }
   #requestFrame() {
     if (this.#frame || this.#disposed) return;

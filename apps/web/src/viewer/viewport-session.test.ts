@@ -34,6 +34,7 @@ void test("session owns its canvas, frees aborted creation, reports idle loss an
   let nextFrame = 0;
   let disconnected = 0;
   class Canvas extends EventTarget {
+    setPointerCapture = mock.fn<(id: number) => void>();
     remove() {
       children.delete(this);
     }
@@ -78,8 +79,10 @@ void test("session owns its canvas, frees aborted creation, reports idle loss an
       freed++;
     },
     device_lost: () => lost.promise,
-    resize() {},
-    orbit() {},
+    resize: mock.fn<(width: number, height: number, scale: number) => void>(),
+    orbit: mock.fn<(dx: number, dy: number) => void>(),
+    pan: mock.fn<(dx: number, dy: number) => void>(),
+    reset_view: mock.fn<() => void>(),
     zoom() {},
     show: () => ({ free() {} }),
     draw: () => {
@@ -137,14 +140,68 @@ void test("session owns its canvas, frees aborted creation, reports idle loss an
     const active = await ViewportSession.open(host, new AbortController().signal, (error) =>
       failures.push(error),
     );
+    assert.deepEqual(
+      viewer.resize.mock.calls.map((c) => c.arguments),
+      [[640, 480, 2]],
+    );
+    const [canvas] = children;
+    assert(canvas instanceof Canvas);
+    const drag = (button: number, shiftKey = false) => {
+      for (const [type, x, y] of [
+        ["pointerdown", 10, 20],
+        ["pointermove", 40, 15],
+        ["pointerup", 40, 15],
+      ] as const) {
+        canvas.dispatchEvent(
+          Object.assign(new Event(type), {
+            pointerId: 1,
+            clientX: x,
+            clientY: y,
+            button,
+            shiftKey: type === "pointerdown" && shiftKey,
+            ctrlKey: false,
+          }),
+        );
+      }
+    };
+    drag(0);
+    assert.deepEqual(
+      viewer.orbit.mock.calls.map((c) => c.arguments),
+      [[30, -5]],
+    );
+    assert.equal(viewer.pan.mock.callCount(), 0);
+    drag(2);
+    assert.equal(viewer.pan.mock.callCount(), 1);
+    drag(0, true);
+    assert.equal(viewer.pan.mock.callCount(), 2);
+    drag(1);
+    assert.deepEqual(
+      viewer.pan.mock.calls.map((c) => c.arguments),
+      [
+        [30, -5],
+        [30, -5],
+      ],
+    );
+    assert.equal(viewer.orbit.mock.callCount(), 1);
+    const menu = new Event("contextmenu", { cancelable: true });
+    canvas.dispatchEvent(menu);
+    assert(menu.defaultPrevented);
     active.show(new Uint8Array([1]));
-    for (const [id, callback] of frames) {
-      frames.delete(id);
-      callback(0);
-    }
+    const drawFrames = () => {
+      for (const [id, callback] of frames) {
+        frames.delete(id);
+        callback(0);
+      }
+    };
+    drawFrames();
     assert.equal(draws, 1);
     assert.equal(frames.size, 0);
     assert.equal(children.size, 1);
+    active.resetView();
+    assert.equal(viewer.reset_view.mock.callCount(), 1);
+    assert.equal(frames.size, 1);
+    drawFrames();
+    assert.equal(draws, 2);
     const loss = new Error("device lost while idle");
     lost.reject(loss);
     await Promise.resolve();
@@ -159,6 +216,8 @@ void test("session owns its canvas, frees aborted creation, reports idle loss an
     assert(alreadyLost.disposed, "completion must not mark a disposed session ready");
     assert.deepEqual(earlyFailures, [loss]);
     active.dispose();
+    active.resetView();
+    assert.equal(viewer.reset_view.mock.callCount(), 1);
     active.show(new Uint8Array([1]));
     assert.equal(freed, 3);
     assert.equal(frames.size, 0);
