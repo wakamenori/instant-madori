@@ -59,7 +59,7 @@ function qualityRates(rows: QualityRow[], area: string) {
 export function readViewerData(db: DatabaseSync, now = new Date()) {
   const hours = query(
     db,
-    { hour: n, ...counts },
+    { hour: n, end: n, parallelism: z.number(), feature_share: z.number(), ...counts },
     "SELECT * FROM mart_kpi WHERE window='hour' AND active_minutes>0 ORDER BY hour",
   )();
   const clock = query(
@@ -205,6 +205,8 @@ export function readViewerData(db: DatabaseSync, now = new Date()) {
     {
       source: label,
       last_poll: z.iso.datetime({ offset: true }).nullable(),
+      last_success: z.iso.datetime({ offset: true }).nullable(),
+      first_poll: z.iso.datetime({ offset: true }).nullable(),
       last_append: z.iso.datetime({ offset: true }).nullable(),
       quarantined: n,
       failed_cycles: n,
@@ -212,11 +214,20 @@ export function readViewerData(db: DatabaseSync, now = new Date()) {
       held: n,
       lag_minutes: value,
     },
-    "SELECT * FROM mart_health ORDER BY source",
+    `WITH polls AS (
+      SELECT s.key source,s.value->>'$.last_poll' at,
+        coalesce(s.value->>'$.failed_cycles',0)+coalesce(s.value->>'$.skipped_cycles',0) missed
+      FROM staging_record r,json_each(r.payload,'$.sources') s
+      WHERE r.source='metrics.receiver' AND s.value->>'$.last_poll' IS NOT NULL
+    ), arrivals AS (
+      SELECT source,min(at) first_poll,max(at) FILTER(WHERE missed=0) last_success FROM polls GROUP BY source
+    )
+    SELECT h.*,a.first_poll,a.last_success FROM mart_health h LEFT JOIN arrivals a USING(source) ORDER BY source`,
   )().map((r) => {
     const cadence = r.source.startsWith("t3.") ? 60 : r.source === "github.actions.job" ? 120 : 300;
+    const reference = r.last_success ?? r.first_poll ?? r.last_poll;
     const stopped =
-      r.last_poll !== null && now.getTime() - Date.parse(r.last_poll) > cadence * 3 * 1000;
+      reference !== null && now.getTime() - Date.parse(reference) > cadence * 3 * 1000;
     return { ...r, stopped };
   });
   const gaps = query(
