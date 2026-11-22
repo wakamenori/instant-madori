@@ -36,36 +36,105 @@ pub struct Rejection {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Reason {
     InvalidId {},
-    DuplicateId { first: ElementKind },
+    DuplicateId {
+        first: ElementKind,
+    },
     NoStorey {},
-    NotFinite { field: String },
-    OutOfRange { field: String, value: f64 },
-    NotPositive { field: String },
-    Negative { field: String },
-    UnknownStorey { storey: String },
-    UnknownVertex { vertex: String },
+    NotFinite {
+        field: String,
+    },
+    OutOfRange {
+        field: String,
+        value: f64,
+    },
+    NotPositive {
+        field: String,
+    },
+    Negative {
+        field: String,
+    },
+    UnknownStorey {
+        storey: String,
+    },
+    UnknownVertex {
+        vertex: String,
+    },
     SameVertexAtBothEnds {},
     ZeroLength {},
     CrossStorey {},
-    DuplicateBoundary { other: String },
-    UnknownWall { wall: String },
-    UnknownBoundary { boundary: String },
-    RepeatedBoundary { boundary: String },
-    OutlineGap { after: String, before: String },
-    PinchedOutline { vertex: String },
-    NotCounterClockwise { signed_area: f64 },
-    TooManyRooms { rooms: Vec<String> },
-    SideTaken { side: Side, rooms: Vec<String> },
+    DuplicateBoundary {
+        other: String,
+    },
+    UnknownWall {
+        wall: String,
+    },
+    UnknownBoundary {
+        boundary: String,
+    },
+    RepeatedBoundary {
+        boundary: String,
+    },
+    OutlineGap {
+        after: String,
+        before: String,
+    },
+    PinchedOutline {
+        vertex: String,
+    },
+    NotCounterClockwise {
+        signed_area: f64,
+    },
+    TooManyRooms {
+        rooms: Vec<String>,
+    },
+    SideTaken {
+        side: Side,
+        rooms: Vec<String>,
+    },
     NoRoom {},
     UnusedVertex {},
     NoRooms {},
-    TooNarrow { axis: Axis, size: f64, minimum: f64 },
-    Overlap { min: Point, max: Point },
-    NarrowGap { gap: f64, minimum: f64 },
-    PinchedCorner { at: Point },
-    UnresolvedJoint { boundaries: Vec<String> },
-    WallInsideRoom { vertex: String, boundary: String },
+    TooNarrow {
+        axis: Axis,
+        size: f64,
+        minimum: f64,
+    },
+    Overlap {
+        min: Point,
+        max: Point,
+    },
+    NarrowGap {
+        gap: f64,
+        minimum: f64,
+    },
+    PinchedCorner {
+        at: Point,
+    },
+    UnresolvedJoint {
+        boundaries: Vec<String>,
+    },
+    WallInsideRoom {
+        vertex: String,
+        boundary: String,
+    },
     NoFloor {},
+    UnknownOpening {},
+    PastWallEnd {
+        wall: String,
+        length: f64,
+        reach: f64,
+    },
+    AboveWall {
+        wall: String,
+        height: f64,
+        top: f64,
+    },
+    OverlapsOpening {
+        wall: String,
+        other: String,
+        along: f64,
+        up: f64,
+    },
 }
 
 impl std::fmt::Display for Rejections {

@@ -159,7 +159,9 @@ fn adjacent_rooms_share_one_boundary_with_opposite_directions() {
         ["s-w", "s-e", "mid"]
     );
     assert_eq!(
-        mid.openings().map(|o| o.id.as_str()).collect::<Vec<_>>(),
+        mid.openings()
+            .map(|o| o.data().id.as_str())
+            .collect::<Vec<_>>(),
         ["door"]
     );
     assert_eq!(mid.data().wall.thickness(), 120.0);

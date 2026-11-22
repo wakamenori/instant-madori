@@ -1,4 +1,4 @@
-use crate::{data::*, error::*, id::*, topology::Index};
+use crate::{OpeningView, data::*, error::*, id::*, topology::Index};
 
 #[derive(Debug)]
 pub struct House {
@@ -74,6 +74,24 @@ impl House {
             .iter()
             .filter_map(|data| self.room(&data.id))
     }
+
+    pub fn opening(&self, id: &OpeningId) -> Option<OpeningView<'_>> {
+        self.opening_view(self.data.openings.get(*self.index.openings.get(id)?)?)
+    }
+
+    pub fn openings(&self) -> impl Iterator<Item = OpeningView<'_>> {
+        self.data
+            .openings
+            .iter()
+            .filter_map(|row| self.opening_view(row))
+    }
+
+    fn opening_view<'a>(&'a self, data: &'a Opening) -> Option<OpeningView<'a>> {
+        Some(OpeningView {
+            data,
+            wall: self.boundary(&data.wall)?,
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -133,14 +151,15 @@ impl<'a> BoundaryView<'a> {
     pub fn face(self, side: Side) -> Face<'a> {
         self.room(side).map_or(Face::Exterior, Face::Room)
     }
-    pub fn openings(self) -> impl Iterator<Item = &'a Opening> {
+    pub fn openings(self) -> impl Iterator<Item = OpeningView<'a>> {
         self.house
             .index
-            .openings
+            .openings_by_wall
             .get(&self.data.id)
             .into_iter()
             .flatten()
             .filter_map(move |&i| self.house.data.openings.get(i))
+            .map(move |data| OpeningView { data, wall: self })
     }
 }
 

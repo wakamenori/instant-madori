@@ -8,6 +8,7 @@ mod joint;
 mod json;
 mod layout;
 mod measure;
+mod opening;
 mod topology;
 
 pub use data::*;
@@ -17,3 +18,4 @@ pub use id::{BoundaryId, OpeningId, OperationId, RoomId, StoreyId, VertexId};
 pub use json::{ReadError, WriteError};
 pub use layout::*;
 pub use measure::*;
+pub use opening::{OpeningView, Passage};
