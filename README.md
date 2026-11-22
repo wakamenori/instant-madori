@@ -169,7 +169,7 @@ Dependabotはnpm・Cargoの更新提案用に残し、upstream本体はsubtree�
 
 ## PRの検査（self-hosted runner）
 
-PRごとに `.github/workflows/check.yml` が、開発用Macのself-hosted runner（ラベル `madori`）で `pnpm setup` と `pnpm check` を実行します。変更したファイルから `scripts/check/ci-mode.ts` が `--full` を付けるかを決めます。最後に、自動修正で差分が出ていないことを確かめます。GitHubのrunnerは使いません。無料プランのprivateリポジトリでは2コア・ディスクの空き13 GBで、`--full` がディスク不足で失敗し、無料枠も足りないためです。
+開発用Macで2台のself-hosted runnerを動かします。PRごとに `.github/workflows/check.yml` の `mode` ジョブが `madori-light` 上で変更ファイルを `scripts/check/ci-mode.ts` に渡します。`check` ジョブは通常モードなら `madori-light`、`--full` なら `madori` で `pnpm setup` と検査を実行します。stagingへのデプロイは `madori` が担当するので、通常モードの検査はデプロイ中にも開始できます。最後に、自動修正で差分が出ていないことを確かめます。GitHubのrunnerは使いません。無料プランのprivateリポジトリでは2コア・ディスクの空き13 GBで、`--full` がディスク不足で失敗し、無料枠も足りないためです。
 
 `pnpm check` は試験ごとの結果を `target/test-results/` に書きます。保存先は `MADORI_TEST_RESULTS_DIR` で変更できます。`check` と `deploy-staging` は、失敗した回も含め、結果を成果物 `test-results-v1-<workflow>-<attempt>` として30日間保存します。取り消した回は保存しません。
 
@@ -181,15 +181,27 @@ PRごとに `.github/workflows/check.yml` が、開発用Macのself-hosted runne
 - `branch-local` は成功歴があり、失敗が一つのPRブランチに限られる試験です。
 - `stable` は成功だけを観測した試験です。
 
-checkoutは毎回clone直後と同じ状態から始めます。Rustの `target/` と `.tools/` だけは、`$RUNNER_TOOL_CACHE/madori` へのシンボリックリンクで実行の間に再利用します。runnerの `--full` は、runner用のDockerの枠（「開発を始める」）を使うので、手元の `pnpm dev` や `pnpm check --full` が開発用の枠を埋めていても待ちません。runnerは一度に一つのジョブしか動かさないので、stagingへのデプロイで `wrangler deploy` がイメージをビルドするときも、runnerのDockerの作業は一つまでです。
+checkoutは毎回clone直後と同じ状態から始めます。Rustの `target/` と `.tools/` だけは、`$RUNNER_TOOL_CACHE/madori` へのシンボリックリンクで実行の間に再利用します。runnerの `--full` は、runner用のDockerの枠（「開発を始める」）を使うので、手元の `pnpm dev` や `pnpm check --full` が開発用の枠を埋めていても待ちません。Dockerを使う `madori` は一度に一つのジョブしか動かさないので、stagingへのデプロイで `wrangler deploy` がイメージをビルドするときも、runnerのDockerの作業は一つまでです。
 
 runnerでも、`--full` の実Containerの接続検査の直後に、手元と同じ規則でDockerのビルドキャッシュを回収します。cache mountは合計8 GiBまで、最近使ったregularとfrontendは別枠で合計4 GiBまで残します。使用中の記録はBuildKitが保持するため、並行するビルドの記録は消しません。使用中のcache mountの0バイトという報告値では実容量を把握できません。runnerの `target/` と `.tools/` はこの回収の対象にしません。runnerの `--full` も、ビルドキャッシュの前に、手元と同じ規則で形状サービスのイメージを回収します。runnerと手元は同じDocker Engineを使うので、動いている手元のセッションのイメージは残ります。
 
 このリポジトリではブランチ保護を使えないため、検査の成功はマージの条件として強制されません。マージの前に、PRの最新のheadで `check` が成功していることを確かめます。
 
-runnerを入れ直すときは、[actions/runner](https://github.com/actions/runner/releases)のosx-arm64版を `~/actions-runner/instant-madori` に展開し、リポジトリの登録トークン（`gh api -X POST repos/wakamenori/instant-madori/actions/runners/registration-token`）で `./config.sh --labels madori` を実行します。mise・cargo・Dockerのある `PATH` で設定すると、runnerがその `PATH` を保存します。runnerの `.env` には、作業フォルダーを信頼する `MISE_TRUSTED_CONFIG_PATHS=<runnerのフォルダー>/_work` と、デプロイ用の認証情報を読む `MADORI_ENV_FILE=<リポジトリの .env の絶対パス>` を書きます。最後に `./svc.sh install` と `./svc.sh start` でlaunchdに常駐させます。外すときは `./svc.sh uninstall` の後に `./config.sh remove` を実行します。
+デプロイ用の `madori` を入れ直すときは、[actions/runner](https://github.com/actions/runner/releases)のosx-arm64版を `~/actions-runner/instant-madori` に展開し、リポジトリの登録トークン（`gh api -X POST repos/wakamenori/instant-madori/actions/runners/registration-token`）で `./config.sh --labels madori` を実行します。mise・cargo・Dockerのある `PATH` で設定すると、runnerがその `PATH` を保存します。runnerの `.env` には、作業フォルダーを信頼する `MISE_TRUSTED_CONFIG_PATHS=<runnerのフォルダー>/_work` と、デプロイ用の認証情報を読む `MADORI_ENV_FILE=<リポジトリの .env の絶対パス>` を書きます。最後に `./svc.sh install` と `./svc.sh start` でlaunchdに常駐させます。外すときは `./svc.sh uninstall` の後に `./config.sh remove` を実行します。
 
-ワークフローは `mise exec -- actionlint` で検査します。actionlintはrunnerのラベル `madori` を `.github/actionlint.yaml` から読み込むので、ラベルを変更するときはこのファイルも更新します。
+通常モード用のrunnerは、同じ配布物を別のフォルダー `~/actions-runner/instant-madori-light` に展開します。そこで登録時に `./config.sh --name instant-madori-light --labels madori-light` を使います。追加するラベルは `madori-light` だけです。このrunnerの `.env` には `MISE_TRUSTED_CONFIG_PATHS=<light runnerのフォルダーの絶対パス>/_work` を書き、デプロイ用の `MADORI_ENV_FILE` は設定しません。
+
+各runnerのツールキャッシュは、既定で各作業フォルダーの `_tool` にあります。初回だけ、元のrunnerがキャッシュを書き換えていない間に、同じAPFSボリューム上で次のコマンドを実行します。コピー先の `madori` がまだない状態で実行してください。`cp -c` は更新したブロックだけを別に保存するため、初回ビルドを省いても、2台が同じCargoの `target/` に書き込むことはありません。
+
+```sh
+cd ~/actions-runner/instant-madori-light
+mkdir -p _work/_tool
+cp -cR ../instant-madori/_work/_tool/madori _work/_tool/
+./svc.sh install
+./svc.sh start
+```
+
+ワークフローは `mise exec -- actionlint` で検査します。actionlintはrunnerのラベル `madori` と `madori-light` を `.github/actionlint.yaml` から読み込むので、ラベルを変更するときはこのファイルも更新します。
 
 VS Code向けの推奨拡張・保存時整形・ESLint自動修正・Rust Analyzer設定を `.vscode/` に用意しています。他のエディタやエージェントによる直接編集でも、同じ `pnpm check` を使えます。
 
@@ -234,7 +246,7 @@ SolidCraftの元のREADME・資料・ライセンスは取り込み領域に保�
 
 ## stagingへデプロイする
 
-mainへのpushで、`.github/workflows/deploy-staging.yml` がself-hosted runnerでstagingへデプロイします。`pnpm check --full`、D1のマイグレーションの適用、`scripts/deploy/wrangler-deploy.ts` を通した `wrangler deploy --env staging` の順に進め、その後 `scripts/check/staging-smoke.ts` で、Accessを通した疎通を確かめます。実行中のデプロイは最後まで続けます。待機できる実行は一つで、後から来たpushの実行が先に待っていた実行を取り消します。実行中のデプロイが終わると、最後に待っていたpushのコミットをデプロイします。マイグレーションはデプロイの前に適用するため、動いている前の版のWorkerと両立する形で書きます。mainに入ったマイグレーションは変更せず、修正は番号の大きいファイルを追加します。`pnpm check` の全モードがこの不変条件を検査します。pushによるデプロイは、`github.event.before` が指すpushの前のmainと比較します。force pushなどで、そのコミットがHEADの履歴に無ければ失敗します。手動の実行と、前のSHAが無いpushでは、`pnpm check` と同じく、mainはfirst parent、ブランチは `origin/main` との分岐点と比較します。
+mainへのpushで、`.github/workflows/deploy-staging.yml` が `madori` でstagingへデプロイします。`pnpm check --full`、D1のマイグレーションの適用、`scripts/deploy/wrangler-deploy.ts` を通した `wrangler deploy --env staging` の順に進め、その後 `scripts/check/staging-smoke.ts` で、Accessを通した疎通を確かめます。実行中のデプロイは最後まで続けます。待機できる実行は一つで、後から来たpushの実行が先に待っていた実行を取り消します。実行中のデプロイが終わると、最後に待っていたpushのコミットをデプロイします。マイグレーションはデプロイの前に適用するため、動いている前の版のWorkerと両立する形で書きます。mainに入ったマイグレーションは変更せず、修正は番号の大きいファイルを追加します。`pnpm check` の全モードがこの不変条件を検査します。pushによるデプロイは、`github.event.before` が指すpushの前のmainと比較します。force pushなどで、そのコミットがHEADの履歴に無ければ失敗します。手動の実行と、前のSHAが無いpushでは、`pnpm check` と同じく、mainはfirst parent、ブランチは `origin/main` との分岐点と比較します。
 
 GitHubはmainへのpushの前後のコミットを比較し、変更したファイルがすべてworkflowの `paths-ignore` に該当すればデプロイを起動しません。対象は `docs/`、`.claude/`、`.github/ISSUE_TEMPLATE/`、`metrics/` の配下と、ルートの `README.md`、`AGENTS.md`、`CLAUDE.md` です。これらは文書、エージェント向けの指示、開発の計測で、Containerイメージのビルド、Workerと静的ファイルのビルド、マイグレーション、デプロイ、疎通確認では読みません。読むのは `pnpm check` の整形、ESLint、文書のパス検査、秘密情報の検査、テストだけで、マージ前にPRの `check` ですべて実行します。一覧の各項目はディレクトリ全体（`<ディレクトリ>/**`）か一つのMarkdownファイルです。この形式と、デプロイが読むディレクトリと重ならないことを `scripts/check/staging-smoke.test.ts` で確かめます。アプリ、クレート、パッケージ、スクリプト、upstream、マイグレーション、依存関係やツールのバージョン固定、このworkflow自体など、対象外のファイルを一つでも変えればデプロイします。ルートのREADMEだけを変えた場合も含め、対象の文書や指示だけのpushでは、stagingは直前にデプロイしたコミットのままで、そのpushのコミットにはdeploy-stagingの実行がありません。手動実行（`gh workflow run`）ではこの一覧を使いません。
 

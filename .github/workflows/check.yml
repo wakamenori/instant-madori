@@ -8,9 +8,27 @@ concurrency:
   group: check-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  mode:
+    runs-on: [self-hosted, madori-light]
+    timeout-minutes: 10
+    outputs:
+      flag: ${{ steps.select.outputs.flag }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          set-safe-directory: false
+      - id: select
+        shell: bash
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || 'origin/main' }}
+        run: |
+          flag=$(git diff --name-only "$BASE...HEAD" | node scripts/check/ci-mode.ts)
+          echo "flag=$flag" >> "$GITHUB_OUTPUT"
   check:
-    # The self-hosted Mac runner (README: CI runner). GitHub-hosted runners are too small for this repo.
-    runs-on: [self-hosted, madori]
+    needs: mode
+    runs-on:
+      [self-hosted, "${{ needs.mode.outputs.flag == '--full' && 'madori' || 'madori-light' }}"]
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v5
@@ -27,12 +45,10 @@ jobs:
           ln -s "$cache/tools" .tools
       - run: pnpm install --frozen-lockfile
       - run: pnpm setup
-      - id: mode
+      - name: pnpm check ${{ needs.mode.outputs.flag }}
+        run: pnpm check ${FLAG:+"$FLAG"}
         env:
-          BASE: ${{ github.event.pull_request.base.sha || 'origin/main' }}
-        run: echo "flag=$(git diff --name-only "$BASE...HEAD" | node scripts/check/ci-mode.ts)" >> "$GITHUB_OUTPUT"
-      - run: pnpm check ${{ steps.mode.outputs.flag }}
-        env:
+          FLAG: ${{ needs.mode.outputs.flag }}
           MADORI_TEST_RESULTS_DIR: ${{ runner.temp }}/test-results
       - if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v7

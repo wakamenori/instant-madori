@@ -35,9 +35,12 @@ LEFT JOIN issue_change ic ON ic.pr=t.pr AND (t.issue IS NULL OR ic.issue=t.issue
 UNION ALL SELECT s.id,'advisor',o.issue,NULL,NULL,NULL,s.started_at,s.completed_at
 FROM stg_t3_subagent s LEFT JOIN owner o ON o.id=s.thread_id WHERE s.origin='provider_native';
 
+CREATE VIEW measured_actions_job AS
+SELECT * FROM stg_actions_job WHERE workflow<>'check' OR coalesce(name,'check')='check';
+
 CREATE TABLE issue_job AS
 SELECT DISTINCT ic.issue,j.id FROM issue_change ic JOIN change c USING(pr)
-JOIN stg_actions_job j ON j.workflow='check' AND (j.head_branch=c.head_ref OR EXISTS (SELECT 1 FROM json_each(j.pr_numbers) WHERE value=c.pr));
+JOIN measured_actions_job j ON j.workflow='check' AND (j.head_branch=c.head_ref OR EXISTS (SELECT 1 FROM json_each(j.pr_numbers) WHERE value=c.pr));
 
 CREATE TABLE issue_deploy AS
 SELECT ic.issue,c.pr,d.run_id,d.run_attempt,d.updated_at completed_at

@@ -3,14 +3,17 @@ SELECT DISTINCT ic.issue,c.pr,a.head_sha,
  CASE WHEN a.run_attempt>1 THEN a.started_at ELSE a.created_at END start,
  CASE WHEN a.status='completed' THEN a.updated_at END end
 FROM issue_change ic JOIN change c USING(pr) JOIN stg_github_pr p ON p.number=c.pr
-JOIN stg_actions_attempt a ON a.workflow='check' AND
+JOIN stg_actions_attempt a ON a.workflow='check'
+ -- A routed attempt also includes time spent waiting for and running mode.
+ AND (a.run_id,a.run_attempt) NOT IN (SELECT run_id,run_attempt FROM stg_actions_job
+ WHERE workflow='check' AND name='mode' AND run_id IS NOT NULL AND run_attempt IS NOT NULL) AND
  (a.head_sha=p.head_sha OR EXISTS(SELECT 1 FROM issue_job ij JOIN stg_actions_job j USING(id)
  WHERE ij.issue=ic.issue AND j.run_id=a.run_id AND j.run_attempt=a.run_attempt
  AND (j.head_branch=c.head_ref OR EXISTS(SELECT 1 FROM json_each(j.pr_numbers) WHERE value=c.pr))))
-UNION SELECT ij.issue,ic.pr,j.head_sha,j.created_at,j.completed_at
-FROM issue_job ij JOIN stg_actions_job j USING(id) JOIN issue_change ic ON ij.issue=ic.issue
-JOIN change c ON c.pr=ic.pr WHERE j.workflow='check'
- AND (j.head_branch=c.head_ref OR EXISTS(SELECT 1 FROM json_each(j.pr_numbers) WHERE value=c.pr));
+UNION SELECT ic.issue,ic.pr,j.head_sha,j.created_at,j.completed_at
+FROM issue_change ic JOIN change c USING(pr) JOIN stg_github_pr p ON p.number=c.pr
+JOIN measured_actions_job j ON j.workflow='check'
+ AND (j.head_sha=p.head_sha OR j.head_branch=c.head_ref OR EXISTS(SELECT 1 FROM json_each(j.pr_numbers) WHERE value=c.pr));
 CREATE INDEX check_issue ON check_period(issue,start,end);
 CREATE TABLE check_gate AS
 SELECT DISTINCT d.issue,d.at start,j.end,j.start queued
