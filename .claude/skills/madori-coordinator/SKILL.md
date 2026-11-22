@@ -188,6 +188,7 @@ node .claude/skills/madori-coordinator/scripts/rank-ready.mjs
   - Opus：`{providerInstanceId: <instance>, model: "claude-opus-5-5", options: {effort: "xhigh"}}`。`<instance>` は「担当を立てる」と同じく、指揮役自身のスレッドの `providerInstanceId` を写す。
   - Codex：`{providerInstanceId: "codex", model: <モデル>, options: {reasoningEffort: "xhigh"}}`。モデルは [pstack-models.md](../../rules/pstack-models.md) の、PR の playbook の行から取る。該当する playbook の行が無いときは、`feature, refactoring` の行を使う。
 - `delegate_task` に `isolation: "worktree"` を付けて、指揮役のスレッドの子として立てる。指示は [verifier-brief.md](verifier-brief.md) の `{…}` を埋めて渡す。
+- `delegate_task` の `title` を `PR #<PR>（#<Issue>）の検証（<回>回目）` にする。`<回>` は下の yaml の `attempt` と同じ数である。計測（`metrics/ingest/polled.ts` の `threadTitle`）はこの形で検証役のスレッドを見分け、Issue と PR に結ぶので、ほかの形にしない。
 - 指示に足してよいのは、試す入力と確かめ方だけにする。合否の基準を足すなら、先に Issue に書く。普段の手順と食い違う禁止は書かない。足した基準に拠る不合格が出たら、その基準を見直してから、同じ検証役に判定し直させる。
 - 同じ仕組みの端の場合で二回目の不合格が出たら、直しを重ねる前に、その仕組みを確かな情報源に切り替えるか、テストのあるスクリプトに移すかを決めて、担当に伝える。
 - 検証役のスレッドには PR を紐付けない。
