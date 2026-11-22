@@ -15,7 +15,7 @@
     "images:upload": "node scripts/dev/upload-images.ts",
     "docker:prune-images": "node scripts/dev/prune-images.ts",
     "docker:prune-build-cache": "node scripts/dev/prune-build-cache.ts",
-    "generate:geometry": "cargo run --locked -q -p madori-geometry-api --bin emit-typescript && node scripts/generate/generate-geometry.ts",
+    "generate:geometry": "cargo run --locked -q -p madori-geometry-api --bin emit-typescript -- packages/contracts/src/generated && node scripts/generate/generate-geometry.ts",
     "build": "node scripts/build/build-wasm.ts && pnpm --filter @madori/web build && pnpm --filter @madori/worker build && cargo build --locked -p madori-geometry",
     "dev": "node scripts/build/build-wasm.ts && pnpm --filter @madori/web build && node scripts/dev/dev.ts",
     "upstream:check": "node scripts/upstream/upstream.ts check",

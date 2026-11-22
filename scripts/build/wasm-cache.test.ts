@@ -72,7 +72,8 @@ void test("only the viewer's build inputs invalidate a cached build", (t) => {
   execFileSync("git", ["init", "-q"], { cwd: root });
   execFileSync("git", ["add", "."], { cwd: root });
   execFileSync("cargo", ["generate-lockfile"], { cwd: root });
-  const key = () => wasmFingerprint(root, "bindgen");
+  const key = () => wasmFingerprint(root, "bindgen", "cargo");
+  assert.notEqual(key()?.key, wasmFingerprint(root, "bindgen", "mbx")?.key);
   let builds = 0;
   const run = () =>
     cacheWasm(root, join(root, "cache"), key, () => {

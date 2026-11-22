@@ -1,3 +1,4 @@
+import { rustBuildTool } from "../shared/rust-build.ts";
 import { machineSlots, withDockerSlot } from "../shared/docker-slots.ts";
 import { access, glob } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -19,7 +20,7 @@ Run pnpm setup once before checking. No mode stages files or deploys resources.`
 export async function runChecks(
   mode: "--fast" | "default" | "--full",
   crates: ReturnType<typeof serviceCrates>,
-  run: (label: string, command: string, args: string[]) => Promise<void>,
+  run: (label: string, command: string, args: string[], env?: NodeJS.ProcessEnv) => Promise<void>,
   inDockerSlot: (stage: () => Promise<void>) => Promise<void>,
   resultsDir = resolve(process.env.MADORI_TEST_RESULTS_DIR ?? "target/test-results"),
   forceRust = false,
@@ -35,12 +36,14 @@ export async function runChecks(
     );
   await resetResults(resultsDir);
   const pnpm = (label: string, ...commandArgs: string[]) => run(label, "pnpm", commandArgs);
-  const cargo = (label: string, ...commandArgs: string[]) => run(label, "cargo", commandArgs);
+  const tool = rustBuildTool();
+  const cargo = (label: string, ...commandArgs: string[]) =>
+    run(label, tool.command, commandArgs, tool.env);
   const script = (label: string, path: string) => run(label, process.execPath, [path]);
   const format = () =>
     pnpm("Format service files", "exec", "prettier", "--write", ".", "--log-level", "warn");
   const rustFormat = () =>
-    cargo("Format service Rust", "fmt", ...crates.flatMap((crate) => ["-p", crate.name]));
+    run("Format service Rust", "cargo", ["fmt", ...crates.flatMap((crate) => ["-p", crate.name])]);
 
   await format();
   await rustFormat();
@@ -55,6 +58,8 @@ export async function runChecks(
       "madori-geometry-api",
       "--bin",
       "emit-typescript",
+      "--",
+      "packages/contracts/src/generated",
     );
   await script("Generate internal body validators", "scripts/generate/generate-geometry.ts");
   if (mode === "--full") {
@@ -224,11 +229,16 @@ async function main() {
   process.on("SIGTERM", interrupt);
   const started = performance.now();
 
-  async function run(label: string, command: string, commandArgs: string[]) {
+  async function run(
+    label: string,
+    command: string,
+    commandArgs: string[],
+    env?: NodeJS.ProcessEnv,
+  ) {
     interruption.signal.throwIfAborted();
     console.log(`\n[check] ${label}`);
     const stepStarted = performance.now();
-    const child = start(command, commandArgs);
+    const child = start(command, commandArgs, { env });
     active.add(child);
     const result = await child.finished;
     active.delete(child);

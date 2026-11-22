@@ -3,6 +3,7 @@ import { existsSync, readFileSync, rmSync } from "node:fs";
 import { basename, dirname, join, parse, resolve } from "node:path";
 import { z } from "zod";
 import { fileURLToPath } from "node:url";
+import { rustBuildTool } from "../shared/rust-build.ts";
 import { repositoryRoot } from "../shared/repository.ts";
 
 import {
@@ -87,8 +88,9 @@ export function buildWasm(root = fileURLToPath(repositoryRoot)) {
       cause: error,
     });
   }
-  const dir = cacheDirectory(root);
-  const build = () => compile(root, bindgen);
+  const tool = rustBuildTool();
+  const dir = cacheDirectory(root, tool.command);
+  const build = () => compile(root, bindgen, tool);
   if (!dir) {
     build();
     return;
@@ -96,7 +98,7 @@ export function buildWasm(root = fileURLToPath(repositoryRoot)) {
   cacheWasm(
     root,
     dir,
-    () => wasmFingerprint(root, version),
+    () => wasmFingerprint(root, version, tool.fingerprint),
     (files) => {
       const { units, scripts } = build();
       return (
@@ -116,12 +118,12 @@ export function buildWasm(root = fileURLToPath(repositoryRoot)) {
   );
 }
 
-function compile(root: string, bindgen: string) {
+function compile(root: string, bindgen: string, tool: ReturnType<typeof rustBuildTool>) {
   console.info(`[wasm] profile=${profile}, wasm-bindgen input=${wasmOutput}`);
   // Cargo must materialize its own artifact after a previous cache restore.
   rmSync(join(root, wasmOutput), { force: true });
   const output = execFileSync(
-    "cargo",
+    tool.command,
     [
       "build",
       "--locked",
@@ -135,6 +137,7 @@ function compile(root: string, bindgen: string) {
     ],
     {
       cwd: root,
+      env: tool.env,
       stdio: ["inherit", "pipe", "inherit"],
       encoding: "utf8",
       maxBuffer: 64 * 1024 ** 2,

@@ -47,6 +47,10 @@ void test("the Wasm builder passes release output to wasm-bindgen", (t) => {
     if (file === "cargo") return output;
     return args?.[0] === "--version" ? "wasm-bindgen 0.2.129" : "";
   });
+  t.mock.method(childProcess, "spawnSync", () => ({
+    status: null,
+    error: new Error("mbx unavailable"),
+  }));
   const logs: string[] = [];
   t.mock.method(console, "info", (message: string) => logs.push(message));
   syncBuiltinESMExports();

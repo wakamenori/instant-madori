@@ -85,12 +85,13 @@ function localDirectories(root: string) {
 const buildEnvironment =
   /^(?:CARGO_|RUST|WASM_BINDGEN_|WBG_|MACOSX_DEPLOYMENT_TARGET$|SDKROOT$|CC(?:_|$)|CFLAGS|AR(?:_|$)|SOURCE_DATE_EPOCH$|OPT_LEVEL$|DEBUG$)/u;
 
-export function wasmFingerprint(root: string, bindgenVersion: string) {
+export function wasmFingerprint(root: string, bindgenVersion: string, toolFingerprint: string) {
   const hash = createHash("sha256");
   const add = (name: string, bytes: string | Buffer) => {
     hash.update(JSON.stringify([name, Buffer.byteLength(bytes)])).update(bytes);
   };
   add("rustc", run(root, "rustc", ["-vV"]));
+  add("build-tool", toolFingerprint);
   add("cargo", run(root, "cargo", ["-V"]));
   add("wasm-bindgen", bindgenVersion);
   for (const name of Object.keys(process.env).sort()) {
@@ -166,8 +167,21 @@ export function coversBuildScriptInputs(
   });
 }
 
-export function cacheDirectory(root: string) {
+export function cacheDirectory(root: string, tool = "cargo") {
   if (process.env.MADORI_WASM_CACHE === "0" || process.env.GITHUB_ACTIONS === "true") return;
+  if (tool === "mbx") {
+    const configDir =
+      process.platform === "darwin"
+        ? join(homedir(), "Library/Application Support")
+        : (process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config"));
+    // Custom linker profiles and environment overrides can reference external build inputs.
+    if (
+      existsSync(join(root, ".mbx.toml")) ||
+      existsSync(join(configDir, "mbx/config.toml")) ||
+      Object.keys(process.env).some((name) => name.startsWith("MBX_"))
+    )
+      return;
+  }
   // External Cargo configuration can select arbitrary compilers, source mirrors and linkers.
   const cargoHome = process.env.CARGO_HOME ?? join(homedir(), ".cargo");
   const configs = [
