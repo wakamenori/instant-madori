@@ -16,7 +16,7 @@ pstack の poteto-mode の Orchestrate に従い、各 PR は Autopilot-full の
 - 指揮役は、メインのチェックアウトで動く Claude Code の T3 スレッド一つ。コードも PR も作らない。
 - プログラムの状態は GitHub に置き、milestone、Issue、PR から読み直す。Orchestrate の `notes.md` と store は作らない。show-me-your-work の判断の記録は、Issue と PR のコメントに書く。
 - 担当は T3 のスレッドとして、検証役は指揮役のスレッドの子として立てる。cloud VM の代わりに、このマシンの worktree を使う。
-- 同時に動かす担当は五人まで。担当はこのマシンで、`pnpm dev` の固定のポート、CPU とメモリ、ディスクを共有するため。その内側の枠は「次の Issue を選ぶ」にある。Rust の `target` は worktree ごとに持つので、担当と検証役は同時に cargo を使ってよい。
+- 同時に動かす担当は五人まで。担当はこのマシンで、CPU とメモリ、ディスクを共有するため。その内側の枠は「次の Issue を選ぶ」にある。Rust の `target` は worktree ごとに持つので、担当と検証役は同時に cargo を使ってよい。
 - 検証は、head ごとに検証役一人で行う。Autopilot-full の swarm にはしない。
 - マージするかは指揮役が決める。コマンドも指揮役が打ってよい。
 - シェルの手順は、[scripts/](scripts/) のスクリプトを、各節に書いたコマンドで呼ぶ。着手する Issue の順も [scripts/rank-ready.mjs](scripts/rank-ready.mjs) で出す。依存の鎖の長さは手で数えられないため。番号や SHA を書き込んだコマンドを一つずつ打ち、変数、ループ、ファイルへのリダイレクトで手順を組み立てない。Bash ツールの zsh は、`noclobber` で既存のファイルへの `>` を拒み、引用符の無い変数を単語に分けないので、組み立てた手順は黙って失敗する。新しい手順が要るときは、スキルにシェルを書かずに、テスト（`*.test.mjs`。`pnpm check` が実行する）と一緒にスクリプトを `scripts/` に足す。その場で書いたスクリプトとポーリングのループは使わない。
