@@ -117,7 +117,7 @@ figure { margin: 0; }
 .probe { position: absolute; inset: 0; cursor: crosshair; }
 .probe:focus-visible { outline-offset: 0; }
 .cross { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px solid var(--ink-2); pointer-events: none; }
-.tip { position: fixed; z-index: 10; pointer-events: none; min-width: 140px; max-width: 280px; padding: 6px 8px; background: var(--surface); border: 1px solid var(--rule-strong); border-radius: 4px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12); font-size: 11px; }
+.tip { position: absolute; top: 0; z-index: 10; pointer-events: none; min-width: 140px; max-width: 280px; padding: 6px 8px; background: var(--surface); border: 1px solid var(--rule-strong); border-radius: 4px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12); font-size: 11px; }
 .tip p { color: var(--ink-3); margin-bottom: 2px; }
 .tip div { display: flex; align-items: center; gap: 6px; }
 .tip b { font-size: 12px; font-variant-numeric: tabular-nums; min-width: 3.5em; }
@@ -226,18 +226,18 @@ form.addEventListener("change", () =>
   }),
 );
 const dialog = document.querySelector("dialog");
-// Each surface owns its list: a modal dialog hides anything moved into it once it closes.
-const chartTip = document.querySelector("#chart-tip"), laneTip = document.querySelector("#lane-tip");
+// Each chart frame owns its value list and positions it relative to itself, so the list scrolls away with the chart.
 function place(tip, x, y) {
-  const left = x + 14 + tip.offsetWidth > innerWidth ? x - 14 - tip.offsetWidth : x + 14;
-  tip.style.left = Math.max(4, left) + "px";
-  tip.style.top = Math.max(4, Math.min(y, innerHeight - tip.offsetHeight - 4)) + "px";
+  const box = tip.parentElement.getBoundingClientRect();
+  const right = x - box.left + 14;
+  tip.style.left = (box.left + right + tip.offsetWidth > innerWidth - 4 ? right - 28 - tip.offsetWidth : right) + "px";
+  tip.style.top = y - box.top + "px";
 }
 const hours = (ms) => (ms / 3600000).toLocaleString("ja-JP", { maximumFractionDigits: ms < 36000000 ? 2 : 1 });
 document.addEventListener("click", (event) => {
-  const button = event.target.closest("button");
-  if (!button || button.disabled) return;
-  changeView(() => press(button));
+  const control = event.target.closest("button, a");
+  if (!control || control.disabled) return;
+  changeView(() => control.matches("button") && press(control));
 });
 function press(button) {
   if (button.matches(".swap")) {
@@ -283,8 +283,10 @@ function press(button) {
   }
 }
 dialog.addEventListener("close", () => changeView(() => {}));
+addEventListener("hashchange", () => changeView(() => {}));
+document.addEventListener("pointerout", (event) => event.relatedTarget || hideLists());
 function hideLists() {
-  chartTip.hidden = laneTip.hidden = true;
+  for (const tip of document.querySelectorAll(".tip")) tip.hidden = true;
   for (const line of document.querySelectorAll(".cross")) line.hidden = true;
 }
 function showTip(layer, index, anchor) {
@@ -305,11 +307,13 @@ function showTip(layer, index, anchor) {
     div.append(key, value, name);
     return div;
   });
-  laneTip.hidden = true;
-  chartTip.replaceChildren(head, ...items.reverse());
-  chartTip.hidden = false;
+  const tip = layer.parentElement.querySelector(".tip");
+  hideLists();
+  line.hidden = false;
+  tip.replaceChildren(head, ...items.reverse());
+  tip.hidden = false;
   const box = layer.getBoundingClientRect();
-  place(chartTip, anchor ?? box.left + (box.width * (row.a + row.b)) / 2, box.top);
+  place(tip, anchor ?? box.left + (box.width * (row.a + row.b)) / 2, box.top);
   layer.dataset.index = index;
 }
 function nearest(layer, clientX) {
@@ -336,10 +340,11 @@ document.addEventListener("pointermove", (event) => {
       .map((lane) => { const d = document.createElement("div"); d.textContent = lane.querySelector("b").textContent; return d; });
     lanes.style.setProperty("--cursor", 100 * f + "%");
     lanes.classList.add("tracking");
-    chartTip.hidden = true;
-    laneTip.replaceChildren(head, ...active);
-    laneTip.hidden = false;
-    place(laneTip, event.clientX, event.clientY + 14);
+    const tip = lanes.querySelector(".tip");
+    hideLists();
+    tip.replaceChildren(head, ...active);
+    tip.hidden = false;
+    place(tip, event.clientX, event.clientY + 14);
     return;
   }
   hideLists();

@@ -97,7 +97,7 @@ function breakMarks(f: Frame, x: (pos: number) => number) {
   return f.breaks.map((b) => `<path class="break" d="M${x(b.position)} 0V${H}"/>`).join("");
 }
 function hoverLayer(f: Frame, end: number) {
-  return `<div class="probe" data-chart="${payload(f, end)}" tabindex="0" role="img" aria-label="ポインタか左右の矢印キーで、その時刻の値を一覧します"><i class="cross" hidden></i></div>`;
+  return `<div class="probe" data-chart="${payload(f, end)}" tabindex="0" role="img" aria-label="ポインタか左右の矢印キーで、その時刻の値を一覧します"><i class="cross" hidden></i></div><div class="tip" role="status" hidden></div>`;
 }
 /** Small trend line with its uncertainty band. values = [value, low?, high?]. */
 export function spark(f: Frame, height: number) {

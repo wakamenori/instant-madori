@@ -112,7 +112,7 @@ export function renderDashboard(data: ViewerData) {
   ${Object.entries(data.timelines)
     .map(([issue, lanes]) => timeline(issue, lanes))
     .join("")}
-  <dialog><form method="dialog"><button class="close">閉じる</button></form><div class="issue-body"></div><div class="tip" id="lane-tip" role="status" hidden></div></dialog><div class="tip" id="chart-tip" role="status" hidden></div>
+  <dialog><form method="dialog"><button class="close">閉じる</button></form><div class="issue-body"></div></dialog>
   <section class="detail"><h2>改善の効果</h2>${table(
     ["改善のIssue", "狙い", "前後の稼働分", "改善前（95%区間）", "改善後（95%区間）"],
     data.effects.map((r) => [
@@ -213,7 +213,7 @@ function timeline(issue: string, lanes: ViewerData["timelines"][number]) {
     3,
   );
   const body = intervals.length
-    ? `<div class="chart"><div class="chart-head"><p>${esc(date(start / 1000))} 〜 ${esc(date(end / 1000))} JST</p>${toggle}</div><figure class="lanes" data-start="${start}" data-end="${end}"><div class="plot">${rows}</div><div class="chart-table" hidden>${records}</div></figure></div>`
+    ? `<div class="chart"><div class="chart-head"><p>${esc(date(start / 1000))} 〜 ${esc(date(end / 1000))} JST</p>${toggle}</div><figure class="lanes" data-start="${start}" data-end="${end}"><div class="plot">${rows}<div class="tip" role="status" hidden></div></div><div class="chart-table" hidden>${records}</div></figure></div>`
     : '<p class="empty">区間の記録はありません</p>';
   return `<template id="issue-${esc(issue)}"><h2>#${esc(issue)} 担い手ごとの経過</h2>${body}</template>`;
 }

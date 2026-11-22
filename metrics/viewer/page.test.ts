@@ -135,18 +135,29 @@ function page() {
     addEventListener: (type: string, fn: Listener) =>
       listeners.set(type, [...(listeners.get(type) ?? []), fn]),
   };
-  runInNewContext(script, { document, innerWidth: 1280, innerHeight: 800 });
+  const win = new FakeElement("window");
+  runInNewContext(script, {
+    document,
+    innerWidth: 1280,
+    innerHeight: 800,
+    addEventListener: (type: string, fn: Listener) => win.addEventListener(type, fn),
+  });
   const fire = (type: string, event: object) => {
     for (const fn of listeners.get(type) ?? []) fn({ preventDefault() {}, ...event });
   };
   /** The one value list on screen; it must not sit inside a closed dialog. */
   const shown = () => {
-    const tips = body.querySelectorAll("div").filter((d) => /tip/u.test(d.id) && !d.hidden);
+    const tips = body
+      .querySelectorAll("div")
+      .filter((d) => (d.classList.has("tip") || /tip/u.test(d.id)) && !d.hidden);
     assert.equal(tips.length, 1, "exactly one value list is visible");
     return tips[0] as FakeElement;
   };
-  const anyShown = () => body.querySelectorAll("div").some((d) => /tip/u.test(d.id) && !d.hidden);
-  return { body, dialog, form, fire, shown, anyShown };
+  const anyShown = () =>
+    body
+      .querySelectorAll("div")
+      .some((d) => (d.classList.has("tip") || /tip/u.test(d.id)) && !d.hidden);
+  return { body, dialog, form, win, fire, shown, anyShown };
 }
 const lines = (tip: FakeElement) => tip.children.map((c) => c.textContent);
 
@@ -178,9 +189,33 @@ function chartLayer() {
   const cross = new FakeElement("i", ["cross"]);
   cross.hidden = true;
   layer.append(cross);
-  const { host, swap, plot, table } = chartFrame("article", layer);
+  const own = /<div class="plot">(?:(?!<div class="xaxis").)*class="tip"/su.test(html);
+  const { host, swap, plot, table } = chartFrame("article", layer, ...frameTip(own));
   return { layer, cross, host, swap, plot, table };
 }
+/** A value list inside the chart frame, when the rendered markup puts one there. */
+function frameTip(present: boolean) {
+  if (!present) return [];
+  const tip = new FakeElement("div", ["tip"]);
+  tip.hidden = true;
+  return [tip];
+}
+const timelineOwnsTip =
+  /<figure class="lanes"[^>]*><div class="plot">(?:(?!<\/figure>).)*class="tip"/su.test(
+    renderDashboard({
+      generatedAt: null,
+      timelines: { 1: [{ name: "tier:work", intervals: [[0, 1]], ms: 1 }] },
+      quality: [],
+      breaks: [],
+      combos: [],
+      effects: [],
+      prevention: [],
+      health: [],
+      gaps: [],
+      verification: [],
+      inactive: [],
+    }),
+  );
 /** The markup around a chart that the 表で見る button switches: host > [button, figure > [.plot, .chart-table]]. */
 function chartFrame(hostTag: "article" | "div", ...content: FakeElement[]) {
   const host = new FakeElement(hostTag, hostTag === "div" ? ["chart"] : []);
@@ -238,7 +273,12 @@ function timelineIn(dialog: FakeElement) {
     row.append(label, track);
     return row;
   };
-  const { host, swap, figure } = chartFrame("div", lane("作業", 0, 1), lane("待ち", 1, 2));
+  const { host, swap, figure } = chartFrame(
+    "div",
+    lane("作業", 0, 1),
+    lane("待ち", 1, 2),
+    ...frameTip(timelineOwnsTip),
+  );
   figure.classList.add("lanes");
   figure.dataset.start = String(Date.UTC(2026, 10, 23, 0));
   figure.dataset.end = String(Date.UTC(2026, 10, 23, 2));
@@ -305,4 +345,22 @@ void test("every view change hides the value lists: table switch, filters and cl
   assert.ok(shown());
   dialog.dispatch("close");
   assert.equal(anyShown(), false, "closing the timeline hides the list");
+});
+
+void test("each chart frame holds its own value list, so a jump within the page leaves none behind", () => {
+  const { body, win, fire, shown, anyShown } = page();
+  const chart = chartLayer();
+  const link = new FakeElement("a");
+  body.append(chart.host, link);
+  fire("pointermove", { target: chart.layer, clientX: 250, clientY: 220 });
+  assert.equal(
+    shown().parentElement,
+    chart.plot,
+    "the list sits in the chart frame and scrolls with it",
+  );
+  fire("click", { target: link });
+  assert.equal(anyShown(), false, "following an in-page link hides the list");
+  fire("pointermove", { target: chart.layer, clientX: 250, clientY: 220 });
+  win.dispatch("hashchange");
+  assert.equal(anyShown(), false, "a hash change from the keyboard or history hides the list");
 });
