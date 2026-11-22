@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { json } from "node:stream/consumers";
 import type { z } from "zod";
@@ -23,7 +23,7 @@ function targetSchema(schema: typeof z) {
 function statePath({ cwd, session_id }: Session) {
   const path = execFileSync(
     "git",
-    ["rev-parse", "--git-path", `agent-guard/verifier-${session_id}.json`],
+    ["rev-parse", "--git-path", `agent-guard/session-${session_id}.json`],
     {
       cwd,
       encoding: "utf8",
@@ -33,18 +33,29 @@ function statePath({ cwd, session_id }: Session) {
   return resolve(cwd, path.trimEnd());
 }
 
+function readState(path: string, schema: typeof z) {
+  if (!existsSync(path)) return undefined;
+  return schema
+    .object({ verifier: targetSchema(schema).nullable() })
+    .parse(JSON.parse(readFileSync(path, "utf8")));
+}
+
 const rememberTarget: Handler = (input, session, schema) => {
   const { prompt } = schema.object({ prompt: schema.string() }).parse(input);
-  const match = /verdict\.ts --pr (\d+) --head ([0-9a-f]{40}) --attempt (\d+)\b/u.exec(prompt);
-  if (!match) return allow;
-  const target = targetSchema(schema).parse({
-    pr: Number(match[1]),
-    head: match[2],
-    attempt: Number(match[3]),
-  });
   const path = statePath(session);
+  const state = readState(path, schema);
+  if (state?.verifier === null) return allow;
+  const match = /verdict\.ts --pr (\d+) --head ([0-9a-f]{40}) --attempt (\d+)\b/u.exec(prompt);
+  if (!match && state) return allow;
+  const verifier = match
+    ? targetSchema(schema).parse({
+        pr: Number(match[1]),
+        head: match[2],
+        attempt: Number(match[3]),
+      })
+    : null;
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, JSON.stringify(target));
+  writeFileSync(path, JSON.stringify({ verifier }));
   return allow;
 };
 
@@ -54,9 +65,9 @@ const checkVerdict: Handler = (input, session, schema) => {
       .stop_hook_active
   )
     return allow;
-  const { pr, head, attempt } = targetSchema(schema).parse(
-    JSON.parse(readFileSync(statePath(session), "utf8")),
-  );
+  const verifier = readState(statePath(session), schema)?.verifier;
+  if (!verifier) return allow;
+  const { pr, head, attempt } = verifier;
   function gh(args: string[]): unknown {
     return JSON.parse(
       execFileSync("gh", args, {

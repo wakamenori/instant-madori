@@ -132,8 +132,6 @@ esac
     const fixture = (name: string, data: unknown) =>
       writeFileSync(resolve(cwd, name), JSON.stringify(data));
     writeFileSync(resolve(cwd, "calls"), "");
-    assert.equal(run("UserPromptSubmit", { prompt: "Implement the issue" }), "");
-    assert.equal(stop(), "");
     assert.equal(run("UserPromptSubmit", { prompt }), "");
     assert.equal(run("Stop", { stop_hook_active: true }), "");
     assert.equal(run("Stop", { stop_hook_active: false, session_id: "other" }), "");
@@ -163,6 +161,13 @@ esac
         assert.ok(decision.reason.includes(phrase), decision.reason);
       }
     }
+    const owner = { session_id: "owner" };
+    const callsBeforeOwner = calls();
+    for (const message of ["Implement the issue", prompt, prompt]) {
+      assert.equal(run("UserPromptSubmit", { ...owner, prompt: message }), "");
+      assert.equal(run("Stop", owner), "");
+    }
+    assert.equal(calls(), callsBeforeOwner);
     assertBlock(1);
     assert.equal(
       run("UserPromptSubmit", { prompt: prompt.replace("--attempt 1", "--attempt 2") }),
