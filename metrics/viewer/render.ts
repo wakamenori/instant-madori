@@ -114,6 +114,7 @@ function windowPage(data: ViewerData, w: ViewerData["windows"][number]) {
       value: p.throughput,
       low: p.throughput_low,
       high: p.throughput_high,
+      uncounted: p.uncounted_features,
     })),
     trend(
       axis,

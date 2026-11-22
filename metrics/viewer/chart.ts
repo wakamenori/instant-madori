@@ -36,6 +36,7 @@ type Sample = {
   dim?: boolean;
   n?: number;
   excluded?: number;
+  uncounted?: number;
   observed?: number | undefined;
 };
 const palette = [
@@ -103,7 +104,7 @@ export function trend<P extends Endpoint>(
   scale = 1,
 ) {
   const series = axis.points.map((p) => ({ p, ...sample(p) }));
-  const max = series.reduce((m, s) => Math.max(m, s.value ?? 0), 0);
+  const max = unit === "%" ? 1 : series.reduce((m, s) => Math.max(m, s.value ?? 0), 0);
   const latest = series.at(-1);
   function reading(s: Sample) {
     const range =
@@ -136,7 +137,7 @@ export function trend<P extends Endpoint>(
       series
         .map((s, i) => {
           const left = x(series[i - 1]?.p.position ?? axis.start ?? 0);
-          return `<rect x="${left}" width="${x(s.p.position) - left}" height="${height}" fill="transparent"><title>${date(s.p.end)} · ${reading(s)} · 境目の未完了 ${s.p.open_start} → ${s.p.open_end} 件${s.excluded === undefined ? "" : " · 分母から除外 " + s.excluded + " 件"}</title></rect>`;
+          return `<rect x="${left}" width="${x(s.p.position) - left}" height="${height}" fill="transparent"><title>${date(s.p.end)} · ${reading(s)} · 境目の未完了 ${s.p.open_start} → ${s.p.open_end} 件${s.excluded === undefined ? "" : " · 分母から除外 " + s.excluded + " 件"}${s.uncounted ? " · 担当を通さず完了（数えない） " + s.uncounted + " 件" : ""}</title></rect>`;
         })
         .join(""),
   );

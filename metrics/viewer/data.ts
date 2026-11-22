@@ -95,6 +95,12 @@ export function readViewerData(db: DatabaseSync): ViewerData {
     `SELECT c.issue,coalesce(f.title,'題名未取得') title,unixepoch(c.closed_at) closed
     FROM issue_classification c LEFT JOIN mart_issue_flow f USING(issue) WHERE c.pr IS NOT NULL AND c.ownership='owner' AND c.kind='機能'`,
   )();
+  const uncounted = query(
+    db,
+    { count: n },
+    `SELECT count(*) count FROM issue_classification WHERE pr IS NOT NULL AND ownership<>'owner' AND kind='機能'
+    AND unixepoch(closed_at)>=? AND unixepoch(closed_at)<?`,
+  );
   const issueStates = query(
     db,
     { issue: n, state: label, minutes: n },
@@ -154,6 +160,7 @@ export function readViewerData(db: DatabaseSync): ViewerData {
           issue_minutes: issue,
           feature_minutes: feature,
           features: count,
+          uncounted_features: uncounted(start, end)[0]?.count ?? 0,
           open_start: z.number().parse(open(start, start)[0]?.count),
           open_end: h.open_end,
           throughput: (count * 60) / minutes,
@@ -287,6 +294,7 @@ export type Point = Counts & {
   start: number;
   end: number;
   position: number;
+  uncounted_features: number;
   throughput: number;
   throughput_low: number;
   throughput_high: number;
