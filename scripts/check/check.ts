@@ -66,6 +66,7 @@ export async function runChecks(
     "apps/worker/tests/rpc",
     "scripts",
     "scripts/check/r2-create-only",
+    "metrics",
   ]) {
     await pnpm(`TypeScript types: ${project}`, "exec", "tsc", "-p", `${project}/tsconfig.json`);
   }
@@ -127,6 +128,7 @@ export async function runChecks(
       "apps/*/{src,tests}/**/*.test.ts",
       "packages/*/{src,tests}/**/*.test.ts",
       "scripts/**/*.test.ts",
+      "metrics/**/*.test.ts",
       ".claude/skills/*/scripts/*.test.mjs",
     ]))
       tests.push(path);

@@ -4,6 +4,7 @@
   "workspaces": {
     ".": {
       "entry": [
+        ".claude/skills/madori-coordinator/scripts/records.mjs",
         "scripts/check/check-doc-paths.ts",
         "scripts/check/check-layout.ts",
         "scripts/check/check-migrations.ts",
@@ -15,9 +16,14 @@
         "scripts/check/smoke.ts",
         "scripts/check/staging-smoke.ts",
         "scripts/check/r2-create-only/worker.ts",
-        "scripts/deploy/registry-retention.ts"
+        "scripts/deploy/registry-retention.ts",
+        "metrics/hook/hook.ts",
+        "metrics/receiver/receiver.ts",
+        "metrics/build/build.ts",
+        "metrics/import/classifications.ts",
+        "metrics/viewer/build.ts"
       ],
-      "project": ["scripts/**/*.ts", "*.mjs"]
+      "project": ["scripts/**/*.ts", "metrics/**/*.ts", "*.mjs"]
     },
     "apps/web": {
       "project": ["src/**/*.{ts,tsx}"]

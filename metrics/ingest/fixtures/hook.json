@@ -1,0 +1,8 @@
+{
+  "session_id": "fake-session-id",
+  "transcript_path": "fake-transcript_path",
+  "cwd": "fake-cwd",
+  "scratchpad_dir": "fake-scratchpad_dir",
+  "hook_event_name": "SessionStart",
+  "source": "fake-source"
+}

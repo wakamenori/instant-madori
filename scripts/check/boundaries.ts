@@ -28,6 +28,18 @@ const workerLayerScopes = {
   },
 };
 
+// The hook's scope includes metrics/home.ts because the hook loads it on every turn.
+const metricsAreaScopes = {
+  "metrics-hook": {
+    files: [`metrics/hook/**/*.${typescriptExtensions}`, "metrics/home.ts"],
+    ignores: [],
+  },
+  "metrics-build": { files: [`metrics/build/**/*.${typescriptExtensions}`], ignores: [] },
+  "metrics-l1": { files: [`metrics/l1/**/*.${typescriptExtensions}`], ignores: [] },
+  "metrics-ingest": { files: [`metrics/ingest/**/*.${typescriptExtensions}`], ignores: [] },
+  "metrics-receiver": { files: [`metrics/receiver/**/*.${typescriptExtensions}`], ignores: [] },
+};
+
 export const typescriptScopes = {
   web: {
     files: [`apps/web/**/*.${typescriptExtensions}`],
@@ -61,14 +73,27 @@ export const typescriptScopes = {
     ],
   },
   contracts: { files: [`packages/contracts/**/*.${typescriptExtensions}`], ignores: [] },
+  "docker-slot": { files: ["scripts/shared/docker-slots.ts"], ignores: [] },
+  scripts: {
+    files: [`scripts/**/*.${typescriptExtensions}`],
+    ignores: ["scripts/shared/docker-slots.ts"],
+  },
+  ...metricsAreaScopes,
+  "metrics-other": {
+    files: [`metrics/**/*.${typescriptExtensions}`],
+    ignores: Object.values(metricsAreaScopes).flatMap((scope) => scope.files),
+  },
 } satisfies Record<string, { files: string[]; ignores: string[] }>;
 
 type TypeScriptScope = keyof typeof typescriptScopes;
 const allScopes = Object.keys(typescriptScopes).filter((scope): scope is TypeScriptScope =>
   Object.hasOwn(typescriptScopes, scope),
 );
+const metricsScopes = allScopes.filter((scope) => scope.startsWith("metrics-"));
+const serviceScopes = allScopes.filter((scope) => !scope.startsWith("metrics-"));
 
-type BoundaryReason = `docs/plan.md §${string}` | `AGENTS.md ${string}`;
+type BoundaryReason =
+  `docs/plan.md §${string}` | `AGENTS.md ${string}` | `metrics/README.md ${string}`;
 type WorkerLayerScope = keyof typeof workerLayerScopes;
 type WorkerLayer = WorkerLayerScope extends `worker-${infer Layer}` ? Layer : never;
 
@@ -407,6 +432,104 @@ export const typescriptBoundaries: TypeScriptBoundary[] = [
     reason: "docs/plan.md §4.2 web owns Wasm loading through viewer/wasm.ts",
     message: "Import viewer bindings through viewer/wasm.ts.",
     appliesToTests: true,
+  },
+  {
+    id: "metrics-service",
+    from: metricsScopes,
+    kind: "imports",
+    targets: ["apps/**", "crates/**", "packages/**", "scripts/**"],
+    reason: "metrics/README.md metrics/ は apps/、crates/、packages/ をimportしない",
+    message: "Metrics must not import the service or its development scripts.",
+    appliesToTests: true,
+  },
+  {
+    id: "service-metrics",
+    from: serviceScopes.filter((scope) => scope !== "docker-slot"),
+    kind: "imports",
+    targets: ["metrics/**"],
+    reason: "metrics/README.md サービスも metrics/ をimportしない",
+    message: "The service must not import metrics.",
+    appliesToTests: true,
+  },
+  {
+    id: "docker-slot-metrics",
+    from: ["docker-slot"],
+    kind: "imports",
+    targets: ["metrics/**"],
+    exceptTargets: ["metrics/hook/docker-slot.ts"],
+    reason: "docs/plan.md §4.2 Docker slot events use the spool writer",
+    message: "Docker slots may import only the slot event writer from metrics.",
+  },
+  {
+    id: "metrics-hook-closure",
+    from: ["metrics-hook"],
+    kind: "imports",
+    targets: ["**"],
+    exceptTargets: ["metrics/hook/**", "metrics/home.ts"],
+    reason: "metrics/README.md hookは受け口が無くても速く終わる",
+    message: "The hook loads on every turn; import only metrics/hook and metrics/home.ts.",
+  },
+  {
+    id: "metrics-hook-packages",
+    from: ["metrics-hook"],
+    kind: "syntax",
+    selectors: [
+      "ImportDeclaration[importKind!='type'][source.value=/^(?!node:|\\.\\.?\\x2F)/u]",
+      "ExportNamedDeclaration[exportKind!='type'][source.value=/^(?!node:|\\.\\.?\\x2F)/u]",
+      "ExportAllDeclaration[exportKind!='type'][source.value=/^(?!node:|\\.\\.?\\x2F)/u]",
+      "ImportExpression > Literal.source[value=/^(?!node:|\\.\\.?\\x2F)/u]",
+    ],
+    reason: "metrics/README.md hookは受け口が無くても速く終わる",
+    message:
+      "The hook imports only node: builtins and relative files, so it starts without packages.",
+  },
+  {
+    id: "metrics-l1-layers",
+    from: ["metrics-l1"],
+    kind: "imports",
+    targets: ["metrics/{hook,ingest,receiver}/**", "metrics/home.ts"],
+    reason: "metrics/README.md L1は出どころを問わず同じ包みで溜める",
+    message:
+      "L1 stores records without knowing transports; it must not import hook, ingest or receiver.",
+  },
+  {
+    id: "metrics-ingest-layers",
+    from: ["metrics-ingest"],
+    kind: "imports",
+    targets: ["metrics/{receiver,hook}/**", "metrics/l1/store.ts"],
+    allowTypeImports: true,
+    reason: "metrics/README.md L1に書くのは受け口だけにして、書き手を一つにする",
+    message: "Ingest parses and decides; only the receiver opens L1 and runs servers.",
+  },
+  {
+    id: "metrics-ingest-io",
+    from: ["metrics-ingest"],
+    kind: "syntax",
+    selectors: [
+      "ImportDeclaration[importKind!='type'][source.value=/^(?:node:)?(?:fs|http|https|net|child_process|sqlite|worker_threads)(?:\\x2F|$)/u]",
+      "ExportNamedDeclaration[exportKind!='type'][source.value=/^(?:node:)?(?:fs|http|https|net|child_process|sqlite|worker_threads)(?:\\x2F|$)/u]",
+      "ExportAllDeclaration[exportKind!='type'][source.value=/^(?:node:)?(?:fs|http|https|net|child_process|sqlite|worker_threads)(?:\\x2F|$)/u]",
+      "ImportExpression > Literal.source[value=/^(?:node:)?(?:fs|http|https|net|child_process|sqlite|worker_threads)(?:\\x2F|$)/u]",
+    ],
+    reason: "metrics/README.md L1に書くのは受け口だけにして、書き手を一つにする",
+    message: "Ingest is pure; IO belongs to metrics/receiver.",
+  },
+  {
+    id: "metrics-build-inputs",
+    from: ["metrics-build"],
+    kind: "imports",
+    targets: ["metrics/{receiver,ingest,hook}/**"],
+    reason: "metrics/README.md L2から上は、L1だけから作り直せる",
+    message: "The derived build reads L1 and does not call collectors.",
+  },
+  {
+    id: "metrics-l1-writer",
+    from: metricsScopes.filter((scope) => scope !== "metrics-receiver"),
+    kind: "imports",
+    targets: ["metrics/l1/store.ts"],
+    importNamePattern: "^openL1Writer$",
+    reason: "metrics/README.md L1に書くのは受け口だけにして、書き手を一つにする",
+    message: "Only metrics/receiver writes L1; other code reads l1_record through SQL.",
   },
 ];
 

@@ -1,7 +1,8 @@
 import { execFileSync } from "node:child_process";
 import { basename } from "node:path";
 
-const migrationsPath = "apps/worker/migrations/";
+// The metrics L1 schema outlives every receiver version, so its migrations are immutable too.
+const migrationsPaths = ["apps/worker/migrations/", "metrics/l1/migrations/"];
 
 function git(...args: string[]) {
   return execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
@@ -39,8 +40,7 @@ function migrationBase() {
     : { commit: git("merge-base", "HEAD", mainHead).trim(), source: "merge base with origin/main" };
 }
 
-function main() {
-  const base = migrationBase();
+function checkMigrations(base: { commit: string }, migrationsPath: string) {
   const baseline = new Set(
     git("ls-tree", "-r", "--name-only", "-z", base.commit, "--", migrationsPath)
       .split("\0")
@@ -81,6 +81,12 @@ function main() {
       violations.push(`${path}: new migration number must be greater than ${maxNumber} from main.`);
     }
   }
+  return violations;
+}
+
+function main() {
+  const base = migrationBase();
+  const violations = migrationsPaths.flatMap((path) => checkMigrations(base, path));
   if (violations.length > 0) throw new Error(violations.join("\n"));
   console.log(`Migration immutability check passed (base ${base.commit}, ${base.source}).`);
 }

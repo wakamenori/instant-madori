@@ -45,7 +45,7 @@ const docsOnly = {
   "CLAUDE.md": "claude",
   "AGENTS.md": "agents\n",
   ".claude/skills/x/SKILL.md": "skill\n",
-  ".github/ISSUE_TEMPLATE/unit.md": "template\n",
+  ".github/ISSUE_TEMPLATE/feature.md": "template\n",
 };
 const withCode = {
   "docs/plan.md": "plan 2\n",

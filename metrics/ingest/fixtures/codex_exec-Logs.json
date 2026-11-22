@@ -1,0 +1,214 @@
+{
+  "resourceLogs": [
+    {
+      "resource": {
+        "attributes": [
+          {
+            "key": "env",
+            "value": {
+              "stringValue": "fake-env"
+            }
+          },
+          {
+            "key": "host.name",
+            "value": {
+              "stringValue": "fake-host-name"
+            }
+          },
+          {
+            "key": "telemetry.sdk.version",
+            "value": {
+              "stringValue": "fake-telemetry-sdk-version"
+            }
+          },
+          {
+            "key": "service.name",
+            "value": {
+              "stringValue": "codex_exec"
+            }
+          },
+          {
+            "key": "telemetry.sdk.language",
+            "value": {
+              "stringValue": "fake-telemetry-sdk-language"
+            }
+          },
+          {
+            "key": "telemetry.sdk.name",
+            "value": {
+              "stringValue": "fake-telemetry-sdk-name"
+            }
+          },
+          {
+            "key": "service.version",
+            "value": {
+              "stringValue": "fake-service-version"
+            }
+          }
+        ],
+        "droppedAttributesCount": 0,
+        "entityRefs": []
+      },
+      "scopeLogs": [
+        {
+          "scope": {
+            "name": "fake-name",
+            "version": "fake-version",
+            "attributes": [],
+            "droppedAttributesCount": 0
+          },
+          "logRecords": [
+            {
+              "timeUnixNano": "fake-value",
+              "observedTimeUnixNano": "fake-value",
+              "severityNumber": 9,
+              "severityText": "fake-value",
+              "body": null,
+              "attributes": [
+                {
+                  "key": "event.name",
+                  "value": {
+                    "stringValue": "fake-value"
+                  }
+                },
+                {
+                  "key": "config.legacy_multi_agent_disabled_sources",
+                  "value": {
+                    "stringValue": "fake-value"
+                  }
+                },
+                {
+                  "key": "provider_name",
+                  "value": {
+                    "stringValue": "fake-value"
+                  }
+                },
+                {
+                  "key": "auth.env_openai_api_key_present",
+                  "value": {
+                    "boolValue": false
+                  }
+                },
+                {
+                  "key": "auth.env_codex_api_key_present",
+                  "value": {
+                    "boolValue": false
+                  }
+                },
+                {
+                  "key": "auth.env_codex_api_key_enabled",
+                  "value": {
+                    "boolValue": true
+                  }
+                },
+                {
+                  "key": "auth.env_refresh_token_url_override_present",
+                  "value": {
+                    "boolValue": false
+                  }
+                },
+                {
+                  "key": "reasoning_effort",
+                  "value": {
+                    "stringValue": "fake-value"
+                  }
+                },
+                {
+                  "key": "reasoning_summary",
+                  "value": {
+                    "stringValue": "fake-value"
+                  }
+                },
+                {
+                  "key": "approval_policy",
+                  "value": {
+                    "stringValue": "fake-value"
+                  }
+                },
+                {
+                  "key": "sandbox_policy",
+                  "value": {
+                    "stringValue": "fake-value"
+                  }
+                },
+                {
+                  "key": "mcp_servers",
+                  "value": {
+                    "stringValue": "fake-value"
+                  }
+                },
+                {
+                  "key": "event.timestamp",
+                  "value": {
+                    "stringValue": "fake-value"
+                  }
+                },
+                {
+                  "key": "conversation.id",
+                  "value": {
+                    "stringValue": "fake-value"
+                  }
+                },
+                {
+                  "key": "app.version",
+                  "value": {
+                    "stringValue": "fake-value"
+                  }
+                },
+                {
+                  "key": "auth_mode",
+                  "value": {
+                    "stringValue": "fake-value"
+                  }
+                },
+                {
+                  "key": "originator",
+                  "value": {
+                    "stringValue": "fake-value"
+                  }
+                },
+                {
+                  "key": "user.account_id",
+                  "value": {
+                    "stringValue": "fake-value"
+                  }
+                },
+                {
+                  "key": "user.email",
+                  "value": {
+                    "stringValue": "fake-value"
+                  }
+                },
+                {
+                  "key": "terminal.type",
+                  "value": {
+                    "stringValue": "fake-value"
+                  }
+                },
+                {
+                  "key": "model",
+                  "value": {
+                    "stringValue": "fake-value"
+                  }
+                },
+                {
+                  "key": "slug",
+                  "value": {
+                    "stringValue": "fake-value"
+                  }
+                }
+              ],
+              "droppedAttributesCount": 0,
+              "flags": 0,
+              "traceId": "fake-value",
+              "spanId": "fake-value",
+              "eventName": "fake-value"
+            }
+          ],
+          "schemaUrl": "fake-schemaUrl"
+        }
+      ],
+      "schemaUrl": "fake-schemaUrl"
+    }
+  ]
+}

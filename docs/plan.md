@@ -306,6 +306,7 @@ instant-madori/
 │   ├── deploy/
 │   ├── measure/
 │   └── shared/
+├── metrics/               # Software Factoryの計測。設計は metrics/README.md
 ├── .github/
 │   ├── workflows/
 │   │   ├── check.yml
@@ -336,6 +337,7 @@ instant-madori/
 | third_party/solidcraft/   | 固定した版のSolidCraft一式。SolidCraft自体に必要な修正もこの領域で行う                                                                         |
 | third_party/solidcraft.md | 取り込み元、採用コミット、独自変更の理由、更新手順。subtreeの外に置く                                                                          |
 | docs/・scripts/           | サービスの計画・検証記録。scripts/はcheck・dev・generate・build・upstream・deploy・measureに分け、複数の目的で使う部品はsharedに置く           |
+| metrics/                  | Software Factoryの計測。生の記録を溜める層、解釈する層、viewer。サービスから独立し、設計は metrics/README.md に置く                            |
 | .github/workflows/        | PRの検査（check.yml）とstagingへのデプロイ（deploy-staging.yml）。開発用Macのself-hosted runnerで動く                                          |
 | .github/ISSUE_TEMPLATE/   | 作業の単位（Issue）のテンプレート                                                                                                              |
 | .github/dependabot.yml    | npm・Cargoの依存関係の更新提案                                                                                                                 |
@@ -367,6 +369,8 @@ Workerの内部は、`api/` から `services/` を呼び、`services/` は外か
 DBの行は、テーブルごとに一つのSQLの `json_object` で読み、`storage/` で共有スキーマにより検証してから返す。型引数による決めつけで行を扱わない。業務上の結果（見つからない、版の競合など）は例外でなく判別可能な結果として返し、`api/` がエラーコードへ対応付ける。予期しない例外だけを500とし、本文を含めずに記録する。
 
 Webのコードは開発用の `scripts/` をimportしない。Viteの設定だけは、ローカルの認証プロキシに使う `scripts/dev/` をimportできる。WebからのWasmバインディングの読込みは `apps/web/src/viewer/wasm.ts` に集め、同じ `viewer/` 直下の `*.test.ts` だけはバインディングを直接importできる。`apps/geometry` には、UIツールキット（egui系・eguiの下位のepaint系・emath・ecolor・eframe・winit）とGPUの描画（wgpu系）を含めない。UIの有無は、crateの名前ではなくツールキットのcrateで判定する。UIを持たない文言の目録 `solidcraft-ui-text` は、engineを通して含まれてよい。サービスはSolidCraftのpluginを実行しない。そのため、ルートの `solidcraft-engine` は既定のfeatureを外し、Containerにwasmtimeとcraft-plugin-wasmを含めない。
+
+開発スクリプトから計測への依存は、`scripts/shared/docker-slots.ts` が枠の記録を渡す `metrics/hook/docker-slot.ts` に限る。
 
 TypeScriptのアプリと共有定義のimport境界は、TypeScriptのモジュール解決後の参照先ファイルで判定する。静的import、再export、文字列リテラルの動的import、import型、`import = require`、型の参照ディレクティブとモジュール拡張を対象にする。動的importの引数を囲む括弧は外し、参照先のqueryとfragmentは除いて解決する。解決できない参照は失敗にする。Node.jsの組込みと、対応するworkspaceが依存として宣言した外部パッケージだけは、解決できなくても許可する。workspaceのパッケージはこの例外に含めない。環境が宣言するambient moduleは、その宣言のファイルで判定する。相対パスの資産は実ファイルの存在を要求する。ファイルの同一性はsymlinkをたどり、OSの実パスで確かめる。大文字小文字を区別するファイルシステムでは、綴りの違う参照は未解決として拒否する。検査はESLintの自動修正と整形の後に実行し、pre-commitでもステージしたTypeScriptファイルを対象に実行する。
 

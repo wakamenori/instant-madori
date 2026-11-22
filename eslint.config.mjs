@@ -98,7 +98,13 @@ const boundaryConfigs = Object.entries(typescriptScopes).flatMap(([scope, { file
   const testRows = rows.filter((row) => row.appliesToTests);
   // Tests read fixtures through import.meta.url and may cross boundaries anyway.
   return [
-    boundaryConfig(`boundaries/${scope}`, files, [...ignores, ...boundaryTestIgnores], rows),
+    boundaryConfig(
+      `boundaries/${scope}`,
+      files,
+      [...ignores, ...boundaryTestIgnores],
+      rows,
+      scope === "scripts",
+    ),
     boundaryConfig(
       `boundaries/${scope}/tests`,
       files.flatMap((file) => boundaryTestIgnores.map((test) => [file, test])),
@@ -132,6 +138,7 @@ export default defineConfig(
       `apps/**/*.${typescriptExtensions}`,
       `packages/**/*.${typescriptExtensions}`,
       `scripts/**/*.${typescriptExtensions}`,
+      `metrics/**/*.${typescriptExtensions}`,
     ],
     extends: [js.configs.recommended, tseslint.configs.recommendedTypeChecked],
     languageOptions: {
@@ -156,6 +163,12 @@ export default defineConfig(
   {
     files: [`apps/worker/**/*.${typescriptExtensions}`],
     languageOptions: { globals: { self: "readonly" } },
+  },
+  {
+    // The hook runs inside every agent session, and what it prints reaches the session.
+    files: [`metrics/hook/**/*.${typescriptExtensions}`],
+    ignores: boundaryTestIgnores,
+    rules: { "no-console": "error" },
   },
   ...boundaryConfigs,
   prettier,
