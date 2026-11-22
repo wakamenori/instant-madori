@@ -161,6 +161,7 @@ export async function runChecks(
         ...nodeTestFlags(resultsDir, "container"),
         "apps/worker/tests/container.e2e.ts",
       ]);
+      await script("Prune geometry service images", "scripts/dev/prune-images.ts");
       await script("Prune Docker build cache", "scripts/dev/prune-build-cache.ts");
     });
     await script("JavaScript dependency licenses", "scripts/check/check-licenses.ts");
