@@ -50,3 +50,19 @@ p {
   inset: 1rem;
   pointer-events: none;
 }
+.project-list {
+  padding: 0;
+  list-style: none;
+}
+.project-list a {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+  padding: 1rem 0;
+  border-bottom: 1px solid #cad4cd;
+  color: inherit;
+}
+.project-list time {
+  font-variant-numeric: tabular-nums;
+}

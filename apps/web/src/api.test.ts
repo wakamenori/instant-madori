@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { test, mock } from "node:test";
 import {
   createProject,
-  sendInstruction,
+  listProjects,
+  listPatterns,
   readPatternState,
   fetchRevisionView,
   ApiError,
@@ -60,7 +61,8 @@ void test("JSON endpoints reject off-contract and malformed responses", async (t
   const unexpected = (error: unknown) =>
     error instanceof ApiError && error.code === "unexpected_response";
   await assert.rejects(createProject({ requestId }, signal), unexpected);
-  await assert.rejects(sendInstruction("P", { requestId, body: "test" }, signal), unexpected);
+  await assert.rejects(listProjects(null, signal), unexpected);
+  await assert.rejects(listPatterns("P", signal), unexpected);
   await assert.rejects(readPatternState("P", signal), unexpected);
   mocked.mock.mockImplementation(() => Promise.resolve(new Response("bad json")));
   await assert.rejects(readPatternState("P", signal), unexpected);
