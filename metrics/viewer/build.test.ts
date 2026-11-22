@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { registry, type RecordInput } from "../l1/sources.ts";
+import { readViewerData } from "./data.ts";
 import { openL1Writer } from "../l1/store.ts";
 
 void test("the viewer CLI publishes the derived snapshot and preserves it on schema drift", (t) => {
@@ -30,6 +31,29 @@ void test("the viewer CLI publishes the derived snapshot and preserves it on sch
     );
   }
   try {
+    for (const [source, observed] of [
+      ["claude.hook", "2026-10-31T00:00:00.000Z"],
+      ["otlp", start],
+    ] as const) {
+      l1.ingest([], observed, [
+        { source, unitHash: "a".repeat(64), reason: "fixture", content: null },
+      ]);
+    }
+    add("t3.thread", "previous-owner", {
+      issue: 40,
+      title_kind: "owner",
+      created_at: "2026-10-30T00:00:00.000Z",
+    });
+    add("t3.run", "previous-run", {
+      thread_id: "previous-owner",
+      started_at: "2026-10-30T00:00:00.000Z",
+      completed_at: "2026-10-30T00:01:00.000Z",
+    });
+    add("metrics.receiver", "first", { sources: { "t3.thread": { last_poll: start } } });
+    add("metrics.receiver", "second", {
+      sources: { "t3.thread": { last_poll: end, failed_cycles: 1 } },
+    });
+    add("t3.run", "run", { thread_id: "owner-41", started_at: start, completed_at: end });
     add("github.issue", "41", { number: 41, title: "Fixture issue", created_at: start });
     for (const issue of [41, 42])
       add("t3.thread", "owner-" + issue, { issue, title_kind: "owner", created_at: start });
@@ -57,33 +81,36 @@ void test("the viewer CLI publishes the derived snapshot and preserves it on sch
   execFileSync(process.execPath, [viewer], options);
   const output = join(root, "dashboard.html");
   const html = readFileSync(output, "utf8");
-  for (const panel of [
-    "主要指標",
-    "Issueごとの待ち時間",
-    "checkの順番待ちと実行時間",
-    "runnerの時間別稼働率",
-    "マージ待ちの推定理由",
-    "活動中の担当数",
-    "Issueと活動履歴",
-    "計測元の状態",
-  ])
-    assert.ok(html.includes("<h2>" + panel + "</h2>"), panel);
-  for (const issue of [41, 42]) assert.ok(html.includes("#" + issue + "</button>"));
-  assert.ok(html.includes('"steps":[{"name":"verify","minutes":'));
-  assert.ok(html.includes('"range_start":"' + start + '"'));
-  assert.ok(html.includes('"range_end":"' + end + '"'));
+  assert.match(html, /スループットとその分解/u);
+  assert.match(html, /<option value="8" selected>/u);
   const custom = join(root, "morning.html");
   execFileSync(process.execPath, [viewer, "--out", custom], options);
-  assert.match(readFileSync(custom, "utf8"), /Fixture issue/u);
+  assert.match(readFileSync(custom, "utf8"), /機能のデリバリー/u);
 
   const derived = new DatabaseSync(join(root, "metrics-derived.sqlite"));
   try {
-    derived.exec("UPDATE mart_ci_job SET steps='broken'");
+    const initial = readViewerData(derived);
+    assert.equal(initial.generatedAt, end);
+    assert.deepEqual(
+      initial.health.filter((h) => h.quarantined).map((h) => [h.source, h.recent_quarantined]),
+      [
+        ["claude.hook", 0],
+        ["otlp", 1],
+      ],
+    );
+    assert.equal(initial.health.find((h) => h.source === "t3.thread")?.stopped, false);
+    assert.equal(initial.windows.find((w) => w.length === 8)?.points.length, 0);
+    derived.prepare("UPDATE mart_health SET last_append=NULL WHERE source='t3.thread'").run();
+    assert.equal(
+      readViewerData(derived).health.find((h) => h.source === "t3.thread")?.stopped,
+      true,
+    );
+    derived.exec("UPDATE mart_health SET quarantined='broken'");
   } finally {
     derived.close();
   }
   const failed = spawnSync(process.execPath, [viewer], { ...options, encoding: "utf8" });
   assert.equal(failed.status, 1);
-  assert.match(failed.stderr, /mart_ci_job[\s\S]*steps/u);
+  assert.match(failed.stderr, /quarantined/u);
   assert.equal(readFileSync(output, "utf8"), html);
 });

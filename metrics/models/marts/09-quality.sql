@@ -68,13 +68,13 @@ FROM mart_quality_issue CROSS JOIN checks GROUP BY area,name;
 CREATE VIEW mart_discovery_count AS SELECT coalesce(c.area,'unknown') area,disposition,count(*) records
 FROM quality_discovery d LEFT JOIN issue_classification c ON c.issue=d.cause_issue GROUP BY 1,2;
 
-INSERT INTO mart_record_gap SELECT issue,'missing_first_round' FROM mart_quality_issue q WHERE first_pass IS NULL AND NOT pre_verification
+INSERT INTO mart_record_gap SELECT issue,'missing_first_round' FROM mart_quality_issue q WHERE merged_at>=(SELECT effective FROM record_policy) AND first_pass IS NULL AND NOT pre_verification
 AND NOT EXISTS(SELECT 1 FROM verification_decision v WHERE v.issue=q.issue AND v.pr=q.pr AND v.round=1);
 INSERT INTO mart_record_gap SELECT issue,'missing_failed_checks' FROM mart_quality_issue
-WHERE first_pass=0 AND missing_verifier=0 AND failed_checks IS NULL;
+WHERE merged_at>=(SELECT effective FROM record_policy) AND first_pass=0 AND missing_verifier=0 AND failed_checks IS NULL;
 
-INSERT INTO mart_record_gap SELECT issue,'undated_comment_verdict' FROM mart_quality_issue WHERE legacy_comment;
-INSERT INTO mart_record_gap SELECT issue,'missing_verifier' FROM mart_quality_issue WHERE missing_verifier;
+INSERT INTO mart_record_gap SELECT issue,'undated_comment_verdict' FROM mart_quality_issue WHERE merged_at>=(SELECT effective FROM record_policy) AND legacy_comment;
+INSERT INTO mart_record_gap SELECT issue,'missing_verifier' FROM mart_quality_issue WHERE merged_at>=(SELECT effective FROM record_policy) AND missing_verifier;
 
 CREATE VIEW mart_quality_interval AS
 WITH proportions AS (

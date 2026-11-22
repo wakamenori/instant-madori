@@ -8,6 +8,7 @@ import { test } from "node:test";
 import { registry, type RecordInput } from "../l1/sources.ts";
 import { openL1Writer } from "../l1/store.ts";
 import { parseClassifications } from "../ingest/classification.ts";
+import { readViewerData } from "../viewer/data.ts";
 import { poissonBounds } from "./poisson.ts";
 
 void test("zero and one completion retain exact two-sided Poisson limits", () => {
@@ -20,7 +21,7 @@ void test("zero and one completion retain exact two-sided Poisson limits", () =>
 void test("hourly and eight active hour windows count releases, owner gaps and minute states", (t) => {
   const root = mkdtempSync(join(tmpdir(), "metrics-factory-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
-  const zero = Date.parse("2026-11-21T00:00:00Z");
+  const zero = Date.parse("2026-11-23T00:00:00Z");
   const at = (n: number) => new Date(zero + n * 60_000).toISOString();
   const db = openL1Writer(join(root, "metrics.sqlite"), registry);
   function add(
@@ -58,6 +59,52 @@ void test("hourly and eight active hour windows count releases, owner gaps and m
     add("t3.run", key, { thread_id: key, started_at: at(begin), completed_at: at(end) });
   }
   try {
+    const improvementLabel = "開発の仕組みの改善：作る・確かめる・届ける・動かす仕組みを良くする";
+    for (const issue of [51, 52, 53, 54]) {
+      add(
+        "github.issue",
+        issue,
+        {
+          number: issue,
+          state: "open",
+          created_at: at(620),
+          labels: [improvementLabel],
+          invalid_yaml_record: true,
+        },
+        at(620),
+      );
+    }
+    for (const issue of [52, 53, 54])
+      add("t3.thread", "dispatch-" + issue, {
+        issue,
+        title_kind: "owner",
+        created_at: at(issue === 54 ? 635 : 625),
+      });
+    add(
+      "metrics.receiver",
+      "poll-at-dispatch",
+      { sources: { "github.issue": { last_poll: at(626) } } },
+      at(626),
+    );
+    for (const issue of [53, 54])
+      add(
+        "github.issue",
+        issue,
+        {
+          number: issue,
+          state: "open",
+          created_at: at(620),
+          labels: [improvementLabel],
+          fields: { type: "開発の仕組みの改善", target: "activity.ci" },
+        },
+        at(630),
+      );
+    for (const [id, created_at] of [
+      [401, "2026-11-22T01:04:43.999Z"],
+      [402, "2026-11-22T01:04:44.000Z"],
+    ] as const) {
+      add("github.comment", id, { issue_or_pr: id, created_at, markers: ["verdict_pass"] });
+    }
     add("t3.approval", "approval", {
       thread_id: "gates",
       kind: "tool",
@@ -84,6 +131,13 @@ void test("hourly and eight active hour windows count releases, owner gaps and m
       created_at: at(-70),
       files_complete: true,
       files: [{ filename: "apps/x" }],
+    });
+    add("github.issue", 20, {
+      number: 20,
+      state: "open",
+      created_at: at(-75),
+      labels: ["機能：利用者に見える振る舞いを足す・変える"],
+      shared_resources: ["staging を占有する"],
     });
     owner(20, "gates", -70, -69);
     add("t3.run", "final", { thread_id: "gates", started_at: at(-15), completed_at: at(-14) });
@@ -258,6 +312,49 @@ void test("hourly and eight active hour windows count releases, owner gaps and m
   });
   const out = new DatabaseSync(join(root, "metrics-derived.sqlite"), { readOnly: true });
   t.after(() => out.close());
+  const viewer = readViewerData(out);
+  const eight = viewer.windows.find((w) => w.length === 8);
+  assert.ok(eight);
+  assert.ok(eight.points.some((p) => p.features > 0 && p.active_minutes === 480));
+  assert.ok(viewer.windows.every((w) => w.points.every((p) => p.active_minutes === w.length * 60)));
+  for (const point of eight.points) {
+    const rolling = out
+      .prepare("SELECT * FROM mart_kpi WHERE window='rolling' AND end=?")
+      .get(point.end);
+    assert.ok(rolling);
+    for (const key of [
+      "start",
+      "active_minutes",
+      "issue_minutes",
+      "feature_minutes",
+      "features",
+      "open_start",
+      "open_end",
+      "throughput",
+      "parallelism",
+      "feature_share",
+      "hours_per_feature",
+      "throughput_low",
+      "throughput_high",
+      "hours_per_feature_low",
+      "hours_per_feature_high",
+    ] as const)
+      assert.equal(point[key], rolling[key], key);
+    assert.equal(
+      point.kinds.reduce((sum, r) => sum + r.minutes, 0),
+      point.issue_minutes,
+    );
+    assert.equal(
+      point.states.reduce((sum, r) => sum + r.minutes, 0),
+      point.feature_minutes,
+    );
+    const completed = out
+      .prepare(
+        "SELECT count(*) n FROM mart_quality_issue q JOIN issue_classification c USING(issue) WHERE unixepoch(c.closed_at)>=? AND unixepoch(c.closed_at)<? AND q.area='product'",
+      )
+      .get(point.start, point.end);
+    assert.equal(point.quality.find((q) => q.area === "product")?.total, completed?.n);
+  }
   const skill = ".claude/skills/madori-coordinator/SKILL.md";
   const repo = join(import.meta.dirname, "../..");
   const policy = readFileSync(join(repo, skill), "utf8");
@@ -301,6 +398,23 @@ void test("hourly and eight active hour windows count releases, owner gaps and m
         plan_change: "いいえ",
       },
     ],
+  );
+  assert.deepEqual(
+    all("SELECT issue,reason FROM mart_record_gap WHERE issue BETWEEN 51 AND 54 ORDER BY issue"),
+    [
+      { issue: 52, reason: "missing_dispatch_target" },
+      { issue: 53, reason: "missing_dispatch_target" },
+    ],
+  );
+  assert.deepEqual(all("SELECT issue FROM mart_record_gap WHERE issue IN (401,402)"), [
+    { issue: 402 },
+  ]);
+  assert.deepEqual(all("SELECT kind,kind_source FROM issue_classification WHERE issue=20"), [
+    { kind: "機能", kind_source: "current" },
+  ]);
+  assert.deepEqual(
+    all("SELECT issue FROM mart_record_gap WHERE reason='missing_kind' AND issue=2"),
+    [],
   );
   assert.deepEqual(all("SELECT DISTINCT shared_resources FROM issue_requirements WHERE issue=21"), [
     { shared_resources: '["staging を占有する"]' },
@@ -367,7 +481,7 @@ void test("hourly and eight active hour windows count releases, owner gaps and m
     ],
   );
   assert.deepEqual(
-    all("SELECT minutes FROM mart_inactive_stretch WHERE start<unixepoch('2026-11-21')"),
+    all("SELECT minutes FROM mart_inactive_stretch WHERE start<unixepoch('2026-11-23')"),
     [{ minutes: 46 }],
   );
   assert.deepEqual(all("SELECT issue,kind,start,end FROM mart_turn_detail ORDER BY start"), [
