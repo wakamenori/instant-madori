@@ -88,7 +88,7 @@ Viteのプロキシ（画面のポート。既定は5173番）経由のAPI要求
 
 ## 日常のコマンド
 
-検査の入口は `pnpm check` にまとめています。すべてのモードで最初にPrettier・rustfmt・ESLintの自動修正を行い、RustもClippyが自動適用できる修正を行ってから再整形・再検査します。修正できない問題が残れば失敗して後続処理を止めます。作業ツリーを書き換えるので、完了後に差分を確認してから必要な変更をステージしてください。コマンドはGitのステージ内容を変更しません。
+検査の入口は `pnpm check` にまとめています。すべてのモードで最初にPrettier・rustfmt・ESLintの自動修正を行い、Rustをビルドする場合はClippyが自動適用できる修正を行ってから再整形・再検査します。修正できない問題が残れば失敗して後続処理を止めます。作業ツリーを書き換えるので、完了後に差分を確認してから必要な変更をステージしてください。コマンドはGitのステージ内容を変更しません。
 
 | コマンド            | 用途                                                                                                                                                                              |
 | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -97,6 +97,8 @@ Viteのプロキシ（画面のポート。既定は5173番）経由のAPI要求
 | `pnpm check --full` | 全体確認。releaseのWasmの再生成、Web・Worker・Rustのビルド、ローカル接続テスト、依存のライセンス・取得元・脆弱性監査も実行。Dockerとネットワークが必要                            |
 | `pnpm dev`          | Web・WorkerとDockerの形状処理Containerを起動                                                                                                                                      |
 | `pnpm build`        | releaseのWasm・Web・Worker・ネイティブRustの成果物だけをビルド                                                                                                                    |
+
+手元の通常・軽い検査は、`origin/main` との分岐点からのコミット、ステージ済み・未ステージの差分、Gitが無視しない未追跡ファイルを調べます。どれも [Rust の入力](scripts/check/rust-inputs.ts) に触れていなければ、Rustからの契約生成、Clippy、Rustテスト、RustをビルドするNodeテスト1件を省き、分岐点を表示します。rustfmt、未使用依存の検査、生成済みJSON SchemaからのZod生成は実行します。`--rust` を付けると、選んだモードのRust検査をすべて実行します。CI、`--full`、Gitで変更を判定できない場合も同様です。
 
 補助スクリプトは `scripts/check/`・`scripts/dev/`・`scripts/generate/`・`scripts/build/`・`scripts/upstream/`・`scripts/deploy/`・`scripts/measure/` に目的別に置き、複数の目的で使う部品は `scripts/shared/` に置きます。テストは対象ファイルと同じフォルダーに置きます。
 
@@ -309,7 +311,7 @@ CLOUDFLARE_ACCOUNT_ID=4a67230af28ec94d9c70ca48572d8e9f mise exec -- node --env-f
 
 Container接続用DOと内部プロトコルは `apps/worker/src/geometry/` に置き、`services/` から呼びます。パターンごとの調整DOは `objects/`、ジョブのWorkflowは `workflows/` に置き、どちらも `services/` だけを呼びます。ジョブの形状処理は、パターンごとの接続用DOとそのContainerで行います。
 
-内部APIの本文は `crates/geometry-api` で定義し、`pnpm generate:geometry` でJSON Schema・Zod・TypeScript型を再生成します。`pnpm check` も全モードで再生成し、RustとNodeのテストが生成結果の一致を検査します。
+内部APIの本文は `crates/geometry-api` で定義し、`pnpm generate:geometry` でJSON Schema・Zod・TypeScript型を再生成します。Rustをビルドする `pnpm check` でも再生成し、RustとNodeのテストが生成結果の一致を検査します。
 
 ### stagingのContainerを計測する
 
