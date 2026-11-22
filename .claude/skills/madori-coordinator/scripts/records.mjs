@@ -11,31 +11,10 @@ import {
 export { labels };
 const text = z.string().trim().min(1);
 
-const time = z.iso.datetime();
-const stagingStart = z.strictObject({ started_at: time });
-const stagingEnd = stagingStart
-  .extend({ ended_at: time })
-  .refine(
-    ({ started_at, ended_at }) => Date.parse(started_at) <= Date.parse(ended_at),
-    "ended_at precedes started_at",
-  );
-
-function leadingBlock(markdown) {
-  const match = /^\s*```yaml[ \t]*\r?\n([\s\S]*?)^```[ \t]*\r?$/m.exec(markdown);
-  if (!match || match.index !== 0) throw new Error("expected a leading fenced yaml record");
-  return parse(match[1]);
-}
-
 export function checkRecord(kind, markdown, label) {
-  if (kind === "issue" || kind === "addition") {
-    if (!labeledKind([label]) || readIssueFields(markdown, [label]) === null)
-      throw new Error("expected the fields required by the Issue label");
-    return;
-  }
-  const raw = leadingBlock(markdown);
-  if (kind === "staging-start") stagingStart.parse(raw);
-  else if (kind === "staging-end") stagingEnd.parse(raw);
-  else throw new Error("unknown record kind");
+  if (kind !== "issue" && kind !== "addition") throw new Error("unknown record kind");
+  if (!labeledKind([label]) || readIssueFields(markdown, [label]) === null)
+    throw new Error("expected the fields required by the Issue label");
 }
 
 export function renderDraft(markdown) {
@@ -63,9 +42,7 @@ if (import.meta.main) {
   try {
     const [kind, file, label, ...rest] = process.argv.slice(2);
     if (!file || rest.length || ["issue", "addition"].includes(kind) !== Boolean(label))
-      throw new Error(
-        "usage: records.mjs draft|staging-start|staging-end <file> OR issue|addition <file> <Issue label>",
-      );
+      throw new Error("usage: records.mjs draft <file> OR issue|addition <file> <Issue label>");
     const markdown = readFileSync(file, "utf8");
     if (kind === "draft") process.stdout.write(renderDraft(markdown));
     else checkRecord(kind, markdown, label);

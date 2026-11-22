@@ -98,17 +98,3 @@ test("issue and addition enforce label, first block, discovery and type-specific
     );
   }
 });
-
-test("staging records the start immediately and the same start with the release time", () => {
-  const started_at = "2026-11-22T01:00:00Z";
-  checkRecord("staging-start", block({ started_at }));
-  checkRecord("staging-end", block({ started_at, ended_at: "2026-11-22T02:00:00Z" }));
-  assert.throws(() => checkRecord("staging-start", block({ started_at, ended_at: started_at })));
-  for (const record of [
-    { started_at },
-    { ended_at: started_at },
-    { started_at, ended_at: "2026-11-21T01:00:00Z" },
-    { started_at: "昨日" },
-  ])
-    assert.throws(() => checkRecord("staging-end", block(record)));
-});
