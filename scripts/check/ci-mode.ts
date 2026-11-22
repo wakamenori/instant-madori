@@ -1,34 +1,62 @@
 import { readFileSync } from "node:fs";
 
-// Paths whose changes need `pnpm check --full` (AGENTS.md: the Container and display path,
-// dependencies, upstream, the Wasm API, tool pins, and the CI definition itself).
-const fullCheckPrefixes = [
+const geometryContainerAndDisplayFormatPaths = [
   "apps/geometry/",
   "crates/display/",
   "crates/geometry-api/",
   "crates/modeling/",
-  "crates/viewer/",
   "apps/worker/src/geometry/",
+  "apps/worker/src/services/geometry.ts",
+  "apps/worker/wrangler.jsonc",
+  ".dockerignore",
+];
+const realContainerJobPaths = [
   "apps/worker/src/objects/",
   "apps/worker/src/workflows/",
   "apps/worker/src/services/jobs.ts",
   "apps/worker/src/compose.ts",
-  "apps/worker/src/services/geometry.ts",
-  "apps/worker/wrangler.jsonc",
-  "third_party/",
-  ".github/workflows/",
-  "scripts/build/",
-  ".cargo/",
-  "scripts/check/boundaries.ts",
-  "scripts/check/check.ts",
-  "scripts/check/check-viewer-wasm",
-  "scripts/check/rust-symbols",
-  "Cargo.toml",
+];
+const releaseWasmAndUpstreamPaths = ["crates/viewer/", "third_party/", "scripts/build/", ".cargo/"];
+const webBuildPaths = [
+  "apps/web/vite.config.ts",
+  "apps/web/index.html",
+  "scripts/dev/dev-session.ts",
+];
+const dependencyAuditAndToolPinPaths = [
   "Cargo.lock",
   "pnpm-lock.yaml",
   "pnpm-workspace.yaml",
+  "deny.toml",
   "mise.toml",
   "rust-toolchain.toml",
+];
+const ciAndFullOnlyScriptPaths = [
+  ".github/workflows/",
+  "scripts/check/check.ts",
+  "scripts/check/layout-contract.ts",
+  "scripts/check/test-results.ts",
+  "scripts/check/boundaries.ts",
+  "scripts/check/check-viewer-wasm",
+  "scripts/check/rust-symbols",
+  "scripts/check/smoke.ts",
+  "scripts/check/check-licenses.ts",
+  "scripts/shared/",
+  "scripts/dev/prune-images.ts",
+  "scripts/dev/prune-build-cache.ts",
+  "scripts/dev/local-access.ts",
+  "apps/worker/tests/container.e2e.ts",
+  "apps/worker/tests/support/",
+  "metrics/home.ts",
+  "metrics/hook/docker-slot.ts",
+  "metrics/hook/spool.ts",
+];
+const fullCheckPrefixes = [
+  ...geometryContainerAndDisplayFormatPaths,
+  ...realContainerJobPaths,
+  ...releaseWasmAndUpstreamPaths,
+  ...webBuildPaths,
+  ...dependencyAuditAndToolPinPaths,
+  ...ciAndFullOnlyScriptPaths,
 ];
 const fullCheckNames = ["package.json", "Cargo.toml", "Dockerfile"];
 
