@@ -1,6 +1,6 @@
 # 案件画面で案を見る
 
-案件画面（`/projects/<案件の ID>`）は、案件の最初のパターンを開き、現在の案の表示データを WebGPU で描く。見出しはパターン名で、その下にパターンを作った日時（`<日時> 作成`）、表示中の案、指示の状態が並ぶ。指示が実行中か待機中なら、状態を 1 秒ごとに読み直し、確定した案に描き替える。何も動いていないときと、待機列が保留のときは読み直さない。案件は URL で開くので、再読込しても、`pnpm dev` を起動し直して画面のポートが変わっても、同じパスで同じ案件が開く。画面からはまだ指示を送れない。利用者はドラッグで回転し、ホイールで拡大・縮小する。
+案件画面（`/projects/<案件の ID>`）は、案件の最初のパターンを開き、現在の案の表示データを WebGPU で描く。見出しはパターン名で、その下にパターンを作った日時（`<日時> 作成`）、表示中の案、指示の状態が並ぶ。指示が実行中か待機中なら、状態を 1 秒ごとに読み直し、確定した案に描き替える。何も動いていないときと、待機列が保留のときは読み直さない。案件は URL で開くので、再読込しても、`pnpm dev` を起動し直して画面のポートが変わっても、同じパスで同じ案件が開く。画面からはまだ指示を送れない。利用者はドラッグで回転し、右ドラッグか、Shift か Ctrl を押したままのドラッグで視点を平行に動かし、ホイールで拡大・縮小する。ビューアの右上の `視点を戻す` を押すと、案の全体が入る最初の視点に戻る。ビューアの下に、この操作の案内が一行出る。
 
 ## Sub-features
 
@@ -10,6 +10,8 @@
 - `view-reopen`：再読込しても、起動し直した後に同じパスを開いても、同じ案件、同じ案、同じ状態が出る。
 - `view-rotate`：ドラッグでモデルが回る。
 - `view-zoom`：ホイールで拡大・縮小する。
+- `view-pan`：右ドラッグ、Shift＋ドラッグ、Ctrl＋ドラッグで、モデルが回らずにカーソルについて平行に動く。動かしてから拡大すると、部屋の中を近くから見られる。中ボタンのドラッグでは何も動かない。キャンバスの上では右クリックのメニューが出ない。
+- `view-reset`：`視点を戻す` を押すと、回転・移動・拡大のどの後でも、案を開いたときと同じ視点に戻る。案が無いあいだ、ボタンは押せない。
 - `view-not-found`：存在しない案件と他人の案件は `この案件は見つかりません。`、それ以外の知らないパスは `このページはありません。` と出る。
 
 ## How to get to it (user POV)
@@ -48,6 +50,29 @@ Preconditions:
   })()
   ```
 
+- **戻す。** 回した後か拡大した後に、`preview_act` の `click` で `locator: 'role=button[name="視点を戻す"]'` を押す。撮り直して `$D/reset.png` に写す。モデルが `drawn.png` と同じ向きと大きさに戻る。ページのスクロールが同じなら、何度戻しても `shasum -a 256` が一致する。
+- **動かす。** 戻した状態で、`preview_evaluate` で右ボタンのドラッグを送る。返り値の `contextMenuPrevented` が `true` なら、右クリックのメニューを止めている。撮り直して `$D/panned.png` に写す。`reset.png` と比べて、モデルが回らずに左上へ動いている。手前の角ほど大きく動くのは、透視の見え方である。
+
+  <!-- prettier-ignore -->
+  ```js
+  (async () => {
+    const canvas = document.querySelector('[role="img"][aria-label="住宅モデル"] canvas');
+    const box = canvas.getBoundingClientRect();
+    const x0 = box.left + box.width / 2, y0 = box.top + box.height / 2;
+    const fire = (type, x, y, button, buttons, shiftKey = false) => canvas.dispatchEvent(new PointerEvent(type, { pointerId: 1, pointerType: "mouse", isPrimary: true, clientX: x, clientY: y, button, buttons, shiftKey, bubbles: true, cancelable: true }));
+    fire("pointerdown", x0, y0, 2, 2);
+    const contextMenuPrevented = !canvas.dispatchEvent(new MouseEvent("contextmenu", { button: 2, clientX: x0, clientY: y0, bubbles: true, cancelable: true }));
+    for (let i = 1; i <= 10; i++) { fire("pointermove", x0 - 18 * i, y0 - 6 * i, -1, 2); await new Promise((r) => requestAnimationFrame(r)); }
+    fire("pointerup", x0 - 180, y0 - 60, 2, 0);
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    return { contextMenuPrevented };
+  })()
+  ```
+
+- **Shift で動かして戻る。** 同じ式を、押す位置を `x0 - 180, y0 - 60`、動かす向きを `+18 * i, +6 * i`、`button` を `0`、`buttons` を `1` にし、`contextmenu` の行を除き、`pointerdown` と最初の 4 回の `pointermove` で `shiftKey` を `true`、残りを `false` にして送る。途中で Shift を離しても移動のまま続く。撮り直すと、`reset.png` と同じハッシュになる。
+- **部屋の中を見る。** 右ボタンのドラッグで窓のある壁を中央へ寄せ、上の「拡大する」の `wheel` を 4 回送る。窓の開口が画面いっぱいに見える。`視点を戻す` を押すと、`reset.png` と同じハッシュに戻る。
+- **案が無いときのボタン。** 新しい案件を作って開き、`まだ案がありません。` が出たら、`preview_evaluate` で `[...document.querySelectorAll("button")].find((e) => e.textContent === "視点を戻す").disabled` を読む。`true` になる。
+
 - **見つからない案件とページ。** `preview_navigate` で `path: "/projects/00000000-0000-4000-8000-000000000000"` を開く。`[role="alert"]` が `この案件は見つかりません。` で、`案件一覧` のリンクがある。`path: "/nope"` を開くと、`[role="alert"]` が `このページはありません。 案件一覧へ` になる。
 
 ## Gotchas
@@ -57,6 +82,7 @@ Preconditions:
 - 仕事が速く終わると、開き直したときにはもう確定していて、実行中の行は見えない。実行中の表示を確かめるときは `MADORI_DEV_JOB_TEST_HOLD=before_render:60` で起動する。
 - ビューアは、状態の行の下にあり、高さが画面の 65% ほどある。案の名前と状態の行はビューアの上なので、スクロールせずに読める。
 - `preview_act` の `scroll` は、キャンバスに `wheel` を送らない。拡大は `preview_evaluate` で合成した `WheelEvent` で確かめ、報告にもそう書く。実際のホイールやトラックパッドの操作感は確かめていない。
+- `preview_act` の `drag` は、`button: "right"` も `modifiers: ["Shift"]` も無視し、いつも左ボタンだけで送る。視点の移動は回転として届く。移動は `preview_evaluate` で合成した `PointerEvent` で確かめ、報告にもそう書く。合成したイベントは既定の動作を起こさないので、実際のマウスでの右クリックのメニューやフォーカスの動きは確かめていない。Windows で右ボタンをキャンバスの外で離したときのメニューも確かめていない。
 - 見出しまでのドラッグは大きく回り、床を下から見た向きになる。向きが変わったことの証拠としては足りる。ドラッグの前にページが少しスクロールするので、`before-rotate.png` との差には位置のずれも含まれる。絵を見て確かめる。
 - WebGPU のキャンバスは、`drawImage` や `toDataURL` で画素を読み出すと透明になる。描かれたことは、スクリーンショットを Read で見て確かめる。
 - Worker のポートで配る画面には、認証のトークンが付かない。一覧も案件も `読み込みに失敗しました。` と出る。画面は画面のポート（`WEB_PORT`）で開く。
