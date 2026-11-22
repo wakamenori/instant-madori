@@ -10,5 +10,3 @@ SELECT o.issue,w.title,w.ready_at,o.launch,c.pr,c.created_at pr_opened,c.merged_
  (SELECT count(*) FROM event e WHERE e.issue=o.issue AND kind='coordinator_message') coordinator_messages,
  (SELECT count(*) FROM event e WHERE e.issue=o.issue AND kind='owner_wake') owner_wakes,'1' definition_version
 FROM launches o LEFT JOIN work_item w USING(issue) LEFT JOIN final_closure f USING(issue) LEFT JOIN change c ON c.pr=f.pr LEFT JOIN deployment_delivery delivery ON delivery.pr=f.pr;
-
-CREATE TABLE mart_issue_wait(issue INTEGER, state TEXT, minutes INTEGER,definition_version TEXT,PRIMARY KEY(issue,state));

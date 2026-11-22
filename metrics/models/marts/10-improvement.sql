@@ -33,7 +33,7 @@ SELECT target,grp,json_group_array(issue ORDER BY pos,issue) issues,min(merged_a
  min((SELECT window_minutes FROM settings),min(pos),(SELECT count(*) FROM active_clock)-max(pos)) minutes
 FROM grouped GROUP BY target,grp;
 
-CREATE TABLE approval_wait AS
+CREATE TABLE IF NOT EXISTS approval_wait AS
 SELECT d.issue,d.start,
  min(i.end,coalesce(d.end,(SELECT min(iif(s.start<=d.start,s.end,s.start)) FROM span s
   WHERE s.actor=d.actor AND coalesce(s.end,'9999')>d.start),'9999')) end
