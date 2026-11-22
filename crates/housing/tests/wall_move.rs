@@ -525,3 +525,112 @@ fn door_and_transom_share_a_span_on_the_shortened_wall() {
         );
     }
 }
+
+#[test]
+fn openings_near_the_moved_end_shift_to_spare_width_before_any_narrows() {
+    let h = verification();
+    let w = wall(&h, (4000, -100), (8100, -100));
+    let (h, window) = window(&h, &w, WallEnd::Start, 500., 2000.);
+    let (h, door) = h
+        .attach_opening(
+            &OperationId::new("door"),
+            &OpeningSpec {
+                wall: w.clone(),
+                from: WallEnd::Start,
+                distance: 2600.,
+                width: 1400.,
+                height: 2000.,
+                sill: 0.,
+                fitting: Fitting::Door {
+                    hinge: WallEnd::Start,
+                    opens_to: Side::Left,
+                },
+            },
+        )
+        .unwrap();
+    let (_, r) = h.move_wall(&shared(&h, 1100.)).unwrap();
+    let placement = |distance, width| OpeningPlacement { distance, width };
+    assert_eq!(
+        r.openings,
+        [
+            OpeningAdjustment {
+                opening: window,
+                wall: w.clone(),
+                before: placement(500., 2000.),
+                after: placement(0., 2000.),
+            },
+            OpeningAdjustment {
+                opening: door,
+                wall: w,
+                before: placement(2600., 1400.),
+                after: placement(2000., 1000.),
+            },
+        ]
+    );
+}
+
+#[test]
+fn a_room_exactly_as_wide_as_the_thickest_wall_is_too_narrow() {
+    let h = verification();
+    h.move_wall(&shared(&h, 3899.99)).unwrap();
+    let r = shared(&h, 3900.);
+    let picked = r.wall.as_str().to_owned();
+    assert_eq!(
+        assert_rejected(&h, r),
+        [Rejection {
+            element: ElementKind::Room,
+            id: h.data().rooms[1].id.as_str().into(),
+            reason: Reason::NarrowRoom {
+                wall: picked,
+                width: 200.,
+                minimum: 200.
+            }
+        }]
+    );
+}
+
+#[test]
+fn a_move_that_jumps_over_a_detached_building_crosses_its_walls() {
+    let h = layout(&[((0, 0), (4000, 5000)), ((4300, 0), (8300, 5000))]);
+    let r = request(
+        &wall(&h, (4000, 0), (4000, 5000)),
+        FaceRole::Exterior {},
+        6000.,
+    );
+    let picked = r.wall.as_str().to_owned();
+    let expected: Vec<_> = h
+        .boundaries()
+        .filter(|w| w.start().data().at.x >= 4300. && w.end().data().at.x >= 4300.)
+        .map(|w| Rejection {
+            element: ElementKind::Wall,
+            id: picked.clone(),
+            reason: Reason::CrossesWall {
+                other: w.data().id.as_str().into(),
+            },
+        })
+        .collect();
+    assert_eq!(expected.len(), 4);
+    assert_eq!(assert_rejected(&h, r), expected);
+}
+
+#[test]
+fn the_moved_wall_planform_follows_the_new_centre_line() {
+    let h = verification();
+    let r = shared(&h, 1234.5);
+    let (m, _) = h.move_wall(&r).unwrap();
+    for w in m.boundaries() {
+        w.planform().unwrap();
+    }
+    let xs = m
+        .boundary(&r.wall)
+        .unwrap()
+        .planform()
+        .unwrap()
+        .points()
+        .iter()
+        .map(|p| p.x)
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), x| {
+            (lo.min(x), hi.max(x))
+        });
+    assert_eq!(xs, (5174.5, 5294.5));
+}
