@@ -13,6 +13,9 @@ CREATE TABLE issue_classification AS
 WITH kinds AS (
  SELECT c.issue,k.kind FROM final_closure c,json_each(c.labels) l JOIN issue_kind k
  ON l.value=k.label
+ UNION ALL
+ SELECT i.number,k.kind FROM stg_github_issue i,json_each(i.labels) l JOIN issue_kind k ON l.value=k.label
+ WHERE i.state='open' AND NOT EXISTS(SELECT 1 FROM final_closure c WHERE c.issue=i.number)
 ), facts AS (
  SELECT w.issue,c.pr,c.closed_at,c.merged_at,(SELECT count(*) FROM kinds k WHERE k.issue=w.issue) n,
  (SELECT kind FROM kinds k WHERE k.issue=w.issue LIMIT 1) kind,bk.kind backfill,
@@ -25,7 +28,7 @@ WITH kinds AS (
 ), classified AS (
 SELECT issue,pr,closed_at,merged_at,ownership,n label_count,
  CASE n WHEN 1 THEN kind WHEN 0 THEN iif(closed_at IS NOT NULL,backfill,NULL) END kind,
- CASE WHEN n=1 THEN 'closure' WHEN n=0 AND closed_at IS NOT NULL AND backfill IS NOT NULL THEN 'backfill' END kind_source
+ CASE WHEN n=1 THEN iif(closed_at IS NULL,'current','closure') WHEN n=0 AND closed_at IS NOT NULL AND backfill IS NOT NULL THEN 'backfill' END kind_source
 FROM facts
 ) SELECT c.*,k.area FROM classified c LEFT JOIN issue_kind k USING(kind);
 CREATE UNIQUE INDEX classification_issue ON issue_classification(issue);

@@ -11,7 +11,7 @@ void test("quality follows the closing PR and active observation clock", (t) => 
   const db = new DatabaseSync(":memory:");
   t.after(() => db.close());
   db.exec(`
- CREATE TABLE mart_record_gap(issue,reason);
+ CREATE VIEW record_policy AS SELECT '2026-11-22T01:04:44.000Z' effective; CREATE TABLE mart_record_gap(issue,reason);
  CREATE TABLE issue_classification(issue,pr,merged_at,closed_at,area);
  INSERT INTO issue_classification VALUES (1,11,'2027-01-01','2027-01-01','product'),(2,12,'2027-03-01','2027-03-01','development'),(3,13,'2027-01-01','2027-01-01','product'),(4,14,'2027-01-01','2027-01-01','product');
  INSERT INTO issue_classification VALUES(27,37,'2027-03-01','2027-03-01','development');
@@ -118,16 +118,14 @@ void test("quality follows the closing PR and active observation clock", (t) => 
     ),
     [[2, 1, 1, 1, 0]],
   );
-  assert.deepEqual(rows("SELECT issue,reason FROM mart_record_gap WHERE issue IN (7,8)"), [
-    [8, "missing_verifier"],
-  ]);
+  assert.deepEqual(rows("SELECT issue,reason FROM mart_record_gap WHERE issue IN (7,8)"), []);
 });
 
 void test("compares equal active windows around clustered improvements and counts distinct CI catches", (t) => {
   const db = new DatabaseSync(":memory:");
   t.after(() => db.close());
   db.exec(`
- CREATE TABLE settings(window_minutes); INSERT INTO settings VALUES(3);
+ CREATE VIEW record_policy AS SELECT '1970-01-01' effective; CREATE TABLE settings(window_minutes); INSERT INTO settings VALUES(3);
  CREATE TABLE issue_classification(issue,pr,merged_at,kind);
  CREATE TABLE stg_github_issue(number,target,type);
  INSERT INTO stg_github_issue(number,target) VALUES(1,'activity.ci'),(2,'activity.ci'),(3,'slot.resource_limit'),(4,'absent'),(5,'操作できる'),(6,'prevention.r2_create_only');

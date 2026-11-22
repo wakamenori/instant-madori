@@ -17,8 +17,8 @@ SELECT c.issue,c.merged_at,i.target,CASE WHEN t.id LIKE 'prevention.%' THEN 'pre
  WHEN t.id IS NOT NULL THEN 'compare' WHEN i.target GLOB '*[^a-zA-Z0-9._-]*' THEN 'manual' ELSE 'unknown_target' END mode,
  (SELECT count(*) FROM mart_active_minute WHERE minute<unixepoch(c.merged_at)) pos
 FROM issue_classification c JOIN stg_github_issue i ON i.number=c.issue LEFT JOIN improvement_target t ON t.id=i.target
-WHERE c.kind='開発の仕組みの改善';
-INSERT INTO mart_record_gap SELECT issue,mode FROM improvement WHERE mode='unknown_target';
+WHERE c.kind='開発の仕組みの改善' AND c.merged_at IS NOT NULL;
+INSERT INTO mart_record_gap SELECT issue,mode FROM improvement WHERE mode='unknown_target' AND target IS NOT NULL AND merged_at>=(SELECT effective FROM record_policy);
 
 CREATE TABLE active_clock AS SELECT minute,row_number() OVER(ORDER BY minute) pos FROM mart_active_minute;
 CREATE UNIQUE INDEX clock_minute ON active_clock(minute);
