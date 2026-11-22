@@ -1,14 +1,12 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { relative, resolve } from "node:path";
+import { resolve } from "node:path";
 import { test } from "node:test";
 import { z } from "zod";
 
 void test("Codex runs the silent recorder then the guard for every registered event", () => {
   const cwd = resolve(import.meta.dirname, "../..");
-  const guardPath = relative(cwd, fileURLToPath(new URL("./agent-guard.ts", import.meta.url)));
   const command = z.strictObject({
     type: z.literal("command"),
     command: z.string(),
@@ -37,7 +35,7 @@ void test("Codex runs the silent recorder then the guard for every registered ev
             command: `node metrics/hook/codex.ts ${event} >/dev/null 2>&1 || true`,
             timeout: 5,
           },
-          { type: "command", command: `node ${guardPath} ${event}`, timeout: 30 },
+          { type: "command", command: `node scripts/dev/agent-guard.ts ${event}`, timeout: 30 },
         ],
       },
     ]);

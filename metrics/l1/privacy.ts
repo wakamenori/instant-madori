@@ -174,19 +174,26 @@ const digestSchema = z.object({
 });
 function digest(text: string) {
   const uuid = /\b[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\b/giu;
+  // Stored digests pass through telemetry() again on every replay, so keep only values that
+  // survive redaction and still match digestSchema.
+  const stable = (value: string | undefined) =>
+    value !== undefined && redact(value) === value ? value : null;
+  const relay =
+    /^\[T3 Code: the agent in T3 thread "([a-f0-9-]{36})" sent this message, not the user\.\]/iu.exec(
+      text,
+    )?.[1];
   return {
     v: 1 as const,
     length: text.length,
     lines: text.split("\n").length,
-    command: /^\/([a-z0-9:_-]+)(?:\s|$)/u.exec(text)?.[1] ?? null,
-    leading_tag: /^<([a-z-]+)>/u.exec(text)?.[1] ?? null,
-    relay_from_thread:
-      /^\[T3 Code: the agent in T3 thread "([a-f0-9-]{36})" sent this message, not the user\.\]/iu.exec(
-        text,
-      )?.[1] ?? null,
+    command: stable(/^\/([a-z0-9:_-]+)(?:\s|$)/u.exec(text)?.[1]),
+    leading_tag: stable(/^<([a-z-]+)>/u.exec(text)?.[1]),
+    relay_from_thread: digestSchema.shape.relay_from_thread.safeParse(relay).data ?? null,
     refs: [
       ...new Set([...text.matchAll(/(?:#|\/(?:issues|pull)\/)(\d+)/gu)].map((m) => Number(m[1]))),
-    ].sort((a, b) => a - b),
+    ]
+      .filter(Number.isSafeInteger)
+      .sort((a, b) => a - b),
     uuids: [...new Set(text.match(uuid) ?? [])].sort(),
     markers: markers.filter((k) =>
       /^[\w-]+$/u.test(k) ? new RegExp("\\b" + k + "\\b", "u").test(text) : text.includes(k),
@@ -200,15 +207,13 @@ function pick(data: Obj, keys: string[]) {
     ),
   );
 }
-type Digest = z.infer<typeof digestSchema>;
-
-function addDigests(input: Obj, facts: Obj, normalize: (value: Digest) => Obj = (value) => value) {
+function addDigests(input: Obj, facts: Obj) {
   for (const key of ["prompt", "last_assistant_message"]) {
     const name = key + "_digest";
-    if (typeof input[key] === "string") facts[name] = normalize(digest(input[key]));
+    if (typeof input[key] === "string") facts[name] = digest(input[key]);
     else {
       const stored = digestSchema.safeParse(input[name]);
-      if (stored.success) facts[name] = normalize(stored.data);
+      if (stored.success) facts[name] = stored.data;
     }
   }
 }
@@ -280,17 +285,7 @@ export function codexHookPrivacy(p: Obj) {
     "tool_use_id",
     "stop_hook_active",
   ]);
-  addDigests(input, facts, (value) => ({
-    ...value,
-    refs: value.refs.filter(Number.isSafeInteger),
-    relay_from_thread:
-      digestSchema.shape.relay_from_thread.safeParse(value.relay_from_thread).data ?? null,
-    command: value.command && redact(value.command) !== value.command ? null : value.command,
-    leading_tag:
-      value.leading_tag && redact(value.leading_tag) !== value.leading_tag
-        ? null
-        : value.leading_tag,
-  }));
+  addDigests(input, facts);
   if (input.tool_input !== undefined) facts.tool_input = tool(input.tool_input, "");
   return telemetry({
     v: 1,

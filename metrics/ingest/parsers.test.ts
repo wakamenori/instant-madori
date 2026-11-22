@@ -6,8 +6,7 @@ import { object } from "../l1/privacy.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, rmSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { relative, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { parseOtlp } from "./otlp.ts";
 import { parseSlot } from "./docker-slot.ts";
@@ -240,11 +239,10 @@ void test("Codex recorder and receiver preserve turn and approval facts across r
       stop_hook_active: false,
     },
   };
-  const recorderPath = relative(root, fileURLToPath(new URL("../hook/codex.ts", import.meta.url)));
   function run(event: string, fields: object, cwd: string) {
     const recorder = config.hooks[event]?.[0]?.hooks[0];
     assert.ok(recorder);
-    assert.equal(recorder.command, `node ${recorderPath} ${event} >/dev/null 2>&1 || true`);
+    assert.equal(recorder.command, `node metrics/hook/codex.ts ${event} >/dev/null 2>&1 || true`);
     const result = spawnSync("/bin/sh", ["-c", recorder.command], {
       cwd,
       env: { ...process.env, INSTANT_MADORI_METRICS_HOME: dir },

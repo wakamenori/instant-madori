@@ -326,7 +326,7 @@ viewerは、持ち主がときどき開いて、工場が速くなっている�
 OTelは、リポジトリではなくこのマシンの設定で有効にする。Claude Codeは、プロジェクトの `.claude/settings.json` の `env` に書いたテレメトリーの設定を使わないためである。
 
 - Claude Codeは、`~/.claude_personal/settings.json` の `env` で有効にする。T3は、このフォルダーを `CLAUDE_CONFIG_DIR` としてClaude Codeを起動する。
-- Codexは、`~/.codex/config.toml` の `[otel]` で有効にする。リポジトリの `.codex/hooks.json` は、SessionStart、UserPromptSubmit、PreToolUse、PostToolUse、PermissionRequest、Stopを登録する。本体のチェックアウトで承認した定義はworktreeでも有効になる。承認は定義のハッシュに結び付くため、各イベントのコマンドは次の2行に固定し、`<Event>` にはイベント名を入れる。
+- Codexは、`~/.codex/config.toml` の `[otel]` で有効にする。リポジトリの `.codex/hooks.json` は、SessionStart、UserPromptSubmit、PreToolUse、PostToolUse、PermissionRequest、Stopを登録する。worktreeのセッションも本体のチェックアウトの `.codex/hooks.json` を読み、コマンドはセッションのcwd（worktree）で動く。そのため、定義の承認と変更は本体のチェックアウトに入ってから効き、スクリプトは各worktreeの版が動く。承認は定義のハッシュに結び付くため、各イベントのコマンドは次の2行に固定し、`<Event>` にはイベント名を入れる。
   1. `node metrics/hook/codex.ts <Event> >/dev/null 2>&1 || true` は、ツールの出力を除いてspoolに書く。記録に失敗してもセッションに出力を返さず、作業を続ける。
   2. `node scripts/dev/agent-guard.ts <Event>` は、標準入力を読み終えて成功する。今後の検査が判定を返せるよう、出力と終了コードはそのままCodexに渡す。
 
