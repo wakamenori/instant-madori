@@ -1,3 +1,4 @@
+import { parseCodexHook } from "../ingest/codex-hook.ts";
 import { execFile, execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync } from "node:fs";
@@ -121,7 +122,9 @@ export async function startReceiver(options: Options) {
         ? parseClassifications
         : name.startsWith("docker-slot-")
           ? parseSlot
-          : parseHook;
+          : name.startsWith("codex-hook-")
+            ? parseCodexHook
+            : parseHook;
       ingest(parse(readFileSync(path), identity));
       unlinkSync(path);
     }

@@ -100,6 +100,20 @@ void test("listener ownership, durable hold, spool replay and expiration", async
   assert.equal(count("l1_quarantine", "content LIKE '%secret%' OR reason LIKE '%private%'"), 0);
   assert.equal((await post(fixture("codex_exec-Logs.json"))).status, 200);
   assert.equal(count("held_record"), 1);
+  writeFileSync(
+    join(home.ready, "codex-hook-one.json"),
+    JSON.stringify({
+      v: 1,
+      id: randomUUID(),
+      at: now.toISOString(),
+      project: slot.project,
+      env: {},
+      stdin: JSON.stringify({ hook_event_name: "SessionStart", session_id: "fake-value" }),
+    }),
+  );
+  receiver.flush();
+  assert.equal(count("held_record", "source='codex.hook'"), 1);
+  assert.equal(count("l1_record", "source='codex.hook'"), 0);
   const t3 = new DatabaseSync(options.t3File);
   t3.exec(`CREATE TABLE orchestration_v2_projection_provider_threads(provider_thread_id,thread_id,provider,payload_json);
 CREATE TABLE orchestration_v2_projection_threads(thread_id,project_id);
@@ -113,4 +127,5 @@ INSERT INTO orchestration_v2_projection_provider_threads VALUES ('provider','thr
   assert.equal(count("held_record"), 0);
   assert.equal(count("l1_record", "source='t3.codex_link'"), 1);
   assert.equal(count("l1_record", "source='codex.otel.log'"), 1);
+  assert.equal(count("l1_record", "source='codex.hook'"), 1);
 });

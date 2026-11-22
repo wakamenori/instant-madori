@@ -326,9 +326,13 @@ viewerは、持ち主がときどき開いて、工場が速くなっている�
 OTelは、リポジトリではなくこのマシンの設定で有効にする。Claude Codeは、プロジェクトの `.claude/settings.json` の `env` に書いたテレメトリーの設定を使わないためである。
 
 - Claude Codeは、`~/.claude_personal/settings.json` の `env` で有効にする。T3は、このフォルダーを `CLAUDE_CONFIG_DIR` としてClaude Codeを起動する。
-- Codexは、`~/.codex/config.toml` の `[otel]` で有効にする。Codexのhookは、リポジトリの `.codex/hooks.json` に置く。hookの承認は本体のチェックアウトで一度だけ行えば、Issueごとのworktreeにも効く。承認は定義（イベント、matcher、コマンドの文字列、timeoutなど）のハッシュに結び付き、呼び出すスクリプトの中身は含まない。そのため、定義はスクリプトを呼ぶ一行に固定して、使うイベントを最初に全部登録し、処理はスクリプトの側で変える。
+- Codexは、`~/.codex/config.toml` の `[otel]` で有効にする。リポジトリの `.codex/hooks.json` は、SessionStart、UserPromptSubmit、PreToolUse、PostToolUse、PermissionRequest、Stopを登録する。本体のチェックアウトで承認した定義はworktreeでも有効になる。承認は定義のハッシュに結び付くため、各イベントのコマンドは次の2行に固定し、`<Event>` にはイベント名を入れる。
+  1. `node metrics/hook/codex.ts <Event> >/dev/null 2>&1 || true` は、ツールの出力を除いてspoolに書く。記録に失敗してもセッションに出力を返さず、作業を続ける。
+  2. `node scripts/dev/agent-guard.ts <Event>` は、標準入力を読み終えて成功する。今後の検査が判定を返せるよう、出力と終了コードはそのままCodexに渡す。
 
-どちらもこのマシンのすべてのセッションに効く。受け口は、hookの記録でこのリポジトリと結べたセッションと、T3のDBでこのリポジトリのスレッドと結べたCodexの会話だけをL1に書き、ほかは捨てる。hookは、セッションのプロジェクトの `.git` が何を指すかを書き、受け口はそれがこのリポジトリのgitの共通ディレクトリかを確かめる。本体のチェックアウトと、Claude CodeとT3が作るworktreeは、どれも同じ共通ディレクトリを持つ。Codexの `conversation.id` は、読み取り専用の `~/.t3/userdata/statev2.sqlite` でCodexスレッドの `nativeThreadRef.nativeId` と照合する。本体のチェックアウトがプロジェクトの `workspace_root` と一致したら、根拠を `t3.codex_link` としてL1に残す。照合に失敗した回数は受け口の健康記録に含める。結べるまでの記録はプライバシー規則を適用してSQLiteに保留し、24時間のうちに結べなければL1に入れずに捨てる。
+受け口はCodexのhookからイベントやターンなどの事実、指示と最終応答から取り出したIssue番号や役割などの要約、コマンドやパスを残したツール入力だけを保存する。cwdのgit共通ディレクトリがこのリポジトリと違えば破棄し、一致すれば会話を `t3.codex_link` で照合してから `codex.hook` としてL1に入れる。
+
+OTelの設定はこのマシンのすべてのセッションに効く。受け口は、hookの記録でこのリポジトリと結べたセッションと、T3のDBでこのリポジトリのスレッドと結べたCodexの会話だけをL1に書き、ほかは捨てる。hookは、セッションのプロジェクトの `.git` が何を指すかを書き、受け口はそれがこのリポジトリのgitの共通ディレクトリかを確かめる。本体のチェックアウトと、Claude CodeとT3が作るworktreeは、どれも同じ共通ディレクトリを持つ。Codexの `conversation.id` は、読み取り専用の `~/.t3/userdata/statev2.sqlite` でCodexスレッドの `nativeThreadRef.nativeId` と照合する。本体のチェックアウトがプロジェクトの `workspace_root` と一致したら、根拠を `t3.codex_link` としてL1に残す。照合に失敗した回数は受け口の健康記録に含める。結べるまでの記録はプライバシー規則を適用してSQLiteに保留し、24時間のうちに結べなければL1に入れずに捨てる。
 
 過去の分は、T3のDB、会話ログ、GitHubから一度だけ取り込む。取り込んだ記録の `source` には、これからの記録と区別できる出どころの名前を付ける。
 

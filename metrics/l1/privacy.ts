@@ -175,7 +175,7 @@ const digestSchema = z.object({
 function digest(text: string) {
   const uuid = /\b[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\b/giu;
   return {
-    v: 1,
+    v: 1 as const,
     length: text.length,
     lines: text.split("\n").length,
     command: /^\/([a-z0-9:_-]+)(?:\s|$)/u.exec(text)?.[1] ?? null,
@@ -193,13 +193,26 @@ function digest(text: string) {
     ),
   };
 }
+function pick(data: Obj, keys: string[]) {
+  return Object.fromEntries(
+    Object.entries(data).filter(
+      ([k, v]) => keys.includes(k) && (typeof v === "string" || typeof v === "boolean"),
+    ),
+  );
+}
+type Digest = z.infer<typeof digestSchema>;
+
+function addDigests(input: Obj, facts: Obj, normalize: (value: Digest) => Obj = (value) => value) {
+  for (const key of ["prompt", "last_assistant_message"]) {
+    const name = key + "_digest";
+    if (typeof input[key] === "string") facts[name] = normalize(digest(input[key]));
+    else {
+      const stored = digestSchema.safeParse(input[name]);
+      if (stored.success) facts[name] = normalize(stored.data);
+    }
+  }
+}
 export function hookPrivacy(p: Obj) {
-  const pick = (data: Obj, keys: string[]) =>
-    Object.fromEntries(
-      Object.entries(data).filter(
-        ([k, v]) => keys.includes(k) && (typeof v === "string" || typeof v === "boolean"),
-      ),
-    );
   const input = object(p.input),
     facts: Obj = pick(input, [
       "hook_event_name",
@@ -215,14 +228,7 @@ export function hookPrivacy(p: Obj) {
       "reason",
       "stop_hook_active",
     ]);
-  for (const key of ["prompt", "last_assistant_message"]) {
-    const name = key + "_digest";
-    if (typeof input[key] === "string") facts[name] = digest(input[key]);
-    else {
-      const stored = digestSchema.safeParse(input[name]);
-      if (stored.success) facts[name] = stored.data;
-    }
-  }
+  addDigests(input, facts);
   for (const key of ["background_tasks", "session_crons"]) {
     const name = key + "_count";
     if (Array.isArray(input[key])) facts[name] = input[key].length;
@@ -254,5 +260,43 @@ export function hookPrivacy(p: Obj) {
             "permission_mode",
           ])
         : facts,
+  });
+}
+
+export function codexHookPrivacy(p: Obj) {
+  const input = object(p.input);
+  const facts = pick(input, [
+    "hook_event_name",
+    "session_id",
+    "turn_id",
+    "cwd",
+    "transcript_path",
+    "model",
+    "permission_mode",
+    "source",
+    "agent_id",
+    "agent_type",
+    "tool_name",
+    "tool_use_id",
+    "stop_hook_active",
+  ]);
+  addDigests(input, facts, (value) => ({
+    ...value,
+    refs: value.refs.filter(Number.isSafeInteger),
+    relay_from_thread:
+      digestSchema.shape.relay_from_thread.safeParse(value.relay_from_thread).data ?? null,
+    command: value.command && redact(value.command) !== value.command ? null : value.command,
+    leading_tag:
+      value.leading_tag && redact(value.leading_tag) !== value.leading_tag
+        ? null
+        : value.leading_tag,
+  }));
+  if (input.tool_input !== undefined) facts.tool_input = tool(input.tool_input, "");
+  return telemetry({
+    v: 1,
+    ...pick(p, ["id", "at"]),
+    project: p.project ?? null,
+    env: pick(object(p.env), ["T3CODE_THREAD_ID", "CODEX_THREAD_ID"]),
+    input: facts,
   });
 }
