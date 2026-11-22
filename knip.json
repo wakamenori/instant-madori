@@ -21,6 +21,7 @@
         "metrics/hook/hook.ts",
         "metrics/hook/codex.ts",
         "scripts/dev/agent-guard.ts",
+        "scripts/dev/staging.ts",
         "metrics/receiver/receiver.ts",
         "metrics/build/build.ts",
         "metrics/import/classifications.ts",
