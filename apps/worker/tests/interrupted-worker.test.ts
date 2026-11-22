@@ -12,9 +12,10 @@ import { promisify } from "node:util";
 
 const fixtureSource = `
   import { startLocalWorker } from ${JSON.stringify(new URL("./support/local-worker.ts", import.meta.url).href)};
+  process.stdin.on("end", () => process.exit());
+  process.stdin.resume();
   await startLocalWorker();
   console.log("ready");
-  setInterval(() => {}, 60_000);
 `;
 
 void test("a test process killed while its Worker runs leaves no Wrangler behind", async (t) => {
@@ -22,7 +23,7 @@ void test("a test process killed while its Worker runs leaves no Wrangler behind
   t.after(() => rm(directory, { recursive: true, force: true }));
   const fixture = spawn(process.execPath, ["--input-type=module", "-e", fixtureSource], {
     env: { ...process.env, TMPDIR: directory },
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: ["pipe", "pipe", "pipe"],
   });
   const exited = once(fixture, "exit");
   try {
