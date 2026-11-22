@@ -120,11 +120,6 @@ SELECT m.*,(
  ORDER BY e.start DESC LIMIT 1
 ) start FROM issue_minute m;
 
-CREATE TABLE mart_minute AS
-SELECT m.issue,m.minute,m.at,CASE WHEN e.wait_target='coordinator' THEN 'wait.coordinator.'||e.wait_detail
- WHEN e.wait_target IS NOT NULL THEN 'wait.'||e.wait_target ELSE coalesce(e.tier,'unrecorded') END state
-FROM sampled_interval m LEFT JOIN mart_effort_interval e USING(issue,start);
-
 CREATE TABLE mart_merge_wait AS
 WITH passes AS (
  SELECT c.pr,c.merged_at merged,max(d.at) last_pass

@@ -504,10 +504,6 @@ void test("hourly and eight active hour windows count releases, owner gaps and m
       "確かめと判断",
     ].sort(),
   );
-  assert.deepEqual(
-    all("SELECT count(*) n FROM mart_minute"),
-    all("SELECT count(*) n FROM issue_minute"),
-  );
   const expected = new Map<number, number>();
   const ends = new Map<number, number>();
   for (const row of all("SELECT issue,start,end FROM owner_interval ORDER BY issue,start")) {
