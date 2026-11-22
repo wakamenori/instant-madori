@@ -48,6 +48,7 @@ void test(
         JOB_TEST_HOLD: "before_commit:15",
       },
     });
+    t.after(() => worker.stop());
     const bootMs = performance.now() - started;
     let session: string | undefined;
     try {

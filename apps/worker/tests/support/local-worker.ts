@@ -17,6 +17,7 @@ import {
   signAccessToken,
 } from "../../../../scripts/dev/local-access.ts";
 import type { AccessKey, AccessUser } from "../../../../scripts/dev/local-access.ts";
+import { dockerTetherEnv } from "../../../../scripts/shared/docker-tether.ts";
 import {
   assertSucceeded,
   cleanupSteps,
@@ -129,7 +130,7 @@ const wranglerExitGraceMs = 10_000;
 function startWrangler(args: string[], onLine?: (line: string) => void): CapturedProcess {
   const child = start(process.execPath, ["-e", lifeline, wrangler, ...args], {
     cwd: workerDirectory,
-    env: { ...process.env, CI: "1" },
+    env: { ...process.env, ...dockerTetherEnv(process.env), CI: "1" },
     stdio: ["pipe", "pipe", "pipe"],
   });
   const lines: string[] = [];
