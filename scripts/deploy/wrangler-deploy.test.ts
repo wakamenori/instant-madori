@@ -25,14 +25,28 @@ async function fixture(t: TestContext) {
   t.after(() => rm(cwd, { recursive: true, force: true }));
   const runner = join(cwd, "runner");
   await mkdir(runner);
-  async function run(env: NodeJS.ProcessEnv, interrupt = false) {
+  async function run(
+    env: NodeJS.ProcessEnv,
+    { interrupt = false, abort }: { interrupt?: boolean; abort?: AbortSignal } = {},
+  ) {
+    const signal = abort ? AbortSignal.any([t.signal, abort]) : t.signal;
+    signal.throwIfAborted();
     const child = spawn(process.execPath, [wrapper, ...args], {
       cwd,
       env: { ...env, RUNNER_TEMP: runner },
       stdio: ["ignore", "pipe", "pipe"],
-      signal: t.signal,
-      killSignal: "SIGKILL",
+      detached: true,
     });
+    const pid = child.pid;
+    function stop() {
+      if (pid === undefined) return;
+      try {
+        process.kill(-pid, "SIGKILL");
+      } catch (error) {
+        if (!(error instanceof Error && "code" in error && error.code === "ESRCH")) throw error;
+      }
+    }
+    signal.addEventListener("abort", stop);
     let output = "";
     child.stdout.setEncoding("utf8").on("data", (part: string) => {
       output += part;
@@ -47,7 +61,12 @@ async function fixture(t: TestContext) {
     const code = await new Promise<number | null>((resolve, reject) => {
       child.once("error", reject);
       child.once("close", resolve);
-    });
+    }).finally(() => signal.removeEventListener("abort", stop));
+    if (signal.aborted) {
+      assert.ok(pid);
+      assert.throws(() => process.kill(-pid, 0), { code: "ESRCH" });
+      signal.throwIfAborted();
+    }
     assert.ok(!output.includes(client), "client ID appeared in logs");
     assert.deepEqual(await readdir(runner), []);
     return { code, lines: output.split("\n") };
@@ -85,18 +104,14 @@ function finish() {
   process.exit(step.code);
 }
 if (step.wait) {
-  const parent = process.ppid;
   process.on("SIGTERM", () => { fs.writeFileSync("signal","SIGTERM"); finish(); });
-  setInterval(() => { if (process.ppid !== parent) process.exit(1); }, 100);
+  setInterval(()=>{},1000);
   console.log("ready for SIGTERM");
 } else finish();
 `,
       { mode: 0o755 },
     );
-  const { code, lines } = await run(
-    { PATH: bin },
-    plan.some((step) => step.wait),
-  );
+  const { code, lines } = await run({ PATH: bin }, { interrupt: plan.some((step) => step.wait) });
   const calls = plan.length
     ? (await readFile(join(cwd, "calls"), "utf8"))
         .trimEnd()
@@ -185,7 +200,7 @@ void test(
   },
 );
 
-async function realWrangler(t: TestContext, rejectUpload: boolean) {
+async function realWrangler(t: TestContext, mode: "accept" | "reject" | "hang") {
   const { cwd, run } = await fixture(t);
   const staging = {
     name: "probe-worker",
@@ -213,6 +228,7 @@ async function realWrangler(t: TestContext, rejectUpload: boolean) {
   await mkdir(home);
   await mkdir(tmp);
 
+  const controller = new AbortController();
   let uploads = 0;
   let missingVersionGets = 0;
   const server = createServer((req, res) => {
@@ -222,7 +238,11 @@ async function realWrangler(t: TestContext, rejectUpload: boolean) {
     let error: { code: number; message: string } | undefined;
     if (req.method === "PUT" && path.endsWith("/scripts/probe-worker")) {
       uploads++;
-      if (rejectUpload) {
+      if (mode === "hang") {
+        controller.abort(new Error("upload interrupted"));
+        return;
+      }
+      if (mode === "reject") {
         res.statusCode = 403;
         error = { code: 10000, message: "Authentication error" };
       } else {
@@ -288,39 +308,43 @@ async function realWrangler(t: TestContext, rejectUpload: boolean) {
   });
   t.after(
     () =>
-      new Promise<void>((resolve, reject) =>
-        server.close((err) => (err ? reject(err) : resolve())),
-      ),
+      new Promise<void>((resolve, reject) => {
+        server.close((err) => (err ? reject(err) : resolve()));
+        server.closeAllConnections();
+      }),
   );
   const address = server.address();
   assert.ok(address && typeof address !== "string");
-  const r = await run({
-    PATH: [
-      resolve(import.meta.dirname, "../../apps/worker/node_modules/.bin"),
-      dirname(process.execPath),
-      "/usr/bin",
-      "/bin",
-    ].join(":"),
-    HOME: home,
-    TMPDIR: tmp,
-    CI: "true",
-    CLOUDFLARE_API_TOKEN: "fake-token",
-    CLOUDFLARE_ACCOUNT_ID: "0123456789abcdef0123456789abcdef",
-    CLOUDFLARE_API_BASE_URL: `http://127.0.0.1:${address.port}/client/v4`,
-    HTTPS_PROXY: "http://127.0.0.1:9",
-    HTTP_PROXY: "http://127.0.0.1:9",
-    NO_PROXY: "127.0.0.1,localhost",
-    WRANGLER_SEND_METRICS: "false",
-    WRANGLER_SEND_ERROR_REPORTS: "false",
-    WRANGLER_HIDE_BANNER: "true",
-  });
+  const r = await run(
+    {
+      PATH: [
+        resolve(import.meta.dirname, "../../apps/worker/node_modules/.bin"),
+        dirname(process.execPath),
+        "/usr/bin",
+        "/bin",
+      ].join(":"),
+      HOME: home,
+      TMPDIR: tmp,
+      CI: "true",
+      CLOUDFLARE_API_TOKEN: "fake-token",
+      CLOUDFLARE_ACCOUNT_ID: "0123456789abcdef0123456789abcdef",
+      CLOUDFLARE_API_BASE_URL: `http://127.0.0.1:${address.port}/client/v4`,
+      HTTPS_PROXY: "http://127.0.0.1:9",
+      HTTP_PROXY: "http://127.0.0.1:9",
+      NO_PROXY: "127.0.0.1,localhost",
+      WRANGLER_SEND_METRICS: "false",
+      WRANGLER_SEND_ERROR_REPORTS: "false",
+      WRANGLER_HIDE_BANNER: "true",
+    },
+    { abort: controller.signal },
+  );
   return { ...r, uploads, missingVersionGets };
 }
 void test(
   "real Wrangler deploys on the second attempt when the first version is not readable yet",
   { timeout: 30000 },
   async (t) => {
-    const r = await realWrangler(t, false);
+    const r = await realWrangler(t, "accept");
     assert.equal(r.code, 0, r.lines.join("\n"));
     assert.equal(r.uploads, 2);
     assert.equal(r.missingVersionGets, 5);
@@ -332,9 +356,12 @@ void test(
   "real Wrangler is not re-run after an upload authentication error",
   { timeout: 30000 },
   async (t) => {
-    const r = await realWrangler(t, true);
+    const r = await realWrangler(t, "reject");
     assert.equal(r.code, 1);
     assert.equal(r.uploads, 1, r.lines.join("\n"));
     assert.ok(r.lines.includes(failure("another error")));
   },
 );
+void test("aborts real Wrangler during upload", { timeout: 30000 }, async (t) => {
+  await assert.rejects(realWrangler(t, "hang"), { message: "upload interrupted" });
+});
