@@ -11,7 +11,7 @@
 ## How to get to it (user POV)
 
 - 画面の操作は無い。利用者から見えるのは、[指示を送る](./instructions.md)の state で、指示が最後に完了か失敗になること。確かめの繰り返しと定期実行は、`$EVIDENCE/dev.log` の Worker のログで読む。
-- 定期実行は、ローカルでは自動で動かない。Worker の 8787 番の `GET /cdn-cgi/local/scheduled` で一回動かす。Vite の 5173 番は `/api` だけを中継するので、この経路は 8787 番へ送る。
+- 定期実行は、ローカルでは自動で動かない。Worker のポートの `GET /cdn-cgi/local/scheduled` で一回動かす。画面のポート（Vite）は `/api` だけを中継するので、この経路は Worker のポート（`WORKER_PORT`）へ送る。
 
 ## Driving it with curl
 
@@ -24,7 +24,7 @@ Preconditions:
 - `state pre` の `runningJob` が `null` で、`queuedJobs` が `[]`。ほかの機能の手順で残った指示があると、A はその後ろで待機中のままになり、どの手順も進まない。残っていたら、[指示を止める](./stop.md)の `stop` で止める。
 
 - **送って、確かめの繰り返しを読む。** `send accept-a 台所を広くしたい`。`202`。`A=$(jq -r .job.jobId "$D/accept-a.json")` を設定する。70秒おいて `grep '"event":"pattern.advanced"' "$EVIDENCE/dev.log" | grep "$A" >| "$D/watch.log"`。`"outcome":"claimed"` の行が一つと、`"outcome":"running"` で `"instanceStatus"` を持つ行が二つ以上ある。`running` の行の間隔は約30秒。
-- **5分より前の定期実行。** 送ってから5分たつ前に `curl -sS -o "$D/sweep-early.txt" -w '%{http_code}\n' http://127.0.0.1:8787/cdn-cgi/local/scheduled`。`200` で、本文が `ok`。`grep -c '"event":"jobs.swept"' "$EVIDENCE/dev.log"` は、送る前と同じ数のまま。
+- **5分より前の定期実行。** 送ってから5分たつ前に `curl -sS -o "$D/sweep-early.txt" -w '%{http_code}\n' "http://127.0.0.1:$WORKER_PORT/cdn-cgi/local/scheduled"`。`200` で、本文が `ok`。`grep -c '"event":"jobs.swept"' "$EVIDENCE/dev.log"` は、送る前と同じ数のまま。
 - **5分を過ぎた定期実行。** 送ってから5分を過ぎて、同じ要求を出力先 `"$D/sweep-late.txt"` で送る。`200` で `ok`。`grep '"event":"jobs.swept"' "$EVIDENCE/dev.log" | tail -1` に `"found":1` と `"woken":1` が出て、その直後に `$A` の `pattern.advanced` の `running` が一行増える。`state state-1` の `runningJob.jobId` は `$A` のまま。
 - **再読込で止まることを読む。** `n=$(grep -c 'Local server updated and ready' "$EVIDENCE/dev.log")` を設定し、`printf '\n// reload\n' >> apps/worker/src/runtime.ts` で中身に一行足す。`$EVIDENCE/dev.log` の `Local server updated and ready` が `n` より増えたら、`git checkout -- apps/worker/src/runtime.ts` で戻す。戻した変更でも、もう一度再読込する。`git status --short apps/worker` が何も出さない。7分の待ちが明けた後も、`state state-2` の `runningJob.jobId` は `$A` のままで、`$A` の `job.finished` は出ない。`pattern.advanced` の `running` は約30秒ごとに出続ける。
 - **止めて抜ける。** `stop stop-a "$A" "$(uuidgen)"`。`200` で、`outcome` が `stopped`、`job.state` が `cancelled`。`state state-3` の `runningJob` が `null`、`lastFinishedJob.state` が `cancelled`。直後の `pattern.advanced` に `"outcome":"idle"` が出て、その後 `$A` の `running` の行は増えない。

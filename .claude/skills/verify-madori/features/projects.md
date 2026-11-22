@@ -20,8 +20,7 @@
 Preconditions:
 
 - 状態確認が通っている。
-- `J='content-type: application/json'` と `O='origin: http://127.0.0.1:5173'` を設定している。
-- `API=http://127.0.0.1:5173/api` と `D="$EVIDENCE/projects"` を設定し、`$D` がある。
+- `. "$EVIDENCE/dev.env"` で `API` と `O` を読み込み、`J='content-type: application/json'` と `D="$EVIDENCE/projects"` を設定し、`$D` がある。
 
 - **作る。** `RID=$(uuidgen)` で `curl -sS -o "$D/create.json" -w '%{http_code}\n' -X POST "$API/projects" -H "$J" -H "$O" -d "{\"requestId\":\"$RID\",\"name\":\"検証の案件\"}"`。`201`。`jq '.project.name, .project.version, .pattern.projectId == .project.id' "$D/create.json"` が `"検証の案件"`、`1`、`true`。
 - **送り直す。** 同じ `RID` と本文で、出力先だけ `"$D/replay.json"` にして送る。`201` で、`project.id` が `create.json` と同じ。
