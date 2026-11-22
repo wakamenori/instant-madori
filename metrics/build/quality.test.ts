@@ -124,52 +124,59 @@ void test("quality follows the closing PR and active observation clock", (t) => 
 void test("compares equal active windows around clustered improvements, samples approval waits and counts distinct CI catches", (t) => {
   const db = new DatabaseSync(":memory:");
   t.after(() => db.close());
+  const epoch = Date.parse("2026-11-21T12:21:00Z") / 1000;
+  const tick = (offset: number) => epoch + offset;
+  const at = (offset: number) => new Date(tick(offset) * 1000).toISOString();
+  db.function("tick", (n) => tick(Number(n)));
+  db.function("at", (n) => at(Number(n)));
   db.exec(`
- CREATE VIEW record_policy AS SELECT '1970-01-01' effective; CREATE TABLE settings(window_minutes); INSERT INTO settings VALUES(3);
- CREATE TABLE issue_classification(issue,pr,merged_at,kind);
- CREATE TABLE stg_github_issue(number,target,type);
- INSERT INTO stg_github_issue(number,target) VALUES(1,'activity.ci'),(2,'activity.ci'),(3,'slot.resource_limit'),(4,'absent'),(5,'操作できる'),(6,'prevention.r2_create_only'),
+CREATE VIEW record_policy AS SELECT '1970-01-01' effective; CREATE TABLE settings(window_minutes); INSERT INTO settings VALUES(3);
+CREATE TABLE issue_classification(issue,pr,merged_at,kind,ownership);
+CREATE TABLE stg_github_issue(number,target,type);
+INSERT INTO stg_github_issue(number,target) VALUES(1,'activity.ci'),(2,'activity.ci'),(3,'slot.resource_limit'),(4,'absent'),(5,'操作できる'),(6,'prevention.r2_create_only'),
  (9,'approval.wait'),(10,'quality.first_pass'),(11,'slot.awaiting_dispatch'),(12,NULL);
- INSERT INTO issue_classification SELECT number,number+10,datetime(CASE number WHEN 2 THEN 600 WHEN 3 THEN 0 ELSE 540 END,'unixepoch'),'開発の仕組みの改善' FROM stg_github_issue;
- INSERT INTO stg_github_issue VALUES(7,'activity.ci','開発の仕組みの改善'),(8,'activity.ci','開発の仕組みの改善');
- INSERT INTO issue_classification VALUES(7,17,NULL,NULL),(8,18,NULL,'開発の仕組みの不具合');
- CREATE TABLE mart_active_minute(minute); INSERT INTO mart_active_minute VALUES(0),(60),(420),(480),(540),(600),(660),(720),(780),(840),(900);
- CREATE TABLE mart_minute(issue,minute,at,state); INSERT INTO mart_minute SELECT 20,minute,minute+10,iif(minute<540,'ci','owner_turn') FROM mart_active_minute;
- INSERT INTO mart_minute VALUES(21,420,430,'ci'),(21,900,910,'owner_turn');
- CREATE TABLE owner_capacity_minute(minute,owners,slots); INSERT INTO owner_capacity_minute SELECT minute,iif(minute IN (420,900),2,1),iif(minute<540,2,NULL) FROM mart_active_minute;
- CREATE TABLE owner_interval(issue,id,start,end);
- INSERT INTO owner_interval VALUES(20,'o',0,960),(21,'other',0,960),
- (22,'owner-a',1200,1380),(22,'owner-b',1380,1560),(22,'owner-c',1620,1680);
- CREATE TABLE actor(id,role,created_at);
- INSERT INTO actor VALUES('o','owner',0),('v','verifier',0),('i','implementer',0),('a','advisor',0),('other','owner',0),
- ('owner-a','owner',1200),('verifier-a','verifier',1210),('owner-b','owner',1380),('verifier-b','verifier',1390),('owner-c','owner',1620);
- CREATE TABLE span(actor,kind,start,end);
- INSERT INTO span VALUES('o','owner_turn',0,20),('v','verifier_run',0,20),
- ('o','owner_turn',420,490),('o','owner_turn',540,560),('o','owner_turn',670,680),('o','owner_turn',705,710),('o','owner_turn',840,NULL);
- CREATE TABLE mart_turn_detail(issue,actor,kind,start,end);
- INSERT INTO mart_turn_detail VALUES
- (20,'o','approval',10,20),(20,'v','approval',5,15),
- (20,'o','approval',61,68),
- (20,'o','approval',430,NULL),(20,'o','approval',605,NULL),
- (20,'o','approval',700,760),
- (20,'i','approval',780,800),(20,'a','approval',780,800),(20,'o','tool',780,800),
- (21,'other','approval',780,NULL),(20,'o','approval',850,NULL);
- INSERT INTO span VALUES('owner-a','owner_turn',1200,NULL);
- INSERT INTO mart_turn_detail VALUES
- (22,'owner-a','approval',1205,NULL),(22,'verifier-a','approval',1215,NULL),(22,'owner-a','approval',1225,1420),
- (22,'owner-a','approval',1380,NULL),(22,'verifier-a','approval',1385,1500),(22,'verifier-b','approval',1445,1460),
- (22,'owner-b','approval',1570,NULL);
- INSERT INTO mart_minute VALUES(22,1260,1270,'owner_turn'),(22,1380,1390,'owner_turn'),(22,1440,1450,'owner_turn'),
- (22,1500,1510,'owner_turn'),(22,1620,1630,'owner_turn');
- CREATE TABLE mart_empty_slot(minute,reason,slots);CREATE TABLE mart_record_gap(issue,reason);
- CREATE TABLE mart_quality_issue(merged_at,first_pass,escaped,rework,observed);
- INSERT INTO mart_quality_issue VALUES(datetime(480,'unixepoch'),1,0,0,1),(datetime(600,'unixepoch'),0,0,0,1);
- INSERT INTO mart_empty_slot VALUES(420,'awaiting_dispatch',2);
- CREATE TABLE stg_actions_job(id,workflow,run_id,head_sha,run_created_at,head_branch,event);
- INSERT INTO stg_actions_job VALUES(1,'deploy-staging',1,'a',datetime(540,'unixepoch'),'main','push'),(2,'deploy-staging',1,'a',datetime(540,'unixepoch'),'main','push'),(3,'deploy-staging',2,'b',datetime(30,'unixepoch'),'main','push');
- CREATE TABLE stg_actions_step(job_id,name,conclusion);
+INSERT INTO issue_classification(issue,pr,merged_at,kind) SELECT number,number+10,at(CASE number WHEN 2 THEN 600 WHEN 3 THEN 0 ELSE 540 END),'開発の仕組みの改善' FROM stg_github_issue;
+INSERT INTO stg_github_issue VALUES(7,'activity.ci','開発の仕組みの改善'),(8,'activity.ci','開発の仕組みの改善');
+INSERT INTO issue_classification(issue,pr,merged_at,kind) VALUES(7,17,NULL,NULL),(8,18,NULL,'開発の仕組みの不具合');
+CREATE TABLE fixture_minute(offset); INSERT INTO fixture_minute VALUES(0),(60),(420),(480),(540),(600),(660),(720),(780),(840),(900);
+CREATE TABLE issue_minute(issue,minute,at); INSERT INTO issue_minute SELECT 20,tick(offset),at(offset+10) FROM fixture_minute;
+INSERT INTO issue_minute VALUES(21,tick(420),at(430)),(21,tick(900),at(910)),(22,tick(1260),at(1270)),(22,tick(1380),at(1390)),(22,tick(1440),at(1450)),(22,tick(1500),at(1510)),(22,tick(1620),at(1630));
+CREATE TABLE owner_capacity_minute(minute,owners,slots); INSERT INTO owner_capacity_minute SELECT tick(offset),iif(offset IN (420,900),2,1),iif(offset<540,2,NULL) FROM fixture_minute;
+CREATE TABLE owner_interval(issue,id,start,end);
+INSERT INTO owner_interval VALUES(20,'o',at(0),at(960)),(21,'other',at(0),at(960)),(22,'owner-a',at(1200),at(1380)),(22,'owner-b',at(1380),at(1560)),(22,'owner-c',at(1620),at(1680));
+CREATE TABLE actor(id,role,created_at,issue);
+INSERT INTO actor VALUES('o','owner',at(0),20),('v','verifier',at(0),20),('i','implementer',at(0),20),('a','advisor',at(0),20),('other','owner',at(0),21),
+ ('owner-a','owner',at(1200),22),('verifier-a','verifier',at(1210),22),('owner-b','owner',at(1380),22),('verifier-b','verifier',at(1390),22),('owner-c','owner',at(1620),22);
+CREATE TABLE owner(id,issue,created_at); INSERT INTO owner SELECT id,issue,created_at FROM actor WHERE role='owner';
+CREATE VIEW inside_actor AS SELECT id,issue,iif(role='advisor','owner',role) role FROM actor WHERE issue IS NOT NULL AND role IN ('owner','advisor','implementer','verifier','other');
+CREATE TABLE span_kind(kind TEXT PRIMARY KEY,axis TEXT);
+INSERT INTO span_kind VALUES ('owner_turn','turn'),('verifier_run','turn'),('ci_run','ci');
+CREATE TABLE span(actor,issue,kind,start,end,detail);
+INSERT INTO span VALUES('o',20,'owner_turn',at(0),at(20),NULL),('v',20,'verifier_run',at(0),at(20),NULL),
+ ('o',20,'owner_turn',at(420),at(490),NULL),('o',20,'owner_turn',at(540),at(560),NULL),('o',20,'owner_turn',at(670),at(680),NULL),('o',20,'owner_turn',at(705),at(710),NULL),('o',20,'owner_turn',at(840),NULL,NULL);
+INSERT INTO span VALUES('owner-a',22,'owner_turn',at(1200),NULL,NULL);
+CREATE TABLE stg_t3_approval(thread_id,kind,requested_at,resolved_at);
+INSERT INTO stg_t3_approval VALUES ('o','x',at(10),at(20)),('v','x',at(5),at(15)),('o','x',at(61),at(68)),('o','x',at(430),NULL),('o','x',at(605),NULL),('o','x',at(700),at(760)),
+ ('i','x',at(780),at(800)),('a','x',at(780),at(800)),('other','x',at(780),NULL),('o','x',at(850),NULL),
+ ('owner-a','x',at(1205),NULL),('verifier-a','x',at(1215),NULL),('owner-a','x',at(1225),at(1420)),('owner-a','x',at(1380),NULL),('verifier-a','x',at(1385),at(1500)),('verifier-b','x',at(1445),at(1460)),('owner-b','x',at(1570),NULL);
+CREATE TABLE event(issue,kind,at,attributes); CREATE TABLE verification_decision(issue,pr,round,at,actor,verdict,head);
+CREATE TABLE stg_actions_attempt(workflow,run_attempt,head_sha,created_at);
+CREATE TABLE deploy_attempt(head_sha,started_at,end,created_at,run_attempt,conclusion,run_id,status); CREATE TABLE issue_change(issue,pr); CREATE TABLE deploy_scope(pr,deployable);
+CREATE TABLE mart_empty_slot(minute,reason,slots);CREATE TABLE mart_record_gap(issue,reason);
+CREATE TABLE mart_quality_issue(merged_at,first_pass,escaped,rework,observed);
+INSERT INTO mart_quality_issue VALUES(at(480),1,0,0,1),(at(600),0,0,0,1);
+INSERT INTO mart_empty_slot VALUES(tick(420),'awaiting_dispatch',2);
+CREATE TABLE stg_actions_job(id,workflow,run_id,head_sha,run_created_at,head_branch,event);
+CREATE TABLE stg_actions_step(job_id,name,conclusion);
+CREATE TABLE change(pr,merged_at,merge_commit_sha);
+
+ CREATE TABLE deployment_delivery(pr,method,delivered,run_id,run_attempt);
+ INSERT INTO span VALUES('ci20',20,'ci_run',at(0),at(540),NULL),('ci21',21,'ci_run',at(420),at(480),NULL);
+ INSERT INTO stg_actions_job VALUES(1,'deploy-staging',1,'a',at(540),'main','push'),(2,'deploy-staging',1,'a',at(540),'main','push'),(3,'deploy-staging',2,'b',at(30),'main','push');
  INSERT INTO stg_actions_step SELECT id,'Check R2 create-only writes on Cloudflare','failure' FROM stg_actions_job;
- `);
+`);
+  model(db, "core/05-gates.sql");
+  model(db, "marts/04-activity.sql");
   model(db, "marts/10-improvement.sql");
   const rows = (sql: string) =>
     db
@@ -179,14 +186,14 @@ void test("compares equal active windows around clustered improvements, samples 
   const hits = (minute: number) =>
     db
       .prepare("SELECT hits FROM target_sample WHERE target='approval.wait' AND minute=?")
-      .get(minute)?.hits ?? 0;
+      .get(tick(minute))?.hits ?? 0;
   assert.deepEqual(
     rows("SELECT start,end FROM approval_wait WHERE issue=22 ORDER BY start"),
     [
-      [1205, 1380],
-      [1215, 1380],
-      [1225, 1380],
-      [1445, 1460],
+      [at(1205), at(1380)],
+      [at(1215), at(1380)],
+      [at(1225), at(1380)],
+      [at(1445), at(1460)],
     ],
     "waits stop at the requester's owner interval end and requests raised outside it are dropped",
   );

@@ -140,6 +140,53 @@ void test("hourly and eight active hour windows count releases, owner gaps and m
       shared_resources: ["staging を占有する"],
     });
     owner(20, "gates", -70, -69);
+    add("claude.hook", "session", {
+      input: { session_id: "gates" },
+      env: { T3CODE_THREAD_ID: "gates" },
+    });
+    function call(event: string, stop: number, duration: number, command?: string) {
+      const fields: Record<string, string> = {
+        "session.id": "gates",
+        "event.name": event,
+        "event.timestamp": at(stop),
+        duration_ms: String(duration * 60000),
+      };
+      if (command)
+        Object.assign(fields, {
+          tool_name: "Bash",
+          tool_parameters: JSON.stringify({ full_command: command }),
+        });
+      add("claude.otel.log", ++id, {
+        log_record: {
+          attributes: Object.entries(fields).map(([key, stringValue]) => ({
+            key,
+            value: { stringValue },
+          })),
+        },
+      });
+    }
+    call("api_request", -69.5, 0.5);
+    call("tool_result", -69.5, 0.5, "pnpm check");
+    call("tool_result", -65, 3, "until ready; do sleep 5; done");
+    call("tool_result", -15, 1, "until ready; do sleep 5; done");
+    add("t3.message", "resume", {
+      thread_id: "gates",
+      sender_thread_id: "coord",
+      role: "user",
+      created_at: at(-50),
+    });
+    add("t3.message", "report", {
+      thread_id: "coord",
+      sender_thread_id: "gates",
+      role: "user",
+      created_at: at(-62),
+    });
+    add("t3.run", "coord-report", {
+      thread_id: "coord",
+      user_message_id: "report",
+      started_at: at(-62),
+      completed_at: at(-61),
+    });
     add("t3.run", "final", { thread_id: "gates", started_at: at(-15), completed_at: at(-14) });
     add("t3.thread", "codex", {
       parent_thread_id: "gates",
@@ -179,7 +226,7 @@ void test("hourly and eight active hour windows count releases, owner gaps and m
     add("t3.run", "coord-run", { thread_id: "coord", started_at: at(-64), completed_at: at(-61) });
     add("github.comment", 202, {
       issue_or_pr: 30,
-      created_at: at(-60),
+      created_at: at(-62),
       fields: [{ attempt: 1, verdict: "PASS", head, decided_at: at(-66), failed_checks: [] }],
     });
     add("github.actions.attempt", "gates-check", {
@@ -261,6 +308,22 @@ void test("hourly and eight active hour windows count releases, owner gaps and m
         closes: [n],
       });
       timeline(n, 603, "closed", null, [pr]);
+    }
+    for (const [attempt, head, verdict, push, decision] of [
+      [1, "b".repeat(40), "FAIL", 45, 55],
+      [2, "c".repeat(40), "PASS", 65, 75],
+    ] as const) {
+      add("github.actions.attempt", "phase-" + attempt, {
+        workflow: "check",
+        run_attempt: 1,
+        head_sha: head,
+        created_at: at(push),
+      });
+      add("github.comment", 300 + attempt, {
+        issue_or_pr: 12,
+        created_at: at(decision),
+        fields: [{ attempt, verdict, head: head.slice(0, 8), decided_at: at(decision) }],
+      });
     }
     timeline(31, 1, "labeled", "製品の不具合：約束どおりに動かない製品を直す");
     timeline(32, 1, "labeled", "確かめと判断：試作・計測・受け入れ・計画づくりで知る・決める");
@@ -439,21 +502,16 @@ void test("hourly and eight active hour windows count releases, owner gaps and m
     [],
   );
   assert.deepEqual(
-    all("SELECT actor,kind FROM span WHERE kind IN ('ci_queue','ci_run') ORDER BY kind"),
+    all("SELECT actor,kind FROM span WHERE kind IN ('ci_queue','ci_run') ORDER BY kind,actor"),
     [
+      { actor: "901", kind: "ci_queue" },
       { actor: "902", kind: "ci_queue" },
-      { actor: "902", kind: "ci_run" },
+      { actor: "9/1", kind: "ci_run" },
     ],
   );
   assert.deepEqual(all("SELECT job_id FROM mart_ci_job WHERE workflow='check'"), [{ job_id: 902 }]);
   assert.deepEqual(all("SELECT check_jobs FROM mart_issue_flow WHERE issue=20"), [
     { check_jobs: 1 },
-  ]);
-  assert.deepEqual(all("SELECT start,end FROM check_period WHERE issue=20"), [
-    { start: at(-67), end: at(-65) },
-  ]);
-  assert.deepEqual(all("SELECT queued,end FROM check_gate WHERE issue=20"), [
-    { queued: at(-67), end: at(-65) },
   ]);
   assert.deepEqual(all("SELECT DISTINCT shared_resources FROM issue_requirements WHERE issue=21"), [
     { shared_resources: '["staging を占有する"]' },
@@ -493,21 +551,65 @@ void test("hourly and eight active hour windows count releases, owner gaps and m
     ].sort(),
   );
   assert.deepEqual(
-    all("SELECT state FROM mart_minute WHERE issue=20 ORDER BY minute LIMIT 10").map(
-      (r) => r.state,
-    ),
-    [
-      "owner_turn",
-      "implementer",
-      "verifier",
-      "ci",
-      "check_wait",
-      "staging_occupied",
-      "deploy_running",
-      "coordinator_busy",
-      "coordinator_busy",
-      "coordinator_asleep",
-    ],
+    all("SELECT count(*) n FROM mart_minute"),
+    all("SELECT count(*) n FROM issue_minute"),
+  );
+  const expected = new Map<number, number>();
+  const ends = new Map<number, number>();
+  for (const row of all("SELECT issue,start,end FROM owner_interval ORDER BY issue,start")) {
+    const issue = Number(row.issue);
+    const start = Math.max(
+      Date.parse(String(row.start)),
+      Date.parse("2026-11-21T12:21:00Z"),
+      ends.get(issue) ?? 0,
+    );
+    const end = Date.parse(String(row.end));
+    if (end > start) {
+      expected.set(issue, (expected.get(issue) ?? 0) + end - start);
+      ends.set(issue, end);
+    }
+  }
+  assert.deepEqual(
+    all("SELECT issue,sum(ms) ms FROM mart_effort_interval GROUP BY issue ORDER BY issue"),
+    Array.from(expected, ([issue, ms]) => ({ issue, ms })),
+  );
+  const interval = (minute: number) =>
+    out
+      .prepare(
+        "SELECT tier,wait_detail,ci_ms,generation_ms,local_ms,ms FROM mart_effort_interval WHERE issue=20 AND start<=? AND end>?",
+      )
+      .get(at(minute), at(minute));
+  const overlap = interval(-70);
+  assert.equal(overlap?.tier, "work");
+  assert.ok(Number(overlap?.generation_ms) + Number(overlap?.local_ms) > Number(overlap?.ms));
+  assert.equal(interval(-67)?.tier, "work");
+  assert.ok(Number(interval(-67)?.ci_ms) > 0);
+  assert.equal(interval(-16)?.tier, "unclassified");
+  assert.deepEqual(
+    [-62, -63, -58].map((n) => interval(n)?.wait_detail),
+    ["this_issue", "elsewhere", "stopped"],
+  );
+  assert.deepEqual(all("SELECT start,phase FROM issue_phase WHERE issue=2 ORDER BY start"), [
+    { start: at(40), phase: "implementation" },
+    { start: at(45), phase: "verification" },
+    { start: at(55), phase: "rework" },
+    { start: at(65), phase: "verification" },
+    { start: at(75), phase: "merge_wait" },
+    { start: at(603), phase: "post_merge" },
+  ]);
+  assert.deepEqual(
+    all(
+      "SELECT phase FROM mart_effort_interval WHERE issue=2 GROUP BY phase ORDER BY min(start)",
+    ).map((r) => r.phase),
+    ["implementation", "verification", "rework", "merge_wait"],
+  );
+  assert.equal(
+    out
+      .prepare(
+        "SELECT min(start) start FROM mart_effort_interval WHERE issue=1 AND phase='post_merge'",
+      )
+      .get()?.start,
+    at(603),
   );
   assert.deepEqual(
     all(
@@ -523,10 +625,13 @@ void test("hourly and eight active hour windows count releases, owner gaps and m
     all("SELECT minutes FROM mart_inactive_stretch WHERE start<unixepoch('2026-11-23')"),
     [{ minutes: 46 }],
   );
-  assert.deepEqual(all("SELECT issue,kind,start,end FROM mart_turn_detail ORDER BY start"), [
-    { issue: 20, kind: "approval", start: at(-70), end: at(-69) },
-    { issue: 20, kind: "approval", start: at(-68), end: at(-67) },
-  ]);
+  assert.deepEqual(
+    all("SELECT issue,kind,start,end FROM mart_turn_detail WHERE kind='approval' ORDER BY start"),
+    [
+      { issue: 20, kind: "approval", start: at(-70), end: at(-69) },
+      { issue: 20, kind: "approval", start: at(-68), end: at(-67) },
+    ],
+  );
   assert.deepEqual(all("SELECT unit,direction FROM improvement_target WHERE id='approval.wait'"), [
     { unit: "割合", direction: "down" },
   ]);
@@ -538,20 +643,6 @@ void test("hourly and eight active hour windows count releases, owner gaps and m
     ],
   );
   assert.deepEqual(all("SELECT count(*) n FROM issue_minute WHERE issue=1"), [{ n: 12 }]);
-  assert.deepEqual(all("SELECT state,minutes FROM mart_issue_wait WHERE issue=1 ORDER BY state"), [
-    { state: "owner_turn", minutes: 7 },
-    { state: "post_merge", minutes: 4 },
-    { state: "verifier", minutes: 1 },
-  ]);
-  assert.deepEqual(
-    all("SELECT detail FROM mart_minute WHERE issue=1 AND state='post_merge' ORDER BY minute"),
-    [
-      { detail: "deploy_queued" },
-      { detail: "deploy_running" },
-      { detail: "staging_occupied" },
-      { detail: "owner_check" },
-    ],
-  );
   assert.deepEqual(all("SELECT previous_kind,kind FROM mart_kind_change"), [
     { previous_kind: "製品の不具合", kind: "機能" },
   ]);

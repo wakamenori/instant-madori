@@ -1,17 +1,30 @@
-CREATE TABLE improvement_target(id TEXT PRIMARY KEY,name TEXT,definition TEXT,unit TEXT,direction TEXT,version INTEGER);
-WITH states(state,name) AS (VALUES ('post_merge','マージ後の確認'),('verifier','検証'),('owner_turn','担当の作業'),('implementer','実装役の作業'),
- ('check_wait','checkの待ち'),('ci','CI'),('staging_occupied','stagingの占有'),('deploy_running','デプロイの実行中'),
- ('coordinator_busy','指揮役がほかの仕事中'),('coordinator_asleep','指揮役が起きていない'),('owner_wait','担当の待ち'),('unknown','不明'))
-INSERT INTO improvement_target SELECT 'activity.'||state,name,name||'の分数 ÷ 延べ時間','割合','down',1 FROM states;
+CREATE TABLE improvement_target(id TEXT PRIMARY KEY,name TEXT,definition TEXT,unit TEXT,direction TEXT,version INTEGER,
+ sample TEXT,observable_from TEXT);
+WITH activity(id,name,sample) AS (VALUES
+ ('owner_turn','担当側の作業','["run:owner"]'),
+ ('implementer','実装役の作業','["run:implementer"]'),
+ ('verifier','検証役の作業','["run:verifier"]'),
+ ('ci','CIの待ちと実行','["run:ci","queue:ci"]'),
+ ('owner_wait','ローカルでの実行','["run:local"]'),
+ ('check_wait','マージ待ち中のCIの待機と実行','["check_wait"]'),
+ ('staging_occupied','stagingの占有の待ち','["detail:staging"]'),
+ ('deploy_running','デプロイの順番の待ち','["detail:deploy_order"]'),
+ ('coordinator_busy','別件を対応中の指揮役を待つ','["detail:elsewhere"]'),
+ ('coordinator_asleep','停止中の指揮役を待つ','["detail:stopped"]'),
+ ('post_merge','マージ後','["phase:post_merge"]'),
+ ('unknown','未分類','["tier:unclassified"]'))
+INSERT INTO improvement_target SELECT 'activity.'||id,name,
+ name||'の区間にかかった分 ÷ 工数（mart_effort_interval を担当区間の各分の時刻で読む）','割合','down',2,sample,
+ (SELECT start FROM effort_scope) FROM activity;
 WITH reasons(reason,name) AS (VALUES ('no_ready_issue','着手できるIssueが無い'),('resource_limit','資源の枠で選べない'),('awaiting_dispatch','指揮役がまだ立てていない'))
-INSERT INTO improvement_target SELECT 'slot.'||reason,name,name||'の枠・分 ÷ 全枠・分','割合','down',1 FROM reasons;
+INSERT INTO improvement_target SELECT 'slot.'||reason,name,name||'の枠・分 ÷ 全枠・分','割合','down',1,NULL,NULL FROM reasons;
 INSERT INTO improvement_target VALUES
- ('approval.wait','承認待ち','担当と検証役が承認の要求で止まっていた分数 ÷ 延べ時間','割合','down',1),
- ('quality.first_pass','一度で合格','最初の検証で合格 ÷ 判定可能な完了Issue','割合','up',1),
- ('quality.rework','作りの見直し','観察を終えた原因Issueのうち見直しあり','割合','down',1),
- ('quality.escape','不具合漏れ','観察を終えた原因Issueのうち漏れあり','割合','down',1),
- ('prevention.uncommitted_fixes','自動修正の入れ忘れ','checkのgit diff検査が失敗したrunとheadの組数','件','up',1),
- ('prevention.r2_create_only','R2の上書き防止','deploy-stagingの専用stepが失敗したrunとheadの組数','件','up',1);
+ ('approval.wait','承認待ち','担当か検証役の承認要求が開いていたIssue・分 ÷ 工数','割合','down',2,'["approval"]',(SELECT start FROM effort_scope)),
+ ('quality.first_pass','一度で合格','最初の検証で合格 ÷ 判定可能な完了Issue','割合','up',1,NULL,NULL),
+ ('quality.rework','作りの見直し','観察を終えた原因Issueのうち見直しあり','割合','down',1,NULL,NULL),
+ ('quality.escape','不具合漏れ','観察を終えた原因Issueのうち漏れあり','割合','down',1,NULL,NULL),
+ ('prevention.uncommitted_fixes','自動修正の入れ忘れ','checkのgit diff検査が失敗したrunとheadの組数','件','up',1,NULL,NULL),
+ ('prevention.r2_create_only','R2の上書き防止','deploy-stagingの専用stepが失敗したrunとheadの組数','件','up',1,NULL,NULL);
 
 CREATE TABLE improvement AS
 SELECT c.issue,c.merged_at,i.target,CASE WHEN i.target IS NULL THEN 'no_target' WHEN t.id LIKE 'prevention.%' THEN 'prevention'
@@ -29,23 +42,17 @@ WITH adjacent AS (
 ), grouped AS (
  SELECT *,sum(prev IS NULL OR pos-prev>=(SELECT window_minutes FROM settings)) OVER(PARTITION BY target ORDER BY pos,issue) grp FROM adjacent
 )
-SELECT target,grp,json_group_array(issue ORDER BY pos,issue) issues,min(merged_at) first_merge,max(merged_at) last_merge,min(pos) first,max(pos) last,
- min((SELECT window_minutes FROM settings),min(pos),(SELECT count(*) FROM active_clock)-max(pos)) minutes
-FROM grouped GROUP BY target,grp;
-
-CREATE TABLE approval_wait AS
-SELECT d.issue,d.start,
- min(i.end,coalesce(d.end,(SELECT min(iif(s.start<=d.start,s.end,s.start)) FROM span s
-  WHERE s.actor=d.actor AND coalesce(s.end,'9999')>d.start),'9999')) end
-FROM mart_turn_detail d JOIN actor a ON a.id=d.actor
-JOIN owner_interval i ON i.issue=d.issue AND i.start<=a.created_at AND i.end>a.created_at
-WHERE d.kind='approval' AND a.role IN ('owner','verifier') AND d.start>=i.start AND d.start<i.end;
-
+SELECT g.target,grp,json_group_array(issue ORDER BY pos,issue) issues,min(merged_at) first_merge,max(merged_at) last_merge,min(pos) first,max(pos) last,
+ max(0,min((SELECT window_minutes FROM settings),
+  min(pos)-(SELECT count(*) FROM active_clock WHERE minute<coalesce(unixepoch(t.observable_from),0)),
+  (SELECT count(*) FROM active_clock)-max(pos))) minutes
+FROM grouped g JOIN improvement_target t ON t.id=g.target GROUP BY g.target,grp;
 CREATE TABLE target_sample AS
-SELECT 'activity.'||state target,minute,count(*) hits FROM mart_minute GROUP BY state,minute
-UNION ALL SELECT 'slot.'||reason,minute,slots FROM mart_empty_slot
-UNION ALL SELECT 'approval.wait',m.minute,count(DISTINCT m.issue) FROM mart_minute m
-JOIN approval_wait w ON w.issue=m.issue AND w.start<=m.at AND w.end>m.at GROUP BY m.minute;
+SELECT t.id target,m.minute,count(DISTINCT m.issue) hits
+FROM sampled_interval m JOIN mart_effort_tag g USING(issue,start)
+JOIN improvement_target t ON EXISTS(SELECT 1 FROM json_each(t.sample) s WHERE s.value=g.tag)
+GROUP BY t.id,m.minute
+UNION ALL SELECT 'slot.'||reason,minute,slots FROM mart_empty_slot;
 CREATE INDEX target_sample_lookup ON target_sample(target,minute);
 CREATE TABLE improvement_observation AS
 WITH sides(side) AS (VALUES ('before'),('after')), windows AS (

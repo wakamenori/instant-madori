@@ -3,18 +3,14 @@ import type { Point, ViewerData } from "./data.ts";
 import { style } from "./page.ts";
 
 const states: Record<string, string> = {
-  post_merge: "マージの後の確認",
-  verifier: "検証",
-  owner_turn: "担当の作業",
-  implementer: "実装役の作業",
-  check_wait: "checkの待ち",
-  ci: "CI",
-  staging_occupied: "stagingの占有",
-  deploy_running: "デプロイの実行中",
-  coordinator_busy: "指揮役がほかの仕事中",
-  coordinator_asleep: "指揮役が起きていない",
-  owner_wait: "担当の待ち",
-  unknown: "不明",
+  work: "作業",
+  "wait.human": "待ち（人）",
+  "wait.resource": "待ち（リソース）",
+  "wait.coordinator.this_issue": "待ち（指揮役がこのIssueを対応中）",
+  "wait.coordinator.elsewhere": "待ち（指揮役が別件を対応中）",
+  "wait.coordinator.stopped": "待ち（指揮役が停止中）",
+  unclassified: "未分類",
+  unrecorded: "記録の前",
 };
 const reasons: Record<string, string> = {
   no_ready_issue: "着手できるIssueが無い",
