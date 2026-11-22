@@ -35,6 +35,8 @@ export interface AssistantTurn {
   /** Thinking data is readable only by the implementation and model that produced it. */
   readonly origin: string;
   readonly parts: ReceivedParts;
+  /** Usage of the attempt that returned this turn. */
+  readonly usage: Usage;
 }
 
 interface ToolResult {
@@ -72,14 +74,14 @@ export interface Usage {
   readonly uncachedInputTokens: number;
   readonly outputTokens: number;
   readonly cacheReadTokens: number;
-  readonly cacheWriteTokens: number;
+  readonly cacheWrite5mTokens: number;
+  readonly cacheWrite1hTokens: number;
 }
 
 export interface AiResponse {
   readonly kind: "ok";
   readonly assistant: AssistantTurn;
   readonly stop: StopReason;
-  readonly usage: Usage;
 }
 
 interface AiFailure {
@@ -94,7 +96,15 @@ export interface Ai {
   roundTrip(request: AiRequest): Promise<AiResult>;
 }
 
-export function receivedTurn(origin: string, parts: readonly AssistantPart[]): AssistantTurn {
+export function receivedTurn(
+  origin: string,
+  parts: readonly AssistantPart[],
+  usage: Usage,
+): AssistantTurn {
   const frozen = Object.freeze(parts.map((part) => Object.freeze({ ...part })));
-  return Object.freeze({ origin, parts: frozen as ReceivedParts });
+  return Object.freeze({
+    origin,
+    parts: frozen as ReceivedParts,
+    usage: Object.freeze({ ...usage }),
+  });
 }

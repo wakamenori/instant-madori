@@ -101,7 +101,10 @@ await test("scripted AI", async (t) => {
       [...parts].reverse(),
       parts.map((part) => (part.kind === "thinking" ? { ...part, data: "edited" } : part)),
     ]) {
-      const forged: AiResponse = { ...first, assistant: receivedTurn("scripted", edited) };
+      const forged: AiResponse = {
+        ...first,
+        assistant: receivedTurn("scripted", edited, first.assistant.usage),
+      };
       const result = await ai.roundTrip(request(after(opening, forged, roomAdded)));
       assert.equal(result.kind === "failed" && result.reason, "rejected");
     }
@@ -110,7 +113,11 @@ await test("scripted AI", async (t) => {
   await t.test("accepts a faithful echo with keys in another order", async () => {
     const ai = scriptedAi(script);
     const first = ok(await ai.roundTrip(request(opening)));
-    const assistant = { parts: first.assistant.parts, origin: first.assistant.origin };
+    const assistant = {
+      parts: first.assistant.parts,
+      origin: first.assistant.origin,
+      usage: first.assistant.usage,
+    };
     const second = ok(
       await ai.roundTrip(request(after(opening, { ...first, assistant }, roomAdded))),
     );
@@ -132,7 +139,8 @@ await test("scripted AI", async (t) => {
       uncachedInputTokens: 10,
       outputTokens: 2,
       cacheReadTokens: 1,
-      cacheWriteTokens: 3,
+      cacheWrite5mTokens: 3,
+      cacheWrite1hTokens: 4,
     };
     const source: ScriptStep[] = [{ stop: "end", parts: [part], usage }];
     const ai = scriptedAi(source);
@@ -141,7 +149,8 @@ await test("scripted AI", async (t) => {
     usage.uncachedInputTokens = 0;
     const result = ok(await ai.roundTrip(request(opening)));
     assert.deepEqual(result.assistant.parts, [{ kind: "text", text: "original" }]);
-    assert.equal(result.usage.uncachedInputTokens, 10);
+    assert.deepEqual(result.assistant.usage, { ...usage, uncachedInputTokens: 10 });
+    assert.ok(Object.isFrozen(result.assistant.usage));
   });
 
   await t.test("requires exactly one result per tool call", async () => {

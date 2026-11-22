@@ -21,7 +21,8 @@ const zeroUsage: Usage = {
   uncachedInputTokens: 0,
   outputTokens: 0,
   cacheReadTokens: 0,
-  cacheWriteTokens: 0,
+  cacheWrite5mTokens: 0,
+  cacheWrite1hTokens: 0,
 };
 
 function isObjectJson(text: string): boolean {
@@ -109,9 +110,8 @@ export function scriptedAi(script: readonly ScriptStep[]): Ai {
     }
     return Object.freeze({
       kind: "ok",
-      assistant: receivedTurn("scripted", step.parts),
+      assistant: receivedTurn("scripted", step.parts, step.usage ?? zeroUsage),
       stop: step.stop,
-      usage: Object.freeze({ ...(step.usage ?? zeroUsage) }),
     });
   });
   return { roundTrip: ({ conversation }) => Promise.resolve(answer(steps, conversation)) };
