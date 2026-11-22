@@ -21,6 +21,7 @@
 
 Preconditions:
 
+- Container が必要。
 - 状態確認が通っている。
 - `$EVIDENCE/sample-view/` がある。`. "$EVIDENCE/dev.env"` で `API` と `O` を読み込み、`D="$EVIDENCE/sample-view"` と `J='content-type: application/json'` を設定している。
 - 数を数える関数を定義している。`counts() { curl -sS "$API/projects" >| "$D/${1}-projects.json"; PID=$(jq -r '[.projects[] | select(.name == "開発用サンプル")] | first | .id' "$D/${1}-projects.json"); PAT=$(curl -sS "$API/projects/$PID/patterns" | jq -r '.patterns[0].id'); curl -sS -o "$D/${1}-state.json" "$API/patterns/$PAT/state"; curl -sS -o "$D/${1}-revisions.json" "$API/patterns/$PAT/revisions"; jq -c '{projects: (.projects | length)}' "$D/${1}-projects.json"; jq -c '{lastJob: .lastFinishedJob.number, revision: .currentRevision.number}' "$D/${1}-state.json"; jq -c '{revisions: (.revisions | length)}' "$D/${1}-revisions.json"; }`
@@ -60,7 +61,7 @@ Preconditions:
   })()
   ```
 
-- **失敗を見る。** 片付けてから `MADORI_DEV_CONTAINERS=0` を付けて起動し直す。プレビューで `preview_evaluate` に `localStorage.removeItem("instant-madori.dev-sample")` を渡してから、ページを開き直して描画を待つ。`alert` が `サンプルの形を作れませんでした。 もう一度送る` になる。警告はキャンバスの下にあり、そのままでは画面の外なので、`preview_evaluate` で `document.querySelector('[role="alert"]').scrollIntoView({ block: "center" })` を実行してから撮り、`failure.png` に写す。`counts failed-1` を実行し、ページを開き直して同じ警告を待ってから `counts failed-2` を実行する。二つは同じで、`lastJob` が `1`、`revision` が `null`、`revisions` が `0`。
+- **失敗を見る。** 片付けてから [SKILL.md の「起動」](../SKILL.md#起動) の手順で `MADORI_DEV_CONTAINERS=0` を付けて起動し直す。プレビューで `preview_evaluate` に `localStorage.removeItem("instant-madori.dev-sample")` を渡してから、ページを開き直して描画を待つ。`alert` が `サンプルの形を作れませんでした。 もう一度送る` になる。警告はキャンバスの下にあり、そのままでは画面の外なので、`preview_evaluate` で `document.querySelector('[role="alert"]').scrollIntoView({ block: "center" })` を実行してから撮り、`failure.png` に写す。`counts failed-1` を実行し、ページを開き直して同じ警告を待ってから `counts failed-2` を実行する。二つは同じで、`lastJob` が `1`、`revision` が `null`、`revisions` が `0`。
 - **止めてから送り直す。** 片付けてから `MADORI_DEV_JOB_TEST_HOLD=before_render:60` を付けて起動し直す。`localStorage` の値を消してページを開き直し、`preview_evaluate` で `[role="status"]` が `サンプルの形を作っています…` になるのを待つ。`counts stop` で `PAT` を設定し、`JOB=$(jq -r .runningJob.jobId "$D/stop-state.json")` で `curl -sS -o "$D/stop.json" -w '%{http_code}\n' -X POST "$API/jobs/$JOB/stop" -H "$J" -H "$O" -d "{\"requestId\":\"$(uuidgen)\"}"`。`200` で `outcome` が `stopped`。画面の `alert` が `指示が止められました。 もう一度送る` になる。`save` を付けない `preview_snapshot` で `button "もう一度送る"` の ref を取り、`preview_act` で押す。待ちの間は `until curl -sS "$API/patterns/$PAT/state" | jq -e '.currentRevision != null' >/dev/null; do sleep 2; done` で確定を待ち、描画を待つ手順を実行する。`shown` に `案1「サンプルの形」を表示しています。` が出る。`counts resent` の `lastJob` が `2`、`revision` と `revisions` が `1`。
 
 ## Gotchas
