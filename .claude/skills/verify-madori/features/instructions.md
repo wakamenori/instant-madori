@@ -13,7 +13,7 @@
 
 ## How to get to it (user POV)
 
-- 画面は、開発用の案件に指示を一件送り、確定した案を描く（[サンプルの住宅モデルを見る](./sample-view.md)）。この機能の手順では、`POST /api/patterns/<id>/messages`、`GET /api/patterns/<id>/state`、`GET /api/patterns/<id>/revisions`、`GET /api/revisions/<id>/view` を使う。
+- 画面からはまだ指示を送れない。送った指示の進み具合と確定した案は、案件画面に出る（[案件画面で案を見る](./project-view.md)）。この機能の手順では、`POST /api/patterns/<id>/messages`、`GET /api/patterns/<id>/state`、`GET /api/patterns/<id>/revisions`、`GET /api/revisions/<id>/view` を使う。
 
 ## Driving it with curl
 

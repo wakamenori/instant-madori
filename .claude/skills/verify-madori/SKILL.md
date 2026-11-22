@@ -1,6 +1,6 @@
 ---
 name: verify-madori
-description: instant-madori を利用者と同じ経路で動かし、振る舞いの証拠を残す。自分の worktree で、ほかの worktree と重ならないポートに起動した画面（WebGPU で描くサンプル）を T3 のプレビューで操作し、Vite のプロキシ経由で Worker API を呼び、その奥の形状 Container まで通す。マージの後は staging を確かめる。変更を本物のアプリで確かめるとき、PR の head を検証するとき、テストでは見えない振る舞いを確かめるときに使う。
+description: instant-madori を利用者と同じ経路で動かし、振る舞いの証拠を残す。自分の worktree で、ほかの worktree と重ならないポートに起動した画面（案件一覧と、WebGPU で案を描く案件画面）を T3 のプレビューで操作し、Vite のプロキシ経由で Worker API を呼び、その奥の形状 Container まで通す。マージの後は staging を確かめる。変更を本物のアプリで確かめるとき、PR の head を検証するとき、テストでは見えない振る舞いを確かめるときに使う。
 ---
 
 # instant-madori を確かめる
@@ -138,7 +138,7 @@ git rev-parse HEAD
 - Bash の呼び出しごとに、初めに `. "$EVIDENCE/dev.env"` を実行して `WEB_PORT`・`WORKER_PORT`・`API`・`O` を読む。シェルの変数は、呼び出しをまたいで残らない。
 - 画面は T3 のプレビューで操作する。`preview_open` に `target: { kind: "environment-port", port: <WEB_PORT> }`、`open: false`、`reuseExistingTab: false` を渡し、返った `tabId` だけを操作する。`<WEB_PORT>` には、起動の確認の `cat` が出した番号を書く。プレビューは `http://localhost:<WEB_PORT>` を開く。このプレビューの Chromium は WebGPU を使える。
 - 要素の ref は、`save` を付けない `preview_snapshot` の `accessibilityTree` から取る。新しい snapshot を撮ると、`save: true` でも前の ref は無効になる。操作の直前に ref を取り直す。
-- `preview_snapshot` が `The browser is not producing screenshot frames` で失敗するときは、T3 の窓が隠れているか最小化されている。`preview_evaluate` と `preview_act` はそのまま動く。要素は ref の代わりに、`preview_act` の `locator` へ `role=button[name="もう一度送る"]` の形で役割と名前を渡して指せる。スクリーンショットは撮れないので、利用者に窓を戻してもらうか、画面の絵を確かめられなかったこととして報告する。
+- `preview_snapshot` が `The browser is not producing screenshot frames` で失敗するときは、T3 の窓が隠れているか最小化されている。`preview_evaluate` と `preview_act` はそのまま動く。要素は ref の代わりに、`preview_act` の `locator` へ `role=button[name="新しい案件を作る"]` の形で役割と名前を渡して指せる。スクリーンショットは撮れないので、利用者に窓を戻してもらうか、画面の絵を確かめられなかったこととして報告する。
 - API は画面のポートのプロキシ（`$API`）へ `curl` で送る。プロキシが、開発者として署名したトークンを付ける。Worker のポート（`http://127.0.0.1:$WORKER_PORT`）へ直接送ると、認証が要る経路は 401 になる。`/api/health` は認証なしで応答し、未知の経路は 404、許していないメソッドは 405 になる。
 - GET 以外の要求には `-H "$O"`（自分の画面の Origin）を付ける。付けないと、CSRF の防御で `403 forbidden` になる。Worker が受け付ける Origin は、この回の画面のポートを `127.0.0.1` と `localhost` で書いた二つだけで、ほかの回の画面の Origin も `403` になる。
 - 書き込みを伴う要求の `requestId` は `uuidgen` で作る。

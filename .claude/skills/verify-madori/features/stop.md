@@ -12,7 +12,7 @@
 
 ## How to get to it (user POV)
 
-- 画面はまだ無い。`POST /api/jobs/<jobId>/stop` に `{"requestId":"<uuid>"}` を送る。`jobId` は受付の応答の `job.jobId`。結果は停止の応答と、`GET /api/patterns/<id>/state` の `lastFinishedJob` で読む。
+- 画面には停止の操作がまだ無い。案件画面は、実行中と待機中の指示を表示する（[案件画面で案を見る](./project-view.md)）。停止は `POST /api/jobs/<jobId>/stop` に `{"requestId":"<uuid>"}` を送る。`jobId` は受付の応答の `job.jobId`。結果は停止の応答と、`GET /api/patterns/<id>/state` の `lastFinishedJob` で読む。
 
 ## Driving it with curl
 
