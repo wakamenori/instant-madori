@@ -286,15 +286,15 @@ mise exec -- node --env-file=/path/to/.env scripts/deploy/registry-retention.ts 
 
 スクリプトは、検証用の利用者の案件に、パターン「障害試験」を固定のrequest IDで作り直して（再送して）使います。次の順に試します。
 
-1. 指示の再送と、そのrequest IDの別の本文・別の操作への使い回し（422）。
-2. 確定の後の停止（`already_finished`）。
-3. 待ちの間の停止（`cancelled`）。
-4. 待たせたジョブをまたぐ再デプロイ。
+1. 待たせたジョブをまたぐ再デプロイ。
+2. 指示の再送と、そのrequest IDの別の本文・別の操作への使い回し（422）。
+3. 確定の後の停止（`already_finished`）。
+4. 待ちの間の停止（`cancelled`）。
 5. 停止の後の待機列の保留と再開。
 
 各試験の前後で、案の一覧と各案の表示データのSHA-256を読みます。前の案がすべて変わらず、増えた案が期待どおり0件か1件であることを確かめます。同じパターンを使い続けるので、毎回それまでの実行で確定した案をすべて照合し直します。最後にWorkers Logsで三つを確かめます。待ちの間にパターンのDOが新しい版に切り替わったこと、止めたジョブが `cancelled` で終わったこと、照合の失敗が無いことです。
 
-実行には、stagingの占有と、mainの再デプロイが要ります。スクリプトはデプロイを起こしません。指揮役が `gh workflow run deploy-staging.yml --ref main` で起動したrunのIDを受け取り、そのrunの `pnpm check --full` が終わる前に実行します。始める前に、終わっていないdeploy-stagingの実行がそのrunだけであることと、その「Migrate and deploy」がまだ始まっていないことを確かめます。先の三つの試験は約3分20秒かかり、その後、「Migrate and deploy」が始まった時点で待たせるジョブを送ります。この段階は、runner がすぐに空けば、runの作成から4分ほどで始まります。そのため、IDを受け取ったらすぐに実行します。待ちは `JOB_TEST_HOLD` の180秒のままで足ります。待ちが覆う必要があるのは、十数秒から1分ほどで終わるこの段階と、その後にパターンのDOが新しい版に切り替わるまでの時間だけだからです。`.env` には、疎通確認のservice tokenの二つの値と、Workers Logsを読む `CLOUDFLARE_API_TOKEN`（`Workers Observability Write` の権限）を入れます。アカウントIDは秘密ではないので、コマンドで渡します。
+実行には、stagingの占有と、mainの再デプロイが要ります。スクリプトはデプロイを起こしません。指揮役が `gh workflow run deploy-staging.yml --ref main` で起動したrunのIDを受け取ったら、すぐに実行します。「Migrate and deploy」が始まる前に実行すれば間に合います。スクリプトは、終わっていないdeploy-stagingの実行がそのrunだけで、「Migrate and deploy」がまだ始まっていないことを確かめます。試験前の案と表示データを読んだら、「Migrate and deploy」の開始を待って、待たせるジョブを送ります。待ちは `JOB_TEST_HOLD` の180秒のままで足ります。待ちが覆う必要があるのは、十数秒から1分ほどで終わるこの段階と、その後にパターンのDOが新しい版に切り替わるまでの時間だけだからです。再デプロイの試験が終わったら、残りの四つの試験を実行します。`.env` には、疎通確認のservice tokenの二つの値と、Workers Logsを読む `CLOUDFLARE_API_TOKEN`（`Workers Observability Write` の権限）を入れます。アカウントIDは秘密ではないので、コマンドで渡します。
 
 ```sh
 CLOUDFLARE_ACCOUNT_ID=4a67230af28ec94d9c70ca48572d8e9f mise exec -- node --env-file=/path/to/.env \
