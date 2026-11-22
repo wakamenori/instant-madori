@@ -27,8 +27,8 @@
 
 ## 検査と引き継ぎ
 
-- miseで固定したツールと、READMEに書いたコマンドを使う。`pnpm check --fast` は、TypeScriptとRustを自動修正したうえで検査する。`pnpm check` は、それに加えて両方のテストを実行する。`pnpm check --full` は、ビルド、ローカルでの統合検査、依存関係の監査まで行う。依存関係、upstream、WasmのAPIを変更した後にも `--full` を使う。コミットの前に、変更に関係する検査を手元で実行する。PRの検査と、マージの前に確かめることは、README「PRの検査（self-hosted runner）」にある。実行していない検査を、実行したと書かない。
-- `apps/geometry`、Dockerfile、`crates/display`・`crates/geometry-api`・`crates/modeling`、Workerの `geometry/`・サンプルAPIと形状サービス、Containerの設定など、Containerまたは表示データの経路を変更した後は、Dockerを起動して `pnpm check --full` で実Containerとの接続を検査する。
+- miseで固定したツールと、READMEに書いたコマンドを使う。`pnpm check --fast` は、TypeScriptとRustを自動修正したうえで検査する。`pnpm check` は、それに加えて両方のテストを実行する。`pnpm check --full` は、ビルド、ローカルでの統合検査、依存関係の監査まで行う。コミットの前に、変更に関係する検査を手元で実行する。PRの検査と、マージの前に確かめることは、README「PRの検査（self-hosted runner）」にある。実行していない検査を、実行したと書かない。
+- Dockerを起動した `pnpm check --full` が要るパスは、`scripts/check/ci-mode.ts` の表が決める。PRのrunnerも、同じ表で `--full` を選ぶ。変更したパスが表に当たれば、コミットの前に手元で `--full` を実行し、実Containerとの接続まで検査する。表は理由ごとに分けてある。形状のContainerと表示データの形式、実Containerで動かすジョブの実行（`apps/worker/src/workflows/` など）、releaseのWasmとupstream、Webのビルド、依存関係とツールの版の固定、CIの定義と `--full` だけが実行するスクリプトである。このファイルにパスの一覧を写さない。`scripts/check/check.ts` の `--full` に段階を足すときは、その段階だけが読む設定ファイルも表に足す。`--full` がnodeで実行するスクリプトと、それが相対パスでimportするファイルが表から漏れると、`scripts/check/ci-mode.ts` のテストが落ちる。
 - `pnpm check --full` のDockerの段階と `pnpm dev` は、マシン全体で共有するDockerの枠（開発用に二つ、runner用に一つ）を取ってから動き、枠が埋まっていれば、枠を持つプロセスを `[docker-slot]` の行に示して待つ。枠はmacOSでだけ働き、Linuxでは枠を取らずに実行する。待つのは正常な動作なので、止めずに待つ。そのほかのDockerの重い作業（実Containerの試験を直接動かす、キャッシュなしでビルドするなど）は、`node scripts/shared/docker-slots.ts run -- <コマンド>` で実行する。`pnpm dev` は使い終わったら止める。枠を持つプロセスは、`kill -9` ではなく、Ctrl-Cか `kill` で止める。`kill -9` は子プロセスのDockerの作業を残したまま枠を空ける。
 - TypeScriptのアプリとスクリプトには、型情報を使うESLintと厳格な型検査を適用し続ける。信頼できないJSONは、外から受け取る箇所でパースして検証する。依存関係のカタログとツールのバージョン固定を、互いに食い違わない状態に保つ。ロックファイルの変更は内容を確認する。
 - `pnpm check` は、どのモードでもサービスのファイルを整形し、ESLintとClippyの自動修正を適用する。ステージする前に、その結果の差分を確認する。upstreamのソース、過去の検証記録、生成されたファイルを一括で整形しない。コミット前のフックは、ステージされたファイルを書き換えずに検査するだけで、プロジェクト全体の検査の代わりにはならない。
