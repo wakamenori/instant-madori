@@ -31,6 +31,7 @@ async function fixture(t: TestContext) {
       env: { ...env, RUNNER_TEMP: runner },
       stdio: ["ignore", "pipe", "pipe"],
       signal: t.signal,
+      killSignal: "SIGKILL",
     });
     let output = "";
     child.stdout.setEncoding("utf8").on("data", (part: string) => {
@@ -84,8 +85,9 @@ function finish() {
   process.exit(step.code);
 }
 if (step.wait) {
+  const parent = process.ppid;
   process.on("SIGTERM", () => { fs.writeFileSync("signal","SIGTERM"); finish(); });
-  setInterval(()=>{},1000);
+  setInterval(() => { if (process.ppid !== parent) process.exit(1); }, 100);
   console.log("ready for SIGTERM");
 } else finish();
 `,
