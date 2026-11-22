@@ -26,12 +26,20 @@ function migrationBase() {
   const explicitBase = process.env["MADORI_MIGRATION_BASE"] ?? "";
   // Manual runs have no base; branch-creation pushes use an all-zero object ID.
   if (!/^0*$/.test(explicitBase)) {
+    if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(explicitBase))
+      throw new Error("MADORI_MIGRATION_BASE must be a full commit SHA.");
+    let commit: string;
     try {
-      git("merge-base", "--is-ancestor", explicitBase, "HEAD");
+      commit = git("rev-parse", "--verify", "--end-of-options", `${explicitBase}^{commit}`).trim();
+    } catch {
+      throw new Error(`MADORI_MIGRATION_BASE ${explicitBase} does not name a commit.`);
+    }
+    try {
+      git("merge-base", "--is-ancestor", commit, "HEAD");
     } catch {
       throw new Error(`MADORI_MIGRATION_BASE ${explicitBase} is not in the history of HEAD.`);
     }
-    return { commit: explicitBase, source: "MADORI_MIGRATION_BASE" };
+    return { commit, source: "MADORI_MIGRATION_BASE" };
   }
   const branch = git("branch", "--show-current").trim();
   const onMain = branch === "main" || (branch === "" && head === mainHead);

@@ -217,7 +217,7 @@ void test("allows a clean push and reports the explicit base and its source", (t
   repo.write(`${migrationsPath}0004_new.sql`);
   repo.commit();
   repo.git("update-ref", "refs/remotes/origin/main", "HEAD");
-  const result = repo.check(before);
+  const result = repo.check(before.toUpperCase());
   assert.equal(result.status, 0, result.stderr);
   assert.ok(result.stdout.includes(before), result.stdout);
   assert.match(result.stdout, /MADORI_MIGRATION_BASE/);
@@ -236,11 +236,25 @@ for (const base of ["", "0000000000000000000000000000000000000000"]) {
   });
 }
 
+for (const base of ["HEAD", "main", "HEAD^"]) {
+  void test(`rejects ${base} as an explicit migration base`, (t) => {
+    const repo = repository(t);
+    repo.git("switch", "main");
+    repo.write(existing, "SELECT 2;\n");
+    repo.commit();
+    repo.write("unrelated.txt");
+    repo.commit();
+    const result = repo.check(base);
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, /MADORI_MIGRATION_BASE must be a full commit SHA/);
+  });
+}
+
 void test("rejects an explicit base that does not exist", (t) => {
   const repo = repository(t);
   const result = repo.check("ffffffffffffffffffffffffffffffffffffffff");
   assert.equal(result.status, 1, result.stderr);
-  assert.match(result.stderr, /not in the history of HEAD/);
+  assert.match(result.stderr, /does not name a commit/);
 });
 
 void test("rejects an explicit base on a side branch outside the history of HEAD", (t) => {
