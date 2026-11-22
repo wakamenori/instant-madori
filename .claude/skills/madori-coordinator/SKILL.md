@@ -104,7 +104,7 @@ Issue の milestone は期限で決める。担当や検証役が範囲の外で
 - テストや検査の穴は、守っているコードを段階の Issue が変えるなら、その Issue の依存にする。置き場は「開発基盤」のままにする。
 - 計画との食い違いは、その記述を後の段階で決め直すなら、その段階に入れる。
 - 利用者にだけ当たる後退（性能や型の甘さ）は、利用者を招く段階に入れる。
-- 今の段階の別の Issue と同じコードを変えるだけでは、今の段階に入れない。置き場は表で決め、段階の Issue を依存の先にして順番だけを登録する。
+- 今の段階の別の Issue と同じコードを変えるだけでは、今の段階に入れない。置き場は表で決める。
 
 「期限なし」の Issue は、次のとおりに扱う。
 
@@ -293,7 +293,7 @@ node .claude/skills/madori-coordinator/scripts/deploy-files.mjs after <番号>
 T3 の定期タスクが、1時間ごとに `/madori-coordinator 見回り` を送る。次を順に行う。何も変わっていなければ、ユーザーへ報告せずに終える。見回りと進み具合の報告は、次の段階へ進むのに残る Issue と、今の段階で作った Issue と閉じた Issue の数から始める。
 
 1. メインのチェックアウトを `git pull --ff-only` で main に合わせる。
-2. `df -h /` で空きを確かめる。20 GiB を切っていたら、次を片付けてから進む。空きが戻るまで、新しいスレッドを立てない。片付けるのは、リポジトリと worktree の持ち物である次の二つだけにする。ユーザーの個人のデータやキャッシュの削除は頼まない。
+2. `df -h /` で空きを確かめる。20 GiB を切っていたら、次を片付けてから進む。空きが戻るまで、新しいスレッドを立てない。片付けるのは次の二つだけにする。ユーザーの個人のデータやキャッシュの削除は頼まない。二つ目の `docker image prune -a -f` は、どのプロジェクトのものかを問わず、使われていないイメージをすべて消す（#402）。
    - `~/.t3/worktrees/instant-madori/` のうち、HEAD が main に入っていて、未コミットの変更が無い worktree。ただし、settled でないスレッドの worktree と、「資源の枠」でまだ数えている担当（マージの後の staging での確認を終えていない担当）の worktree は残す。作ったばかりの担当の worktree も、HEAD が main に入っていて変更が無いため。担当のスレッドはマージで settled になるので、settled だけを理由に消さない。
      - settled でないスレッドは、`t3_thread_list` に `settled: false` を付けて最後のページまで出す。
      - 各スレッドの worktree は、`t3_thread_read` が返す `thread.worktreePath` で調べる。`creationSource` が `provider` のスレッドは読まない。Claude Code や Codex が自分で立てた subagent で、親のスレッドと同じ `worktreePath` を返す。
