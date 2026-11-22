@@ -1,17 +1,35 @@
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 import { z } from "zod";
-import { poissonBounds } from "../build/poisson.ts";
 
 const n = z.int().nonnegative();
 const value = z.number().nullable();
 const label = z.string();
-const counts = {
+const tiers = z.enum(["work", "wait", "unclassified"]);
+type Tier = z.infer<typeof tiers>;
+const emptyTiers = () => ({ work: 0, wait: 0, unclassified: 0 });
+type Cells = Record<string, Record<Tier, number>>;
+interface Effort {
+  tiers: Record<Tier, number>;
+  phases: Cells;
+  waits: Record<string, number>;
+  work: { generation: number; local: number; ci_deploy: number };
+}
+const kpiSchema = {
+  completions: n,
+  throughput: z.number(),
+  throughput_low: z.number(),
+  throughput_high: z.number(),
+  parallelism: z.number(),
+  target_share: value,
+  hours_per_completion: value,
+  hours_per_completion_low: value,
+  hours_per_completion_high: value,
   active_minutes: n,
   issue_minutes: n,
-  feature_minutes: n,
-  features: n,
+  target_minutes: n,
   open_start: n,
   open_end: n,
+  features: n,
 };
 function query<T extends z.ZodRawShape>(db: DatabaseSync, shape: T, sql: string) {
   const statement = db.prepare(sql);
@@ -42,7 +60,7 @@ function proportion(hits: number, n: number) {
     n,
   };
 }
-function qualityRates(rows: QualityRow[], area: string) {
+export function qualityRates(rows: QualityRow[], area: string) {
   const cohort = rows.filter((r) => r.area === area);
   const known = cohort.filter((r) => r.first_pass !== null);
   const observed = cohort.filter((r) => r.observed).length;
@@ -56,7 +74,7 @@ function qualityRates(rows: QualityRow[], area: string) {
     escaped: proportion(cohort.filter((r) => r.escaped).length, cohort.length),
   };
 }
-export function readViewerData(db: DatabaseSync): ViewerData {
+export function readViewerData(db: DatabaseSync) {
   const snapshot =
     query(
       db,
@@ -64,131 +82,163 @@ export function readViewerData(db: DatabaseSync): ViewerData {
       "SELECT max(at) at FROM (SELECT max(last_append) at FROM mart_health UNION ALL SELECT max(last_quarantine) FROM mart_health)",
     )()[0]?.at ?? null;
 
-  const hours = query(
-    db,
-    { hour: n, end: n, parallelism: z.number(), feature_share: z.number(), ...counts },
-    "SELECT * FROM mart_kpi WHERE window='hour' AND active_minutes>0 ORDER BY hour",
-  )();
   const clock = query(
     db,
-    { minute: n, owners: n, feature_minutes: n, capacity: value },
-    "SELECT minute,owners,feature_minutes,owners+slots capacity FROM owner_capacity_minute ORDER BY minute",
+    { minute: n },
+    "SELECT minute FROM owner_capacity_minute WHERE minute >= (SELECT since FROM kpi_policy) ORDER BY minute",
   )();
-  const breaks = clock.flatMap((r, i) =>
-    i > 0 && clock[i - 1]?.minute !== r.minute - 60 ? [{ position: i, resume: r.minute }] : [],
-  );
-  let position = 0;
-  const operatingHours = hours.map((h) => ({ ...h, position: (position += h.active_minutes) }));
-  const open = query(
-    db,
-    { count: n },
-    "SELECT count(DISTINCT issue) count FROM owner_interval WHERE julianday(start)<julianday(?,'unixepoch') AND julianday(end)>julianday(?,'unixepoch')",
-  );
+  const positions = new Map<number, number>();
+  const breaks = clock.flatMap(({ minute }, i) => {
+    positions.set(Math.floor(minute / 3600) * 3600, i + 1);
+    return i > 0 && clock[i - 1]?.minute !== minute - 60 ? [{ position: i, resume: minute }] : [];
+  });
   const quality = query(
     db,
     qualitySchema,
     "SELECT q.*,unixepoch(c.closed_at) closed FROM mart_quality_issue q JOIN issue_classification c USING(issue)",
   )();
-  const features = query(
+  const rolling = query(
     db,
-    { issue: n, title: label, closed: n },
-    `SELECT c.issue,coalesce(f.title,'題名未取得') title,unixepoch(c.closed_at) closed
-    FROM issue_classification c LEFT JOIN mart_issue_flow f USING(issue) WHERE c.pr IS NOT NULL AND c.ownership='owner' AND c.kind='機能'`,
-  )();
-  const uncounted = query(
-    db,
-    { count: n },
-    `SELECT count(*) count FROM issue_classification WHERE pr IS NOT NULL AND ownership<>'owner' AND kind='機能'
-    AND unixepoch(closed_at)>=? AND unixepoch(closed_at)<?`,
+    { hour: n, start: n, end: n, ...kpiSchema },
+    "SELECT * FROM mart_kpi WHERE window='rolling' AND target=? AND span=? ORDER BY hour",
   );
-  const issueStates = query(
+  const intervals = query(
     db,
-    { issue: n, state: label, minutes: n },
-    `SELECT m.issue,state,count(*) minutes FROM mart_minute m JOIN issue_classification c USING(issue) WHERE c.kind='機能' GROUP BY m.issue,state`,
-  )();
-  const featureIssues = features
-    .map((f) => {
-      const states = issueStates.filter((s) => s.issue === f.issue);
-      return { ...f, states, minutes: states.reduce((sum, s) => sum + s.minutes, 0) };
-    })
-    .sort((a, b) => b.minutes - a.minutes || a.issue - b.issue);
-  const states = query(
-    db,
-    { state: label, minutes: n },
-    `SELECT state,count(*) minutes FROM mart_minute JOIN issue_classification USING(issue) WHERE kind='機能' AND minute>=? AND minute<? GROUP BY state`,
+    {
+      phase: label,
+      tier: tiers,
+      wait_key: label.nullable(),
+      duration: n,
+      generation: z.number(),
+      local: z.number(),
+      ci_deploy: z.number(),
+    },
+    `
+    WITH bounds(s,e) AS (VALUES (?,?)), clipped AS (
+      SELECT e.*,round((unixepoch(min(e.end,b.e),'subsec')-unixepoch(max(e.start,b.s),'subsec'))*1000) overlap
+      FROM bounds b JOIN mart_effort_interval e ON e.start < b.e AND e.end > b.s
+      LEFT JOIN issue_classification c USING(issue) WHERE (?='全種類' OR c.kind='機能')
+    ) SELECT coalesce(phase,'none') phase,tier,wait_target||'.'||wait_detail wait_key,
+    sum(overlap) duration,sum(generation_ms*overlap/ms) generation,
+    sum(local_ms*overlap/ms) local,sum((ci_ms+deploy_ms)*overlap/ms) ci_deploy
+    FROM clipped GROUP BY coalesce(phase,'none'),tier,wait_key`,
   );
-  const slots = query(
+  const slotRows = query(
     db,
-    { reason: label, slots: n },
-    "SELECT reason,sum(slots) slots FROM mart_empty_slot WHERE minute>=? AND minute<? GROUP BY reason",
+    { reason: z.enum(["no_ready_issue", "resource_limit", "awaiting_dispatch"]), minutes: n },
+    "SELECT reason,sum(slots) minutes FROM mart_empty_slot WHERE minute>=? AND minute<? GROUP BY reason",
   );
-  // Whole UTC hours are already aggregated. Only the leading partial hour needs minute records.
+  const capacity = query(
+    db,
+    { capacity: value },
+    "SELECT CASE WHEN count(slots)=count(*) THEN avg(owners+slots) END capacity FROM owner_capacity_minute WHERE minute>=? AND minute<?",
+  );
+  const issues = query(
+    db,
+    { issue: n, kind: label, title: label, closed: n },
+    `
+    SELECT c.issue,coalesce(kind,'unknown') kind,coalesce(f.title,'題名未取得') title,unixepoch(c.closed_at) closed
+    FROM issue_classification c LEFT JOIN mart_issue_flow f USING(issue) WHERE c.pr IS NOT NULL AND ownership='owner'
+    AND closed>=? AND closed<? AND (?='全種類' OR kind='機能')`,
+  );
+  const cells = query(
+    db,
+    { phase: label, tier: tiers, ms: n },
+    "SELECT coalesce(phase,'none') phase,tier,sum(ms) ms FROM mart_effort_interval WHERE issue=? GROUP BY 1,2",
+  );
   const kinds = query(
     db,
     { kind: label, minutes: n, completions: n },
-    `WITH parts AS (
-    SELECT kind,minutes,completions FROM mart_kind_period WHERE window='hour' AND hour>=? AND hour<?
-    UNION ALL SELECT coalesce(kind,'unknown'),count(*),0 FROM mart_minute LEFT JOIN issue_classification USING(issue)
-    WHERE minute>=? AND minute<? GROUP BY kind
-    UNION ALL SELECT coalesce(kind,'unknown'),0,count(*) FROM issue_classification WHERE pr IS NOT NULL AND ownership='owner'
-    AND unixepoch(closed_at)>=? AND unixepoch(closed_at)<? GROUP BY kind)
-    SELECT kind,sum(minutes) minutes,sum(completions) completions FROM parts GROUP BY kind ORDER BY kind`,
+    "SELECT kind,sum(minutes) minutes,sum(completions) completions FROM mart_kind_period WHERE window='rolling' AND span=? AND hour=? GROUP BY kind ORDER BY minutes DESC,kind",
   );
-  const windows = [4, 8, 16, 24, 48].map((length) => {
-    const points = operatingHours
-      .filter((h) => h.position >= length * 60)
-      .map((h) => {
-        const active = clock.slice(Math.max(0, h.position - length * 60), h.position);
-        const first = active[0];
-        if (!first) throw new Error("Missing operating minutes");
-        const start = first.minute,
-          end = h.hour + 3600;
-
-        const whole = Math.ceil(start / 3600) * 3600;
-        const byKind = kinds(whole, end, start, whole, start, whole);
-        const count = byKind.find((r) => r.kind === "機能")?.completions ?? 0,
-          bounds = poissonBounds(count);
-        const minutes = active.length,
-          issue = active.reduce((s, r) => s + r.owners, 0),
-          feature = active.reduce((s, r) => s + r.feature_minutes, 0);
-        const cohort = quality.filter((r) => r.closed >= start && r.closed < end);
-        return {
-          start,
-          end,
-          position: h.position,
-          active_minutes: minutes,
-          issue_minutes: issue,
-          feature_minutes: feature,
-          features: count,
-          uncounted_features: uncounted(start, end)[0]?.count ?? 0,
-          open_start: z.number().parse(open(start, start)[0]?.count),
-          open_end: h.open_end,
-          throughput: (count * 60) / minutes,
-          throughput_low: (bounds.lower * 60) / minutes,
-          throughput_high: (bounds.upper * 60) / minutes,
-          parallelism: issue / minutes,
-          feature_share: ratio(feature, issue),
-          hours_per_feature: ratio(feature / 60, count),
-          hours_per_feature_low: feature / 60 / bounds.upper,
-          hours_per_feature_high: ratio(feature / 60, bounds.lower),
-          capacity: active.every((r) => r.capacity !== null)
-            ? active.reduce((sum, r) => sum + (r.capacity ?? 0), 0) / minutes
-            : null,
-          slots: slots(start, end),
-          kinds: byKind,
-          states: states(start, end),
-          quality: ["product", "development"].map((area) => qualityRates(cohort, area)),
+  const combos = ([4, 8, 24] as const).flatMap((span) =>
+    (["機能", "全種類"] as const).map((target) => {
+      const points = rolling(target, span).flatMap(({ hour, start, end, ...kpi }) => {
+        const position = positions.get(hour);
+        if (position === undefined) return [];
+        const effort: Effort = {
+          tiers: emptyTiers(),
+          phases: {},
+          waits: {},
+          work: { generation: 0, local: 0, ci_deploy: 0 },
         };
+        for (const row of intervals(
+          new Date(start * 1000).toISOString(),
+          new Date(end * 1000).toISOString(),
+          target,
+        )) {
+          effort.tiers[row.tier] += row.duration;
+          (effort.phases[row.phase] ??= emptyTiers())[row.tier] += row.duration;
+          if (row.wait_key)
+            effort.waits[row.wait_key] = (effort.waits[row.wait_key] ?? 0) + row.duration;
+          effort.work.generation += row.generation;
+          effort.work.local += row.local;
+          effort.work.ci_deploy += row.ci_deploy;
+        }
+        const slots = { no_ready_issue: 0, resource_limit: 0, awaiting_dispatch: 0 };
+        for (const row of slotRows(start, end))
+          slots[row.reason] = row.minutes / kpi.active_minutes;
+        return [
+          {
+            hour,
+            start,
+            end,
+            position,
+            kpi,
+            effort,
+            slots,
+            capacity: capacity(start, end)[0]?.capacity ?? null,
+            unclassified_share: ratio(
+              effort.tiers.unclassified,
+              Object.values(effort.tiers).reduce((a, b) => a + b, 0),
+            ),
+          },
+        ];
       });
-    const latest = points.at(-1);
-    return {
-      length,
-      points,
-      issues: latest
-        ? featureIssues.filter((f) => f.closed >= latest.start && f.closed < latest.end)
-        : [],
-    };
-  });
+      const latest = points.at(-1);
+      const completed = latest
+        ? issues(latest.start, latest.end, target)
+            .map((issue) => {
+              const phases: Cells = {};
+              let effort_ms = 0;
+              for (const row of cells(issue.issue)) {
+                (phases[row.phase] ??= emptyTiers())[row.tier] = row.ms;
+                effort_ms += row.ms;
+              }
+              return { ...issue, effort_ms, cells: phases };
+            })
+            .sort((a, b) => b.effort_ms - a.effort_ms || a.issue - b.issue)
+        : [];
+      return {
+        span,
+        target,
+        points,
+        issues: completed,
+        kinds: latest ? kinds(span, latest.hour) : [],
+      };
+    }),
+  );
+  const tags = query(
+    db,
+    { tag: label, start: label, end: label },
+    `SELECT tag,start,end FROM mart_effort_tag WHERE issue=?
+    AND (tag LIKE 'tier:%' OR tag LIKE 'run:%' OR tag IN ('queue:ci','approval')) ORDER BY tag,start`,
+  );
+  const timelines: Record<number, { name: string; intervals: [number, number][] }[]> = {};
+  for (const { issue } of combos.find((c) => c.span === 24 && c.target === "全種類")?.issues ??
+    []) {
+    const lanes = new Map<string, [number, number][]>();
+    for (const row of tags(issue)) {
+      const lane = lanes.get(row.tag) ?? [];
+      const start = Date.parse(row.start),
+        end = Date.parse(row.end),
+        last = lane.at(-1);
+      if (last && last[1] === start) last[1] = end;
+      else lane.push([start, end]);
+      lanes.set(row.tag, lane);
+    }
+    timelines[issue] = Array.from(lanes, ([name, intervals]) => ({ name, intervals }));
+  }
   const effects = query(
     db,
     {
@@ -269,9 +319,10 @@ export function readViewerData(db: DatabaseSync): ViewerData {
   )();
   return {
     generatedAt: snapshot,
-    operatingHours,
+    quality,
+    timelines,
     breaks,
-    windows,
+    combos,
     effects,
     prevention,
     health,
@@ -280,94 +331,6 @@ export function readViewerData(db: DatabaseSync): ViewerData {
     inactive,
   };
 }
-type Counts = z.infer<z.ZodObject<typeof counts>>;
-type OperatingHour = Counts & {
-  hour: number;
-  end: number;
-  position: number;
-  parallelism: number;
-  feature_share: number;
-};
-type StateMinutes = { state: string; minutes: number };
-type Rate = { value: number | null; low: number | null; high: number | null; n: number };
-export type Point = Counts & {
-  start: number;
-  end: number;
-  position: number;
-  uncounted_features: number;
-  throughput: number;
-  throughput_low: number;
-  throughput_high: number;
-  parallelism: number;
-  feature_share: number | null;
-  hours_per_feature: number | null;
-  hours_per_feature_low: number;
-  hours_per_feature_high: number | null;
-  capacity: number | null;
-  slots: { reason: string; slots: number }[];
-  kinds: { kind: string; minutes: number; completions: number }[];
-  states: StateMinutes[];
-  quality: {
-    area: string;
-    total: number;
-    observed: number;
-    first_pass: Rate;
-    rework: Rate;
-    escaped: Rate;
-  }[];
-};
-export interface ViewerData {
-  generatedAt: string | null;
-  operatingHours: OperatingHour[];
-  breaks: { position: number; resume: number }[];
-  windows: {
-    length: number;
-    points: Point[];
-    issues: {
-      issue: number;
-      title: string;
-      closed: number;
-      minutes: number;
-      states: StateMinutes[];
-    }[];
-  }[];
-  effects: {
-    name: string;
-    issues: string;
-    minutes: number;
-    before: number | null;
-    before_low: number | null;
-    before_high: number | null;
-    before_n: number | null;
-    after: number | null;
-    after_low: number | null;
-    after_high: number | null;
-    after_n: number | null;
-  }[];
-  prevention: {
-    issue: number;
-    name: string;
-    catches: number | null;
-    checked_runs: number;
-    main_runs: number;
-    main_failures: number | null;
-  }[];
-  health: {
-    source: string;
-    last_poll: string | null;
-    first_poll: string | null;
-    last_success: string | null;
-    last_append: string | null;
-    quarantined: number;
-    last_quarantine: string | null;
-    recent_quarantined: number;
-    failed_cycles: number;
-    skipped_cycles: number;
-    held: number;
-    lag_minutes: number | null;
-    stopped: boolean;
-  }[];
-  gaps: { issue: number | null; reason: string }[];
-  verification: { issue: number | null; pr: number | null; reason: string }[];
-  inactive: { start: number; end: number; minutes: number }[];
-}
+export type ViewerData = ReturnType<typeof readViewerData>;
+export type Combo = ViewerData["combos"][number];
+export type Point = Combo["points"][number];

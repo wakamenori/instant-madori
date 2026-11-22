@@ -1,22 +1,6 @@
-import { color, date, esc, fmt, stacked, table, trend } from "./chart.ts";
-import type { Point, ViewerData } from "./data.ts";
-import { style } from "./page.ts";
-
-const states: Record<string, string> = {
-  work: "作業",
-  "wait.human": "待ち（人）",
-  "wait.resource": "待ち（リソース）",
-  "wait.coordinator.this_issue": "待ち（指揮役がこのIssueを対応中）",
-  "wait.coordinator.elsewhere": "待ち（指揮役が別件を対応中）",
-  "wait.coordinator.stopped": "待ち（指揮役が停止中）",
-  unclassified: "未分類",
-  unrecorded: "記録の前",
-};
-const reasons: Record<string, string> = {
-  no_ready_issue: "着手できるIssueが無い",
-  resource_limit: "資源の枠で選べない",
-  awaiting_dispatch: "指揮役がまだ立てていない",
-};
+import { date, esc, fmt, graph, table } from "./chart.ts";
+import { qualityRates, type Point, type Combo, type ViewerData } from "./data.ts";
+import { style, script } from "./page.ts";
 const gapNames: Record<string, string> = {
   missing_closure: "Issueを閉じたPRが不明",
   missing_kind: "種類の記録なし",
@@ -39,139 +23,6 @@ const gapNames: Record<string, string> = {
   undated_comment_verdict: "判定日時の記録なし",
   unknown_target: "改善の狙いが不明",
 };
-function stateLayer(s: { state: string; minutes: number }) {
-  return {
-    name: states[s.state] ?? s.state,
-    value: s.minutes / 60,
-    color: color(Object.keys(states).indexOf(s.state)),
-  };
-}
-function windowPage(data: ViewerData, w: ViewerData["windows"][number]) {
-  const axis = {
-    points: w.points,
-    start: w.length * 60,
-    end: data.operatingHours.at(-1)?.position ?? 0,
-    breaks: data.breaks,
-  };
-  const section = (key: string) => key + "-" + w.length;
-  function quality(title: string, metric: "first_pass" | "rework" | "escaped") {
-    return (["product", "development"] as const)
-      .map((area) =>
-        trend(
-          axis,
-          title + " · " + (area === "product" ? "製品" : "開発の仕組み"),
-          "%",
-          metric === "first_pass" ? "高いほど良い" : "低いほど良い",
-          (p) => {
-            const q = p.quality.find((row) => row.area === area);
-            const rate = q?.[metric];
-            return {
-              value: rate?.value ?? null,
-              low: rate?.low ?? null,
-              high: rate?.high ?? null,
-              n: rate?.n ?? 0,
-              excluded: (q?.total ?? 0) - (rate?.n ?? 0),
-              observed: metric === "first_pass" ? undefined : q?.observed,
-              dim: metric !== "first_pass" && q?.observed !== q?.total,
-            };
-          },
-          "",
-          100,
-        ),
-      )
-      .join("");
-  }
-  const kindNames = Array.from(new Set(w.points.flatMap((p) => p.kinds.map((r) => r.kind)))).sort();
-  function hourly(metric: "parallelism" | "feature_share") {
-    const percent = metric === "feature_share";
-    const hourlyAxis = { points: data.operatingHours, breaks: data.breaks };
-    return `<details><summary>日本時間の各時間帯の${percent ? "機能に回った割合" : "並列数"}</summary>${trend(
-      hourlyAxis,
-      percent ? "機能に回った割合" : "並列数",
-      percent ? "%" : "件",
-      percent ? "高いほど良い" : "良し悪しの向きなし",
-      (h) => ({ value: h[metric] }),
-      "",
-      percent ? 100 : 1,
-    )}</details>`;
-  }
-  function kindLayers(p: Point, metric: "minutes" | "completions") {
-    return p.kinds.map((r) => ({
-      name: r.kind === "unknown" ? "不明" : r.kind,
-      value: r[metric] / (metric === "minutes" ? 60 : 1),
-      color: color(kindNames.indexOf(r.kind)),
-    }));
-  }
-  const breaks = data.breaks
-    .map((b) => `<span>${fmt(b.position / 60)} h │ ${date(b.resume)} 再開</span>`)
-    .join("");
-  const overview = [
-    trend(axis, "機能のスループット", "件/h", "高いほど良い", (p) => ({
-      value: p.throughput,
-      low: p.throughput_low,
-      high: p.throughput_high,
-      uncounted: p.uncounted_features,
-    })),
-    trend(
-      axis,
-      "並列数",
-      "件",
-      "良し悪しの向きなし",
-      (p) => ({ value: p.parallelism }),
-      section("capacity"),
-    ),
-    trend(
-      axis,
-      "機能に回った割合",
-      "%",
-      "高いほど良い",
-      (p) => ({ value: p.feature_share }),
-      section("allocation"),
-      100,
-    ),
-    trend(
-      axis,
-      "機能1件あたりの延べ時間",
-      "h/件",
-      "短いほど良い",
-      (p) => ({
-        value: p.hours_per_feature,
-        low: p.hours_per_feature_low,
-        high: p.hours_per_feature_high,
-      }),
-      section("effort"),
-    ),
-  ].join("");
-  const issueList = w.issues
-    .map(
-      (f) =>
-        `<li><div><b>#${f.issue}</b> ${esc(f.title)} <strong>${fmt(f.minutes / 60)} h</strong></div><div class="strip">${f.states
-          .map((s) => {
-            const r = stateLayer(s);
-            return `<i style="flex:${s.minutes};background:${r.color}"><span>${esc(r.name)} ${s.minutes} 分</span></i>`;
-          })
-          .join("")}</div></li>`,
-    )
-    .join("");
-  return `<div data-window="${w.length}" ${w.length === 8 ? "" : "hidden"}><section><h2>スループットとその分解</h2>${overview}
-  ${breaks ? `<div class="resumes"><b>稼働再開（日本時間）</b>${breaks}</div>` : ""}</section>
-  <section id="${section("capacity")}"><h2>並列数</h2>${stacked(
-    axis,
-    "担当枠の使われ方",
-    "枠",
-    (p) => [
-      { name: "並列数", value: p.parallelism, color: color(0) },
-      ...Object.entries(reasons).map(([reason, name], i) => ({
-        name,
-        color: color(i + 1),
-        value: (p.slots.find((r) => r.reason === reason)?.slots ?? 0) / p.active_minutes,
-      })),
-    ],
-    (p) => p.capacity,
-  )}${hourly("parallelism")}</section>
-  <section id="${section("allocation")}"><h2>機能に回った割合</h2>${stacked(axis, "種類ごとの延べ時間", "h", (p) => kindLayers(p, "minutes"))}${stacked(axis, "種類ごとの完了数", "件", (p) => kindLayers(p, "completions"))}${quality("作りの見直しが起きた割合", "rework")}${quality("不具合が漏れた割合", "escaped")}${hourly("feature_share")}</section>
-  <section id="${section("effort")}"><h2>機能1件あたりの延べ時間</h2>${stacked(axis, "機能の延べ時間の内訳", "h", (p) => p.states.map(stateLayer))}${quality("一度で検証に合格した割合", "first_pass")}<h3>直近の窓で完了した機能</h3>${issueList ? `<ol>${issueList}</ol>` : "<p>完了した機能はありません</p>"}</section></div>`;
-}
 function effectValue(
   rate: number | null,
   low: number | null,
@@ -183,20 +34,18 @@ function effectValue(
     : `${fmt(rate, 100)}%（${fmt(low, 100)}〜${fmt(high, 100)}） · n=${n ?? 0}`;
 }
 export function renderDashboard(data: ViewerData) {
-  const options = data.windows
-    .map(
-      (w) =>
-        `<option value="${w.length}" ${w.length === 8 ? "selected" : ""}>${w.length} 時間</option>`,
-    )
-    .join("");
   const gapCounts = new Map<string, number>();
   for (const { reason } of data.gaps) gapCounts.set(reason, (gapCounts.get(reason) ?? 0) + 1);
   const alert = data.health.some((r) => r.stopped || r.recent_quarantined > 0)
     ? '<aside><a href="#health">記録の到着に問題があります。計測の信頼性を確認</a></aside>'
     : "";
   return `<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Software Factory 計測</title><style>${style}</style><main>${alert}
-  <header><div><p>Software Factory</p><h1>機能のデリバリー</h1><small>集計日時 ${data.generatedAt ? date(Date.parse(data.generatedAt) / 1000) + " JST" : "—"}</small></div><label>直近の稼働時間 <select id="window">${options}</select></label></header>
-  ${data.windows.map((w) => windowPage(data, w)).join("")}
+  <header><div><small>Software Factory · ${data.generatedAt ? date(Date.parse(data.generatedAt) / 1000) + " JST" : "—"}</small><h1>デリバリーの振り返り</h1></div><label>集計対象 <select id="target"><option value="機能">機能のみ</option><option selected>全種類</option></select></label><label>直近の稼働 <select id="window"><option value="4">4 時間</option><option value="8" selected>8 時間</option><option value="24">24 時間</option></select></label></header>
+  ${data.combos.map((c) => panel(data, c)).join("")}
+  ${Object.entries(data.timelines)
+    .map(([issue, lanes]) => timeline(issue, lanes))
+    .join("")}
+  <dialog><button autofocus class="close">閉じる</button><div></div></dialog><output id="tooltip" hidden></output>
   <section><h2>改善の効果</h2>${table(
     ["改善 Issue", "狙い", "前後の稼働分", "改善前（95%区間）", "改善後（95%区間）"],
     data.effects.map((r) => [
@@ -262,14 +111,213 @@ export function renderDashboard(data: ViewerData) {
     ["開始（JST）", "終了（JST）", "分"],
     data.inactive.map((r) => [date(r.start), date(r.end), r.minutes]),
   )}</details></section></main>
-  <script>
-    const select = document.querySelector('#window');
-    function show() {
-      for (const panel of document.querySelectorAll('[data-window]')) {
-        panel.hidden = panel.dataset.window !== select.value;
-      }
-    }
-    select.addEventListener('change', show);
-    show();
-  </script></html>`;
+  <script>${script}</script></html>`;
+}
+const tiers = ["work", "wait", "unclassified"] as const;
+const tierNames = ["作業", "待ち", "未分類"];
+const phases: Record<string, string> = {
+  implementation: "実装",
+  verification: "検証",
+  rework: "手戻り",
+  merge_wait: "マージ待ち",
+  post_merge: "マージ後",
+  none: "フェーズ不明",
+};
+const waitNames: Record<string, string> = {
+  "human.approval": "人 · 承認",
+  "human.decision": "人 · 判断",
+  "resource.ci_queue": "リソース · CI順番",
+  "resource.docker_wait": "リソース · Docker枠",
+  "resource.deploy_queue": "リソース · デプロイ順番",
+  "resource.staging": "リソース · staging",
+  "resource.deploy_order": "リソース · デプロイ順序",
+  "coordinator.this_issue": "指揮役 · このIssue",
+  "coordinator.elsewhere": "指揮役 · 別件",
+  "coordinator.stopped": "指揮役 · 停止",
+};
+const laneNames: Record<string, string> = {
+  "tier:work": "作業",
+  "tier:wait": "待ち",
+  "tier:unclassified": "未分類",
+  "run:owner": "担当",
+  "run:implementer": "実装役",
+  "run:verifier": "検証役",
+  "run:other": "その他の役",
+  "run:local": "ローカル",
+  "run:ci": "CI",
+  "queue:ci": "CI順番待ち",
+  approval: "承認待ち",
+};
+function timeline(issue: string, lanes: ViewerData["timelines"][number]) {
+  const intervals = lanes.flatMap((l) => l.intervals);
+  const start = intervals.reduce((m, r) => Math.min(m, r[0]), Infinity),
+    end = intervals.reduce((m, r) => Math.max(m, r[1]), 0);
+  const heading = `<h2>#${esc(issue)} 担い手ごとの経過</h2>`;
+  const rows = lanes
+    .map((l) => {
+      const name = esc(laneNames[l.name] ?? l.name);
+      const intervals = l.intervals
+        .map(
+          ([a, b]) =>
+            `<i data-start="${a}" data-end="${b}" style="left:${(100 * (a - start)) / (end - start)}%;width:${(100 * (b - a)) / (end - start)}%;background:var(--${l.name.startsWith("tier:") ? esc(l.name.slice(5)) : "neutral"})"></i>`,
+        )
+        .join("");
+      return `<div><b>${name}</b><div class="track">${intervals}</div></div>`;
+    })
+    .join("");
+  const records = table(
+    ["担い手", "開始（JST）", "終了（JST）"],
+    lanes.flatMap((l) =>
+      l.intervals.map(([a, b]) => [laneNames[l.name] ?? l.name, date(a / 1000), date(b / 1000)]),
+    ),
+  );
+  const chart = intervals.length
+    ? `<div class="chart"><button class="swap" aria-expanded="false">表で見る</button><div class="plot"><p>${date(start / 1000)} 〜 ${date(end / 1000)} JST</p><div class="lanes" data-start="${start}" data-end="${end}">${rows}</div></div><div class="chart-table" hidden>${records}</div></div>`
+    : "区間の記録はありません";
+  return `<template id="issue-${esc(issue)}">${heading}${chart}</template>`;
+}
+function portion(p: Point, ms: number) {
+  const total = Object.values(p.effort.tiers).reduce((a, b) => a + b, 0);
+  return total ? (ms / total) * (p.kpi.hours_per_completion ?? 100) : 0;
+}
+const unit = (p: Point) => (p.kpi.hours_per_completion === null ? "%" : "h/件");
+function bars(rows: [string, number][], unit: string) {
+  const max = rows.reduce((m, r) => Math.max(m, r[1]), 0);
+  return rows.length
+    ? rows
+        .sort((a, b) => b[1] - a[1])
+        .map(
+          ([name, v]) =>
+            `<div class="bar"><span>${esc(name)}</span><b>${fmt(v)} ${unit}</b><i style="width:${max ? (100 * v) / max : 0}%"></i></div>`,
+        )
+        .join("")
+    : "該当する記録はありません";
+}
+function legend(labels: string[], colors: readonly string[]) {
+  return `<div class="legend">${labels.map((name, i) => `<span><i style="background:var(--${colors[i] ?? "ink"})"></i>${esc(name)}</span>`).join("")}</div>`;
+}
+function panel(data: ViewerData, c: Combo) {
+  const p = c.points.at(-1);
+  const open = `<section class="combo" data-span="${c.span}" data-target="${c.target}" ${c.span === 8 && c.target === "全種類" ? "" : "hidden"}>`;
+  if (!p) return open + "<p>稼働の記録はありません</p></section>";
+  const chartRows = (values: (r: Point) => (number | null)[], units: (r: Point) => string) =>
+    c.points.map((r) => ({
+      position: r.position,
+      end: r.end,
+      unit: units(r),
+      values: values(r),
+      context: `${date(r.start)} JST 開始 · 稼働 ${r.kpi.active_minutes} 分 · 工数 ${r.kpi.issue_minutes} 分 · 完了 ${r.kpi.completions} 件 · 境目の未完了 ${r.kpi.open_start} → ${r.kpi.open_end} 件`,
+    }));
+  function tile(
+    key: "throughput" | "parallelism" | "target_share" | "hours_per_completion",
+    title: string,
+    u: string,
+    direction: string,
+  ) {
+    if (!p) return "";
+    const bounds = key === "throughput" || key === "hours_per_completion" ? key : null;
+    const scale = u === "%" ? 100 : 1;
+    const v = p.kpi[key],
+      lo = bounds ? p.kpi[`${bounds}_low`] : null,
+      hi = bounds ? p.kpi[`${bounds}_high`] : null;
+    const rows = chartRows(
+      (r) => {
+        const val = r.kpi[key];
+        return [
+          val === null ? null : val * scale,
+          ...(bounds ? [r.kpi[`${bounds}_low`], r.kpi[`${bounds}_high`]] : []),
+        ];
+      },
+      () => u,
+    );
+    return `<article class="tile" data-kpi="${key}" data-value="${v ?? ""}" data-low="${lo ?? ""}" data-high="${hi ?? ""}" data-n="${p.kpi.completions}"><h2>${title}</h2><strong>${fmt(v, scale)}</strong> ${u}<small>${direction} · 完了 ${p.kpi.completions} 件${bounds ? " · 95%区間 " + fmt(lo) + "〜" + fmt(hi) : ""}</small>${graph({ rows, labels: [title, ...(bounds ? ["95%下限", "95%上限"] : [])], colors: [], mode: "trend", breaks: data.breaks })}</article>`;
+  }
+  const u = unit(p);
+  const phaseTable = Object.entries(phases)
+    .filter(([phase]) => phase !== "none" || p.effort.phases.none)
+    .map(
+      ([phase, name]) =>
+        `<tr><th>${name}</th>${tiers
+          .map((t) => {
+            const v = portion(p, p.effort.phases[phase]?.[t] ?? 0);
+            return `<td><button data-cell="${phase}.${t}" data-value="${v}" aria-pressed="false">${fmt(v)}</button></td>`;
+          })
+          .join("")}</tr>`,
+    )
+    .join("");
+  const slots = [
+    "進行中",
+    "割り当て待ち",
+    "リソース制約で着手不可",
+    "着手可能なIssueなし",
+    "担当枠の上限",
+  ];
+  const colors = ["running", "dispatch", "resource", "ready"];
+  const issueButtons = c.issues.map(
+    (i) =>
+      `<button class="issue" data-issue="${i.issue}" data-effort="${i.effort_ms}" data-cells="${esc(JSON.stringify(i.cells))}"><span>#${i.issue} ${esc(i.title)}</span><b>${fmt(i.effort_ms / 3600000)} h</b></button>`,
+  );
+  const quality = ["product", "development"]
+    .map((area) => {
+      const r = qualityRates(
+        data.quality.filter((q) => q.closed >= p.start && q.closed < p.end),
+        area,
+      );
+      return `<div class="${r.observed < r.total ? "dim" : ""}"><h3>${area === "product" ? "製品" : "開発の仕組み"} · 観察完了 ${r.observed}/${r.total}</h3>${table(
+        ["指標", "割合（95%区間）"],
+        (
+          [
+            ["一度で検証に合格", r.first_pass],
+            ["作りの見直し", r.rework],
+            ["不具合の漏れ", r.escaped],
+          ] as const
+        ).map(([name, rate]) => [name, effectValue(rate.value, rate.low, rate.high, rate.n)]),
+      )}</div>`;
+    })
+    .join("");
+  return (
+    open +
+    `<div class="tiles">${tile("throughput", "スループット", "件/h", "多いほど良い")}${tile("parallelism", "同時進行数", "件", "良し悪しの向きなし")}${c.target === "機能" ? tile("target_share", "機能の工数比率", "%", "高いほど良い") : ""}${tile("hours_per_completion", "1件あたりの工数", "h/件", "少ないほど良い")}</div>
+ <div class="middle"><article><h2>1件あたりの工数の内訳</h2>${graph({ rows: chartRows((r) => tiers.map((t) => portion(r, r.effort.tiers[t])), unit), labels: tierNames, colors: [...tiers], mode: "stack", breaks: data.breaks })}${legend(tierNames, tiers)}<small>${p.kpi.completions ? u : "完了なし · %"}${c.points.some((r) => !r.kpi.completions) && c.points.some((r) => r.kpi.completions) ? " · 完了なしの区間は割合（0〜100%）" : ""}</small></article>
+ <article><h2>フェーズ別の内訳 <small>${u}</small></h2><table><thead><tr><th>フェーズ</th>${tierNames.map((t) => "<th>" + t + "</th>").join("")}</tr></thead><tbody>${phaseTable}</tbody></table></article>
+ <article><h2>待ち時間の内訳</h2>${bars(
+   Object.entries(p.effort.waits).map(([k, v]) => [waitNames[k] ?? k, portion(p, v)]),
+   u,
+ )}</article>
+ <article><h2>作業時間の内訳</h2>${bars(
+   [
+     ["応答生成", portion(p, p.effort.work.generation)],
+     ["ローカル", portion(p, p.effort.work.local)],
+     ["CI・デプロイ", portion(p, p.effort.work.ci_deploy)],
+   ],
+   u,
+ )}<small>並行度 ${fmt(p.effort.tiers.work ? Object.values(p.effort.work).reduce((a, b) => a + b, 0) / p.effort.tiers.work : null)} 倍</small></article></div>
+ <div class="lower"><article><h2>同時進行数の上限の内訳</h2>${graph({
+   rows: chartRows(
+     (r) => [
+       r.kpi.parallelism,
+       r.slots.awaiting_dispatch,
+       r.slots.resource_limit,
+       r.slots.no_ready_issue,
+       r.capacity,
+     ],
+     () => "枠",
+   ),
+   labels: slots,
+   colors,
+   capacity: true,
+   mode: "stack",
+   breaks: data.breaks,
+ })}${legend(slots, colors)}</article>
+ <article><h2>種類別の${c.target === "機能" ? "工数比率" : "完了件数"}</h2>${bars(
+   c.kinds.map((k) => [
+     k.kind === "unknown" ? "種類不明" : k.kind,
+     c.target === "機能" ? (100 * k.minutes) / p.kpi.issue_minutes : k.completions,
+   ]),
+   c.target === "機能" ? "%" : "件",
+ )}</article>
+ <article><h2>期間内に完了したIssue</h2><div class="top">${issueButtons.slice(0, 6).join("")}</div><details class="rest" ${issueButtons.length <= 6 ? "hidden" : ""}><summary>残りのIssue</summary><div>${issueButtons.slice(6).join("")}</div></details><p class="empty-issues" ${issueButtons.length ? "hidden" : ""}>該当するIssueはありません</p></article></div>
+ <p class="reliability"><b>計測の信頼性</b> · 未分類 ${fmt(p.unclassified_share, 100)}% · <a href="#health">Issueに結べなかった記録 ${data.gaps.length} 件</a> · 期間内の完了 ${p.kpi.completions} 件</p>
+ <section class="quality"><h2>品質</h2><div>${quality}</div></section></section>`
+  );
 }

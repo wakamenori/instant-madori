@@ -1,4 +1,4 @@
-import type { Point, ViewerData } from "./data.ts";
+import type { ViewerData } from "./data.ts";
 export const esc = (s: string | number) =>
   String(s)
     .replaceAll("&", "&amp;")
@@ -29,160 +29,88 @@ export function table(headers: string[], rows: (string | number | null)[][]) {
     "</tbody></table></div>"
   );
 }
-type Sample = {
-  value: number | null;
-  low?: number | null;
-  high?: number | null;
-  dim?: boolean;
-  n?: number;
-  excluded?: number;
-  uncounted?: number;
-  observed?: number | undefined;
+
+type ChartRow = {
+  position: number;
+  end: number;
+  values: (number | null)[];
+  unit: string;
+  context: string;
 };
-const palette = [
-  "#14756e",
-  "#bc6941",
-  "#537ab5",
-  "#8871ad",
-  "#a28627",
-  "#488650",
-  "#ac547e",
-  "#647889",
-  "#387d97",
-  "#936755",
-  "#7d8543",
-  "#96968e",
-];
-export function color(index: number) {
-  return palette[index % palette.length] ?? "#808080";
-}
-type Endpoint = Pick<Point, "position" | "end" | "open_start" | "open_end">;
-type Axis<P extends Endpoint = Point> = {
-  points: P[];
-  start?: number;
-  end?: number;
+type Chart = {
+  labels: string[];
+  colors: string[];
+  rows: ChartRow[];
   breaks: ViewerData["breaks"];
+  mode: "trend" | "stack";
+  capacity?: boolean;
 };
-const width = 720,
-  height = 94;
-function plot(
-  axis: Axis<Endpoint>,
-  max: number,
-  topLabel: string,
-  draw: (x: (pos: number) => number, y: (v: number) => number) => string,
-) {
-  const end = axis.end ?? axis.points.at(-1)?.position ?? 0;
+export function graph({ labels, colors, rows, breaks, mode, capacity }: Chart) {
+  const end = rows.at(-1)?.position;
   if (!end) return '<p class="empty">稼働の記録はありません</p>';
-  const x = (pos: number) => +((pos / end) * width).toFixed(2);
-  const y = (v: number) => +(height - (height * v) / (max || 1)).toFixed(2);
-  const breaks = axis.breaks
-    .map(
-      (b) =>
-        `<path class="break" d="M${x(b.position)} 0v${height}"><title>${date(b.resume)} 再開</title></path>`,
-    )
+  const maxima = new Map<string, number>();
+  for (const row of rows) {
+    const values = row.values.map((v) => v ?? 0);
+    const stack = mode === "stack" ? values.slice(0, colors.length).reduce((a, b) => a + b, 0) : 0;
+    maxima.set(
+      row.unit,
+      row.unit === "%" ? 100 : Math.max(maxima.get(row.unit) ?? 0, stack, ...values),
+    );
+  }
+  const x = (pos: number) => (pos / end) * 1000;
+  const shapes = rows
+    .map((row, i) => {
+      const prev = rows[i - 1],
+        left = x(prev?.position ?? 0),
+        right = x(row.position);
+      const y = (v: number) => 100 - (100 * v) / (maxima.get(row.unit) || 1);
+      if (mode === "trend") {
+        const [v, lo, hi] = row.values,
+          [pv, pl, ph] = prev?.values ?? [];
+        const band =
+          lo != null && hi != null && pl != null && ph != null
+            ? `<polygon class="band" points="${left},${y(pl)} ${right},${y(lo)} ${right},${y(hi)} ${left},${y(ph)}"/>`
+            : "";
+        return (
+          band +
+          (v == null
+            ? ""
+            : `<path class="line" d="M${pv == null ? right - 1 : left} ${y(pv ?? v)} L${right} ${y(v)}"/>`)
+        );
+      }
+      let total = 0;
+      const bars = colors
+        .map((color, j) => {
+          const bottom = y(total);
+          total += row.values[j] ?? 0;
+          return (
+            `<rect x="${left}" width="${right - left}" y="${y(total)}" height="${bottom - y(total)}" fill="var(--${color})"/>` +
+            (bottom > y(total) && total !== (row.values[j] ?? 0)
+              ? `<path class="gap" d="M${left} ${bottom}H${right}"/>`
+              : "")
+          );
+        })
+        .join("");
+      const cap = capacity ? row.values.at(-1) : null;
+      return bars + (cap == null ? "" : `<path class="line" d="M${left} ${y(cap)}H${right}"/>`);
+    })
     .join("");
-  const hours = end / 60;
-  const tickStep = Math.max(1, Math.ceil(hours / 80));
-  const labelStep = tickStep * Math.max(1, Math.ceil(hours / (6 * tickStep)));
-  const tickMarks: string[] = [];
-  const labels: string[] = [];
-  for (let h = 0; h < hours; h += tickStep) {
-    const tickX = x(h * 60);
-    tickMarks.push(`<path stroke="#c2d0ca" d="M${tickX} ${height - 4}v4"/>`);
-    if (h % labelStep === 0 && (h === 0 || hours - h > labelStep))
-      labels.push(`<span style="left:${(100 * h) / hours}%">${h}</span>`);
-  }
-  return `<div class="graph"><small>${topLabel}</small><svg viewBox="-2 -2 724 100" preserveAspectRatio="none" aria-label="稼働時間ごとの推移"><svg x="0" y="0" width="${width}" height="${height}" overflow="hidden">${draw(x, y)}</svg>${breaks}${tickMarks.join("")}</svg><div class="axis">${labels.join("")}<span>${fmt(hours)} 稼働時間</span></div></div>`;
-}
-export function trend<P extends Endpoint>(
-  axis: Axis<P>,
-  title: string,
-  unit: string,
-  direction: string,
-  sample: (p: P) => Sample,
-  link = "",
-  scale = 1,
-) {
-  const series = axis.points.map((p) => ({ p, ...sample(p) }));
-  const max = unit === "%" ? 1 : series.reduce((m, s) => Math.max(m, s.value ?? 0), 0);
-  const latest = series.at(-1);
-  function reading(s: Sample) {
-    const range =
-      s.low != null || s.high != null
-        ? `（${fmt(s.low ?? null, scale)}〜${fmt(s.high ?? null, scale)}）`
-        : "";
-    return `${fmt(s.value, scale)} ${unit}${range}${s.n === undefined ? "" : " · n=" + s.n}${s.observed === undefined ? "" : " · 観察完了 " + s.observed + "/" + s.n}`;
-  }
-  const graph = plot(
-    axis,
-    max,
-    fmt(max, scale) + " " + unit,
-    (x, y) =>
-      series
-        .map((s, i) => {
-          const prev = series[i - 1],
-            right = x(s.p.position),
-            left = x(prev?.p.position ?? axis.start ?? 0);
-          const band =
-            s.low != null && s.high != null && prev?.low != null && prev.high != null
-              ? `<polygon fill="#c7e4dd" points="${left},${y(prev.low)} ${right},${y(s.low)} ${right},${y(s.high)} ${left},${y(prev.high)}"/>`
-              : "";
-          const line =
-            s.value === null
-              ? ""
-              : `<g opacity="${s.dim ? 0.4 : 1}">${prev?.value != null ? `<path stroke="#116960" stroke-width="2" d="M${left} ${y(prev.value)} L${right} ${y(s.value)}"/>` : ""}<circle cx="${right}" cy="${y(s.value)}" r="1.8" fill="#116960"/></g>`;
-          return band + line;
-        })
-        .join("") +
-      series
-        .map((s, i) => {
-          const left = x(series[i - 1]?.p.position ?? axis.start ?? 0);
-          return `<rect x="${left}" width="${x(s.p.position) - left}" height="${height}" fill="transparent"><title>${date(s.p.end)} · ${reading(s)} · 境目の未完了 ${s.p.open_start} → ${s.p.open_end} 件${s.excluded === undefined ? "" : " · 分母から除外 " + s.excluded + " 件"}${s.uncounted ? " · 担当を通さず完了（数えない） " + s.uncounted + " 件" : ""}</title></rect>`;
-        })
-        .join(""),
-  );
-  return `<article><h3>${link ? `<a href="#${link}">${esc(title)} ↓</a>` : esc(title)}</h3><small>${direction}</small><div class="series">${graph}<strong>${latest ? reading(latest) : "—"}</strong></div></article>`;
-}
-type Layer = { name: string; value: number; color: string };
-export function stacked(
-  axis: Axis,
-  title: string,
-  unit: string,
-  layers: (p: Point) => Layer[],
-  limit?: (p: Point) => number | null,
-) {
-  const series = axis.points.map((p) => ({ layers: layers(p), cap: limit?.(p) }));
-  const max = series.reduce(
-    (m, row) =>
-      Math.max(
-        m,
-        row.layers.reduce((s, r) => s + r.value, 0),
-        row.cap ?? 0,
-      ),
-    0,
-  );
-  const graph = plot(axis, max, fmt(max) + " " + unit, (x, y) =>
-    axis.points
-      .map((p, i) => {
-        const left = x(axis.points[i - 1]?.position ?? axis.start ?? 0),
-          w = x(p.position) - left;
-        let sum = 0;
-        const bars =
-          series[i]?.layers
-            .map((r) => {
-              const bottom = y(sum);
-              sum += r.value;
-              return r.value
-                ? `<rect x="${left}" y="${y(sum)}" width="${w}" height="${bottom - y(sum)}" fill="${r.color}"><title>${date(p.end)} · ${esc(r.name)} ${fmt(r.value)} ${unit}</title></rect>`
-                : "";
-            })
-            .join("") ?? "";
-        const cap = limit?.(p);
-        return bars + (cap != null ? `<path stroke="#273c41" d="M${left} ${y(cap)}h${w}"/>` : "");
-      })
-      .join(""),
-  );
-  const latest = new Map(series.at(-1)?.layers.map((r) => [r.name, r.value]));
-  const legend = new Map(series.flatMap((row) => row.layers).map((r) => [r.name, r.color]));
-  return `<article><h3>${esc(title)}</h3>${graph}<div class="legend">${Array.from(legend, ([name, c]) => `<span><i style="background:${c}"></i>${esc(name)} ${fmt(latest.get(name) ?? 0)} ${unit}</span>`).join("")}${limit ? " <span>━ 担当枠の上限</span>" : ""}</div></article>`;
+  const readings = rows.map((r) => r.values.map((v) => fmt(v) + " " + r.unit));
+  const targets = rows
+    .map((r, i) => {
+      const left = x(rows[i - 1]?.position ?? 0);
+      const values = labels.map((name, j) => name + " " + readings[i]?.[j]).join("\n");
+      return `<rect x="${left}" width="${x(r.position) - left}" height="100" fill="transparent" data-tip="${esc(date(r.end) + " JST\n" + values + "\n" + r.context)}"/>`;
+    })
+    .join("");
+  const axes = Array.from(maxima, ([u, max]) => fmt(max) + " " + u).join(" / ");
+  const step = Math.max(60, Math.ceil(end / 600) * 60);
+  const ticks = Array.from(
+    { length: Math.floor(end / step) },
+    (_, i) => `<path class="tick" d="M${x((i + 1) * step)} 96v4"/>`,
+  ).join("");
+  return `<div class="chart"><span class="ceiling">${axes}</span><button type="button" class="swap" aria-expanded="false">表で見る</button><div class="plot"><svg viewBox="0 -2 1000 104" preserveAspectRatio="none" aria-label="稼働時間ごとの推移">${shapes}${ticks}${targets}${breaks.map((b) => `<path class="break" d="M${x(b.position)} 0v100" data-tip="${date(b.resume)} JST 再開"/>`).join("")}<line class="cross" y1="0" y2="100" hidden/></svg><small>0 <span>${fmt(end / 60)} 稼働時間</span></small></div><div class="chart-table" hidden>${table(
+    ["時刻（JST）", ...labels, "期間"],
+    rows.map((r, i) => [date(r.end), ...(readings[i] ?? []), r.context]),
+  )}</div></div>`;
 }

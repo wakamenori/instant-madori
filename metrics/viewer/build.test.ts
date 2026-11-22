@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -80,12 +80,13 @@ void test("the viewer CLI publishes the derived snapshot and preserves it on sch
   execFileSync(process.execPath, [join(import.meta.dirname, "../build/build.ts")], options);
   execFileSync(process.execPath, [viewer], options);
   const output = join(root, "dashboard.html");
+  assert.equal(statSync(output).mode & 0o777, 0o600);
   const html = readFileSync(output, "utf8");
-  assert.match(html, /スループットとその分解/u);
+  assert.match(html, /デリバリーの振り返り/u);
   assert.match(html, /<option value="8" selected>/u);
   const custom = join(root, "morning.html");
   execFileSync(process.execPath, [viewer, "--out", custom], options);
-  assert.match(readFileSync(custom, "utf8"), /機能のデリバリー/u);
+  assert.match(readFileSync(custom, "utf8"), /デリバリーの振り返り/u);
 
   const derived = new DatabaseSync(join(root, "metrics-derived.sqlite"));
   try {
@@ -99,7 +100,7 @@ void test("the viewer CLI publishes the derived snapshot and preserves it on sch
       ],
     );
     assert.equal(initial.health.find((h) => h.source === "t3.thread")?.stopped, false);
-    assert.equal(initial.windows.find((w) => w.length === 8)?.points.length, 0);
+    assert.equal(initial.combos.find((w) => w.span === 8)?.points.length, 0);
     derived.prepare("UPDATE mart_health SET last_append=NULL WHERE source='t3.thread'").run();
     assert.equal(
       readViewerData(derived).health.find((h) => h.source === "t3.thread")?.stopped,
