@@ -5,11 +5,13 @@ import { fileURLToPath } from "node:url";
 import { start, stop } from "../shared/processes.ts";
 import { repositoryRoot, serviceCrates } from "../shared/repository.ts";
 import { assertContainerE2eFiles } from "./layout-contract.ts";
+import { rustSkipBase } from "./rust-inputs.ts";
 import { cargoTestFlags, nodeTestFlags, resetResults } from "./test-results.ts";
 
-const usage = `Usage: pnpm check [--fast | --full]
+const usage = `Usage: pnpm check [--fast | --full] [--rust]
   --fast  Autofix, TypeScript types/lint, Rust native/Wasm Clippy, local static checks.
   default All fast checks, TypeScript tests and Rust tests.
+  --rust  Run the Rust build steps for this mode even if Rust inputs are unchanged.
   --full  Also rebuild Wasm bindings, build apps, check local integration and audit dependencies.
 All modes modify service source through formatters and automatic lint fixes.
 Run pnpm setup once before checking. No mode stages files or deploys resources.`;
@@ -20,7 +22,17 @@ export async function runChecks(
   run: (label: string, command: string, args: string[]) => Promise<void>,
   inDockerSlot: (stage: () => Promise<void>) => Promise<void>,
   resultsDir = resolve(process.env.MADORI_TEST_RESULTS_DIR ?? "target/test-results"),
+  forceRust = false,
 ): Promise<void> {
+  const base = rustSkipBase(
+    process.cwd(),
+    forceRust || mode === "--full",
+    process.env.GITHUB_ACTIONS,
+  );
+  if (base)
+    console.log(
+      `[check] Rust steps skipped: no Rust inputs changed since ${base.slice(0, 12)} (CI runs them)`,
+    );
   await resetResults(resultsDir);
   const pnpm = (label: string, ...commandArgs: string[]) => run(label, "pnpm", commandArgs);
   const cargo = (label: string, ...commandArgs: string[]) => run(label, "cargo", commandArgs);
@@ -33,16 +45,17 @@ export async function runChecks(
   await format();
   await rustFormat();
   await pnpm("Generate Worker types", "--filter", "@madori/worker", "types");
-  await cargo(
-    "Generate internal API contract",
-    "run",
-    "--locked",
-    "-q",
-    "-p",
-    "madori-geometry-api",
-    "--bin",
-    "emit-typescript",
-  );
+  if (!base)
+    await cargo(
+      "Generate internal API contract",
+      "run",
+      "--locked",
+      "-q",
+      "-p",
+      "madori-geometry-api",
+      "--bin",
+      "emit-typescript",
+    );
   await script("Generate internal body validators", "scripts/generate/generate-geometry.ts");
   if (mode === "--full") {
     await script("Build Wasm bindings", "scripts/build/build-wasm.ts");
@@ -89,38 +102,40 @@ export async function runChecks(
   await script("Skill argument placeholders", "scripts/check/check-skill-arguments.ts");
   await script("Secret scan", "scripts/check/check-secrets.ts");
 
-  const native = ["--workspace", "--all-targets"];
-  const wasm = ["-p", "madori-viewer", "--target", "wasm32-unknown-unknown", "--all-targets"];
-  for (const [label, target] of [
-    ["native", native],
-    ["Wasm", wasm],
-  ] satisfies [string, string[]][]) {
-    await cargo(
-      `Fix Rust: ${label}`,
-      "clippy",
-      "--locked",
-      ...target,
-      "--no-deps",
-      "--fix",
-      "--allow-dirty",
-      "--allow-staged",
-    );
-  }
-  await rustFormat();
-  for (const [label, target] of [
-    ["native", native],
-    ["Wasm", wasm],
-  ] satisfies [string, string[]][]) {
-    await cargo(
-      `Clippy: ${label}`,
-      "clippy",
-      "--locked",
-      ...target,
-      "--no-deps",
-      "--",
-      "-D",
-      "warnings",
-    );
+  if (!base) {
+    const native = ["--workspace", "--all-targets"];
+    const wasm = ["-p", "madori-viewer", "--target", "wasm32-unknown-unknown", "--all-targets"];
+    for (const [label, target] of [
+      ["native", native],
+      ["Wasm", wasm],
+    ] satisfies [string, string[]][]) {
+      await cargo(
+        `Fix Rust: ${label}`,
+        "clippy",
+        "--locked",
+        ...target,
+        "--no-deps",
+        "--fix",
+        "--allow-dirty",
+        "--allow-staged",
+      );
+    }
+    await rustFormat();
+    for (const [label, target] of [
+      ["native", native],
+      ["Wasm", wasm],
+    ] satisfies [string, string[]][]) {
+      await cargo(
+        `Clippy: ${label}`,
+        "clippy",
+        "--locked",
+        ...target,
+        "--no-deps",
+        "--",
+        "-D",
+        "warnings",
+      );
+    }
   }
 
   if (mode !== "--fast") {
@@ -136,9 +151,12 @@ export async function runChecks(
     if (tests.length === 0) throw new Error("No TypeScript tests found");
     await run("TypeScript tests", process.execPath, [
       ...nodeTestFlags(resultsDir, "typescript"),
+      ...(base
+        ? ["--test-skip-pattern=^Rust serialized optional responses are accepted by generated zod$"]
+        : []),
       ...tests.sort(),
     ]);
-    await cargo("Rust tests", ...cargoTestFlags(resultsDir));
+    if (!base) await cargo("Rust tests", ...cargoTestFlags(resultsDir));
   }
   if (mode === "--full") {
     await pnpm("Build web", "--filter", "@madori/web", "build");
@@ -188,10 +206,11 @@ async function main() {
     console.log(usage);
     return;
   }
-  if (args.length > 1 || (args.length === 1 && args[0] !== "--fast" && args[0] !== "--full")) {
+  const modes = args.filter((arg) => arg !== "--rust");
+  if (modes.length > 1 || (modes.length === 1 && modes[0] !== "--fast" && modes[0] !== "--full")) {
     throw new Error(usage);
   }
-  const mode = args[0] === "--fast" || args[0] === "--full" ? args[0] : "default";
+  const mode = modes[0] === "--fast" || modes[0] === "--full" ? modes[0] : "default";
   process.chdir(fileURLToPath(repositoryRoot));
 
   const active = new Set<ReturnType<typeof start>>();
@@ -223,12 +242,18 @@ async function main() {
   const crates = serviceCrates();
 
   try {
-    await runChecks(mode, crates, run, (stage) =>
-      withDockerSlot(
-        machineSlots(),
-        { purpose: "pnpm check --full", signal: interruption.signal },
-        stage,
-      ),
+    await runChecks(
+      mode,
+      crates,
+      run,
+      (stage) =>
+        withDockerSlot(
+          machineSlots(),
+          { purpose: "pnpm check --full", signal: interruption.signal },
+          stage,
+        ),
+      undefined,
+      args.includes("--rust"),
     );
     console.log(
       `\n[check] Passed (${mode}, ${((performance.now() - started) / 1000).toFixed(1)}s).`,

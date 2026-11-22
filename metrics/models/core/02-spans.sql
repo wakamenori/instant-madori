@@ -1,3 +1,5 @@
+CREATE VIEW record_policy AS SELECT '2026-11-22T01:04:44.000Z' effective,'43c2075b0' revision;
+
 CREATE TABLE span AS
 SELECT a.id actor,a.issue,CASE role WHEN 'owner' THEN 'owner_turn' WHEN 'implementer' THEN 'implementer_run'
  WHEN 'advisor' THEN 'advisor_run' WHEN 'verifier' THEN 'verifier_run' ELSE 'coordinator_turn' END kind,r.started_at start,r.completed_at end
@@ -13,8 +15,10 @@ UNION ALL SELECT comment_id,issue_or_pr,'staging_occupancy',started_at,max(ended
 FROM stg_github_comment_block WHERE started_at IS NOT NULL AND issue_or_pr NOT IN (SELECT number FROM stg_github_pr) GROUP BY issue_or_pr,started_at
 UNION ALL SELECT c.id,c.issue_or_pr,'staging_occupancy',c.created_at,(
  SELECT min(e.created_at) FROM stg_github_comment e,json_each(e.markers) m
- WHERE m.value='staging_occupy_end' AND e.issue_or_pr=c.issue_or_pr AND e.created_at>=c.created_at)
+ WHERE m.value='staging_occupy_end' AND e.issue_or_pr=c.issue_or_pr AND e.created_at>=c.created_at
+ AND e.created_at<(SELECT effective FROM record_policy))
 FROM stg_github_comment c,json_each(c.markers) m WHERE m.value='staging_occupy_start'
+ AND c.created_at<(SELECT effective FROM record_policy)
  -- The coordinator opens and closes occupancy on the Issue; its merge comment on the PR repeats the
  -- opening line but never closes it.
  AND NOT EXISTS (SELECT 1 FROM stg_github_comment_block b WHERE b.issue_or_pr=c.issue_or_pr AND b.started_at IS NOT NULL AND (b.comment_id=c.id OR (b.started_at<=c.created_at AND coalesce(b.ended_at,'9999')>=c.created_at)))

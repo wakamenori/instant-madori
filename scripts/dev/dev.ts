@@ -1,3 +1,4 @@
+import { dockerTetherEnv } from "../shared/docker-tether.ts";
 import { machineSlots, withDockerSlot } from "../shared/docker-slots.ts";
 import {
   finishDevelopment,
@@ -70,6 +71,7 @@ async function develop(session: DevSession) {
       ],
       {
         cwd: "apps/worker",
+        env: { ...process.env, ...dockerTetherEnv(process.env) },
       },
     ),
     start(process.execPath, ["node_modules/vite/bin/vite.js", ...session.viteArgs], {

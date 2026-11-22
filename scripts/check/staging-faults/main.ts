@@ -220,6 +220,13 @@ export async function runFaultJourney(
     return stopped;
   }
   const expected: LogExpectation[] = [];
+  await step("redeploy while held", 1, async () => {
+    if (!(await deploy.waitForWindow())) return { adds: 0 };
+    const { job } = await send("R");
+    await finished(job.jobId, "completed", 120_000);
+    expected.push({ kind: "committed", jobId: job.jobId });
+    return { adds: 1, committedBy: job.jobId };
+  });
   const bodyA = instruction();
   let acceptedA: Awaited<ReturnType<typeof send>>;
   await step("instruction replay", 1, async () => {
@@ -252,13 +259,6 @@ export async function runFaultJourney(
     await finished(job.jobId, "cancelled");
     expected.push({ kind: "stopped", jobId: job.jobId, held: true });
     return { adds: 0 };
-  });
-  await step("redeploy while held", 1, async () => {
-    if (!(await deploy.waitForWindow())) return { adds: 0 };
-    const { job } = await send("R");
-    await finished(job.jobId, "completed", 120_000);
-    expected.push({ kind: "committed", jobId: job.jobId });
-    return { adds: 1, committedBy: job.jobId };
   });
   await step("queue hold after a stop, then resume", 1, async () => {
     const { job: q1 } = await send("Q1");
@@ -340,29 +340,37 @@ export async function runFaultJourney(
     await evidence("journey.jsonl", jsonl(records));
     if (verdict.kind === "failed" || verdict.kind === "pending")
       throw new JourneyFailure("FAIL log evidence: " + violations.join(", "));
-    const previous = lines
-      .slice()
-      .reverse()
-      .find((l) => l.jobId === ids.A && l.step === "render snapshot" && l.outcome === "saved");
     const container = ids.R
       ? (await logs("traceId", ids.R)).filter((l) => l.event.startsWith("container."))
       : [];
-    await evidence(
-      "container.jsonl",
-      jsonl(
-        container.map((l) => ({
-          ...l,
-          secondsSincePreviousRender: previous ? (l.at - previous.at) / 1000 : null,
-        })),
-      ),
-    );
+    await evidence("container.jsonl", jsonl(container));
     console.log(verdict.kind.toUpperCase() + " log evidence");
     await step("stopped Workflows ended without a revision", 0, () => Promise.resolve({ adds: 0 }));
     return verdict;
   }
 }
-if (import.meta.main) {
+export async function exitCodeOf(
+  journey: () => ReturnType<typeof runFaultJourney>,
+): Promise<0 | 1 | 2> {
   try {
+    const result = await journey();
+    console.log(
+      result.kind === "pass"
+        ? "PASS staging fault journey"
+        : "MISSED " + result.why + "; request another dispatch and rerun",
+    );
+    return result.kind === "pass" ? 0 : 2;
+  } catch (error) {
+    console.error(
+      error instanceof JourneyFailure || error instanceof AssertionError
+        ? error.message
+        : "Staging fault journey failed",
+    );
+    return 1;
+  }
+}
+if (import.meta.main) {
+  process.exitCode = await exitCodeOf(async () => {
     const { values } = parseArgs({
       options: { "deploy-run": { type: "string" }, evidence: { type: "string" } },
     });
@@ -381,7 +389,7 @@ if (import.meta.main) {
       await readFile(new URL("apps/worker/wrangler.jsonc", repositoryRoot), "utf8"),
     );
     await mkdir(dir, { recursive: true });
-    const result = await runFaultJourney(
+    return runFaultJourney(
       {
         target,
         service: target.service,
@@ -399,18 +407,5 @@ if (import.meta.main) {
         evidence: (file, data) => writeFile(join(dir, file), data),
       },
     );
-    console.log(
-      result.kind === "pass"
-        ? "PASS staging fault journey"
-        : "MISSED " + result.why + "; request another dispatch and rerun",
-    );
-    process.exitCode = result.kind === "pass" ? 0 : 2;
-  } catch (error) {
-    console.error(
-      error instanceof JourneyFailure || error instanceof AssertionError
-        ? error.message
-        : "Staging fault journey failed",
-    );
-    process.exitCode = 1;
-  }
+  });
 }

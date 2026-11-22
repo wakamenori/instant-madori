@@ -10,11 +10,13 @@ import {
   type CancelledJob,
 } from "../../../packages/contracts/src/index.ts";
 import type { Committed } from "./history.ts";
-import { faultTarget, runFaultJourney } from "./main.ts";
+import { exitCodeOf, faultTarget, runFaultJourney } from "./main.ts";
 
 type Fault =
   | "clean"
   | "aborted run"
+  | "early deploy"
+  | "stopped commits"
   | "late commit"
   | "changed display"
   | "old version"
@@ -73,8 +75,14 @@ function staging(fault: Fault) {
     patternId: string | null;
     traceId: string;
   }[] = [];
-  const deployment = start + 300_000;
-  const version = () => (now >= deployment + 30_000 ? "new" : "old");
+  const deploymentDelay: Partial<Record<Fault, number>> = {
+    "early deploy": 60_000,
+    "missed window": 10_500,
+    "late adoption": -60_000,
+  };
+  const stepStart = start + (deploymentDelay[fault] ?? 300_000);
+  const stepEnd = stepStart + (fault === "missed window" ? 500 : 30_000);
+  const version = () => (now >= stepEnd ? "new" : "old");
   function log(
     job: AcceptedJob,
     event: string,
@@ -111,7 +119,7 @@ function staging(fault: Fault) {
     running = job;
     const claimed = version();
     log(job, "pattern.advanced", "claimed");
-    if (!(fault === "missing hold" && job.number === 2))
+    if (!(fault === "missing hold" && job.number === 3))
       log(job, "job.step", "hold", { step: "check test hold before render" });
     later(60_000, () => {
       if (running?.jobId === job.jobId)
@@ -125,8 +133,8 @@ function staging(fault: Fault) {
     });
     later(180_000, () => {
       if (running?.jobId !== job.jobId) {
-        log(job, "job.finished", "cancelled");
-        if (fault === "late commit" && job.number === 2) commit();
+        log(job, "job.finished", fault === "stopped commits" ? "committed" : "cancelled");
+        if (fault === "late commit" && job.number === 3) commit();
         return;
       }
       log(job, "container.ready", "ready");
@@ -264,13 +272,6 @@ function staging(fault: Fault) {
   function gh(args: readonly string[]) {
     if (args[0] === "api") return fault === "parallel deploy" ? "47\n48" : "47";
     assert.deepEqual(args.slice(0, 4), ["run", "view", "47", "--json"]);
-    const stepStart =
-      fault === "late adoption"
-        ? start - 60_000
-        : fault === "missed window"
-          ? start + 10_000
-          : deployment;
-    const end = stepStart + 30_000;
     return JSON.stringify({
       databaseId: 47,
       event: "workflow_dispatch",
@@ -283,9 +284,9 @@ function staging(fault: Fault) {
           steps: [
             {
               name: "Migrate and deploy",
-              status: now < stepStart ? "pending" : now < end ? "in_progress" : "completed",
+              status: now < stepStart ? "pending" : now < stepEnd ? "in_progress" : "completed",
               startedAt: iso(stepStart),
-              completedAt: iso(end),
+              completedAt: iso(stepEnd),
             },
           ],
         },
@@ -351,7 +352,12 @@ void test("history grows from two revisions to five across replay, stop, deploy 
     .split("\n")
     .map((line) =>
       z
-        .object({ name: z.string(), before: snapshot.optional(), after: snapshot.optional() })
+        .object({
+          name: z.string(),
+          outcome: z.literal("PASS").optional(),
+          before: snapshot.optional(),
+          after: snapshot.optional(),
+        })
         .parse(JSON.parse(line)),
     );
   assert.equal(steps[0]?.before?.history.length, 2);
@@ -359,13 +365,24 @@ void test("history grows from two revisions to five across replay, stop, deploy 
   const initial = steps[0]?.before?.history;
   assert(initial);
   assert.deepEqual(steps.at(-1)?.after?.history.slice(-2), initial);
-  assert.match(
-    fake.evidence.get("journey.jsonl") ?? "",
-    /stopped Workflows ended without a revision/u,
+  assert.deepEqual(
+    steps.map((step) => step.name),
+    [
+      "redeploy while held",
+      "instruction replay",
+      "stop after commit",
+      "stop while held",
+      "queue hold after a stop, then resume",
+      "log evidence",
+      "stopped Workflows ended without a revision",
+    ],
   );
   assert.match(fake.evidence.get("logs.jsonl") ?? "", /cancelled/u);
-  assert.match(fake.evidence.get("container.jsonl") ?? "", /"secondsSincePreviousRender":[0-9]/u);
+  assert.match(fake.evidence.get("container.jsonl") ?? "", /"event":"container\./u);
   assert.match(fake.evidence.get("deploy-run.json") ?? "", /success/u);
+});
+void test("the held job catches a deployment starting after one minute", async () => {
+  assert.equal((await staging("early deploy").run()).kind, "pass");
 });
 void test("an aborted run's hold and queued work are cleared before the baseline", async () => {
   const fake = staging("aborted run");
@@ -374,7 +391,7 @@ void test("an aborted run's hold and queued work are cleared before the baseline
   assert.match(fake.posts[1] ?? "", /queue\/cancel$/u);
   assert.equal(fake.revisions.length, 5);
 });
-void test("a stopped workflow committing later adds two revisions during redeployment", async () => {
+void test("a stopped workflow committing later adds two revisions during the queue step", async () => {
   await assert.rejects(staging("late commit").run(), /added 2 revisions, expected 1/u);
 });
 void test("a previous revision's display changes", async () => {
@@ -395,6 +412,7 @@ for (const fault of ["old version", "missed window"] as const) {
   });
 }
 for (const [fault, message] of [
+  ["stopped commits", /expected cancelled finish/u],
   ["advance failed", /pattern\.advance_failed/u],
   ["missing hold", /missing hold before stop/u],
   ["parallel deploy", /only unfinished/u],
@@ -407,3 +425,21 @@ for (const [fault, message] of [
       assert.equal(fake.posts.length, 0);
   });
 }
+
+for (const [fault, code] of [
+  ["clean", 0],
+  ["missed window", 2],
+  ["advance failed", 1],
+] as const) {
+  void test(fault + " returns exit code " + code, async () => {
+    assert.equal(await exitCodeOf(() => staging(fault).run()), code);
+  });
+}
+void test("an unexpected error returns exit code 1", async () => {
+  assert.equal(
+    await exitCodeOf(() => {
+      throw new Error("x");
+    }),
+    1,
+  );
+});

@@ -5,6 +5,7 @@ import {
   acceptInstruction,
   claimNextJob,
   completeJob,
+  keepsWatching,
   reconcilePattern,
   recovery,
   runJob,
@@ -13,7 +14,8 @@ import {
   sweepStalledPatterns,
 } from "../../src/services/jobs.ts";
 import type { JobExecutionReference, JobRuns } from "../../src/services/jobs.ts";
-import type { RunObservation } from "../../src/services/deps.ts";
+import { runAlarmCycle } from "../../src/objects/alarm-cycle.ts";
+import type { Reconciliation, RunObservation } from "../../src/services/deps.ts";
 import { jobInstanceId } from "../../src/workflows/job-runs.ts";
 import { applyJobMigrations, openJobDatabase, now } from "./jobs-support.ts";
 import { stepEngine } from "./job-steps.ts";
@@ -297,6 +299,89 @@ await test("Pattern reconciliation on D1", async (t) => {
     assert.equal(first.kind, "failed_lost_run");
     assert.deepEqual(second, { kind: "queue_held", heldBy: a });
   });
+
+  type Fixture = Awaited<ReturnType<typeof fixture>>;
+  async function activeJob(f: Fixture, observation?: RunObservation) {
+    await f.accept();
+    const { reference } = await f.claim();
+    if (observation) f.instances.set(jobInstanceId(reference), observation);
+  }
+  async function lostRun(f: Fixture) {
+    await activeJob(f, { kind: "ended", instanceStatus: "errored" });
+    f.age(10);
+  }
+  const watching = {
+    claimed: {
+      watches: true,
+      async arrange(f) {
+        await f.accept();
+      },
+    },
+    run_restarted: { watches: true, arrange: activeJob },
+    running: {
+      watches: true,
+      arrange: (f) => activeJob(f, { kind: "progressing", instanceStatus: "running" }),
+    },
+    stalled: {
+      watches: true,
+      arrange: (f) => activeJob(f, { kind: "stalled", instanceStatus: "paused" }),
+    },
+    failed_lost_run: { watches: true, arrange: lostRun },
+    settled_meanwhile: {
+      watches: true,
+      async arrange(f) {
+        await activeJob(f);
+        f.deps.jobRuns.observe = async (job) => {
+          assert.equal((await f.run(job)).kind, "committed");
+          return { kind: "ended", instanceStatus: "complete" };
+        };
+      },
+    },
+    queue_held: {
+      watches: false,
+      async arrange(f) {
+        await lostRun(f);
+        await f.accept();
+        assert.equal((await f.reconcile()).kind, "failed_lost_run");
+      },
+    },
+    idle: { watches: false, arrange: () => Promise.resolve() },
+  } satisfies Record<
+    Reconciliation["kind"],
+    { watches: boolean; arrange: (f: Fixture) => Promise<void> }
+  >;
+
+  for (const [kind, scenario] of Object.entries(watching)) {
+    await t.test(`alarm after reconciliation: ${kind}`, async () => {
+      const f = await fixture();
+      await scenario.arrange(f);
+      const alarmTime = Date.parse(now);
+      let alarm: number | null = null;
+      await runAlarmCycle({
+        storage: {
+          setAlarm(time) {
+            alarm = Number(time);
+            return Promise.resolve();
+          },
+          getAlarm: () => Promise.resolve(alarm),
+          deleteAlarm() {
+            alarm = null;
+            return Promise.resolve();
+          },
+        },
+        now: () => alarmTime,
+        reconcile: async () => {
+          const outcome = await f.reconcile();
+          assert.equal(outcome.kind, kind);
+          return keepsWatching(outcome);
+        },
+        failed(error) {
+          throw error;
+        },
+      });
+      assert.equal(alarm, scenario.watches ? alarmTime + 30_000 : null);
+    });
+  }
 });
 
 void test("a full sweep wakes the other patterns when one wake fails", async () => {

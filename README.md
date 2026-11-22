@@ -25,9 +25,9 @@ mise exec -- pnpm dev
 
 Rustは、rustupのcargoで動かします。`rust-toolchain.toml` の版とWasmのターゲットは、rustupを通したときだけ使われます。`mise exec` とmiseを有効にしたシェルでは、`mise.toml` が `$CARGO_HOME/bin`（既定は `~/.cargo/bin`）をPATHの先頭に置くので、Homebrewなどで入れた別のrustがPATHの前の方にあっても、rustupのcargoを使います。`pnpm setup` は、cargoを使う前に、PATHで最初に見つかるcargoがrustupのものかを確かめ、違えばそのcargoの場所と直し方を表示して止まります。miseを使わない場合は、rustupのcargoがあるフォルダーを、ほかのcargoより前にPATHに置いてください。`$CARGO_HOME/bin` はmiseで固定したツールよりも前に来るので、そこに `cargo install` で入れた `cargo-deny` や `cargo-machete` があると、固定した版の代わりにそれが動きます。
 
-`git worktree add` で作った別のworktreeでは、`pnpm setup` が、cargoを確かめた直後に、メインのチェックアウトの `target/` と `.tools/` をcopy-on-write（macOSはAPFSのclonefile、Linuxはreflink）で複製します。複製した後、自作のRustのクレート（workspaceのクレートと、path依存のSolidCraftのクレート）のソースの更新時刻を進めます。Cargoはpath依存のクレートが新しいかどうかをソースの更新時刻だけで判断し、クレートを見分けるハッシュもworkspaceからの相対パスで作るので、このままでは別のチェックアウトがコンパイルしたクレートを再利用してしまうためです。外部のクレートは複製をそのまま使い、自作のクレートだけをそのworktreeでビルドし直します。worktreeごとに `target/` を持つので、複数のworktreeで同時にCargoを使えます。`target/` がシンボリックリンクなら、リンクだけを外して複製に置き換えます。`target/` のディレクトリがすでにあれば、何もしません。空の `target/` を作っておくと、複製せずに最初からビルドします。複製元と別のファイルシステムにあるworktreeでは、全体のコピーになるので止まります。Gitのフックは全worktreeで共有なので、メインのチェックアウトでだけ登録します。
+`git worktree add` で作った別のworktreeでは、`pnpm setup` が、cargoを確かめた直後に、メインのチェックアウトの `target/` と `.tools/` をcopy-on-write（macOSはAPFSのclonefile、Linuxはreflink）で複製します。複製した後、自作のRustのクレート（workspaceのクレートと、path依存のSolidCraftのクレート）のソースの更新時刻を進めます。Cargoはpath依存のクレートが新しいかどうかをソースの更新時刻だけで判断し、クレートを見分けるハッシュもworkspaceからの相対パスで作るので、このままでは別のチェックアウトがコンパイルしたクレートを再利用してしまうためです。Cargoでビルドするときは、外部のクレートは複製を使い、自作のクレートをそのworktreeでビルドし直します。Wasmは、同じ入力で生成済みなら、ユーザーごとのキャッシュから復元します。worktreeごとに `target/` を持つので、複数のworktreeで同時にCargoを使えます。`target/` がシンボリックリンクなら、リンクだけを外して複製に置き換えます。`target/` のディレクトリがすでにあれば、何もしません。空の `target/` を作っておくと、複製せずに最初からビルドします。複製元と別のファイルシステムにあるworktreeでは、全体のコピーになるので止まります。Gitのフックは全worktreeで共有なので、メインのチェックアウトでだけ登録します。
 
-手元の単発の値（2026-11-20）では、26 GB・約1.9万ファイルの `target/` の複製は5〜9秒で終わり、ディスクの空きはほとんど変わりませんでした。複製の後の `pnpm setup` は312秒で、自作の11のクレートだけをWasmのreleaseでビルドし直し、外部のクレートはビルドしませんでした。続く `pnpm check` は536秒でした。この二つの時間は、別のworktreeで検証が動いていた間に測ったので、ほかの負荷の分だけ伸びている可能性があります。worktreeごとに増えるディスクは、複製の後に書かれたファイルの合計で、`pnpm setup` の後で0.60 GB、`pnpm check` の後で3.94 GBでした。worktreeを消すと戻ります。メインのチェックアウトの `target/` が古くなるほど、複製と共有できる部分が減り、外部のクレートもworktreeごとにビルドし直すことになります。
+手元の単発の値（2026-11-20）では、26 GB・約1.9万ファイルの `target/` の複製は5〜9秒で終わり、ディスクの空きはほとんど変わりませんでした。Wasmキャッシュ導入前の `pnpm setup` は複製の後に312秒かかり、自作の11のクレートだけをWasmのreleaseでビルドし直し、外部のクレートはビルドしませんでした。続く `pnpm check` は536秒でした。この二つの時間は、別のworktreeで検証が動いていた間に測ったので、ほかの負荷の分だけ伸びている可能性があります。worktreeごとに増えるディスクは、複製の後に書かれたファイルの合計で、`pnpm setup` の後で0.60 GB、`pnpm check` の後で3.94 GBでした。worktreeを消すと戻ります。メインのチェックアウトの `target/` が古くなるほど、複製と共有できる部分が減り、外部のクレートもworktreeごとにビルドし直すことになります。
 
 `pnpm dev`は、ローカルのD1へマイグレーションを適用してから次のプロセスを起動し、Ctrl-Cでまとめて終了します。ContainerとプロキシはWranglerが終了時に削除します。終了処理の失敗は報告し、起動・実行結果と終了コードを維持します。
 
@@ -40,6 +40,10 @@ Dockerを使う重い作業は、マシン全体で共有する「Dockerの枠�
 枠はmacOSでだけ働きます。Linuxでは枠を取らずに実行し、そのことを `[docker-slot]` の行に一行表示します。枠の実体は、`~/.local/state/instant-madori/docker-slots/` のファイルにかけるflockです。枠は取ったプロセスだけが持ち、プロセスが終わると、`kill -9` で止めた場合もOSが外します。子プロセスは枠を持ちません。そのため、`kill -9` で止めると、そのプロセスが起動した `wrangler dev` やDockerのビルドが動き続けていても枠は空きます。止めるときは、Ctrl-Cか `kill`（SIGTERM）を使ってください。
 
 `node scripts/shared/docker-slots.ts status` で各枠を持つプロセスを表示します。`pnpm check --full` と `pnpm dev` の外でDockerの重い作業をするときは、`node scripts/shared/docker-slots.ts run -- <コマンド>` で枠を取ってから実行してください。実Containerの試験を直接動かす場合や、キャッシュなしでイメージをビルドする場合が当たります。`run` の中で `pnpm check --full` や `pnpm dev` を起動すると、二つ目の枠を待たずに失敗します。`pnpm dev` は動いている間ずっと枠を一つ持つので、使い終わったら止めてください。
+
+形状サービスのイメージは、どのworktreeとself-hosted runnerから作っても、Cargoの `target/` を一つのcache mount（id `instant-madori-geometry-build-v2`）で共有します。Cargoはpath依存のクレートの新しさをソースの更新時刻で判断しますが、COPYはチェックアウトごとの更新時刻を持ち込みます。そのため、cache mountにはソースの写しを `target/` と並べて置き、ビルドのたびに、内容が違う項目だけを写しへ書き、余分な項目を消します。Cargoはシンボリックリンクについて、コンパイルしたときのリンクの先のファイルの更新時刻を見るので、写しにはリンクを置かず、リンクの先の内容を通常のファイルとディレクトリとして写します。参照先の無いリンクは写しません。Cargoは写しをビルドし、内容が変わったクレートとそれに依存するクレートだけを作り直します。ビルドのログの `Source copy: removed <数>, wrote <数> entries` の行が、消した項目と書いた項目の数を示し、書いた項目が20個以下なら続けてそのパスを示します。内容が違うworktreeが交互にビルドすると、違うクレートとそれに依存するクレートをそのたびに作り直します。このcache mountは一度に一つのビルドだけが使い、同時に始まったビルドは、先のビルドのCargoが終わるまで表示なしで待ちます。
+
+cache mountのidを変えると、新しいcache mountは空から始まり、最初のビルドはすべての依存をコンパイルします。手元の計測（2026-11-22、runnerの検査と重なった状態）では795秒と1265秒かかり、実Containerの試験の起動待ちの期限（800秒）を超えることがあります。idを変えるPRでは、`pnpm check --full` の前に、`node scripts/shared/docker-slots.ts run -- docker build --platform linux/amd64 --output type=cacheonly -f apps/geometry/Dockerfile .` で一度ビルドしてcacheを温めてください。
 
 `pnpm check --full` は、実Containerの接続検査の直後に、同じDockerの枠を持ったまま、接続先のローカルDocker Engineの未使用ビルドキャッシュを回収します。Cargoのregistry・git・targetを含む `exec.cachemount` は合計8 GiBまで残します。それとは別に、`regular` と `frontend` は最近使った記録から合計4 GiBまで残します。形状サービスの一組の層は、Rustの基底層・aptのRUN・COPY・CargoのRUN・frontend・実行用のCOPYを合わせて約3.91 GBです。4 GiBの枠はこの一組を残しますが、更新時の余裕は残りません。BuildKitは、再利用した基底層とaptのRUNの最終使用時刻を更新しません。そのため、記録が枠を超えると、回収はRustの基底イメージの層を最も古い記録として選びます。計測では、選んだ基底層の記録は回収の後も残り、層の記録の合計は回収の前後とも約6.37 GBで、枠を超えたままでした。時間の範囲ではビルドが集中した際の容量を制限できないため、容量で制限します。
 
@@ -88,7 +92,7 @@ Viteのプロキシ（画面のポート。既定は5173番）経由のAPI要求
 
 ## 日常のコマンド
 
-検査の入口は `pnpm check` にまとめています。すべてのモードで最初にPrettier・rustfmt・ESLintの自動修正を行い、RustもClippyが自動適用できる修正を行ってから再整形・再検査します。修正できない問題が残れば失敗して後続処理を止めます。作業ツリーを書き換えるので、完了後に差分を確認してから必要な変更をステージしてください。コマンドはGitのステージ内容を変更しません。
+検査の入口は `pnpm check` にまとめています。すべてのモードで最初にPrettier・rustfmt・ESLintの自動修正を行い、Rustをビルドする場合はClippyが自動適用できる修正を行ってから再整形・再検査します。修正できない問題が残れば失敗して後続処理を止めます。作業ツリーを書き換えるので、完了後に差分を確認してから必要な変更をステージしてください。コマンドはGitのステージ内容を変更しません。
 
 | コマンド            | 用途                                                                                                                                                                              |
 | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -97,6 +101,8 @@ Viteのプロキシ（画面のポート。既定は5173番）経由のAPI要求
 | `pnpm check --full` | 全体確認。releaseのWasmの再生成、Web・Worker・Rustのビルド、ローカル接続テスト、依存のライセンス・取得元・脆弱性監査も実行。Dockerとネットワークが必要                            |
 | `pnpm dev`          | Web・WorkerとDockerの形状処理Containerを起動                                                                                                                                      |
 | `pnpm build`        | releaseのWasm・Web・Worker・ネイティブRustの成果物だけをビルド                                                                                                                    |
+
+手元の通常・軽い検査は、`origin/main` との分岐点からのコミット、ステージ済み・未ステージの差分、Gitが無視しない未追跡ファイルを調べます。どれも [Rust の入力](scripts/check/rust-inputs.ts) に触れていなければ、Rustからの契約生成、Clippy、Rustテスト、RustをビルドするNodeテスト1件を省き、分岐点を表示します。rustfmt、未使用依存の検査、生成済みJSON SchemaからのZod生成は実行します。`--rust` を付けると、選んだモードのRust検査をすべて実行します。CI、`--full`、Gitで変更を判定できない場合も同様です。
 
 補助スクリプトは `scripts/check/`・`scripts/dev/`・`scripts/generate/`・`scripts/build/`・`scripts/upstream/`・`scripts/deploy/`・`scripts/measure/` に目的別に置き、複数の目的で使う部品は `scripts/shared/` に置きます。テストは対象ファイルと同じフォルダーに置きます。
 
@@ -108,7 +114,9 @@ Issue・PR・検証記録に貼る画像は、`pnpm images:upload --issue <番�
 
 Cargoのdevプロファイルは、incrementalコンパイルを無効にしています（`Cargo.toml` の `incremental = false`）。Cargoはincrementalの有無をクレートのハッシュに含めます。そのため、有効な実行と無効な実行が混ざると、path依存のSolidCraftのクレートと自作のクレートの成果物が、別のハッシュで一式ずつ `target/` に残ります。環境変数の `CARGO_INCREMENTAL` はこの設定より優先されます。`CARGO_INCREMENTAL` を付けない実行と `CARGO_INCREMENTAL=0` の実行は同じ成果物を使いますが、`CARGO_INCREMENTAL=1` は別の一式を作ります。Cargoは、`CARGO_INCREMENTAL` が設定されていなければ、環境変数の `CI` が設定されているとき（値によらず）incrementalを無効にします。この設定があれば、`CI` の有無でも成果物は変わりません。`RUSTFLAGS` もハッシュに含まれるので、付けると同じく別の一式を作ります。incrementalのキャッシュ（`target/debug/incremental`）も作りません。有効だったときは、一回の `pnpm check` で6.1 GBになりました（2026-11-20、一つのworktree）。
 
-`pnpm setup`・`pnpm dev`・`pnpm build`・`pnpm check --full` は、同じスクリプトでWasmをreleaseビルドします。Cargoのプロファイルとwasm-bindgenの入力先は一つの値から決め、`target/wasm32-unknown-unknown/release/madori_viewer.wasm` からバインディングを生成します。開発・検査・配信で同じWasmを使います。依存を含む初回のWasmのreleaseビルドは、手元の単発の参考値で189秒でした（依存のキャッシュが無い状態、`.cargo/config.toml` の `jobs = 4`）。初回は長くなりますが、再ビルドでは依存のキャッシュを再利用します。RustのテストとClippyはdebugのままです。バインディングを生成する前に、Wasmに入る自作のクレートがすべてこのチェックアウトの `target/` でコンパイルされたことを確かめ、違えば止まります。rustcがクレートをコンパイルしたときにだけ書くdep-info（`deps/<クレート>-<ハッシュ>.d`）に、コンパイルしたチェックアウトの出力先が残るので、それを比べます。Cargoが最後に書く `target/wasm32-unknown-unknown/release/madori_viewer.d` は、再利用しただけのビルドでも今のチェックアウトのパスで書き直されるので、比べる対象にしません。
+`pnpm setup`・`pnpm dev`・`pnpm build`・`pnpm check --full` は同じスクリプトでreleaseのWasmを準備します。入力が一致すると、サイズ検査に使う `target/wasm32-unknown-unknown/release/madori_viewer.wasm` とWebが読む `crates/viewer/pkg/` をまとめて復元します。初めての入力ではCargoでビルドし、自作の全クレートのdep-infoにこのチェックアウトの出力先が記録されていることを確かめてから、wasm-bindgenでバインディングを生成します。
+
+キャッシュの鍵は、Wasm向けの依存に含まれるローカルクレートのファイル（未コミット・未追跡のソースも含む）、親workspaceのマニフェスト、Cargo.lock、CargoとRustの設定、ツールの版、ビルドスクリプト、ビルドに関わる環境変数のSHA-256です。既定の置き場は `$XDG_CACHE_HOME/instant-madori/wasm`（未設定なら `~/.cache/instant-madori/wasm`）です。`MADORI_WASM_CACHE_DIR` で変更できます。一組32 MiB以下の成果物を保存し、保存時刻の新しい8組を残します。`MADORI_WASM_CACHE=0 pnpm setup` で復元と保存を止め、Cargoとwasm-bindgenを実行します。Cargoの外部設定、独自のコンパイラ・リンカーなど、入力を列挙できない設定でもこのビルド経路を使います。GitHub Actionsでは毎回この経路を検査します。
 
 `pnpm setup` で生成したWasmの型定義を通常・軽いモードで使います。初期生成がなければ準備手順を示して停止します。Wasmの公開API・依存・ビルド設定・upstreamを変更した場合は `--full` を実行してください。全体モードではreleaseのWasmを再生成してからTypeScriptを検査し、配信用のWasmもローカル配信と実Containerの接続テストで確認します。
 
@@ -290,15 +298,15 @@ mise exec -- node --env-file=/path/to/.env scripts/deploy/registry-retention.ts 
 
 スクリプトは、検証用の利用者の案件に、パターン「障害試験」を固定のrequest IDで作り直して（再送して）使います。次の順に試します。
 
-1. 指示の再送と、そのrequest IDの別の本文・別の操作への使い回し（422）。
-2. 確定の後の停止（`already_finished`）。
-3. 待ちの間の停止（`cancelled`）。
-4. 待たせたジョブをまたぐ再デプロイ。
+1. 待たせたジョブをまたぐ再デプロイ。
+2. 指示の再送と、そのrequest IDの別の本文・別の操作への使い回し（422）。
+3. 確定の後の停止（`already_finished`）。
+4. 待ちの間の停止（`cancelled`）。
 5. 停止の後の待機列の保留と再開。
 
 各試験の前後で、案の一覧と各案の表示データのSHA-256を読みます。前の案がすべて変わらず、増えた案が期待どおり0件か1件であることを確かめます。同じパターンを使い続けるので、毎回それまでの実行で確定した案をすべて照合し直します。最後にWorkers Logsで三つを確かめます。待ちの間にパターンのDOが新しい版に切り替わったこと、止めたジョブが `cancelled` で終わったこと、照合の失敗が無いことです。
 
-実行には、stagingの占有と、mainの再デプロイが要ります。スクリプトはデプロイを起こしません。指揮役が `gh workflow run deploy-staging.yml --ref main` で起動したrunのIDを受け取り、そのrunの `pnpm check --full` が終わる前に実行します。始める前に、終わっていないdeploy-stagingの実行がそのrunだけであることと、その「Migrate and deploy」がまだ始まっていないことを確かめます。先の三つの試験は約3分20秒かかり、その後、「Migrate and deploy」が始まった時点で待たせるジョブを送ります。この段階は、runner がすぐに空けば、runの作成から4分ほどで始まります。そのため、IDを受け取ったらすぐに実行します。待ちは `JOB_TEST_HOLD` の180秒のままで足ります。待ちが覆う必要があるのは、十数秒から1分ほどで終わるこの段階と、その後にパターンのDOが新しい版に切り替わるまでの時間だけだからです。`.env` には、疎通確認のservice tokenの二つの値と、Workers Logsを読む `CLOUDFLARE_API_TOKEN`（`Workers Observability Write` の権限）を入れます。アカウントIDは秘密ではないので、コマンドで渡します。
+実行には、stagingの占有と、mainの再デプロイが要ります。スクリプトはデプロイを起こしません。指揮役が `gh workflow run deploy-staging.yml --ref main` で起動したrunのIDを受け取ったら、すぐに実行します。「Migrate and deploy」が始まる前に実行すれば間に合います。スクリプトは、終わっていないdeploy-stagingの実行がそのrunだけで、「Migrate and deploy」がまだ始まっていないことを確かめます。試験前の案と表示データを読んだら、「Migrate and deploy」の開始を待って、待たせるジョブを送ります。待ちは `JOB_TEST_HOLD` の180秒のままで足ります。待ちが覆う必要があるのは、十数秒から1分ほどで終わるこの段階と、その後にパターンのDOが新しい版に切り替わるまでの時間だけだからです。再デプロイの試験が終わったら、残りの四つの試験を実行します。`.env` には、疎通確認のservice tokenの二つの値と、Workers Logsを読む `CLOUDFLARE_API_TOKEN`（`Workers Observability Write` の権限）を入れます。アカウントIDは秘密ではないので、コマンドで渡します。
 
 ```sh
 CLOUDFLARE_ACCOUNT_ID=4a67230af28ec94d9c70ca48572d8e9f mise exec -- node --env-file=/path/to/.env \
@@ -321,7 +329,7 @@ CLOUDFLARE_ACCOUNT_ID=4a67230af28ec94d9c70ca48572d8e9f mise exec -- node --env-f
 
 Container接続用DOと内部プロトコルは `apps/worker/src/geometry/` に置き、`services/` から呼びます。パターンごとの調整DOは `objects/`、ジョブのWorkflowは `workflows/` に置き、どちらも `services/` だけを呼びます。ジョブの形状処理は、パターンごとの接続用DOとそのContainerで行います。
 
-内部APIの本文は `crates/geometry-api` で定義し、`pnpm generate:geometry` でJSON Schema・Zod・TypeScript型を再生成します。`pnpm check` も全モードで再生成し、RustとNodeのテストが生成結果の一致を検査します。
+内部APIの本文は `crates/geometry-api` で定義し、`pnpm generate:geometry` でJSON Schema・Zod・TypeScript型を再生成します。Rustをビルドする `pnpm check` でも再生成し、RustとNodeのテストが生成結果の一致を検査します。
 
 ### stagingのContainerを計測する
 

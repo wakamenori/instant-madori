@@ -36,14 +36,13 @@ const commentSchema = z.object({
   updated_at: str.optional(),
   created_at: str,
 });
-// The coordinator's own wording (占有を、今から始める / 占有を終える / 占有が終わり). "占有が終わってから
-// マージする" defers a merge and must not end an occupancy. Bump commentRulesVersion with any change
-// so the comment poller rereads history under the new rules.
-export const commentRulesVersion = "yaml-4";
+// Bump the version to replay GitHub comments whenever their extracted fields change.
+export const commentRulesVersion = "yaml-5";
 const markers = {
+  staging_occupy_start:
+    /(?:^指揮役：staging の占有を始めた|(?:^|[。、])この Issue の担当の staging の占有を、今から始める)(?=[。（]|$)/u,
   staging_occupy_end:
-    /占有を終え(?:る|た)|占有が終わ(?:り|った|る。)|占有を(?:解除|解放|終了)|占有の(?:終了|解除)/u,
-  staging_occupy_start: /占有を、?\s*(?:今から)?\s*始め|占有が始ま|占有を開始|占有の開始/u,
+    /(?:^指揮役：staging の占有を終えた|(?:^|：)担当が staging の確認を終えたので、この Issue の担当の staging の占有を終える)(?=[。（]|$)|^指揮役：#\d+ の担当の staging の占有が終わり、終わっていない deploy-staging/u,
   merged: /マージしました|\bmerged\b/iu,
 };
 export const blockerSchema = reference.extend({ state: str });
@@ -87,7 +86,9 @@ export function commentRecord(data: unknown, labels: string[] = []) {
   const legacy = fields.length
     ? []
     : Object.entries(markers)
-        .filter(([marker, re]) => c.body.includes(marker) || re.test(c.body))
+        .filter(
+          ([marker, re]) => (marker === "merged" && c.body.includes(marker)) || re.test(c.body),
+        )
         .map(([marker]) => marker);
   const decision = fields.length
     ? null

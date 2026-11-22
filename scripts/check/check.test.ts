@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { once } from "node:events";
 import {
   existsSync,
@@ -227,7 +227,7 @@ setTimeout(() => process.exit(1), 10000);
   );
   const check = spawn(
     process.execPath,
-    [fileURLToPath(new URL("./check.ts", import.meta.url)), "--fast"],
+    [fileURLToPath(new URL("./check.ts", import.meta.url)), "--fast", "--rust"],
     {
       env: {
         ...process.env,
@@ -292,4 +292,71 @@ void test("default and full checks run the skill script tests; fast checks do no
     if (mode === "--fast") assert.equal(args, undefined);
     else assert(args?.includes(skillTest), `${mode}: ${String(args)}`);
   }
+});
+
+void test("local change selection controls every Rust build and the mixed TypeScript suite", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "madori-rust-check-"));
+  const previous = process.cwd();
+  const ci = process.env.GITHUB_ACTIONS;
+  delete process.env.GITHUB_ACTIONS;
+  process.chdir(cwd);
+  t.after(() => {
+    if (ci === undefined) delete process.env.GITHUB_ACTIONS;
+    else process.env.GITHUB_ACTIONS = ci;
+    process.chdir(previous);
+    rmSync(cwd, { recursive: true, force: true });
+  });
+  const git = (...args: string[]) =>
+    execFileSync("git", ["-c", "core.hooksPath=/dev/null", ...args]);
+  mkdirSync("crates/viewer/pkg", { recursive: true });
+  writeFileSync("crates/viewer/pkg/madori_viewer.d.ts", "");
+  mkdirSync("apps/worker/tests", { recursive: true });
+  writeFileSync("apps/worker/tests/container.e2e.ts", "");
+  writeFileSync("apps/worker/tests/example.test.ts", "");
+  git("init", "-q");
+  git("add", ".");
+  git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "initial");
+  async function verify(build: boolean, mode: "default" | "--full" = "default", force = false) {
+    const commands = new Map<string, string[]>();
+    await runChecks(
+      mode,
+      [],
+      (label, _command, args) => {
+        commands.set(label, args);
+        return Promise.resolve();
+      },
+      (stage) => stage(),
+      resultsDir,
+      force,
+    );
+    for (const label of [
+      "Generate internal API contract",
+      "Fix Rust: native",
+      "Fix Rust: Wasm",
+      "Clippy: native",
+      "Clippy: Wasm",
+      "Rust tests",
+    ])
+      assert.equal(commands.has(label), build, label);
+    const ts = commands.get("TypeScript tests");
+    assert(ts);
+    assert(ts.includes("apps/worker/tests/example.test.ts"));
+    assert.equal(
+      ts.some((arg) => arg.startsWith("--test-skip-pattern")),
+      !build,
+    );
+    assert(commands.has("Format service Rust"));
+    assert(commands.has("Unused Rust dependencies"));
+  }
+  await verify(true);
+  git("update-ref", "refs/remotes/origin/main", "HEAD");
+  writeFileSync("app.ts", "changed");
+  await verify(false);
+  await verify(true, "default", true);
+  await verify(true, "--full");
+  process.env.GITHUB_ACTIONS = "true";
+  await verify(true);
+  delete process.env.GITHUB_ACTIONS;
+  writeFileSync("crates/new.rs", "");
+  await verify(true);
 });

@@ -33,6 +33,7 @@ const dependencyAuditAndToolPinPaths = [
 const ciAndFullOnlyScriptPaths = [
   ".github/workflows/",
   "scripts/check/check.ts",
+  "scripts/check/rust-inputs.ts",
   "scripts/check/layout-contract.ts",
   "scripts/check/test-results.ts",
   "scripts/check/boundaries.ts",

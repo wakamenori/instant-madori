@@ -1,9 +1,21 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
-import { basename, join, parse } from "node:path";
+import { existsSync, readFileSync, rmSync } from "node:fs";
+import { basename, dirname, join, parse, resolve } from "node:path";
 import { z } from "zod";
 import { fileURLToPath } from "node:url";
 import { repositoryRoot } from "../shared/repository.ts";
+
+import {
+  bindings,
+  cacheDirectory,
+  cacheWasm,
+  platform,
+  profile,
+  coversBuildScriptInputs,
+  coversCompilerInputs,
+  wasmFingerprint,
+  wasmOutput,
+} from "./wasm-cache.ts";
 
 type Unit = { crate: string; depInfo: string };
 
@@ -13,12 +25,26 @@ const artifact = z.object({
   filenames: z.array(z.string()),
 });
 
-export function parseLocalUnits(output: string): Unit[] {
+type LocalBuild = { packageDir: string; output: string };
+
+export function parseLocalBuild(output: string) {
+  const scripts: LocalBuild[] = [];
   const units = new Map<string, Unit>();
   for (const line of output.split("\n")) {
     if (!line.startsWith("{")) continue;
     const message: unknown = JSON.parse(line);
-    if (z.object({ reason: z.string() }).parse(message).reason !== "compiler-artifact") continue;
+    const { reason } = z.object({ reason: z.string() }).parse(message);
+    if (reason === "build-script-executed") {
+      const { package_id, out_dir } = z
+        .object({ package_id: z.string(), out_dir: z.string() })
+        .parse(message);
+      if (package_id.startsWith("path+file://"))
+        scripts.push({
+          packageDir: fileURLToPath(new URL(package_id.slice("path+".length))),
+          output: join(dirname(out_dir), "output"),
+        });
+    }
+    if (reason !== "compiler-artifact") continue;
     const { package_id, target, filenames } = artifact.parse(message);
     if (!package_id.startsWith("path+file://") || target.kind.includes("custom-build")) continue;
     for (const filename of filenames) {
@@ -28,7 +54,7 @@ export function parseLocalUnits(output: string): Unit[] {
       units.set(depInfo, { crate: target.name, depInfo });
     }
   }
-  return [...units.values()];
+  return { units: [...units.values()], scripts };
 }
 
 export function verifyProvenance(units: Unit[]) {
@@ -49,20 +75,51 @@ export function verifyProvenance(units: Unit[]) {
     throw new Error(`${errors.join("\n")}\nRun pnpm setup so this checkout has its own target.`);
 }
 
-export function buildWasm() {
-  const root = fileURLToPath(repositoryRoot);
-  const bindgen = fileURLToPath(new URL(".tools/bin/wasm-bindgen", repositoryRoot));
-  const profile = "release";
-  const input = `target/wasm32-unknown-unknown/${profile}/madori_viewer.wasm`;
+export function buildWasm(root = fileURLToPath(repositoryRoot)) {
+  root = resolve(root);
+  const bindgen = join(root, ".tools/bin/wasm-bindgen");
+  let version: string;
   try {
-    const version = execFileSync(bindgen, ["--version"], { encoding: "utf8" }).trim();
+    version = execFileSync(bindgen, ["--version"], { encoding: "utf8" }).trim();
     if (version !== "wasm-bindgen 0.2.129") throw new Error(`Unexpected version: ${version}`);
   } catch (error) {
     throw new Error("Run pnpm setup to install the matching wasm-bindgen CLI.", {
       cause: error,
     });
   }
-  console.info(`[wasm] profile=${profile}, wasm-bindgen input=${input}`);
+  const dir = cacheDirectory(root);
+  const build = () => compile(root, bindgen);
+  if (!dir) {
+    build();
+    return;
+  }
+  cacheWasm(
+    root,
+    dir,
+    () => wasmFingerprint(root, version),
+    (files) => {
+      const { units, scripts } = build();
+      return (
+        units.every(({ depInfo }) =>
+          coversCompilerInputs(root, files, readFileSync(depInfo, "utf8")),
+        ) &&
+        scripts.every((script) =>
+          coversBuildScriptInputs(
+            root,
+            files,
+            script.packageDir,
+            readFileSync(script.output, "utf8"),
+          ),
+        )
+      );
+    },
+  );
+}
+
+function compile(root: string, bindgen: string) {
+  console.info(`[wasm] profile=${profile}, wasm-bindgen input=${wasmOutput}`);
+  // Cargo must materialize its own artifact after a previous cache restore.
+  rmSync(join(root, wasmOutput), { force: true });
   const output = execFileSync(
     "cargo",
     [
@@ -72,7 +129,7 @@ export function buildWasm() {
       "-p",
       "madori-viewer",
       "--target",
-      "wasm32-unknown-unknown",
+      platform,
       "--profile",
       profile,
     ],
@@ -83,12 +140,15 @@ export function buildWasm() {
       maxBuffer: 64 * 1024 ** 2,
     },
   );
-  verifyProvenance(parseLocalUnits(output));
+  const local = parseLocalBuild(output);
+  verifyProvenance(local.units);
+  rmSync(join(root, bindings), { recursive: true, force: true });
   execFileSync(
     bindgen,
-    [input, "--target", "web", "--out-dir", "crates/viewer/pkg", "--out-name", "madori_viewer"],
+    [wasmOutput, "--target", "web", "--out-dir", bindings, "--out-name", "madori_viewer"],
     { cwd: root, stdio: "inherit" },
   );
+  return local;
 }
 
 if (import.meta.main) buildWasm();

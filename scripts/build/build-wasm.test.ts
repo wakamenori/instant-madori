@@ -5,11 +5,10 @@ import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
-import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { repositoryRoot } from "../shared/repository.ts";
 
-import { buildWasm, parseLocalUnits, verifyProvenance } from "./build-wasm.ts";
+import { buildWasm, parseLocalBuild, verifyProvenance } from "./build-wasm.ts";
 
 function artifacts(t: TestContext) {
   const dir = mkdtempSync(join(tmpdir(), "wasm-artifacts-"));
@@ -38,7 +37,7 @@ function artifacts(t: TestContext) {
 
 void test("the Wasm builder passes release output to wasm-bindgen", (t) => {
   const { output, viewer, display } = artifacts(t);
-  assert.deepEqual(parseLocalUnits(output), [
+  assert.deepEqual(parseLocalBuild(output).units, [
     { crate: "madori_viewer", depInfo: viewer },
     { crate: "madori_display", depInfo: display },
   ]);
@@ -51,14 +50,20 @@ void test("the Wasm builder passes release output to wasm-bindgen", (t) => {
   const logs: string[] = [];
   t.mock.method(console, "info", (message: string) => logs.push(message));
   syncBuiltinESMExports();
+  const root = mkdtempSync(join(tmpdir(), "wasm-compile-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const bypass = process.env.MADORI_WASM_CACHE;
+  process.env.MADORI_WASM_CACHE = "0";
   try {
-    buildWasm();
+    buildWasm(root);
   } finally {
+    if (bypass === undefined) delete process.env.MADORI_WASM_CACHE;
+    else process.env.MADORI_WASM_CACHE = bypass;
     t.mock.restoreAll();
     syncBuiltinESMExports();
   }
 
-  const bindgen = fileURLToPath(new URL(".tools/bin/wasm-bindgen", repositoryRoot));
+  const bindgen = join(root, ".tools/bin/wasm-bindgen");
   const input = "target/wasm32-unknown-unknown/release/madori_viewer.wasm";
   assert.deepEqual(commands, [
     { file: bindgen, args: ["--version"] },
@@ -106,7 +111,7 @@ void test("rejects foreign rustc dep-info and reports the recorded checkout", (t
   const foreign = "/another/target/deps/madori_display-123.d";
   writeFileSync(display, `${foreign}: crates/display/src/lib.rs\n`);
   assert.throws(
-    () => verifyProvenance(parseLocalUnits(output)),
+    () => verifyProvenance(parseLocalBuild(output).units),
     /madori_display: \/another\/target.*\nRun pnpm setup/u,
   );
 });
@@ -114,7 +119,7 @@ void test("rejects foreign rustc dep-info and reports the recorded checkout", (t
 void test("rejects missing dep-info or a file without the rustc target line", (t) => {
   const { display, output } = artifacts(t);
   rmSync(display);
-  const verify = () => verifyProvenance(parseLocalUnits(output));
+  const verify = () => verifyProvenance(parseLocalBuild(output).units);
   assert.throws(verify, /madori_display: missing dep-info target/u);
   writeFileSync(display, "crates/display/src/lib.rs:\n");
   assert.throws(verify, /madori_display: missing dep-info target/u);
@@ -122,7 +127,7 @@ void test("rejects missing dep-info or a file without the rustc target line", (t
 
 void test("requires the viewer artifact", () => {
   assert.throws(
-    () => verifyProvenance(parseLocalUnits('{"reason":"build-finished"}')),
+    () => verifyProvenance(parseLocalBuild('{"reason":"build-finished"}').units),
     /No madori_viewer unit/u,
   );
 });
