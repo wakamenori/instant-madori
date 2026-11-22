@@ -139,6 +139,67 @@ void test("orders whole trees and sibling branches by newest descendant use", ()
   );
 });
 
+void test("after a Rust base bump, 6 GiB removes the older set's build chain through its apt RUN", () => {
+  // Layer sizes of the geometry image measured on 2026-11-22, root first.
+  const buildChain = [
+    ["rust1", 203_786_022],
+    ["rust2", 75_074_838],
+    ["rust3", 264_966_221],
+    ["rust4", 795_424_060],
+    ["rust5", 728_378_330],
+    ["workdirsrc", 8_284],
+    ["toolchain", 12_525],
+    ["apt", 642_584_516],
+    ["cargotoml", 154_635],
+    ["dotcargo", 16_384],
+    ["geometry", 57_344],
+    ["crates", 364_544],
+    ["solidcraft", 139_374_592],
+    ["workdirapp", 8_192],
+    ["cargorun", 234_049_536],
+  ] as const;
+  const shared = [
+    record("runtimebase", { kind: "regular", sizeBytes: 113_551_278, usedAt: 2 }),
+    record("groupadd", { kind: "regular", sizeBytes: 81_119, usedAt: 2, parents: ["runtimebase"] }),
+    record("frontend", { kind: "frontend", sizeBytes: 41_852_167, usedAt: 4 }),
+  ];
+  // BuildKit stamps a build's final stage last, and a fully cached build stamps only that stage.
+  const set = (name: string, buildAt: number, finalAt: number) => [
+    ...buildChain.map(([step, sizeBytes], i) =>
+      record(`${name}${step}`, {
+        kind: "regular",
+        sizeBytes,
+        usedAt: buildAt,
+        parents: i === 0 ? [] : [`${name}${buildChain[i - 1]?.[0] ?? ""}`],
+      }),
+    ),
+    record(`${name}copyfrombuild`, {
+      kind: "regular",
+      sizeBytes: 308_441_272,
+      usedAt: finalAt,
+      parents: ["groupadd"],
+    }),
+  ];
+  const bytes = (records: CacheRecord[]) => records.reduce((sum, r) => sum + r.sizeBytes, 0);
+  const older = set("old", 1, 2);
+  const records = [...older, ...set("new", 3, 4), ...shared];
+  assert.equal(bytes([...older, ...shared]), 3_548_185_859);
+  assert.equal(bytes(records), 6_940_887_154);
+
+  const removed = selected(records, 0, 6 * 1024 ** 3);
+  assert.deepEqual(removed, [
+    "oldcargorun",
+    "oldworkdirapp",
+    "oldsolidcraft",
+    "oldcrates",
+    "oldgeometry",
+    "olddotcargo",
+    "oldcargotoml",
+    "oldapt",
+  ]);
+  assert.equal(bytes(records.filter((r) => removed.includes(r.id))), 1_016_609_743);
+});
+
 const rawRecord = {
   ID: "cache123",
   Type: "exec.cachemount",
