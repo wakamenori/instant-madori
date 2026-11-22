@@ -39,20 +39,36 @@ void test("only stopped sources and quarantined records raise the page warning",
     last_success: null,
     first_poll: null,
     last_append: null,
-    quarantined: 0,
+    last_quarantine: null,
+    quarantined: 54,
     held: 2,
     lag_minutes: null,
     failed_cycles: 7,
     skipped_cycles: 2,
     stopped: false,
   };
-  for (const [stopped, quarantined] of [
+  for (const [stopped, recent_quarantined] of [
     [false, 0],
     [false, 1],
     [true, 0],
   ] as const) {
-    const html = renderDashboard({ ...empty, health: [{ ...health, stopped, quarantined }] });
-    assert.equal(html.includes("<aside>"), stopped || quarantined > 0);
+    const html = renderDashboard({
+      ...empty,
+      health: [{ ...health, stopped, recent_quarantined }],
+    });
+    assert.equal(html.includes("<aside>"), stopped || recent_quarantined > 0);
     assert.ok(html.includes("&lt;/script&gt;&lt;img src=x&gt;"));
   }
+});
+
+void test("record gap totals are visible above the collapsed issue list", () => {
+  const html = renderDashboard({
+    ...empty,
+    gaps: [
+      { issue: 41, reason: "missing_dispatch_target" },
+      { issue: 42, reason: "missing_dispatch_target" },
+    ],
+  });
+  assert.match(html, /<td>改善の担当を立てた時点の狙いなし<\/td><td>2<\/td>/u);
+  assert.match(html, /<details><summary>該当するIssueの一覧<\/summary>.*<td>41<\/td>/u);
 });

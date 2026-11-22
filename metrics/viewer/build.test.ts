@@ -31,10 +31,29 @@ void test("the viewer CLI publishes the derived snapshot and preserves it on sch
     );
   }
   try {
+    for (const [source, observed] of [
+      ["claude.hook", "2026-10-31T00:00:00.000Z"],
+      ["otlp", start],
+    ] as const) {
+      l1.ingest([], observed, [
+        { source, unitHash: "a".repeat(64), reason: "fixture", content: null },
+      ]);
+    }
+    add("t3.thread", "previous-owner", {
+      issue: 40,
+      title_kind: "owner",
+      created_at: "2026-10-30T00:00:00.000Z",
+    });
+    add("t3.run", "previous-run", {
+      thread_id: "previous-owner",
+      started_at: "2026-10-30T00:00:00.000Z",
+      completed_at: "2026-10-30T00:01:00.000Z",
+    });
     add("metrics.receiver", "first", { sources: { "t3.thread": { last_poll: start } } });
     add("metrics.receiver", "second", {
       sources: { "t3.thread": { last_poll: end, failed_cycles: 1 } },
     });
+    add("t3.run", "run", { thread_id: "owner-41", started_at: start, completed_at: end });
     add("github.issue", "41", { number: 41, title: "Fixture issue", created_at: start });
     for (const issue of [41, 42])
       add("t3.thread", "owner-" + issue, { issue, title_kind: "owner", created_at: start });
@@ -70,10 +89,22 @@ void test("the viewer CLI publishes the derived snapshot and preserves it on sch
 
   const derived = new DatabaseSync(join(root, "metrics-derived.sqlite"));
   try {
-    const stoppedAt = (at: string) =>
-      readViewerData(derived, new Date(at)).health.find((h) => h.source === "t3.thread")?.stopped;
-    assert.equal(stoppedAt("2026-11-01T08:02:59Z"), false);
-    assert.equal(stoppedAt(end), true);
+    const initial = readViewerData(derived);
+    assert.equal(initial.generatedAt, end);
+    assert.deepEqual(
+      initial.health.filter((h) => h.quarantined).map((h) => [h.source, h.recent_quarantined]),
+      [
+        ["claude.hook", 0],
+        ["otlp", 1],
+      ],
+    );
+    assert.equal(initial.health.find((h) => h.source === "t3.thread")?.stopped, false);
+    assert.equal(initial.windows.find((w) => w.length === 8)?.points.length, 0);
+    derived.prepare("UPDATE mart_health SET last_append=NULL WHERE source='t3.thread'").run();
+    assert.equal(
+      readViewerData(derived).health.find((h) => h.source === "t3.thread")?.stopped,
+      true,
+    );
     derived.exec("UPDATE mart_health SET quarantined='broken'");
   } finally {
     derived.close();

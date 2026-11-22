@@ -306,6 +306,7 @@ void test("hourly and eight active hour windows count releases, owner gaps and m
   const eight = viewer.windows.find((w) => w.length === 8);
   assert.ok(eight);
   assert.ok(eight.points.some((p) => p.features > 0 && p.active_minutes === 480));
+  assert.ok(viewer.windows.every((w) => w.points.every((p) => p.active_minutes === w.length * 60)));
   for (const point of eight.points) {
     const rolling = out
       .prepare("SELECT * FROM mart_kpi WHERE window='rolling' AND end=?")

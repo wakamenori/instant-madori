@@ -56,7 +56,14 @@ function qualityRates(rows: QualityRow[], area: string) {
     escaped: proportion(cohort.filter((r) => r.escaped).length, cohort.length),
   };
 }
-export function readViewerData(db: DatabaseSync, now = new Date()) {
+export function readViewerData(db: DatabaseSync): ViewerData {
+  const snapshot =
+    query(
+      db,
+      { at: label.nullable() },
+      "SELECT max(at) at FROM (SELECT max(last_append) at FROM mart_health UNION ALL SELECT max(last_quarantine) FROM mart_health)",
+    )()[0]?.at ?? null;
+
   const hours = query(
     db,
     { hour: n, end: n, parallelism: z.number(), feature_share: z.number(), ...counts },
@@ -122,48 +129,50 @@ export function readViewerData(db: DatabaseSync, now = new Date()) {
     SELECT kind,sum(minutes) minutes,sum(completions) completions FROM parts GROUP BY kind ORDER BY kind`,
   );
   const windows = [4, 8, 16, 24, 48].map((length) => {
-    const points = operatingHours.map((h) => {
-      const active = clock.slice(Math.max(0, h.position - length * 60), h.position);
-      const first = active[0];
-      if (!first) throw new Error("Missing operating minutes");
-      const start = first.minute,
-        end = h.hour + 3600;
+    const points = operatingHours
+      .filter((h) => h.position >= length * 60)
+      .map((h) => {
+        const active = clock.slice(Math.max(0, h.position - length * 60), h.position);
+        const first = active[0];
+        if (!first) throw new Error("Missing operating minutes");
+        const start = first.minute,
+          end = h.hour + 3600;
 
-      const whole = Math.ceil(start / 3600) * 3600;
-      const byKind = kinds(whole, end, start, whole, start, whole);
-      const count = byKind.find((r) => r.kind === "機能")?.completions ?? 0,
-        bounds = poissonBounds(count);
-      const minutes = active.length,
-        issue = active.reduce((s, r) => s + r.owners, 0),
-        feature = active.reduce((s, r) => s + r.feature_minutes, 0);
-      const cohort = quality.filter((r) => r.closed >= start && r.closed < end);
-      return {
-        start,
-        end,
-        position: h.position,
-        active_minutes: minutes,
-        issue_minutes: issue,
-        feature_minutes: feature,
-        features: count,
-        open_start: z.number().parse(open(start, start)[0]?.count),
-        open_end: h.open_end,
-        throughput: (count * 60) / minutes,
-        throughput_low: (bounds.lower * 60) / minutes,
-        throughput_high: (bounds.upper * 60) / minutes,
-        parallelism: issue / minutes,
-        feature_share: ratio(feature, issue),
-        hours_per_feature: ratio(feature / 60, count),
-        hours_per_feature_low: feature / 60 / bounds.upper,
-        hours_per_feature_high: ratio(feature / 60, bounds.lower),
-        capacity: active.every((r) => r.capacity !== null)
-          ? active.reduce((sum, r) => sum + (r.capacity ?? 0), 0) / minutes
-          : null,
-        slots: slots(start, end),
-        kinds: byKind,
-        states: states(start, end),
-        quality: ["product", "development"].map((area) => qualityRates(cohort, area)),
-      };
-    });
+        const whole = Math.ceil(start / 3600) * 3600;
+        const byKind = kinds(whole, end, start, whole, start, whole);
+        const count = byKind.find((r) => r.kind === "機能")?.completions ?? 0,
+          bounds = poissonBounds(count);
+        const minutes = active.length,
+          issue = active.reduce((s, r) => s + r.owners, 0),
+          feature = active.reduce((s, r) => s + r.feature_minutes, 0);
+        const cohort = quality.filter((r) => r.closed >= start && r.closed < end);
+        return {
+          start,
+          end,
+          position: h.position,
+          active_minutes: minutes,
+          issue_minutes: issue,
+          feature_minutes: feature,
+          features: count,
+          open_start: z.number().parse(open(start, start)[0]?.count),
+          open_end: h.open_end,
+          throughput: (count * 60) / minutes,
+          throughput_low: (bounds.lower * 60) / minutes,
+          throughput_high: (bounds.upper * 60) / minutes,
+          parallelism: issue / minutes,
+          feature_share: ratio(feature, issue),
+          hours_per_feature: ratio(feature / 60, count),
+          hours_per_feature_low: feature / 60 / bounds.upper,
+          hours_per_feature_high: ratio(feature / 60, bounds.lower),
+          capacity: active.every((r) => r.capacity !== null)
+            ? active.reduce((sum, r) => sum + (r.capacity ?? 0), 0) / minutes
+            : null,
+          slots: slots(start, end),
+          kinds: byKind,
+          states: states(start, end),
+          quality: ["product", "development"].map((area) => qualityRates(cohort, area)),
+        };
+      });
     const latest = points.at(-1);
     return {
       length,
@@ -209,6 +218,8 @@ export function readViewerData(db: DatabaseSync, now = new Date()) {
       first_poll: z.iso.datetime({ offset: true }).nullable(),
       last_append: z.iso.datetime({ offset: true }).nullable(),
       quarantined: n,
+      recent_quarantined: n,
+      last_quarantine: label.nullable(),
       failed_cycles: n,
       skipped_cycles: n,
       held: n,
@@ -222,12 +233,16 @@ export function readViewerData(db: DatabaseSync, now = new Date()) {
     ), arrivals AS (
       SELECT source,min(at) first_poll,max(at) FILTER(WHERE missed=0) last_success FROM polls GROUP BY source
     )
-    SELECT h.*,a.first_poll,a.last_success FROM mart_health h LEFT JOIN arrivals a USING(source) ORDER BY source`,
+    SELECT h.*,a.first_poll,
+      CASE WHEN h.last_poll IS NOT NULL THEN nullif(max(coalesce(a.last_success,''),coalesce(h.last_append,'')),'') END last_success
+      FROM mart_health h LEFT JOIN arrivals a USING(source) ORDER BY source`,
   )().map((r) => {
     const cadence = r.source.startsWith("t3.") ? 60 : r.source === "github.actions.job" ? 120 : 300;
     const reference = r.last_success ?? r.first_poll ?? r.last_poll;
     const stopped =
-      reference !== null && now.getTime() - Date.parse(reference) > cadence * 3 * 1000;
+      reference !== null &&
+      snapshot !== null &&
+      Date.parse(snapshot) - Date.parse(reference) > cadence * 1000;
     return { ...r, stopped };
   });
   const gaps = query(
@@ -246,7 +261,7 @@ export function readViewerData(db: DatabaseSync, now = new Date()) {
     "SELECT * FROM mart_inactive_stretch ORDER BY start",
   )();
   return {
-    generatedAt: now.toISOString(),
+    generatedAt: snapshot,
     operatingHours,
     breaks,
     windows,
@@ -258,5 +273,93 @@ export function readViewerData(db: DatabaseSync, now = new Date()) {
     inactive,
   };
 }
-export type ViewerData = ReturnType<typeof readViewerData>;
-export type Point = ViewerData["windows"][number]["points"][number];
+type Counts = z.infer<z.ZodObject<typeof counts>>;
+type OperatingHour = Counts & {
+  hour: number;
+  end: number;
+  position: number;
+  parallelism: number;
+  feature_share: number;
+};
+type StateMinutes = { state: string; minutes: number };
+type Rate = { value: number | null; low: number | null; high: number | null; n: number };
+export type Point = Counts & {
+  start: number;
+  end: number;
+  position: number;
+  throughput: number;
+  throughput_low: number;
+  throughput_high: number;
+  parallelism: number;
+  feature_share: number | null;
+  hours_per_feature: number | null;
+  hours_per_feature_low: number;
+  hours_per_feature_high: number | null;
+  capacity: number | null;
+  slots: { reason: string; slots: number }[];
+  kinds: { kind: string; minutes: number; completions: number }[];
+  states: StateMinutes[];
+  quality: {
+    area: string;
+    total: number;
+    observed: number;
+    first_pass: Rate;
+    rework: Rate;
+    escaped: Rate;
+  }[];
+};
+export interface ViewerData {
+  generatedAt: string | null;
+  operatingHours: OperatingHour[];
+  breaks: { position: number; resume: number }[];
+  windows: {
+    length: number;
+    points: Point[];
+    issues: {
+      issue: number;
+      title: string;
+      closed: number;
+      minutes: number;
+      states: StateMinutes[];
+    }[];
+  }[];
+  effects: {
+    name: string;
+    issues: string;
+    minutes: number;
+    before: number | null;
+    before_low: number | null;
+    before_high: number | null;
+    before_n: number | null;
+    after: number | null;
+    after_low: number | null;
+    after_high: number | null;
+    after_n: number | null;
+  }[];
+  prevention: {
+    issue: number;
+    name: string;
+    catches: number | null;
+    checked_runs: number;
+    main_runs: number;
+    main_failures: number | null;
+  }[];
+  health: {
+    source: string;
+    last_poll: string | null;
+    first_poll: string | null;
+    last_success: string | null;
+    last_append: string | null;
+    quarantined: number;
+    last_quarantine: string | null;
+    recent_quarantined: number;
+    failed_cycles: number;
+    skipped_cycles: number;
+    held: number;
+    lag_minutes: number | null;
+    stopped: boolean;
+  }[];
+  gaps: { issue: number | null; reason: string }[];
+  verification: { issue: number | null; pr: number | null; reason: string }[];
+  inactive: { start: number; end: number; minutes: number }[];
+}

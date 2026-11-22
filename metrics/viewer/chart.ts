@@ -56,7 +56,12 @@ export function color(index: number) {
   return palette[index % palette.length] ?? "#808080";
 }
 type Endpoint = Pick<Point, "position" | "end" | "open_start" | "open_end">;
-type Axis<P extends Endpoint = Point> = { points: P[]; breaks: ViewerData["breaks"] };
+type Axis<P extends Endpoint = Point> = {
+  points: P[];
+  start?: number;
+  end?: number;
+  breaks: ViewerData["breaks"];
+};
 const width = 720,
   height = 94;
 function plot(
@@ -65,7 +70,7 @@ function plot(
   topLabel: string,
   draw: (x: (pos: number) => number, y: (v: number) => number) => string,
 ) {
-  const end = axis.points.at(-1)?.position ?? 0;
+  const end = axis.end ?? axis.points.at(-1)?.position ?? 0;
   if (!end) return '<p class="empty">稼働の記録はありません</p>';
   const x = (pos: number) => +((pos / end) * width).toFixed(2);
   const y = (v: number) => +(height - (height * v) / (max || 1)).toFixed(2);
@@ -86,7 +91,7 @@ function plot(
     if (h % labelStep === 0 && (h === 0 || hours - h > labelStep / 2))
       labels.push(`<span style="left:${(100 * h) / hours}%">${h}</span>`);
   }
-  return `<div class="graph"><small>${topLabel}</small><svg viewBox="-2 -2 724 100" preserveAspectRatio="none" aria-label="稼働時間ごとの推移">${draw(x, y)}${breaks}${tickMarks.join("")}</svg><div class="axis">${labels.join("")}<span>${fmt(hours)} 稼働時間</span></div></div>`;
+  return `<div class="graph"><small>${topLabel}</small><svg viewBox="-2 -2 724 100" preserveAspectRatio="none" aria-label="稼働時間ごとの推移"><svg x="0" y="0" width="${width}" height="${height}" overflow="hidden">${draw(x, y)}</svg>${breaks}${tickMarks.join("")}</svg><div class="axis">${labels.join("")}<span>${fmt(hours)} 稼働時間</span></div></div>`;
 }
 export function trend<P extends Endpoint>(
   axis: Axis<P>,
@@ -98,7 +103,7 @@ export function trend<P extends Endpoint>(
   scale = 1,
 ) {
   const series = axis.points.map((p) => ({ p, ...sample(p) }));
-  const max = series.reduce((m, s) => Math.max(m, s.value ?? 0, s.high ?? 0, s.low ?? 0), 0);
+  const max = series.reduce((m, s) => Math.max(m, s.value ?? 0), 0);
   const latest = series.at(-1);
   function reading(s: Sample) {
     const range =
@@ -116,7 +121,7 @@ export function trend<P extends Endpoint>(
         .map((s, i) => {
           const prev = series[i - 1],
             right = x(s.p.position),
-            left = x(prev?.p.position ?? 0);
+            left = x(prev?.p.position ?? axis.start ?? 0);
           const band =
             s.low != null && s.high != null && prev?.low != null && prev.high != null
               ? `<polygon fill="#c7e4dd" points="${left},${y(prev.low)} ${right},${y(s.low)} ${right},${y(s.high)} ${left},${y(prev.high)}"/>`
@@ -130,7 +135,7 @@ export function trend<P extends Endpoint>(
         .join("") +
       series
         .map((s, i) => {
-          const left = x(series[i - 1]?.p.position ?? 0);
+          const left = x(series[i - 1]?.p.position ?? axis.start ?? 0);
           return `<rect x="${left}" width="${x(s.p.position) - left}" height="${height}" fill="transparent"><title>${date(s.p.end)} · ${reading(s)} · 境目の未完了 ${s.p.open_start} → ${s.p.open_end} 件${s.excluded === undefined ? "" : " · 分母から除外 " + s.excluded + " 件"}</title></rect>`;
         })
         .join(""),
@@ -158,7 +163,7 @@ export function stacked(
   const graph = plot(axis, max, fmt(max) + " " + unit, (x, y) =>
     axis.points
       .map((p, i) => {
-        const left = x(axis.points[i - 1]?.position ?? 0),
+        const left = x(axis.points[i - 1]?.position ?? axis.start ?? 0),
           w = x(p.position) - left;
         let sum = 0;
         const bars =

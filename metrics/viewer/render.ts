@@ -29,6 +29,8 @@ const gapNames: Record<string, string> = {
   missing_owner: "担当の記録なし",
   bypass: "担当を通さず完了",
   label_file_mismatch: "ラベルと変更ファイルの食い違い",
+  missing_dispatch_target: "改善の担当を立てた時点の狙いなし",
+  invalid_issue_record: "Issueの定型記録が不足または形式違い",
   missing_issue_yaml: "Issueの定型記録なし",
   missing_comment_yaml: "コメントの定型記録なし",
   invalid_comment_yaml: "コメントの定型記録が不正",
@@ -49,7 +51,12 @@ function stateLayer(s: { state: string; minutes: number }) {
   };
 }
 function windowPage(data: ViewerData, w: ViewerData["windows"][number]) {
-  const axis = { points: w.points, breaks: data.breaks };
+  const axis = {
+    points: w.points,
+    start: w.length * 60,
+    end: data.operatingHours.at(-1)?.position ?? 0,
+    breaks: data.breaks,
+  };
   const section = (key: string) => key + "-" + w.length;
   function quality(title: string, metric: "first_pass" | "rework" | "escaped") {
     return (["product", "development"] as const)
@@ -82,7 +89,7 @@ function windowPage(data: ViewerData, w: ViewerData["windows"][number]) {
   function hourly(metric: "parallelism" | "feature_share") {
     const percent = metric === "feature_share";
     const hourlyAxis = { points: data.operatingHours, breaks: data.breaks };
-    return `<details><summary>UTCの各時間帯の${percent ? "機能に回った割合" : "並列数"}</summary>${trend(
+    return `<details><summary>日本時間の各時間帯の${percent ? "機能に回った割合" : "並列数"}</summary>${trend(
       hourlyAxis,
       percent ? "機能に回った割合" : "並列数",
       percent ? "%" : "件",
@@ -121,7 +128,7 @@ function windowPage(data: ViewerData, w: ViewerData["windows"][number]) {
       "機能に回った割合",
       "%",
       "高いほど良い",
-      (p) => ({ n: p.issue_minutes, value: p.feature_share }),
+      (p) => ({ value: p.feature_share }),
       section("allocation"),
       100,
     ),
@@ -131,7 +138,6 @@ function windowPage(data: ViewerData, w: ViewerData["windows"][number]) {
       "h/件",
       "短いほど良い",
       (p) => ({
-        n: p.features,
         value: p.hours_per_feature,
         low: p.hours_per_feature_low,
         high: p.hours_per_feature_high,
@@ -186,11 +192,13 @@ export function renderDashboard(data: ViewerData) {
         `<option value="${w.length}" ${w.length === 8 ? "selected" : ""}>${w.length} 時間</option>`,
     )
     .join("");
-  const alert = data.health.some((r) => r.stopped || r.quarantined > 0)
+  const gapCounts = new Map<string, number>();
+  for (const { reason } of data.gaps) gapCounts.set(reason, (gapCounts.get(reason) ?? 0) + 1);
+  const alert = data.health.some((r) => r.stopped || r.recent_quarantined > 0)
     ? '<aside><a href="#health">記録の到着に問題があります。計測の信頼性を確認</a></aside>'
     : "";
   return `<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Software Factory 計測</title><style>${style}</style><main>${alert}
-  <header><div><p>Software Factory</p><h1>機能のデリバリー</h1><small>集計日時 ${date(Date.parse(data.generatedAt) / 1000)} JST</small></div><label>直近の稼働時間 <select id="window">${options}</select></label></header>
+  <header><div><p>Software Factory</p><h1>機能のデリバリー</h1><small>集計日時 ${data.generatedAt ? date(Date.parse(data.generatedAt) / 1000) + " JST" : "—"}</small></div><label>直近の稼働時間 <select id="window">${options}</select></label></header>
   ${data.windows.map((w) => windowPage(data, w)).join("")}
   <section><h2>改善の効果</h2>${table(
     ["改善 Issue", "狙い", "前後の稼働分", "改善前（95%区間）", "改善後（95%区間）"],
@@ -221,7 +229,8 @@ export function renderDashboard(data: ViewerData) {
       "最終成功（JST）",
       "巡回",
       "取込の遅れ（分）",
-      "隔離",
+      "隔離（直近8稼働時間）",
+      "隔離（累計）",
       "保留",
       "失敗",
       "見送り",
@@ -233,17 +242,22 @@ export function renderDashboard(data: ViewerData) {
       r.last_success ? date(Date.parse(r.last_success) / 1000) : null,
       r.stopped ? "停止" : r.last_poll ? "稼働" : "—",
       fmt(r.lag_minutes),
+      r.recent_quarantined,
       r.quarantined,
       r.held,
       r.failed_cycles,
       r.skipped_cycles,
     ]),
   )}
-  <details><summary>記録の抜け（${data.gaps.length}件）</summary>${table(
+  <h3>記録の抜け（${data.gaps.length}件）</h3>${table(
+    ["理由", "件数"],
+    Array.from(gapCounts, ([reason, count]) => [gapNames[reason] ?? reason, count]),
+  )}
+  <details><summary>該当するIssueの一覧</summary>${table(
     ["Issue", "理由"],
     data.gaps.map((r) => [r.issue, gapNames[r.reason] ?? r.reason]),
   )}</details>
-  <details><summary>検証の記録の抜け（${data.verification.length}件）</summary>${table(
+  <details><summary>検証の記録の詳細（${data.verification.length}件）</summary>${table(
     ["Issue", "PR", "理由"],
     data.verification.map((r) => [r.issue, r.pr, gapNames[r.reason] ?? r.reason]),
   )}</details>

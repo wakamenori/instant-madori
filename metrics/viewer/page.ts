@@ -77,7 +77,7 @@ small,
   min-width: 0;
   margin: 8px 0;
 }
-.graph svg {
+.graph > svg {
   display: block;
   width: 100%;
   height: 82px;
