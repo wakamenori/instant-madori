@@ -18,9 +18,10 @@
 
 Preconditions:
 
+- 「終わった後に止める」には Container が必要。
 - SKILL.md の「起動」の `pnpm dev` を、`MADORI_DEV_JOB_TEST_HOLD=before_render:30` を付けて起動している。仕事は実行権を取った後、描画の前に30秒待つ。待ちを付けずに動いていたら、片付けてから、SKILL.md の「起動」の三行を、`perl` の行の先頭に `MADORI_DEV_JOB_TEST_HOLD=before_render:30 ` を足して実行し直す。`dev.pgid` を書く行も実行する。抜くと、片付けが前のプロセスグループを指したままになる。
 - [案件](./projects.md)の「作る」を済ませ、`PAT=$(jq -r .pattern.id "$EVIDENCE/projects/create.json")` を設定している。
-- `J='content-type: application/json'`、`O='origin: http://127.0.0.1:5173'`、`API=http://127.0.0.1:5173/api`、`D="$EVIDENCE/stop"` を設定し、`$D` がある。
+- `. "$EVIDENCE/dev.env"` で `API` と `O` を読み込み、`J='content-type: application/json'` と `D="$EVIDENCE/stop"` を設定し、`$D` がある。
 - 送る関数 `send() { curl -sS -o "$D/${1}.json" -w '%{http_code}\n' -X POST "$API/patterns/$PAT/messages" -H "$J" -H "$O" -d "{\"requestId\":\"$(uuidgen)\",\"body\":\"${2}\"}"; }`、止める関数 `stop() { curl -sS -o "$D/${1}.json" -w '%{http_code}\n' -X POST "$API/jobs/${2}/stop" -H "$J" -H "$O" -d "{\"requestId\":\"${3}\"}"; }`、状態を読む関数 `state() { curl -sS -o "$D/${1}.json" "$API/patterns/$PAT/state"; }` を定義している。
 - [指示を送る](./instructions.md)の `settle` を、出力先を `$D` にして定義している。
 

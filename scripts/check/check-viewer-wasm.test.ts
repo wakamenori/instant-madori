@@ -8,10 +8,11 @@ import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { crateFamilies, rustBoundaries, viewerWasmBoundary } from "./boundaries.ts";
 import { inspectViewerWasm } from "./check-viewer-wasm.ts";
-type FixtureFunction = { name?: string; bodySize: number; exportAs?: string };
+type FixtureFunction = { name?: string; bodySize: number; exportAs?: string | readonly string[] };
 type Fixture = {
   importedFunctions?: readonly string[];
   functions: readonly FixtureFunction[];
+  bindgenIdentifiers?: readonly string[];
   names?: boolean;
 };
 
@@ -33,14 +34,23 @@ const text = (value: string) => {
 const vector = (items: number[][]) => [...leb(items.length), ...items.flat()];
 const section = (id: number, payload: number[]) => [id, ...leb(payload.length), ...payload];
 
-function wasmModule({ importedFunctions = [], functions, names = true }: Fixture): Uint8Array {
+function wasmModule({
+  importedFunctions = [],
+  functions,
+  bindgenIdentifiers,
+  names = true,
+}: Fixture): Uint8Array {
   const imports = importedFunctions.length;
   const bodies = functions.map(({ bodySize }) => {
     if (bodySize < 2) throw new Error("a body needs at least its locals count and end");
     return [...leb(bodySize), 0x00, ...Array<number>(bodySize - 2).fill(0x01), 0x0b];
   });
   const exports = functions.flatMap((fn, i) =>
-    fn.exportAs === undefined ? [] : [[...text(fn.exportAs), 0x00, ...leb(imports + i)]],
+    (typeof fn.exportAs === "string" ? [fn.exportAs] : (fn.exportAs ?? [])).map((name) => [
+      ...text(name),
+      0x00,
+      ...leb(imports + i),
+    ]),
   );
   const named: [number, string][] = [
     ...importedFunctions.map((name, i): [number, string] => [i, name]),
@@ -66,6 +76,12 @@ function wasmModule({ importedFunctions = [], functions, names = true }: Fixture
     ...section(3, vector(functions.map(() => [0x00]))),
     ...section(7, vector(exports)),
     ...section(10, vector(bodies)),
+    ...(bindgenIdentifiers
+      ? section(0, [
+          ...text("__wasm_bindgen_unstable"),
+          ...bindgenIdentifiers.flatMap((id) => [0xff, 0, 1, ...text(id)]),
+        ])
+      : []),
     ...(names
       ? section(0, [...text("name"), 0x01, ...leb(functionNames.length), ...functionNames])
       : []),
@@ -220,13 +236,16 @@ void test("one function naming both kernel crates counts once for the family", (
   assert.match(result.stdout, /Its types appear in 1 function of alloc\./);
 });
 
-void test("descriptors are excluded and unmangled buckets follow the crate rows", (t) => {
+const hash = "0123456789abcdef";
+const exported = (name: string, bodySize = 12) => ({ name, bodySize, exportAs: name });
+
+void test("exported descriptors are excluded and listed names count toward their crates", (t) => {
   const result = check(t, {
     functions: [
       viewer,
-      { name: "__wbindgen_describe_render", bodySize: 10 },
-      { name: "__wbg_shim", bodySize: 5 },
-      { name: "render", bodySize: 6, exportAs: "render" },
+      exported("__wbindgen_describe_render", 10),
+      exported("__wbindgen_malloc", 5),
+      exported("__wbg_jspi_task_poll", 6),
       { name: "memcmp", bodySize: 7 },
     ],
   });
@@ -234,10 +253,112 @@ void test("descriptors are excluded and unmangled buckets follow the crate rows"
   assert.match(result.stdout, /whole code section contains 68 B in 5 functions/);
   assert.match(result.stdout, /leaves out 1 wasm-bindgen descriptors \(10 B\)/);
   assert.match(result.stdout, /\| total +\| +4 \| +58 \| +100.0%/u);
-  assert.match(
-    result.stdout,
-    /madori_viewer.*\n.*other unmangled.*\n.*exported, unmangled.*\n.*wasm-bindgen glue/su,
-  );
+  assert.match(result.stdout, /^\| wasm_bindgen +\| +1 \| +5 \|/m);
+  assert.match(result.stdout, /^\| js_sys +\| +1 \| +6 \|/m);
+  assert.match(result.stdout, /^\| compiler_builtins +\| +1 \| +7 \|/m);
+  assert.doesNotMatch(result.stdout, /wasm-bindgen glue|other unmangled|exported, unmangled/);
+});
+
+for (const [fn, message] of [
+  [
+    exported("solidcore_probe_exported"),
+    /solidcore_probe_exported \(exported\): unmangled name with no known origin/,
+  ],
+  [
+    { name: "solidcore_probe_private", bodySize: 12 },
+    /solidcore_probe_private \(not exported\): unmangled name with no known origin/,
+  ],
+  [
+    exported("memcmp"),
+    /memcmp: exported, but compiler_builtins does not export it, so another crate defines it/,
+  ],
+  [
+    { name: "__wbindgen_malloc", bodySize: 5 },
+    /__wbindgen_malloc: not exported, but wasm_bindgen exports it, so another crate defines it/,
+  ],
+  [
+    exported("viewer_draw_ffffffffffffffff"),
+    /viewer_draw_ffffffffffffffff.*suffix matches no wasm-bindgen crate identifier/,
+  ],
+  [{ name: `viewer_draw_${hash}`, bodySize: 5 }, /viewer_draw_.*not exported.*no known origin/],
+  [{ name: "__wbindgen_describe_x", bodySize: 9 }, /__wbindgen_describe_x.*no known origin/],
+  [
+    { ...viewer, exportAs: ["__wbindgen_describe_noop", "solidcore_probe_alias"] },
+    /solidcore_probe_alias.*no known origin/,
+  ],
+] as const) {
+  void test(`unattributable symbol fails with ${message.source}`, (t) => {
+    const result = check(t, {
+      functions: [viewer, fn],
+      bindgenIdentifiers: [`madori-viewer-${hash}`],
+    });
+    assert.equal(result.status, 1, result.stdout);
+    assert.match(result.stderr, message);
+    assert.match(result.stderr, /unmangledOwners.*family check/);
+  });
+}
+
+void test("viewer exports and struct shims count toward the viewer by hash", (t) => {
+  const result = check(t, {
+    functions: [viewer, exported(`viewer_draw_${hash}`), exported(`__wbg_viewer_free_${hash}`)],
+    bindgenIdentifiers: [`madori-viewer-${hash}`],
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^\| madori_viewer +\| +3 \| +64 \|/m);
+});
+
+for (const [pkg, family] of [
+  ["solidcore", "CAD kernel"],
+  ["solidcraft-engine", "editing engine"],
+  ["egui", "UI toolkit"],
+] as const) {
+  void test(`an export with the hash of ${pkg} fails as ${family}`, (t) => {
+    const result = check(t, {
+      functions: [viewer, exported(`draw_${hash}`)],
+      bindgenIdentifiers: [`${pkg}-${hash}`],
+    });
+    assert.equal(result.status, 1, result.stdout);
+    assert.ok(
+      result.stderr.includes(`${family}: ${pkg.replaceAll("-", "_")} has 1 functions, 12 B`),
+      result.stderr,
+    );
+  });
+}
+
+void test("two packages claiming one hash fail even if their crate names coincide", (t) => {
+  const result = check(t, {
+    functions: [viewer],
+    bindgenIdentifiers: [`pkg-name-${hash}`, `pkg_name-${hash}`],
+  });
+  assert.equal(result.status, 1, result.stdout);
+  assert.match(result.stderr, /names both pkg-name and pkg_name/);
+});
+
+void test("merged exports count once in the table and once per defining crate for families", (t) => {
+  const result = check(t, {
+    functions: [{ ...viewer, exportAs: [`zoom_${hash}`, `draw_${hash}`] }],
+    bindgenIdentifiers: [`solidcore-${hash}`],
+  });
+  assert.equal(result.status, 1, result.stdout);
+  assert.match(result.stdout, /^\| madori_viewer +\| +1 \| +40 \|/m);
+  assert.match(result.stdout, /^\| total +\| +1 \| +40 \|/m);
+  assert.match(result.stderr, /CAD kernel: solidcore has 1 functions, 40 B/);
+  assert.ok(result.stderr.includes(`zoom_${hash}`));
+});
+
+void test("a merged wasm-bindgen runtime alias passes", (t) => {
+  const result = check(t, {
+    functions: [
+      viewer,
+      {
+        name: "_RNvNtCs1_12wasm_bindgen4___rt19link_mem_intrinsics",
+        exportAs: "__wbindgen_skip_interpret_calls",
+        bodySize: 3,
+      },
+    ],
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^\| wasm_bindgen +\| +1 \| +3 \|/m);
 });
 
 for (const [label, bindings, status, message] of [

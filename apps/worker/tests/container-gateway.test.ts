@@ -794,3 +794,71 @@ void test("a send the operation does not await cannot start a request after it s
   );
   assert.deepEqual(f.openDeadlines(), []);
 });
+
+for (const ending of ["earlier", "later"] as const) {
+  void test(`an operation's end leaves a concurrent operation's request deadline armed when the ${ending} one ends first`, async () => {
+    const f = fixture();
+    const gateway = f.make();
+    const fetchPort = f.container.fetchPort.bind(f.container);
+    let markReached: (signal: AbortSignal) => void = () => undefined;
+    const reached = new Promise<AbortSignal>((resolve) => {
+      markReached = resolve;
+    });
+    let hung = false;
+    f.container.fetchPort = (request) => {
+      if (hung || new URL(request.url).pathname === "/healthz") return fetchPort(request);
+      hung = true;
+      markReached(request.signal);
+      return new Promise((_resolve, reject) => {
+        request.signal.addEventListener("abort", () => reject(new Error("aborted")), {
+          once: true,
+        });
+      });
+    };
+    let release: () => void = () => undefined;
+    const hold = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const earlier = ending === "earlier" ? gateway.run(() => hold) : undefined;
+    const pending = gateway.run((send) => send(f.call));
+    const signal = await reached;
+    if (earlier) {
+      release();
+      await earlier;
+    } else {
+      assert.equal((await gateway.run((send) => send(f.call))).kind, "response");
+    }
+    assert.equal(signal.aborted, false, "the concurrent request remains active");
+    assert.deepEqual(
+      f.openDeadlines(),
+      [f.call.timeoutMs],
+      "the concurrent request keeps its deadline",
+    );
+    f.fireDeadlines();
+    assert.deepEqual(await pending, { kind: "unavailable", reason: "unreachable" });
+    assert.deepEqual(f.openDeadlines(), []);
+  });
+}
+
+void test("a send kept past its operation's end neither starts nor probes a Container, even while another operation is active", async () => {
+  const f = fixture();
+  const gateway = f.make();
+  let kept: ((request: typeof f.call) => Promise<unknown>) | undefined;
+  await gateway.run((send) => {
+    kept = send;
+    return Promise.resolve();
+  });
+  let release: () => void = () => undefined;
+  const hold = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const active = gateway.run(() => hold);
+  await Promise.resolve();
+  assert(kept);
+  await assert.rejects(kept(f.call), /send after the operation settled/);
+  release();
+  await active;
+  assert.equal(f.counts().starts, 0, "no Container was started");
+  assert.deepEqual(f.requests, [], "no readiness probe or request reached the Container");
+  assert.deepEqual(f.openDeadlines(), []);
+});

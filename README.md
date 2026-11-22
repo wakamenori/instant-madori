@@ -31,9 +31,11 @@ Rustは、rustupのcargoで動かします。`rust-toolchain.toml` の版とWasm
 
 `pnpm dev`は、ローカルのD1へマイグレーションを適用してから次のプロセスを起動し、Ctrl-Cでまとめて終了します。ContainerとプロキシはWranglerが終了時に削除します。終了処理の失敗は報告し、起動・実行結果と終了コードを維持します。
 
-Containerを使うローカルセッション（実Containerテスト、別worktreeやself-hosted runnerでの `pnpm check --full`）は同時に起動できます。Miniflareがセッションごとに異なるIDをContainerの名前（`workerd-<ID>-instant-madori-GeometryContainer-...`）に付けるためです。`pnpm dev` だけは8787番と5173番のポートを固定しているので、同時に一つしか起動できません。クラッシュしたセッションのContainerは残ることがあります。`docker ps -a --format '{{.ID}} {{.Names}}'` で `workerd-` で始まる名前を確かめ、動いているセッションがないときに `docker rm --force <ID>...` で削除します。
+`pnpm dev` は、何も指定しなければ5173番（画面）と8787番（Worker）を使います。別のworktreeの `pnpm dev` と同時に動かすときは、`MADORI_DEV_PORTS=auto pnpm dev` で起動します。20000〜32767番から、空いている二つのポートを選びます。どちらの場合も、使うポートを起動の初め（マイグレーションの前）に `Web: http://127.0.0.1:<画面のポート> | Worker: http://127.0.0.1:<Workerのポート>` の行で表示します。既定のポートに `127.0.0.1` か `localhost` で応答するプロセスがあれば、その時点で止まり、別のポートへは移りません。同じチェックアウトでは、`pnpm dev` を同時に一つしか起動できません。二つ目は `.local/dev.lock` のロックを取れずに止まります。ローカルのD1と `apps/worker/.dev.vars` は、チェックアウトごとに一つしかないためです。
 
-Dockerを使う重い作業は、マシン全体で共有する「Dockerの枠」を一つ取ってから始まります。枠を取るのは、`pnpm check --full` の実Containerの接続検査とビルドキャッシュの回収の間と、Containerを有効にした `pnpm dev` の起動から終了までです。枠は開発用に二つ、self-hosted runner用に一つあります。runnerはGitHub Actionsが設定する `GITHUB_ACTIONS=true` で見分け、開発用の枠が埋まっていても待ちません。枠が埋まっていれば空くまで待ち、待ち始めとその後の一分ごとに、各枠を持つプロセスの目的、pid、経過時間、チェックアウトを `[docker-slot]` の行に表示します。待っている間のCtrl-Cで、`pnpm check` は中断して終了コード1で、`pnpm dev` は通常の停止として終了コード0で終わります。
+Containerを使うローカルセッション（別worktreeの `pnpm dev`、実Containerテスト、別worktreeやself-hosted runnerでの `pnpm check --full`）は同時に起動できます。Miniflareがセッションごとに異なるIDをContainerの名前（`workerd-<ID>-instant-madori-GeometryContainer-...`）に付けるためです。クラッシュしたセッションのContainerは残ることがあります。`docker ps -a --format '{{.ID}} {{.Names}}'` で `workerd-` で始まる名前を確かめ、動いているセッションがないときに `docker rm --force <ID>...` で削除します。
+
+Dockerを使う重い作業は、マシン全体で共有する「Dockerの枠」を一つ取ってから始まります。枠を取るのは、`pnpm check --full` の実Containerの接続検査、形状サービスのイメージの回収、ビルドキャッシュの回収の間と、Containerを有効にした `pnpm dev` の起動から終了までです。枠は開発用に二つ、self-hosted runner用に一つあります。runnerはGitHub Actionsが設定する `GITHUB_ACTIONS=true` で見分け、開発用の枠が埋まっていても待ちません。枠が埋まっていれば空くまで待ち、待ち始めとその後の一分ごとに、各枠を持つプロセスの目的、pid、経過時間、チェックアウトを `[docker-slot]` の行に表示します。待っている間のCtrl-Cで、`pnpm check` は中断して終了コード1で、`pnpm dev` は通常の停止として終了コード0で終わります。Containerを有効にした `pnpm dev` が二つ動くと開発用の枠は両方埋まり、三つ目の `pnpm dev` と `pnpm check --full` のDockerの段階は、どちらかが止まるまで待ちます。
 
 枠はmacOSでだけ働きます。Linuxでは枠を取らずに実行し、そのことを `[docker-slot]` の行に一行表示します。枠の実体は、`~/.local/state/instant-madori/docker-slots/` のファイルにかけるflockです。枠は取ったプロセスだけが持ち、プロセスが終わると、`kill -9` で止めた場合もOSが外します。子プロセスは枠を持ちません。そのため、`kill -9` で止めると、そのプロセスが起動した `wrangler dev` やDockerのビルドが動き続けていても枠は空きます。止めるときは、Ctrl-Cか `kill`（SIGTERM）を使ってください。
 
@@ -41,9 +43,23 @@ Dockerを使う重い作業は、マシン全体で共有する「Dockerの枠�
 
 `pnpm check --full` は、実Containerの接続検査の直後に、同じDockerの枠を持ったまま、接続先のローカルDocker Engineの未使用ビルドキャッシュを回収します。Cargoのregistry・git・targetを含む `exec.cachemount` は合計8 GiBまで残します。それとは別に、`regular` と `frontend` は最近使った記録から合計4 GiBまで残します。形状サービスの一組の層は、Rustの基底層・aptのRUN・COPY・CargoのRUN・frontend・実行用のCOPYを合わせて約3.91 GBです。4 GiBの枠はこの一組を残しますが、更新時の余裕は残りません。BuildKitは、再利用した基底層とaptのRUNの最終使用時刻を更新しません。そのため、記録が枠を超えると、回収はRustの基底イメージの層を最も古い記録として選びます。計測では、選んだ基底層の記録は回収の後も残り、層の記録の合計は回収の前後とも約6.37 GBで、枠を超えたままでした。時間の範囲ではビルドが集中した際の容量を制限できないため、容量で制限します。
 
-各枠を超えた場合は最終使用時刻が古い未使用記録から丸ごと消し、`source.local`・`source.git.checkout`・`internal` の未使用記録はすべて消します。使用中の記録と未知の種類は残し、未知の種類は一行で報告します。Dockerは使用中のcache mountを0バイトと報告するため、その実容量は上限の計算に含められません。使用が終わった後や別のビルドで増えた後は、実容量が上限を超えることがあります。回収後の報告値も、使用中のmountの実容量を保証しません。イメージ・Container・ボリュームは回収しません。Unixソケットで接続するローカルDockerを対象とし、独立したbuildx builderは対象にしません。
+各枠を超えた場合は最終使用時刻が古い未使用記録から丸ごと消し、`source.local`・`source.git.checkout`・`internal` の未使用記録はすべて消します。使用中の記録と未知の種類は残し、未知の種類は一行で報告します。Dockerは使用中のcache mountを0バイトと報告するため、その実容量は上限の計算に含められません。使用が終わった後や別のビルドで増えた後は、実容量が上限を超えることがあります。回収後の報告値も、使用中のmountの実容量を保証しません。ビルドキャッシュの回収は、イメージ・Container・ボリュームを対象にしません。Unixソケットで接続するローカルDockerを対象とし、独立したbuildx builderは対象にしません。
 
 手で確かめる場合は `pnpm docker:prune-build-cache --dry-run` で保持・削除候補と容量を表示し、`pnpm docker:prune-build-cache` で回収します。上限を変える場合は `--mount-limit-bytes 8589934592 --layer-limit-bytes 4294967296` のようにバイト数を指定します。このオプションはその実行だけに適用します。
+
+`pnpm check --full` は、実Containerの接続検査の直後、ビルドキャッシュの回収の前に、同じDockerの枠を持ったまま、このリポジトリの形状サービスのイメージを回収します。対象は、Wranglerが `pnpm dev` と実Containerの試験で付ける `cloudflare-dev/geometrycontainer-geometry-8788ff521eb5` のタグと、stagingへのデプロイが手元に残す `registry.cloudflare.com/<アカウントID>/instant-madori-staging-geometrycontainer-geometry` のタグだけです。ほかのリポジトリのタグは、同じイメージを指していても外しません。Wranglerはセッションを起動するたびに新しいタグを付けますが、ソースが同じならタグは同じイメージを指します。手元の計測（2026-11-22）では、192個のタグが2個のイメージを指していました。ディスクを使うのはイメージなので、イメージを単位にして、最後にタグを付けた時刻（`docker image inspect` の `Metadata.LastTagTime`）が新しい3個を残します。イメージ一つは、共有する基底の層113.6 MBのほかに、約308.5 MBを使います。
+
+残す3個のイメージは、タグを一つだけ残し、ほかのタグを外します。それより古いイメージは、すべてのタグを外して消します。次のイメージは、数に関係なく、すべてのタグを残します。
+
+- Container（動いているものと止まったもの）が使うイメージ。
+- 動いているWranglerのうち最も古いものが起動した時刻の5分前より後に、タグを付けたイメージ。動いているセッションは、Containerが休止した後も、自分のタグからContainerを作り直すためです。5分は、Docker DesktopのVMの時計とmacOSの時計のずれに備える余裕です。
+- タグを付けた時刻が分からないイメージ。
+
+削除には、タグを指定した `docker image rm` を使い、`--force` を付けません。計画を立てた後に始まったセッションのContainerがイメージを使い、Dockerが削除を断った場合は、そのイメージを残して報告します。stagingへのデプロイが残したタグは、次の `--full` で回収します。
+
+手で確かめる場合は `pnpm docker:prune-images --dry-run` で各イメージの扱いを表示し、`pnpm docker:prune-images` で回収します。残す数は `--keep 5` のように指定します。このオプションはその実行だけに適用します。
+
+既定のポートでは、次のURLを使います。`MADORI_DEV_PORTS=auto` では、起動の初めの行に出たポートに置き換えます。
 
 | URL                   | 内容                                                              |
 | --------------------- | ----------------------------------------------------------------- |
@@ -56,7 +72,7 @@ Dockerを使う重い作業は、マシン全体で共有する「Dockerの枠�
 
 Rustサービスだけを反復する場合は `MADORI_INTERNAL_TOKEN=local cargo run -p madori-geometry` で起動します。`http://127.0.0.1:3001/healthz` は認証不要、`/v1/sample/display` は `authorization: Bearer local` が必要です。このプロセスをWorkerが呼ぶことはありません。
 
-5分ごとのCron Triggerが、受付または実行権の取得から5分を超えたジョブのパターンDOを起こします。保留中の待機列は再開しません。ローカルでは次のコマンドで同じ定期処理を呼べます。
+5分ごとのCron Triggerが、受付または実行権の取得から5分を超えたジョブのパターンDOを起こします。保留中の待機列は再開しません。ローカルでは次のコマンドで同じ定期処理を呼べます（`auto` ではWorkerのポートに置き換えます）。
 
 ```sh
 curl http://127.0.0.1:8787/cdn-cgi/local/scheduled
@@ -68,7 +84,7 @@ curl http://127.0.0.1:8787/cdn-cgi/local/scheduled
 
 ローカルではCloudflare Accessの代わりに、生成した開発用の鍵を使います。`pnpm dev`は初回に鍵を `.local/access-key.json` に作り、Workerの設定 `apps/worker/.dev.vars` をそこから生成します。どちらもGitの追跡対象外です。`.dev.vars` は毎回生成し直すので、手で編集しないでください。この仕組み以外で作った `.dev.vars` があると、上書きせずに停止します。
 
-Viteのプロキシ（5173番）経由のAPI要求には、開発者として署名したトークンが付きます。別の利用者として試すときは、`MADORI_DEV_EMAIL=other@example.com pnpm dev` のように起動します。8787番のWorkerへ直接送った要求には認証ヘッダーが付かないため、認証が必要なAPIは401になります。`/api/health` は認証なしで応答し、未知のパスは404、許可していないメソッドは405になります。TypeScriptは開発中に更新されますが、Rust・Wasmを変更したときは再ビルド・再起動してください。
+Viteのプロキシ（画面のポート。既定は5173番）経由のAPI要求には、開発者として署名したトークンが付きます。変更を伴う要求は、その回の画面のOrigin（画面のポートを `127.0.0.1` と `localhost` で書いた二つ）からだけ受け付け、ほかのOriginからは403になります。`.dev.vars` の `APP_ORIGINS` には、起動のたびにこの二つだけを書きます。別の利用者として試すときは、`MADORI_DEV_EMAIL=other@example.com pnpm dev` のように起動します。Workerのポート（既定は8787番）へ直接送った要求には認証ヘッダーが付かないため、認証が必要なAPIは401になります。`/api/health` は認証なしで応答し、未知のパスは404、許可していないメソッドは405になります。TypeScriptは開発中に更新されますが、Rust・Wasmを変更したときは再ビルド・再起動してください。
 
 ## 日常のコマンド
 
@@ -118,7 +134,7 @@ TypeScriptのテストはNode.js標準のtest runnerを使います。HTTP経由
 | Dockerfile                        | hadolint                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | upstreamとの境界                  | 採用版とのファイル照合、独自変更の記録、Cargo workspaceと依存先の検査                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | 依存の境界                        | `scripts/check/boundaries.ts` の表から、TypeScriptはコンパイラAPIで解決した参照先ファイルの検査とESLintの構文・global制限を、Rustは `cargo metadata` と `cargo tree` の検査を組み立てる。Rustの依存グラフの行は、禁止するcrateを、守る性質ごとの集まり（UIツールキット、GPU、pluginの実行環境、編集エンジン）で指定する。表の各行を違反・許可の例でテストする。Workerの層は許可先から禁止先を生成し、未宣言ディレクトリも拒否する。import境界は自動修正後の`check`とpre-commitで検査し、エディタのESLint診断には出ない。非文字列の動的importは構文で拒否する。層外の再export、`require()` の呼出し、servicesの `fetch`・`Headers` は検査しない |
-| ビューアのWasm                    | `--full` で、releaseのWasm（wasm-bindgenの前）の名前セクションを `scripts/check/check-viewer-wasm.ts` が読み、crateごとの関数の数とコード量をMarkdownの表でログに出す。各関数を本体を定義したcrateに数え、CADカーネル（solidcore・solidcore-ops）、編集エンジン、UIツールキットの関数があれば失敗する。名前の無い関数や読めない名前も失敗にする。`target/` のWasmと `crates/viewer/pkg` のWasmで `madori_viewer` のcrateのハッシュが違えば失敗する。インライン化されたコードは、呼び出し側のcrateに数える                                                                                                                                      |
+| ビューアのWasm                    | `--full` で、releaseのWasm（wasm-bindgenの前）の名前セクションとexportの名前を `scripts/check/check-viewer-wasm.ts` が読み、crateごとの関数の数とコード量をMarkdownの表でログに出す。各関数を本体を定義したcrateに数え、CADカーネル（solidcore・solidcore-ops）、編集エンジン、UIツールキットの関数があれば失敗する。名前を変えない関数は、wasm-bindgenのcrateの識別子か検査の一覧で数える。名前の無い関数、読めない名前、出どころの分からない名前も失敗にする。`target/` のWasmと `crates/viewer/pkg` のWasmで `madori_viewer` のcrateのハッシュが違えば失敗する。インライン化されたコードは、呼び出し側のcrateに数える                       |
 
 Workerの保存境界では、型名・バインディングの取り出し・組み立て関数の入口を別の行で検査する。`storage/` では `z.any` と `z.custom` を禁止し、行の型は渡したスキーマから導出する。テストは破損注入のためにこれらの制限を除外し、ブランド型への直接キャストと `as never` の禁止だけは適用する。この構文検査では、次の形を防げない。
 
@@ -158,7 +174,7 @@ PRごとに `.github/workflows/check.yml` が、開発用Macのself-hosted runne
 
 checkoutは毎回clone直後と同じ状態から始めます。Rustの `target/` と `.tools/` だけは、`$RUNNER_TOOL_CACHE/madori` へのシンボリックリンクで実行の間に再利用します。runnerの `--full` は、runner用のDockerの枠（「開発を始める」）を使うので、手元の `pnpm dev` や `pnpm check --full` が開発用の枠を埋めていても待ちません。runnerは一度に一つのジョブしか動かさないので、stagingへのデプロイで `wrangler deploy` がイメージをビルドするときも、runnerのDockerの作業は一つまでです。
 
-runnerでも、`--full` の実Containerの接続検査の直後に、手元と同じ規則でDockerのビルドキャッシュを回収します。cache mountは合計8 GiBまで、最近使ったregularとfrontendは別枠で合計4 GiBまで残します。使用中の記録はBuildKitが保持するため、並行するビルドの記録は消しません。使用中のcache mountの0バイトという報告値では実容量を把握できません。runnerの `target/` と `.tools/` はこの回収の対象にしません。
+runnerでも、`--full` の実Containerの接続検査の直後に、手元と同じ規則でDockerのビルドキャッシュを回収します。cache mountは合計8 GiBまで、最近使ったregularとfrontendは別枠で合計4 GiBまで残します。使用中の記録はBuildKitが保持するため、並行するビルドの記録は消しません。使用中のcache mountの0バイトという報告値では実容量を把握できません。runnerの `target/` と `.tools/` はこの回収の対象にしません。runnerの `--full` も、ビルドキャッシュの前に、手元と同じ規則で形状サービスのイメージを回収します。runnerと手元は同じDocker Engineを使うので、動いている手元のセッションのイメージは残ります。
 
 このリポジトリではブランチ保護を使えないため、検査の成功はマージの条件として強制されません。マージの前に、PRの最新のheadで `check` が成功していることを確かめます。
 

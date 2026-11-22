@@ -2,6 +2,7 @@ import { defineConfig } from "vite";
 import type { ProxyOptions } from "vite";
 import react from "@vitejs/plugin-react";
 import { accessAssertionHeader } from "@madori/contracts";
+import { devWorkerPort } from "../../scripts/dev/dev-session.ts";
 import { devAccess, readAccessKey, signAccessToken } from "../../scripts/dev/local-access.ts";
 
 /** Signed once at startup; long enough that a running dev server never sees it expire. */
@@ -24,7 +25,7 @@ async function apiProxy(): Promise<ProxyOptions> {
     console.warn("API requests will be unauthenticated until the dev server restarts.");
   }
   return {
-    target: "http://127.0.0.1:8787",
+    target: `http://127.0.0.1:${devWorkerPort(process.env)}`,
     configure(proxy) {
       proxy.on("proxyReq", (proxyReq) => {
         proxyReq.removeHeader(accessAssertionHeader);

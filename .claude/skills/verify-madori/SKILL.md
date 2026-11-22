@@ -1,19 +1,17 @@
 ---
 name: verify-madori
-description: instant-madori を利用者と同じ経路で動かし、振る舞いの証拠を残す。127.0.0.1:5173 の画面（WebGPU で描くサンプル）を T3 のプレビューで操作し、Vite のプロキシ経由で Worker API を呼び、その奥の形状 Container まで通す。マージの後は staging を確かめる。変更を本物のアプリで確かめるとき、PR の head を検証するとき、テストでは見えない振る舞いを確かめるときに使う。
+description: instant-madori を利用者と同じ経路で動かし、振る舞いの証拠を残す。自分の worktree で、ほかの worktree と重ならないポートに起動した画面（WebGPU で描くサンプル）を T3 のプレビューで操作し、Vite のプロキシ経由で Worker API を呼び、その奥の形状 Container まで通す。マージの後は staging を確かめる。変更を本物のアプリで確かめるとき、PR の head を検証するとき、テストでは見えない振る舞いを確かめるときに使う。
 ---
 
 # instant-madori を確かめる
 
 機能ごとの手順は [features/README.md](features/README.md) にある。このファイルには、どの機能にも共通する準備、起動、状態確認、操作、証拠、片付けを書く。
 
-## 一度に一つだけ動かす
+## 自分のポートで動かす
 
-`pnpm dev` は 8787 番と 5173 番を固定で使うので、このマシンで同時に動かせるのは一つだけ。自分で起動していないインスタンスは操作しない。起動の前に次を実行し、何か出たら止まって、起動した人に聞く。
+このスキルでは、`pnpm dev` を `MADORI_DEV_PORTS=auto` を付けて起動する。`pnpm dev` が画面（Vite）と Worker のポートを 20000〜32767 番の空いている番号から選ぶので、ほかの worktree の担当や検証役と同時に動かせる。何も指定しないときの 5173 番と 8787 番は、利用者のために空けておく。選んだポートは `dev.log` の `Web: http://127.0.0.1:<画面のポート> | Worker: http://127.0.0.1:<Worker のポート>` の行に出る。起動の確認がこの行を `$EVIDENCE/dev.env` に書き、以後の手順はそこからポートを読む。自分で起動していないインスタンスは操作しない。
 
-```sh
-lsof -nP -iTCP:8787 -iTCP:5173 -sTCP:LISTEN
-```
+同じ worktree では、`pnpm dev` は同時に一つしか起動できない。二つ目は `pnpm dev is already running in this checkout (pid <pid>)` で止まる。起動し直すときは、先に片付ける。
 
 ## このマシンのシェル
 
@@ -59,26 +57,38 @@ EVIDENCE="<スクラッチパッド>/verify-madori/<名前>"
 mkdir -p "$EVIDENCE"
 ```
 
+検証する機能がすべて Container 不要なら、次の `perl` の行の先頭に `MADORI_DEV_CONTAINERS=0 ` を足して起動する。この起動は Docker の枠を取らないので、ほかの担当の `pnpm check --full` や実 Container の試験がこの起動のために待たずに済む。`dev.log` に `[docker-slot]` の行は出ない。`node scripts/shared/docker-slots.ts status` にも、この worktree が使う枠は出ない。
+
 Bash ツールの `run_in_background` で、新しいプロセスグループとして起動する。片付けでは、このグループに Ctrl-C と同じ SIGINT を送るので、グループの番号を残す。`set -m` はこの zsh では使えない。
 
 ```sh
-perl -e 'setpgrp(0, 0); exec @ARGV or die "exec: $!"' mise exec -- pnpm dev >| "$EVIDENCE/dev.log" 2>&1 &
+MADORI_DEV_PORTS=auto perl -e 'setpgrp(0, 0); exec @ARGV or die "exec: $!"' mise exec -- pnpm dev >| "$EVIDENCE/dev.log" 2>&1 &
 echo $! >| "$EVIDENCE/dev.pgid"
 wait
 ```
 
-`pnpm dev` は Wasm と Web をビルドし、ローカルの D1 にマイグレーションを当てる。Container を有効にしていれば、マシン全体で共有する Docker の枠（AGENTS.md「検査と引き継ぎ」）を取ってから、Worker（8787）と Vite（5173）を起動する。枠が埋まっている間は、`dev.log` に `[docker-slot] <時刻> waiting …` の行を一分ごとに出して待ち、取れたら `[docker-slot] <時刻> acquired …` を出す。待つのは正常な動作なので、止めずに待つ。初回は amd64 イメージのビルドに数分かかる。次の二つが通れば使える。一つ目の繰り返しは、枠を待っている間（`waiting` の行があり、`acquired` の行がまだ無い間）の試行を数えない。
+`pnpm dev` は Wasm と Web をビルドしてから、ポートを選んで `Web: … | Worker: …` の行を出し、ローカルの D1 にマイグレーションを当てる。Container を有効にしていれば、マシン全体で共有する Docker の枠（AGENTS.md「検査と引き継ぎ」）を取ってから、選んだポートで Worker と Vite を起動する。枠が埋まっている間は、`dev.log` に `[docker-slot] <時刻> waiting …` の行を一分ごとに出して待ち、取れたら `[docker-slot] <時刻> acquired …` を出す。待つのは正常な動作なので、止めずに待つ。初回は amd64 イメージのビルドに数分かかる。Container が有効なら、次の二つが通れば使える。
+
+一つ目の繰り返しは、`Web: … | Worker: …` の行から `$EVIDENCE/dev.env` を作り直し、`WEB_PORT`・`WORKER_PORT`・`API`・`O` を読む。自分の `dev.log` に、Worker の `Ready on http://127.0.0.1:<Worker のポート>` と Vite の `Local:   http://127.0.0.1:<画面のポート>/` が出るまでは、`curl` を送らない。どちらの行も、そのポートを取れたときだけ出る。ほかの回が先に同じポートを取っていれば、自分の Vite か Worker が起動に失敗して `pnpm dev` が終わり、繰り返しはログの末尾を出して止まる。`curl` だけで待つと、ほかの回のアプリの応答で通ってしまう。枠を待っている間（`waiting` の行があり、`acquired` の行がまだ無い間）の試行は数えない。
 
 ```sh
 tries=0
-until curl -fsS http://127.0.0.1:5173/api/me >/dev/null 2>&1 || [ "$tries" -ge 120 ]; do
+while :; do
+  kill -0 -- "-$(cat "$EVIDENCE/dev.pgid")" 2>/dev/null || { echo "pnpm dev exited" >&2; tail -n 30 "$EVIDENCE/dev.log" >&2; exit 1; }
+  sed -nE 's#^Web: http://127\.0\.0\.1:([0-9]+) \| Worker: http://127\.0\.0\.1:([0-9]+)$#WEB_PORT=\1 WORKER_PORT=\2 API=http://127.0.0.1:\1/api O="origin: http://127.0.0.1:\1"#p' "$EVIDENCE/dev.log" | head -n 1 >| "$EVIDENCE/dev.env"
+  if [ -s "$EVIDENCE/dev.env" ]; then
+    . "$EVIDENCE/dev.env"
+    if grep -qE "Ready on http://127\.0\.0\.1:$WORKER_PORT([^0-9]|\$)" "$EVIDENCE/dev.log" && grep -qE "Local: +http://127\.0\.0\.1:$WEB_PORT/" "$EVIDENCE/dev.log" && curl -fsS "$API/me" >/dev/null 2>&1; then break; fi
+  fi
+  [ "$tries" -ge 120 ] && { echo "not ready" >&2; tail -n 30 "$EVIDENCE/dev.log" >&2; exit 1; }
   if grep -q '\[docker-slot\] [0-9:]* waiting ' "$EVIDENCE/dev.log" && ! grep -q '\[docker-slot\] [0-9:]* acquired ' "$EVIDENCE/dev.log"; then :; else tries=$((tries + 1)); fi
   sleep 5
 done
+cat "$EVIDENCE/dev.env"
 (
   set -eu
-  api=http://127.0.0.1:5173/api
-  headers=(-H 'origin: http://127.0.0.1:5173' -H 'content-type: application/json')
+  api=$API
+  headers=(-H "$O" -H 'content-type: application/json')
   project=$(curl -fsS "${headers[@]}" "$api/projects" -d '{"requestId":"a2e54e37-3687-4dbd-a8cd-b2813b114d69","name":"起動確認"}')
   pattern=$(jq -er '.pattern.id' <<< "$project")
   accepted=$(curl -fsS "${headers[@]}" "$api/patterns/$pattern/messages" \
@@ -87,7 +97,13 @@ done
   for i in {1..210}; do
     state=$(curl -fsS "$api/patterns/$pattern/state")
     if jq -e --arg job "$job" '.lastFinishedJob.jobId == $job' <<< "$state" >/dev/null; then
-      revision=$(jq -er '.lastFinishedJob | select(.state == "completed") | .revision.id' <<< "$state")
+      job_state=$(jq -r '.lastFinishedJob.state' <<< "$state")
+      if [ "$job_state" != completed ]; then
+        echo "Job $job $job_state" >&2
+        grep -F "\"jobId\":\"$job\"" "$EVIDENCE/dev.log" | grep -F '"event":"job.finished"' | tail -n 1 >&2
+        exit 1
+      fi
+      revision=$(jq -er '.lastFinishedJob.revision.id' <<< "$state")
       curl -sS -o /dev/null -w '%{http_code} %{content_type}\n' "$api/revisions/$revision/view"
       exit
     fi
@@ -98,32 +114,37 @@ done
 )
 ```
 
-二つ目が `200 application/vnd.madori.display; version=1` なら、5173 番で受け付けた指示がジョブとしてパターンの Durable Object と Container まで届き、確定した案の表示データを取得できた。Container の起動待ちは最大 60 秒。`$EVIDENCE/dev.log` に `Container image(s) ready` と `Ready on http://127.0.0.1:8787` が、枠を取ってから 10 分過ぎても出なければ、ログの末尾を報告して止まる。枠を待っている間は、`waiting` の行に枠を持つプロセスの目的、pid、経過時間、チェックアウトが出る。長く待つときは、その行を指揮役に伝える。
+`cat` が出す `WEB_PORT` と `WORKER_PORT` が、この回のポートである。二つ目が `200 application/vnd.madori.display; version=1` なら、自分の画面のポートで受け付けた指示がジョブとしてパターンの Durable Object と Container まで届き、確定した案の表示データを取得できた。Container の起動待ちは最大 60 秒。`$EVIDENCE/dev.log` に `Container image(s) ready` と `Ready on http://127.0.0.1:<Worker のポート>` が、枠を取ってから 10 分過ぎても出なければ、ログの末尾を報告して止まる。枠を待っている間は、`waiting` の行に枠を持つプロセスの目的、pid、経過時間、チェックアウトが出る。長く待つときは、その行を指揮役に伝える。
+
+Container を無効にしても一つ目の確認は通る。二つ目は `Job <id> failed` と `"reason":"containers_disabled"` を含む `job.finished` の行を出し、終了コード 1 で終わる。これがこの起動の期待する結果である。理由が異なる場合や確認できない場合、または Container が有効なのに同じ出力が出た場合は、起動確認の失敗とする。
 
 ## 状態確認
 
 おかしいと思ったら、まず次を実行する。読むだけで、何も変えない。ただし `/api/me` は、初めて来た利用者の行を作る。
 
 ```sh
+. "$EVIDENCE/dev.env"
 kill -0 -- "-$(cat "$EVIDENCE/dev.pgid")" && echo "dev: running" || echo "dev: stopped"
-lsof -nP -iTCP:8787 -iTCP:5173 -sTCP:LISTEN | tail -n +2 | tr -s ' ' | cut -d ' ' -f 1,2,9
-curl -sS http://127.0.0.1:8787/api/health; echo
-curl -sS http://127.0.0.1:5173/api/me; echo
+lsof -nP -iTCP:"$WEB_PORT" -iTCP:"$WORKER_PORT" -sTCP:LISTEN | tail -n +2 | tr -s ' ' | cut -d ' ' -f 1,2,9
+curl -sS "http://127.0.0.1:$WORKER_PORT/api/health"; echo
+curl -sS "$API/me"; echo
 git rev-parse HEAD
 ```
 
-期待する結果は次のとおり。`dev: running`。`node` が 5173 番、`workerd` が 8787 番で LISTEN。`{"status":"ok","service":"worker"}`。`user.email` が `dev@example.com` の応答。確かめたい head。
+期待する結果は次のとおり。`dev: running`。`node` が `127.0.0.1:$WEB_PORT`、`workerd` が `127.0.0.1:$WORKER_PORT` で LISTEN し、ほかのプロセスがこの二つのポートにいない。`{"status":"ok","service":"worker"}`。`user.email` が `dev@example.com` の応答。確かめたい head。
 
 ## 操作
 
-- 画面は T3 のプレビューで操作する。`preview_open` に `target: { kind: "environment-port", port: 5173 }`、`open: false`、`reuseExistingTab: false` を渡し、返った `tabId` だけを操作する。このプレビューの Chromium は WebGPU を使える。
+- Bash の呼び出しごとに、初めに `. "$EVIDENCE/dev.env"` を実行して `WEB_PORT`・`WORKER_PORT`・`API`・`O` を読む。シェルの変数は、呼び出しをまたいで残らない。
+- 画面は T3 のプレビューで操作する。`preview_open` に `target: { kind: "environment-port", port: <WEB_PORT> }`、`open: false`、`reuseExistingTab: false` を渡し、返った `tabId` だけを操作する。`<WEB_PORT>` には、起動の確認の `cat` が出した番号を書く。プレビューは `http://localhost:<WEB_PORT>` を開く。このプレビューの Chromium は WebGPU を使える。
 - 要素の ref は、`save` を付けない `preview_snapshot` の `accessibilityTree` から取る。新しい snapshot を撮ると、`save: true` でも前の ref は無効になる。操作の直前に ref を取り直す。
 - `preview_snapshot` が `The browser is not producing screenshot frames` で失敗するときは、T3 の窓が隠れているか最小化されている。`preview_evaluate` と `preview_act` はそのまま動く。要素は ref の代わりに、`preview_act` の `locator` へ `role=button[name="もう一度送る"]` の形で役割と名前を渡して指せる。スクリーンショットは撮れないので、利用者に窓を戻してもらうか、画面の絵を確かめられなかったこととして報告する。
-- API は 5173 番のプロキシへ `curl` で送る。プロキシが、開発者として署名したトークンを付ける。8787 番へ直接送ると、認証が要る経路は 401 になる。`/api/health` は認証なしで応答し、未知の経路は 404、許していないメソッドは 405 になる。
-- GET 以外の要求には `origin: http://127.0.0.1:5173` を付ける。付けないと、CSRF の防御で `403 forbidden` になる。
+- API は画面のポートのプロキシ（`$API`）へ `curl` で送る。プロキシが、開発者として署名したトークンを付ける。Worker のポート（`http://127.0.0.1:$WORKER_PORT`）へ直接送ると、認証が要る経路は 401 になる。`/api/health` は認証なしで応答し、未知の経路は 404、許していないメソッドは 405 になる。
+- GET 以外の要求には `-H "$O"`（自分の画面の Origin）を付ける。付けないと、CSRF の防御で `403 forbidden` になる。Worker が受け付ける Origin は、この回の画面のポートを `127.0.0.1` と `localhost` で書いた二つだけで、ほかの回の画面の Origin も `403` になる。
 - 書き込みを伴う要求の `requestId` は `uuidgen` で作る。
 - 別の利用者として試すときは、片付けてから `MADORI_DEV_EMAIL=other@example.com` を付けて起動し直す。同じ worktree なら、ローカルの D1 の中身は残る。
 - Rust と Wasm を変えたら、片付けてから起動し直す。TypeScript の変更は動いたまま反映される。
+- 起動し直すとポートが変わる。起動し直したら、起動の確認をもう一度実行して `dev.env` を作り直し、プレビューも新しい `WEB_PORT` で開き直す。
 
 ## 証拠
 
@@ -143,7 +164,12 @@ git rev-parse HEAD
 
 ```sh
 kill -INT -- "-$(cat "$EVIDENCE/dev.pgid")"
-for i in $(seq 1 60); do lsof -nP -iTCP:8787 -iTCP:5173 -sTCP:LISTEN >/dev/null || break; sleep 1; done
+for i in $(seq 1 60); do kill -0 -- "-$(cat "$EVIDENCE/dev.pgid")" 2>/dev/null || break; sleep 1; done
+sed -nE 's#^Web: http://127\.0\.0\.1:([0-9]+) \| Worker: http://127\.0\.0\.1:([0-9]+)$#WEB_PORT=\1 WORKER_PORT=\2 API=http://127.0.0.1:\1/api O="origin: http://127.0.0.1:\1"#p' "$EVIDENCE/dev.log" | head -n 1 >| "$EVIDENCE/dev.env"
+if [ -s "$EVIDENCE/dev.env" ]; then
+  . "$EVIDENCE/dev.env"
+  for i in $(seq 1 60); do lsof -nP -iTCP:"$WEB_PORT" -iTCP:"$WORKER_PORT" -sTCP:LISTEN >/dev/null || break; sleep 1; done
+fi
 sleep 3
 grep -oE 'containerName = workerd-[0-9a-f]{16}-' "$EVIDENCE/dev.log" | sed -E 's/^containerName = workerd-//; s/-$//' | sort -u >| "$EVIDENCE/container-sessions.txt"
 case $(wc -l < "$EVIDENCE/container-sessions.txt" | tr -d ' ') in
@@ -153,7 +179,7 @@ case $(wc -l < "$EVIDENCE/container-sessions.txt" | tr -d ' ') in
 esac
 ```
 
-workerd は Container を作るたびに、`dev.log` へ `containerName = workerd-<ID>-instant-madori-GeometryContainer-…` の警告を書く。`<ID>` はこの回の `pnpm dev` のセッションの ID で、その Container と `-proxy` には `dev.workerd.session=<ID>` のラベルが付く。Wrangler は終了時にこのラベルの Container を消す。最後の `case` は、ID が一つのときだけその消し残しを消す。TypeScript の変更で Worker を読み込み直しても、ID は変わらない。ID が二つ以上出たら、`dev.log` にほかのセッションの行が混ざったか、Container の設定が変わって Wrangler が別のセッションを始めたので、何も消さずに候補を報告して止まる。片付けの後、二つのポートが空き、`kill -0` がグループを見つけないことを確かめる。開いたプレビューのタブは `t3_preview_close` で閉じる。終わったら `$EVIDENCE` の場所を報告する。
+workerd は Container を作るたびに、`dev.log` へ `containerName = workerd-<ID>-instant-madori-GeometryContainer-…` の警告を書く。`<ID>` はこの回の `pnpm dev` のセッションの ID で、その Container と `-proxy` には `dev.workerd.session=<ID>` のラベルが付く。Wrangler は終了時にこのラベルの Container を消す。最後の `case` は、ID が一つのときだけその消し残しを消す。TypeScript の変更で Worker を読み込み直しても、ID は変わらない。ID が二つ以上出たら、`dev.log` にほかのセッションの行が混ざったか、Container の設定が変わって Wrangler が別のセッションを始めたので、何も消さずに候補を報告して止まる。片付けは、プロセスグループが消えるのを待ってから、`dev.log` の `Web: … | Worker: …` の行からこの回のポートを読み直す。起動の確認を一度も通していなくても、自分のポートを確かめられる。この行が無ければ、`pnpm dev` はポートを選ぶ前に止まっていて、何も待ち受けていない。片付けの後、`dev.env` の二つのポートが空き、`kill -0` がグループを見つけないことを確かめる。開いたプレビューのタブは `t3_preview_close` で閉じる。終わったら `$EVIDENCE` の場所を報告する。
 
 ## マージの後に staging を確かめる
 

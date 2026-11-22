@@ -146,6 +146,7 @@ void test("full checks hold one Docker slot across container integration and pru
         ...nodeTestFlags(resultsDir, "container"),
         "apps/worker/tests/container.e2e.ts",
       ].join(" "),
+      "Prune geometry service images scripts/dev/prune-images.ts",
       "Prune Docker build cache scripts/dev/prune-build-cache.ts",
     ]);
     assert.deepEqual(
@@ -153,6 +154,51 @@ void test("full checks hold one Docker slot across container integration and pru
       ["JavaScript dependency licenses", "JavaScript vulnerability audit", "Rust dependency audit"],
     );
   }
+});
+
+void test("full checks fail when cargo deny finds a stale advisory ignore or an unused wrapper", async () => {
+  mkdirSync("apps/worker/tests", { recursive: true });
+  writeFileSync("apps/worker/tests/container.e2e.ts", "");
+  writeFileSync("apps/worker/tests/example.test.ts", "");
+  const audits: Command[] = [];
+  const failure = new Error("cargo deny failed");
+  await assert.rejects(
+    runChecks(
+      "--full",
+      [],
+      (_label, command, args) => {
+        const invoked = [command, ...args];
+        if (invoked.join(" ").includes("cargo deny")) {
+          audits.push(invoked);
+          return Promise.reject(failure);
+        }
+        return Promise.resolve();
+      },
+      (stage) => stage(),
+      resultsDir,
+    ),
+    (error) => error === failure,
+    "pnpm check --full must fail when cargo deny fails",
+  );
+  assert.deepEqual(
+    audits,
+    [
+      [
+        "mise",
+        "exec",
+        "--",
+        "cargo",
+        "deny",
+        "--locked",
+        "check",
+        "-D",
+        "advisory-not-detected",
+        "-D",
+        "unused-wrapper",
+      ],
+    ],
+    "The two -D flags make a stale advisory ignore or an unused wrappers entry in deny.toml fail the audit. When cargo deny reports one, remove that entry from deny.toml instead of changing this command. See third_party/solidcraft.md.",
+  );
 });
 
 void test("a second Ctrl-C lets check stop its running step", async () => {
