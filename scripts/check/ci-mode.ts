@@ -4,6 +4,7 @@ const geometryContainerAndDisplayFormatPaths = [
   "apps/geometry/",
   "crates/display/",
   "crates/geometry-api/",
+  "crates/housing/",
   "crates/modeling/",
   "apps/worker/src/geometry/",
   "apps/worker/src/services/geometry.ts",

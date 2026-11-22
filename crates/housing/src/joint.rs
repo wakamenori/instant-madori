@@ -165,7 +165,7 @@ impl<'a> Joint<'a> {
         let i = self.index(leaving)?;
         let n = self.ends.len();
         let j = (i + 1) % n;
-        let (p, q) = (self.ends[i], self.ends[j]);
+        let q = self.ends[j];
         if q.id != arriving {
             return Err(Rejection {
                 element: ElementKind::Room,
@@ -176,6 +176,68 @@ impl<'a> Joint<'a> {
                 },
             });
         }
+        self.wedge(i, true)
+    }
+
+    pub(crate) fn end(&self, id: &str) -> Result<Vec<Point>, Rejection> {
+        let i = self.index(id)?;
+        let n = self.ends.len();
+        let prev = (i + n - 1) % n;
+        let e = self.ends[i];
+        let v = self.vertex.data().at;
+        let Some(pair) = self.through else {
+            if n != 2 {
+                return Err(unresolved(
+                    self.vertex,
+                    &self.ends.iter().map(|e| e.id).collect::<Vec<_>>(),
+                ));
+            }
+            let mut chain = self.wedge(i, false)?;
+            chain.extend(self.wedge(prev, false)?);
+            return Ok(chain);
+        };
+        if pair.contains(&i) {
+            let partner = self.ends[if pair[0] == i { pair[1] } else { pair[0] }];
+            return Ok(vec![
+                Profile::new(v, e.u, e.left, partner.u, partner.right).kp,
+                Profile::new(v, partner.u, partner.left, e.u, e.right).kq,
+            ]);
+        }
+        let profile = self.profile(i, pair).0;
+        self.wedge(i, false)?;
+        self.wedge(prev, false)?;
+        let hit = |offset| {
+            profile
+                .hit(v.translated(offset), e.u)
+                .ok_or_else(|| unresolved(self.vertex, &[id]))
+        };
+        Ok(profile.chain(
+            Some(hit(e.u.left() * e.left)?),
+            Some(hit(e.u.right() * e.right)?),
+        ))
+    }
+
+    fn profile(&self, i: usize, pair: [usize; 2]) -> (Profile, usize, usize) {
+        let n = self.ends.len();
+        let mut t = i;
+        while !pair.contains(&t) {
+            t = (t + n - 1) % n;
+        }
+        let mut s = (i + 1) % n;
+        while !pair.contains(&s) {
+            s = (s + 1) % n;
+        }
+        let (p, q) = (self.ends[t], self.ends[s]);
+        (
+            Profile::new(self.vertex.data().at, p.u, p.left, q.u, q.right),
+            t,
+            s,
+        )
+    }
+
+    fn wedge(&self, i: usize, allow_free: bool) -> Result<Vec<Point>, Rejection> {
+        let j = (i + 1) % self.ends.len();
+        let (p, q) = (self.ends[i], self.ends[j]);
         let error = || unresolved(self.vertex, &[p.id, q.id]);
         let v = self.vertex.data().at;
         let Some(pair) = self.through else {
@@ -183,16 +245,8 @@ impl<'a> Joint<'a> {
                 .map(|m| vec![m])
                 .ok_or_else(error);
         };
-        let mut t = i;
-        while !pair.contains(&t) {
-            t = (t + n - 1) % n;
-        }
-        let mut s = j;
-        while !pair.contains(&s) {
-            s = (s + 1) % n;
-        }
+        let (profile, t, s) = self.profile(i, pair);
         let (tp, tq) = (self.ends[t], self.ends[s]);
-        let profile = Profile::new(v, tp.u, tp.left, tq.u, tq.right);
         if t != i && s != j {
             let m = mitre(v, p.u, p.left, q.u, q.right).ok_or_else(error)?;
             let delta = m.delta_from(v);
@@ -202,7 +256,11 @@ impl<'a> Joint<'a> {
                 tq.u.right().dot(delta) >= tq.right
             };
             if free {
-                return Ok(vec![m]);
+                return if allow_free {
+                    Ok(vec![m])
+                } else {
+                    Err(error())
+                };
             }
         }
         let start = if s == j {
