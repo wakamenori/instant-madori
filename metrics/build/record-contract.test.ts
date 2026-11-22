@@ -8,6 +8,7 @@ import { test } from "node:test";
 import { parse } from "yaml";
 import { classifications } from "../ingest/classification.ts";
 import { issueFacts, commentFacts } from "../ingest/github-yaml.ts";
+import { messageDecision } from "../ingest/polled.ts";
 
 void test("coordinator CLI and ingestion recognize the same record shapes", (t) => {
   const dir = mkdtempSync(join(tmpdir(), "record-contract-"));
@@ -42,8 +43,11 @@ void test("coordinator CLI and ingestion recognize the same record shapes", (t) 
     );
     assert.equal(result.status === 0, valid, result.stderr);
     if (valid) {
-      const { comment } = z.object({ comment: z.string() }).parse(JSON.parse(result.stdout));
+      const { comment, message } = z
+        .object({ comment: z.string(), message: z.string() })
+        .parse(JSON.parse(result.stdout));
       assert.ok(commentFacts(comment, [])[0] != null);
+      assert.ok(messageDecision("検証 #1 @ " + sha, "assistant", message).verification);
     }
   }
   const start = "started_at: 2026-11-20T00:00:00Z";

@@ -4,6 +4,7 @@ import { parseArgs } from "node:util";
 import { parse, Scalar, stringify } from "yaml";
 import { z } from "zod";
 
+const repository = "wakamenori/instant-madori";
 const checks = ["検査", "振る舞い", "地図", "差分", "終わった証拠"] as const;
 type Check = (typeof checks)[number];
 const positive = z.string().regex(/^\d+$/u).pipe(z.coerce.number<string>().int().positive());
@@ -71,18 +72,26 @@ export function parseCommand(argv: string[]) {
   return { pr, head, attempt, report, dryRun, outcome };
 }
 
-export function renderComment(verdict: Verdict, report: string) {
+function record(verdict: Verdict, attempt: boolean) {
   const head = new Scalar(verdict.head);
   head.type = Scalar.QUOTE_DOUBLE;
   const { outcome } = verdict;
   const yaml = stringify({
-    attempt: verdict.attempt,
+    ...(attempt ? { attempt: verdict.attempt } : {}),
     head,
     verdict: outcome.verdict,
     decided_at: verdict.decidedAt,
     failed_checks: outcome.verdict === "FAIL" ? outcome.failed : [],
   });
-  return "```yaml\n" + yaml + "```\n\n" + report;
+  return "```yaml\n" + yaml + "```\n";
+}
+
+export function renderComment(verdict: Verdict, report: string) {
+  return record(verdict, true) + "\n" + report;
+}
+
+export function renderMessage(verdict: Verdict, url: string, state: string) {
+  return record(verdict, false) + "\n" + url + "\nverify " + state + " on " + verdict.head;
 }
 
 export function renderStatus({ attempt, outcome }: Verdict, targetUrl: string | undefined) {
@@ -131,7 +140,12 @@ export function existingComment(
 }
 
 function gh(args: string[], input?: string) {
-  const result = spawnSync("gh", args, { input, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  const result = spawnSync("gh", args, {
+    input,
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
+    env: { ...process.env, GH_REPO: repository },
+  });
   if (result.error) throw result.error;
   if (result.status !== 0)
     throw new Error(result.stderr.trim() || `gh exited with ${result.status}`);
@@ -157,7 +171,14 @@ function run(argv: string[]) {
   };
   const body = renderComment(verdict, report);
   if (args.dryRun) {
-    console.log(JSON.stringify({ comment: body, status: renderStatus(verdict, undefined) }));
+    const status = renderStatus(verdict, undefined);
+    console.log(
+      JSON.stringify({
+        comment: body,
+        status,
+        message: renderMessage(verdict, "<comment URL>", status.state),
+      }),
+    );
     return;
   }
   const { headRefOid } = z
@@ -180,8 +201,7 @@ function run(argv: string[]) {
         ).html_url;
   const status = renderStatus(verdict, url);
   gh(["api", `repos/{owner}/{repo}/statuses/${args.head}`, "--input", "-"], JSON.stringify(status));
-  console.log(url);
-  console.log(`verify ${status.state} on ${args.head}`);
+  console.log(renderMessage(verdict, url, status.state));
 }
 
 if (import.meta.main) {

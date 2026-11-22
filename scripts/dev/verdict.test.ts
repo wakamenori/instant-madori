@@ -1,11 +1,17 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { parse } from "yaml";
-import { existingComment, parseCommand, renderComment, renderStatus } from "./verdict.ts";
+import {
+  existingComment,
+  parseCommand,
+  renderComment,
+  renderMessage,
+  renderStatus,
+} from "./verdict.ts";
 
 const head = "1".repeat(40);
 const args = ["--pr", "7", "--head", head, "--attempt", "1", "--report", "report.md"];
@@ -72,6 +78,19 @@ void test("the leading YAML record quotes the SHA and preserves the report", () 
   }
 });
 
+void test("the printed message leads with the verdict record without the attempt", () => {
+  const message = renderMessage(fail, url, "failure");
+  const [record, tail] = message.slice(8).split("```\n\n");
+  assert.ok(record);
+  assert.deepEqual(parse(record), {
+    head,
+    verdict: "FAIL",
+    decided_at: decidedAt,
+    failed_checks: ["地図", "検査"],
+  });
+  assert.equal(tail, url + "\nverify failure on " + head);
+});
+
 void test("commit status links the verdict to the readable report", () => {
   assert.deepEqual(renderStatus(pass, url), {
     state: "success",
@@ -104,4 +123,28 @@ void test("retries reuse the matching record unless any matching attempt conflic
     assert.deepEqual(existingComment([comment, { ...comment, body: other }], fail), {
       kind: "conflict",
     });
+});
+
+void test("a moved PR head stops before any comment or status is written", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "verdict-"));
+  t.after(() => rmSync(dir, { recursive: true }));
+  const log = join(dir, "calls.log");
+  const report = join(dir, "report.md");
+  writeFileSync(report, "report");
+  writeFileSync(
+    join(dir, "gh"),
+    `#!/bin/sh\necho "$GH_REPO $*" >> "${log}"\necho '{"headRefOid":"${"b".repeat(40)}"}'\n`,
+  );
+  chmodSync(join(dir, "gh"), 0o755);
+  const result = spawnSync(
+    process.execPath,
+    [join(import.meta.dirname, "verdict.ts"), ...args.slice(0, -1), report, "--pass"],
+    { cwd: dir, encoding: "utf8", env: { ...process.env, PATH: dir + ":" + process.env.PATH } },
+  );
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /differs from verified head/u);
+  assert.equal(
+    readFileSync(log, "utf8"),
+    "wakamenori/instant-madori pr view 7 --json headRefOid\n",
+  );
 });
