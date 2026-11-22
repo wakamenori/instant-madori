@@ -16,8 +16,11 @@ import { text } from "node:stream/consumers";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { after, test } from "node:test";
-import { runChecks } from "./check.ts";
+import { minimumFreeBytes, requireFreeDisk, withDockerSlot } from "../shared/docker-slots.ts";
+import { runChecks, type CheckGates } from "./check.ts";
 import { nodeTestFlags } from "./test-results.ts";
+
+const ungated: CheckGates = { dockerStage: (stage) => stage(), rustStage: () => {} };
 
 type Command = string[];
 const modes = ["--fast", "default", "--full"] as const;
@@ -51,7 +54,7 @@ void test("import boundaries read TypeScript after ESLint fixes and formatting, 
           commands.push(invoked);
           return typeCheck(invoked) ? Promise.reject(failure) : Promise.resolve();
         },
-        (stage) => stage(),
+        ungated,
         resultsDir,
       ),
       (error) => error === failure,
@@ -81,7 +84,7 @@ void test("each mode clears previous results before the first step and records e
         commands.set(label, args);
         return Promise.resolve();
       },
-      (stage) => stage(),
+      ungated,
       resultsDir,
     );
     for (const [label, suite] of [
@@ -126,10 +129,13 @@ void test("full checks hold one Docker slot across container integration and pru
         commands.push([label, ...args].join(" "));
         return Promise.resolve();
       },
-      async (stage) => {
-        commands.push("enter");
-        await stage();
-        commands.push("exit");
+      {
+        ...ungated,
+        dockerStage: async (stage) => {
+          commands.push("enter");
+          await stage();
+          commands.push("exit");
+        },
       },
       resultsDir,
     );
@@ -174,7 +180,7 @@ void test("full checks fail when cargo deny finds a stale advisory ignore or an 
         }
         return Promise.resolve();
       },
-      (stage) => stage(),
+      ungated,
       resultsDir,
     ),
     (error) => error === failure,
@@ -286,7 +292,7 @@ void test("default and full checks run the skill script tests; fast checks do no
         if (label === "TypeScript tests") args = commandArgs;
         return Promise.resolve();
       },
-      (stage) => stage(),
+      ungated,
       resultsDir,
     );
     if (mode === "--fast") assert.equal(args, undefined);
@@ -317,6 +323,7 @@ void test("local change selection controls every Rust build and the mixed TypeSc
   git("add", ".");
   git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "initial");
   async function verify(build: boolean, mode: "default" | "--full" = "default", force = false) {
+    const gated: string[] = [];
     const commands = new Map<string, string[]>();
     await runChecks(
       mode,
@@ -325,7 +332,7 @@ void test("local change selection controls every Rust build and the mixed TypeSc
         commands.set(label, args);
         return Promise.resolve();
       },
-      (stage) => stage(),
+      { ...ungated, rustStage: (label) => gated.push(label) },
       resultsDir,
       force,
     );
@@ -338,6 +345,7 @@ void test("local change selection controls every Rust build and the mixed TypeSc
       "Rust tests",
     ])
       assert.equal(commands.has(label), build, label);
+    assert.equal(gated.includes("TypeScript tests"), build);
     const ts = commands.get("TypeScript tests");
     assert(ts);
     assert(ts.includes("apps/worker/tests/example.test.ts"));
@@ -359,4 +367,126 @@ void test("local change selection controls every Rust build and the mixed TypeSc
   delete process.env.GITHUB_ACTIONS;
   writeFileSync("crates/new.rs", "");
   await verify(true);
+});
+
+void test("full checks gate every Rust build immediately before running it", async () => {
+  mkdirSync("apps/worker/tests", { recursive: true });
+  writeFileSync("apps/worker/tests/container.e2e.ts", "");
+  writeFileSync("apps/worker/tests/example.test.ts", "");
+  const steps: string[] = [];
+  await runChecks(
+    "--full",
+    [],
+    (label) => {
+      steps.push(label);
+      return Promise.resolve();
+    },
+    { ...ungated, rustStage: (label) => steps.push("gate " + label) },
+    resultsDir,
+    true,
+  );
+  const gated = steps.filter((step) => step.startsWith("gate ")).map((step) => step.slice(5));
+  assert.deepEqual(gated, [
+    "Generate internal API contract",
+    "Build Wasm bindings",
+    "Fix Rust: native",
+    "Fix Rust: Wasm",
+    "Clippy: native",
+    "Clippy: Wasm",
+    "TypeScript tests",
+    "Rust tests",
+    "Build geometry service",
+  ]);
+  for (const label of gated) assert.equal(steps[steps.indexOf("gate " + label) + 1], label);
+});
+
+void test("each mode stops before its first Rust build on low disk", async () => {
+  const slots = {
+    kind: "flock",
+    directory: wasmBindingsOnly,
+    pool: "development",
+    freeBytes: () => minimumFreeBytes - 1,
+  } as const;
+  for (const mode of modes) {
+    const steps: string[] = [];
+    const lines: string[] = [];
+    await assert.rejects(
+      runChecks(
+        mode,
+        [],
+        (label) => {
+          steps.push(label);
+          return Promise.resolve();
+        },
+        {
+          ...ungated,
+          rustStage: (label) => requireFreeDisk(slots, label, (line) => lines.push(line)),
+        },
+        resultsDir,
+        true,
+      ),
+      /Not enough free disk space before Generate internal API contract/,
+    );
+    assert.deepEqual(steps, [
+      "Format service files",
+      "Format service Rust",
+      "Generate Worker types",
+    ]);
+    assert.equal(lines.length, 1);
+    assert.match(lines[0] ?? "", / stopped before Generate internal API contract: 11\.9 GiB free/);
+  }
+});
+
+void test("full checks stop before container integration and pruning when disk falls", async (t) => {
+  mkdirSync("apps/worker/tests", { recursive: true });
+  writeFileSync("apps/worker/tests/container.e2e.ts", "");
+  writeFileSync("apps/worker/tests/example.test.ts", "");
+  const directory = mkdtempSync(join(wasmBindingsOnly, "docker-"));
+  const previousHome = process.env.INSTANT_MADORI_METRICS_HOME;
+  process.env.INSTANT_MADORI_METRICS_HOME = directory;
+  t.after(() => {
+    if (previousHome === undefined) delete process.env.INSTANT_MADORI_METRICS_HOME;
+    else process.env.INSTANT_MADORI_METRICS_HOME = previousHome;
+  });
+  let free = 100 * 1024 ** 3;
+  const slots = { kind: "flock", directory, pool: "development", freeBytes: () => free } as const;
+  const steps: string[] = [];
+  const lines: string[] = [];
+  const log = (line: string) => lines.push(line);
+  await assert.rejects(
+    runChecks(
+      "--full",
+      [],
+      (label) => {
+        steps.push(label);
+        if (label === "Build staging Worker (dry run)") free = minimumFreeBytes - 1;
+        return Promise.resolve();
+      },
+      {
+        dockerStage: (stage) =>
+          withDockerSlot(
+            slots,
+            { purpose: "pnpm check --full", signal: new AbortController().signal, log },
+            stage,
+          ),
+        rustStage: (label) => requireFreeDisk(slots, label, log),
+      },
+      resultsDir,
+      true,
+    ),
+    /Not enough free disk space before taking/,
+  );
+  assert.equal(steps.at(-1), "Build staging Worker (dry run)");
+  for (const skipped of [
+    "Container integration",
+    "Prune geometry service images",
+    "Prune Docker build cache",
+    "JavaScript dependency licenses",
+  ])
+    assert(!steps.includes(skipped));
+  assert.equal(lines.length, 1);
+  assert.match(
+    lines[0] ?? "",
+    / stopped before taking a development slot for pnpm check --full: 11\.9 GiB free/,
+  );
 });
