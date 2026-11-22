@@ -10,7 +10,7 @@ pub const TATAMI_SQUARE_METRES: f64 = TATAMI_SQUARE_MILLIMETRES / 1e6;
 const SQUARE_METRE_PLACES: u8 = 2;
 const TATAMI_PLACES: u8 = 1;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Area {
     square_millimetres: f64,
     perimeter: f64,
