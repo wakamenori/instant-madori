@@ -14,6 +14,8 @@
 
 リポジトリの `.claude/skills/verify-madori/SKILL.md` を読む。その「準備」のとおりに PR #{PR} の head `{HEAD}` を取り出し、準備する。証拠は、その「起動」が決める置き場に置く。
 
+実 Container の試験や Docker のビルドを `pnpm check --full` と `pnpm dev` の外で直接動かすときは、`node scripts/shared/docker-slots.ts run -- <コマンド>` で包んで Docker の枠を取る。
+
 ## 確かめること
 
 1. 検査。触ったパスに関係する検査が、head で通る。AGENTS.md「検査と引き継ぎ」が Docker を求めるパスなら、`pnpm check --full` を使う。自動修正の差分が出ない。runner の `check` が同じ SHA で成功している（`gh pr checks {PR}`）。
