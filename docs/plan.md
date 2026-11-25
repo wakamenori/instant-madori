@@ -354,24 +354,24 @@ instant-madori/
 └── AGENTS.md
 ```
 
-| 配置                      | 責務                                                                                                                                           |
-| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| apps/web/                 | React画面、APIクライアント、Wasmの読み込み、会話・履歴・表示状態                                                                               |
-| apps/worker/              | API、AI接続、Workflows、Durable Objects、D1・R2アクセス。マイグレーションとCloudflareのデプロイ設定もまとめる                                  |
-| apps/geometry/            | Container内のHTTP受付、処理の実行・停止、スナップショットの読込・出力。ContainerのDockerfileも置く                                             |
-| crates/display/           | 表示データの不変条件と版付きバイナリ形式。依存を持たず、modelingとviewerが共有する                                                             |
-| crates/geometry-api/      | WorkerとContainerの内部API契約。packages/contractsへTypeScript定義を生成する                                                                   |
-| crates/housing/           | 住宅データ（加工と物体を含む）、共有境界、寸法・面積、引き継ぎの規則、住宅の関係の検査                                                         |
-| crates/modeling/          | 住宅用コマンド、SolidCraftとの対応、加工と物体のコマンドへの変換と配置、変更の引き継ぎ、3Dの検査と投影による面積の照合、保存用スナップショット |
-| crates/viewer/            | Web画面へ組み込むWasmライブラリ。選択補助、カメラ操作、素材・日差しの表示                                                                      |
-| packages/contracts/       | 通信スキーマと共有型。Rust側の定義から生成した型・スキーマの受け渡し先                                                                         |
-| third_party/solidcraft/   | 固定した版のSolidCraft一式。SolidCraft自体に必要な修正もこの領域で行う                                                                         |
-| third_party/solidcraft.md | 取り込み元、採用コミット、独自変更の理由、更新手順。subtreeの外に置く                                                                          |
-| docs/・scripts/           | サービスの計画・検証記録。scripts/はcheck・dev・generate・build・upstream・deploy・measureに分け、複数の目的で使う部品はsharedに置く           |
-| metrics/                  | Software Factoryの計測。生の記録を溜める層、解釈する層、viewer。サービスから独立し、設計は metrics/README.md に置く                            |
-| .github/workflows/        | PRの検査（check.yml）とstagingへのデプロイ（deploy-staging.yml）。開発用Macのself-hosted runnerで動く                                          |
-| .github/ISSUE_TEMPLATE/   | 作業の単位（Issue）のテンプレート                                                                                                              |
-| .github/dependabot.yml    | npm・Cargoの依存関係の更新提案                                                                                                                 |
+| 配置                      | 責務                                                                                                                                                            |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| apps/web/                 | React画面、APIクライアント、Wasmの読み込み、会話・履歴・表示状態                                                                                                |
+| apps/worker/              | API、AI接続、Workflows、Durable Objects、D1・R2アクセス。マイグレーションとCloudflareのデプロイ設定もまとめる                                                   |
+| apps/geometry/            | Container内のHTTP受付、処理の実行・停止、スナップショットの読込・出力。ContainerのDockerfileも置く                                                              |
+| crates/display/           | 表示データの不変条件と版付きバイナリ形式。依存を持たず、modelingとviewerが共有する                                                                              |
+| crates/geometry-api/      | WorkerとContainerの内部API契約。packages/contractsへTypeScript定義を生成する                                                                                    |
+| crates/housing/           | 住宅データ（加工と物体を含む）、共有境界、寸法・面積、引き継ぎの規則、住宅の関係の検査                                                                          |
+| crates/modeling/          | 住宅用コマンド、SolidCraftとの対応、加工と物体のコマンドへの変換と配置、変更の引き継ぎ、3Dの検査と投影による面積の照合、保存用スナップショット、間取りSVGの生成 |
+| crates/viewer/            | Web画面へ組み込むWasmライブラリ。選択補助、カメラ操作、素材・日差しの表示                                                                                       |
+| packages/contracts/       | 通信スキーマと共有型。Rust側の定義から生成した型・スキーマの受け渡し先                                                                                          |
+| third_party/solidcraft/   | 固定した版のSolidCraft一式。SolidCraft自体に必要な修正もこの領域で行う                                                                                          |
+| third_party/solidcraft.md | 取り込み元、採用コミット、独自変更の理由、更新手順。subtreeの外に置く                                                                                           |
+| docs/・scripts/           | サービスの計画・検証記録。scripts/はcheck・dev・generate・build・upstream・deploy・measureに分け、複数の目的で使う部品はsharedに置く                            |
+| metrics/                  | Software Factoryの計測。生の記録を溜める層、解釈する層、viewer。サービスから独立し、設計は metrics/README.md に置く                                             |
+| .github/workflows/        | PRの検査（check.yml）とstagingへのデプロイ（deploy-staging.yml）。開発用Macのself-hosted runnerで動く                                                           |
+| .github/ISSUE_TEMPLATE/   | 作業の単位（Issue）のテンプレート                                                                                                                               |
+| .github/dependabot.yml    | npm・Cargoの依存関係の更新提案                                                                                                                                  |
 
 Workerの依存は、層に属さない `apps/worker/src/compose.ts` で構築する。APIは `serviceDeps(env, runtime)`、パターンのDOは `patternCoordinatorDeps(env, workflow, runtime)`、ジョブのWorkflowは `jobWorkflowDeps(env, runtime)` を使う。DOには、実行権の取得、activeなジョブの参照の読取り、Workflowの開始だけを渡す。Workflowには、実行権の復元と、実行権を受け取る確認・確定・失敗の記録・snapshotの保存、形状処理、AIとの往復、パターンのDOを起こす関数だけを渡す。組み立て関数をimportできるのは `api/app.ts`・`objects/pattern-coordinator.ts`・`workflows/job-workflow.ts` だけで、この3つも元の層のimportの制限を受ける。サービスはDOのnamespaceではなく、型付き `GeometryInstance` を受けて `GeometryApi` を返す関数に依存する。インスタンス名の導出とRPCのretryable/overloaded例外からunavailableへの変換は `geometry/geometry-client.ts` に集める。サービス基盤のジョブは、パターンごとの接続用DOのインスタンス（キー `{ kind: "pattern", patternId }`、名前 `pattern:<パターンID>`）でContainerを呼ぶ。インスタンスのキーを加えるときも導出はこのファイルに置き、呼び出し側はDOの名前を組み立てない。
 
