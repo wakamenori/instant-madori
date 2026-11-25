@@ -25,7 +25,7 @@ const slots = Object.entries(poolSizes).flatMap(([pool, size]) =>
   Array.from({ length: size }, (_, i) => ({ pool, name: `${pool}-${i + 1}` })),
 );
 const home = userInfo().homedir;
-function freeBytesOnThisMac() {
+export function freeBytesOnThisMac() {
   const { bavail, bsize } = statfsSync(home);
   return bavail * bsize;
 }
@@ -79,7 +79,7 @@ function describe(directory: string, name: string, busy = false) {
   return `${name}: ${purpose} (pid ${pid}, ${duration(Date.now() - Date.parse(since))}, ${path})`;
 }
 
-function tryLock(path: string) {
+export function tryLock(path: string) {
   // Darwin's O_EXLOCK is passed through by Node but absent from fs.constants.
   const O_EXLOCK = 0x20;
   try {
