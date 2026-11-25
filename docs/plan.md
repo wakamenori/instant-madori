@@ -641,7 +641,7 @@ queueHoldは、待機列が保留中なら `{ job: { jobId, messageId, number, s
 | ------------------------------------------- | ------------------------------------------------------------------------- |
 | GET /api/me                                 | 内部ユーザーと利用可能な設定                                              |
 | GET・POST /api/projects                     | 案件一覧・作成                                                            |
-| PATCH /api/projects/:id                     | 案件名などの管理情報                                                      |
+| GET・PATCH /api/projects/:id                | 案件の読取り（名前と版）と、案件名などの管理情報の変更                    |
 | GET・POST /api/projects/:id/patterns        | パターン一覧・作成                                                        |
 | PATCH /api/patterns/:id                     | パターン名などの管理情報                                                  |
 | GET /api/patterns/:id/state                 | 現在の案、会話・履歴の位置、ジョブ、待機・保留状態                        |
