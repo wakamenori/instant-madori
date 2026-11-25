@@ -19,7 +19,9 @@ pub struct Modifier {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Effect {
+    /// Removes the profile through the wall's whole thickness.
     Cut {},
+    /// Fills the profile through the wall's thickness and `protrusion` beyond the named faces.
     Add { to: AddTo, protrusion: f64 },
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -142,7 +144,7 @@ impl<'a> WallPlane<'a> {
             });
         }
         let height = self.wall.wall.height;
-        if up.end > height + LENGTH_TOLERANCE_MM && height.is_finite() {
+        if up.end > height + LENGTH_TOLERANCE_MM {
             return Err(Reason::AboveWall {
                 wall: wall(),
                 height,

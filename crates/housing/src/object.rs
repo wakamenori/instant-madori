@@ -31,6 +31,8 @@ pub enum Combine {
     Add,
     Cut,
 }
+/// An axis-aligned plane in the object's frame. A profile's (u, v) maps to (x, y), (x, z), or
+/// (y, z) in that order, and the solid extrudes toward the remaining positive axis.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Plane {
@@ -38,19 +40,24 @@ pub enum Plane {
     Xz { y: f64 },
     Yz { x: f64 },
 }
+/// Where the object's origin goes. The object's frame has +z up and +y toward its front.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Placement {
     Room {
         storey: StoreyId,
         at: Point,
+        /// Degrees counterclockwise from the plan x axis to the object's x axis.
         rotation: f64,
     },
+    /// The front faces away from `face`.
     Wall {
         wall: BoundaryId,
         from: WallEnd,
         face: FaceRole,
+        /// Distance along the wall from the reference end to the origin.
         distance: f64,
+        /// Height of the origin above the floor.
         height: f64,
     },
 }

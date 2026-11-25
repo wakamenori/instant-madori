@@ -10,7 +10,9 @@ use std::f64::consts::{FRAC_PI_2, TAU};
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WallPoint {
+    /// Distance along the wall from the modifier's reference end.
     pub along: f64,
+    /// Height above the floor.
     pub up: f64,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -73,7 +75,7 @@ impl Arc {
         let ab = b.delta_from(a);
         let ac = c.delta_from(a);
         let cross = ab.cross(ac);
-        if cross == 0. || exact_orientation(a, b, c).is_eq() {
+        if exact_orientation(a, b, c).is_eq() {
             return None;
         }
         let center =
@@ -82,7 +84,6 @@ impl Arc {
         if ![center.x, center.y, radius]
             .iter()
             .all(|v| v.abs() <= LIMIT_MM)
-            || radius == 0.
         {
             return None;
         }
