@@ -2,6 +2,7 @@
 
 pub mod commands;
 pub mod display;
+pub mod floor_plan;
 mod model;
 mod outline;
 pub mod sample;
