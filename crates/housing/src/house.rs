@@ -127,6 +127,9 @@ impl<'a> BoundaryView<'a> {
     pub fn data(self) -> &'a Boundary {
         self.data
     }
+    pub fn length(self) -> f64 {
+        self.end.data.at.delta_from(self.start.data.at).length()
+    }
     pub fn start(self) -> VertexView<'a> {
         self.start
     }

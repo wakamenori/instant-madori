@@ -62,6 +62,8 @@ fn lettered_house(
         rooms: vec![],
         boundaries: vec![],
         wall_colors: vec![],
+        objects: vec![],
+        modifiers: vec![],
         openings: vec![],
     };
     for (i, ring) in rooms_as_letter_rings.iter().enumerate() {

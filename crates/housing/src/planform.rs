@@ -27,7 +27,7 @@ fn significand_and_scale(x: f64) -> (i128, usize) {
     )
 }
 
-fn exact_orientation(a: Point, b: Point, c: Point) -> Ordering {
+pub(crate) fn exact_orientation(a: Point, b: Point, c: Point) -> Ordering {
     let mut digits = [0i128; DIGITS];
     for (x, y) in [
         (a.x, b.y),
@@ -62,7 +62,7 @@ fn exact_orientation(a: Point, b: Point, c: Point) -> Ordering {
     }
 }
 
-fn between(a: Point, b: Point, p: Point) -> bool {
+pub(crate) fn between(a: Point, b: Point, p: Point) -> bool {
     (a.x.min(b.x)..=a.x.max(b.x)).contains(&p.x) && (a.y.min(b.y)..=a.y.max(b.y)).contains(&p.y)
 }
 

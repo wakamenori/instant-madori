@@ -425,6 +425,8 @@ fn polygon(points: &[Coord], inset: f64) -> House {
             edges,
         }],
         wall_colors: vec![],
+        objects: vec![],
+        modifiers: vec![],
         openings: vec![],
     })
     .unwrap()
