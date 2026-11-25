@@ -337,3 +337,197 @@ fn retained_order_with_removed_and_rehosted_elements() {
         .map(Source::key))
     );
 }
+
+const BLUE: Srgb = Srgb { r: 0, g: 0, b: 255 };
+
+fn blue_wall(h: House) -> (House, BoundaryId) {
+    let wall = shared(&h);
+    let west = h
+        .rooms()
+        .find(|r| r.edges().any(|e| e.from.x < 4000.))
+        .unwrap();
+    (
+        h.set_wall_color(
+            &wall,
+            &FaceRole::Room {
+                room: west.data().id.clone(),
+            },
+            BLUE,
+        )
+        .unwrap(),
+        wall,
+    )
+}
+fn moved() -> (Model, BoundaryId) {
+    let (h, wall) = blue_wall(fixture());
+    let old = Model::build(&h, None).unwrap();
+    let east = h
+        .rooms()
+        .find(|r| r.edges().any(|e| e.from.x > 4000.))
+        .unwrap();
+    let (h, _) = h
+        .move_wall(&WallMove {
+            wall: wall.clone(),
+            toward: FaceRole::Room {
+                room: east.data().id.clone(),
+            },
+            distance: 500.,
+        })
+        .unwrap();
+    (Model::build(&h, Some(&old)).unwrap(), wall)
+}
+fn assert_west_triangle(vertices: [[f64; 3]; 3], x: f64) {
+    assert!(vertices.iter().all(|p| (p[0] - x).abs() < 1e-6));
+    let [a, b, c] = vertices;
+    let nx = (b[1] - a[1]) * (c[2] - a[2]) - (b[2] - a[2]) * (c[1] - a[1]);
+    assert!(nx < 0.);
+}
+fn assert_blue_wall(m: &Model, wall: &BoundaryId, count: usize, x: f64, base: f64) {
+    let names = m.bodies_of(wall.as_str());
+    assert_eq!(names.len(), count);
+    for body in &m.session.model.state().bodies {
+        let colors = m.session.doc.face_colors(body);
+        if !names.contains(&body.name) {
+            assert!(colors.is_empty());
+            continue;
+        }
+        assert_eq!(colors.len(), 1);
+        let (face, look) = &colors[0];
+        assert_eq!(look.color, [0, 0, 255]);
+        let mesh = body.mesh();
+        let mut min = f64::INFINITY;
+        let mut max = f64::NEG_INFINITY;
+        for (t, f) in mesh.triangles.iter().zip(&mesh.tri_face) {
+            if *f as usize == *face {
+                let vertices = mesh.tri(t).unwrap().map(Into::into);
+                assert_west_triangle(vertices, x);
+                for p in vertices {
+                    min = min.min(p[2]);
+                    max = max.max(p[2]);
+                }
+            }
+        }
+        assert_eq!((min, max), (base, base + 2400.));
+    }
+}
+#[test]
+fn moved_wall_keeps_blue_on_west_face() {
+    let (model, wall) = moved();
+    assert_blue_wall(&model, &wall, 1, 4440., 0.);
+}
+#[test]
+fn decoded_display_keeps_blue_on_west_face() {
+    let (model, wall) = moved();
+    let display = DisplayModel::decode(&model.display().unwrap().encode().unwrap()).unwrap();
+    let mut colors = 0;
+    for body in display.bodies() {
+        for (face, rgb) in body.face_colors().iter() {
+            colors += 1;
+            assert_eq!(body.element().as_str(), wall.as_str());
+            assert_eq!([rgb.r, rgb.g, rgb.b], [0, 0, 255]);
+            let mesh = body.mesh();
+            let mut triangles = 0;
+            for (t, f) in mesh.triangles().iter().zip(mesh.faces()) {
+                if *f == face {
+                    triangles += 1;
+                    assert_west_triangle(
+                        t.map(|i| mesh.positions()[i as usize].map(f64::from)),
+                        4440.,
+                    );
+                }
+            }
+            assert!(triangles > 0);
+        }
+    }
+    assert_eq!(colors, 1);
+}
+fn assert_door(distance: f64) {
+    let (h, wall) = blue_wall(fixture());
+    let h = opening(&h, "door", wall.clone(), distance, 900., 2400., 0.);
+    assert_blue_wall(&Model::build(&h, None).unwrap(), &wall, 2, 3940., 0.);
+}
+#[test]
+fn full_height_door_paints_both_bodies() {
+    assert_door(900.);
+}
+#[test]
+fn narrow_pier_receives_blue() {
+    assert_door(101.5);
+}
+fn corrupt_table(swap: bool) -> (BuildError, BoundaryId) {
+    let (h, wall) = blue_wall(fixture());
+    let mut model = Model::assemble(&h, None).unwrap();
+    let (left, right) = model
+        .entries
+        .iter_mut()
+        .find_map(|entry| match &mut entry.kind {
+            EntryKind::Wall {
+                wall: id,
+                left,
+                right,
+            } if id == &wall => Some((left, right)),
+            _ => None,
+        })
+        .unwrap();
+    if swap {
+        std::mem::swap(left, right);
+    } else if *left == h.data().wall_colors[0].face {
+        *left = FaceRole::Exterior {};
+    } else {
+        *right = FaceRole::Exterior {};
+    }
+    (model.paint(&h).unwrap_err(), wall)
+}
+#[test]
+fn missing_table_role_reports_wall() {
+    let (err, wall) = corrupt_table(false);
+    assert!(err.to_string().contains(wall.as_str()));
+    assert!(
+        matches!(err,BuildError::WallColor{element,reason:WallColorFailure::RoleNotInTable{..}} if element.as_str()==wall.as_str())
+    );
+}
+#[test]
+fn swapped_table_roles_fail_room_check() {
+    let (err, wall) = corrupt_table(true);
+    assert!(
+        matches!(err,BuildError::WallColor{element,reason:WallColorFailure::RoomNotOnSide{..}} if element.as_str()==wall.as_str())
+    );
+}
+#[test]
+fn zero_offset_side_receives_blue() {
+    let (h, wall) = blue_wall(fixture());
+    let left = h.boundary(&wall).unwrap().face(Side::Left).role() == h.data().wall_colors[0].face;
+    let mut data = h.data().clone();
+    let offsets = &mut data
+        .boundaries
+        .iter_mut()
+        .find(|b| b.id == wall)
+        .unwrap()
+        .wall
+        .offsets;
+    if left {
+        offsets.left = 0.;
+    } else {
+        offsets.right = 0.;
+    }
+    assert_blue_wall(
+        &Model::build(&House::new(data).unwrap(), None).unwrap(),
+        &wall,
+        1,
+        4000.,
+        0.,
+    );
+}
+#[test]
+fn elevated_storey_paints_at_its_base() {
+    let (h, wall) = blue_wall(fixture());
+    let mut data = h.data().clone();
+    data.storeys[0].base_elevation = 3000.;
+    assert_blue_wall(
+        &Model::build(&House::new(data).unwrap(), None).unwrap(),
+        &wall,
+        1,
+        3940.,
+        3000.,
+    );
+}

@@ -4,7 +4,7 @@ pub mod commands;
 pub mod display;
 mod model;
 pub mod sample;
-pub use model::{BodyDefect, BuildError, Entry, EntryKind, Model};
+pub use model::{BodyDefect, BuildError, Entry, EntryKind, Model, WallColorFailure};
 
 use solidcraft_doc::Document;
 use solidcraft_engine::Session;
