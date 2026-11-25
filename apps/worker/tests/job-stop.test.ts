@@ -224,4 +224,53 @@ await test("Job stop through workerd HTTP", { timeout: 120_000 }, async (t) => {
       });
     },
   );
+  await t.test(
+    "lastFinishedJob names the last job that ran, not a job stopped before it ran",
+    async () => {
+      const first = await create();
+      const firstA = await accept(first.id);
+      await waitState(first.id, (value) => value.runningJob?.jobId === firstA.jobId);
+      const firstB = await accept(first.id);
+      const firstQueue = await waitState(first.id, (value) => value.queuedJobs.length === 1);
+      assert.deepEqual(firstQueue.queuedJobs, [firstB]);
+      assert.equal((await stop(firstB.jobId)).status, 200);
+      const stoppedB = await state(first.id);
+      assert.equal((await stop(firstA.jobId)).status, 200);
+      const stoppedFirstA = await state(first.id);
+      assert.equal(stoppedFirstA.queueHold, null);
+
+      const second = await create();
+      const secondA = await accept(second.id);
+      await waitState(second.id, (value) => value.runningJob?.jobId === secondA.jobId);
+      const secondB = await accept(second.id);
+      const secondC = await accept(second.id);
+      const secondQueue = await waitState(second.id, (value) => value.queuedJobs.length === 2);
+      assert.deepEqual(secondQueue.queuedJobs, [secondB, secondC]);
+      assert.equal((await stop(secondC.jobId)).status, 200);
+      assert.equal((await stop(secondA.jobId)).status, 200);
+      const heldQueue = await state(second.id);
+      const cancelledA = { ...secondA, state: "cancelled" };
+      assert.deepEqual(heldQueue.queueHold, { job: cancelledA });
+      const cancel = await worker.call(`/api/patterns/${second.id}/queue/cancel`, {
+        as: owner,
+        method: "POST",
+        body: { requestId: crypto.randomUUID(), heldBy: secondA.jobId },
+      });
+      assert.equal(cancel.status, 200);
+      const cancelledQueue = await state(second.id);
+      assert.equal(cancelledQueue.queueHold, null);
+      assert.deepEqual(cancelledQueue.queuedJobs, []);
+      await settleJobs(worker, owner, first.id, [firstA.jobId]);
+      await settleJobs(worker, owner, second.id, [secondA.jobId]);
+      assert.deepEqual(
+        [
+          stoppedB.lastFinishedJob,
+          stoppedFirstA.lastFinishedJob,
+          heldQueue.lastFinishedJob,
+          cancelledQueue.lastFinishedJob,
+        ],
+        [null, { ...firstA, state: "cancelled" }, cancelledA, cancelledA],
+      );
+    },
+  );
 });
