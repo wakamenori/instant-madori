@@ -49,6 +49,24 @@ macOSでは、Rustのビルドの前と、Dockerの枠を取る前に、ホー�
 
 空きで止まったら、空きを増やしてからもう一度実行してください。担当と検証役は、worktreeの外を消さずに指揮役に報告します。空きで止まったのは試験の失敗ではないので、空きが戻った後にrunnerのジョブを実行し直すことは、不安定な試験の再実行に当たりません。`docker-slots run` も空きが足りなければ止まるので、`pnpm docker:prune-build-cache` などの回収は `docker-slots run` で包まずに実行してください。
 
+Cargoは古い成果物を `target/` から消しません。依存、機能、ツールチェーンが変わるたびに、新しい成果物が古いものと並んで残ります。worktreeの `target/` はworktreeと一緒に消えます。それ以外の `target/` は、指揮役の見回りが毎回 `node scripts/dev/prune-targets.ts` で回収します。対象は、メインのチェックアウトの `target/` と、self-hosted runnerごとの `$RUNNER_TOOL_CACHE/madori/target` です。runnerは `~/actions-runner/*/.runner` のうち、このリポジトリに登録したものを数えます。worktreeの `target/`、mbxのストア、Docker、runnerの `tools/` には触りません。
+
+回収は、成果物を選ばずに `target/` を丸ごと空にします。次の二つの場合に空にします。大きさは割り当てた容量（`du` と同じ）で数えます。
+
+- 16 GiBを超えた `target/`。
+- 空きが20 GiBを切っている間の、空にしてから24時間を過ぎた `target/`。メインのチェックアウト、大きいrunnerの順に、空きを測り直しながら一つずつ空にし、20 GiBに戻ったら止めます。24時間以内に空にした `target/` は一回分の成果物しか持たず、空にしても次のジョブが作り直して空きがまた減るので、空にしません。
+
+使っている `target/` は空にしません。次のどれかに当たれば、`busy` の行に理由を示して残し、次の見回りでまた試します。
+
+- Cargoがロックのファイル（`.cargo-lock` など）のロックを持っている。
+- runnerがジョブを実行している（`<runnerのフォルダー>/bin/Runner.Worker` が動いている）。
+- コマンドラインにその `target/` のパスを含むプロセスがある。
+- メインのチェックアウトで、24時間以内に `target/` の中のファイルが書かれた。開発者のセッションは相対パスで `target/` を読むことがあり、それはロックにもプロセスの一覧にも出ないためです。
+
+空にする間、スクリプトはCargoのロックをすべて持ち、ロックのファイルだけを残してほかを消します。ロックを待っていたCargoは、空にした後に同じファイルのロックを取るので、Cargo同士は順に動きます。途中で止まっても、Cargoは欠けた成果物を作り直し、次の見回りが続きを消します。最後の行の `short` は、回収の後も空きが20 GiBを切っていることを示します。`--dry-run` は、各 `target/` の大きさと扱いだけを表示します。
+
+空にした後の最初のジョブは、Rustを空から作り直します。2026-11-26の計測では、`madori-light` は `pnpm setup` に212秒（ふだん約5秒）、`pnpm check` に395秒（ふだん約100秒）、`madori` は `pnpm setup` に206秒、`pnpm check --full` に694秒（ふだん約300秒）かかりました。作り直した `target/` は、`madori-light` が5.8 GiB、`madori` が9.6 GiBでした。新しいworktreeの `pnpm setup` はメインのチェックアウトの `target/` を読まないので、その時間は変わりません（`target/` が無い状態で5秒）。`MADORI_MBX=0` のときだけ、空の `target/` を複製して空から作ります。
+
 形状サービスのイメージは、どのworktreeとself-hosted runnerから作っても、Cargoの `target/` を一つのcache mount（id `instant-madori-geometry-build-v2`）で共有します。Cargoはpath依存のクレートの新しさをソースの更新時刻で判断しますが、COPYはチェックアウトごとの更新時刻を持ち込みます。そのため、cache mountにはソースの写しを `target/` と並べて置き、ビルドのたびに、内容が違う項目だけを写しへ書き、余分な項目を消します。Cargoはシンボリックリンクについて、コンパイルしたときのリンクの先のファイルの更新時刻を見るので、写しにはリンクを置かず、リンクの先の内容を通常のファイルとディレクトリとして写します。参照先の無いリンクは写しません。Cargoは写しをビルドし、内容が変わったクレートとそれに依存するクレートだけを作り直します。ビルドのログの `Source copy: removed <数>, wrote <数> entries` の行が、消した項目と書いた項目の数を示し、書いた項目が20個以下なら続けてそのパスを示します。内容が違うworktreeが交互にビルドすると、違うクレートとそれに依存するクレートをそのたびに作り直します。このcache mountは一度に一つのビルドだけが使い、同時に始まったビルドは、先のビルドのCargoが終わるまで表示なしで待ちます。
 
 cache mountのidを変えると、新しいcache mountは空から始まり、最初のビルドはすべての依存をコンパイルします。手元の計測（2026-11-22、runnerの検査と重なった状態）では795秒と1265秒かかり、実Containerの試験の起動待ちの期限（800秒）を超えることがあります。idを変えるPRでは、`pnpm check --full` の前に、`node scripts/shared/docker-slots.ts run -- docker build --platform linux/amd64 --output type=cacheonly -f apps/geometry/Dockerfile .` で一度ビルドしてcacheを温めてください。
