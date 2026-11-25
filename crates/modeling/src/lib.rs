@@ -3,6 +3,7 @@
 pub mod commands;
 pub mod display;
 mod model;
+mod outline;
 pub mod sample;
 pub use model::{
     BuildError, Entry, EntryKind, LoadError, Mismatch, MismatchReason, Mismatches, Model, Subject,
