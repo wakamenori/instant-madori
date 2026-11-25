@@ -48,7 +48,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/metrics/hook/hook.ts\" permission >/dev/null 2>&1 || true",
+            "command": "node \"$CLAUDE_PROJECT_DIR/metrics/hook/hook.ts\" >/dev/null 2>&1 || true",
             "timeout": 5
           }
         ]
@@ -61,6 +61,18 @@
             "type": "command",
             "command": "node \"$CLAUDE_PROJECT_DIR/scripts/dev/agent-guard.ts\" PreToolUse",
             "timeout": 30
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/metrics/hook/hook.ts\" >/dev/null 2>&1 || true",
+            "timeout": 5
           }
         ]
       }

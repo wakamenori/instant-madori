@@ -217,22 +217,41 @@ function addDigests(input: Obj, facts: Obj) {
     }
   }
 }
-export function hookPrivacy(p: Obj) {
-  const input = object(p.input),
-    facts: Obj = pick(input, [
-      "hook_event_name",
-      "session_id",
-      "cwd",
-      "transcript_path",
-      "permission_mode",
-      "prompt_id",
-      "effort",
-      "model",
-      "agent_type",
-      "source",
-      "reason",
-      "stop_hook_active",
-    ]);
+const stableId = z.string().refine((value) => redact(value) === value);
+const taskNotification = z.strictObject({
+  task_id: stableId.regex(/^[A-Za-z0-9_-]{1,64}$/u),
+  tool_use_id: stableId.regex(/^[A-Za-z0-9_-]{1,128}$/u).nullable(),
+  status: z.string().regex(/^[a-z_]{1,32}$/u),
+  exit_code: z.int().nullable(),
+  ended_at: z.iso.datetime().nullable(),
+});
+const eventKeys = new Map<string, string[]>([
+  [
+    "PermissionRequest",
+    ["hook_event_name", "cwd", "session_id", "tool_name", "prompt_id", "permission_mode"],
+  ],
+  [
+    "PostToolUse",
+    ["hook_event_name", "cwd", "session_id", "tool_name", "tool_use_id", "background_task_id"],
+  ],
+]);
+function hookFacts(input: Obj): Obj {
+  const keys = typeof input.hook_event_name === "string" && eventKeys.get(input.hook_event_name);
+  if (keys) return pick(input, keys);
+  const facts: Obj = pick(input, [
+    "hook_event_name",
+    "session_id",
+    "cwd",
+    "transcript_path",
+    "permission_mode",
+    "prompt_id",
+    "effort",
+    "model",
+    "agent_type",
+    "source",
+    "reason",
+    "stop_hook_active",
+  ]);
   addDigests(input, facts);
   for (const key of ["background_tasks", "session_crons"]) {
     const name = key + "_count";
@@ -244,6 +263,13 @@ export function hookPrivacy(p: Obj) {
     )
       facts[name] = input[name];
   }
+  return facts;
+}
+export function hookPrivacy(p: Obj) {
+  const input = object(p.input);
+  const facts = hookFacts(input);
+  const notification = taskNotification.safeParse(input.task_notification);
+  if (notification.success) facts.task_notification = notification.data;
   return telemetry({
     v: 1,
     ...pick(p, ["id", "at"]),
@@ -254,17 +280,7 @@ export function hookPrivacy(p: Obj) {
       "CLAUDE_EFFORT",
       "CLAUDE_CODE_CHILD_SESSION",
     ]),
-    input:
-      input.hook_event_name === "PermissionRequest"
-        ? pick(input, [
-            "hook_event_name",
-            "cwd",
-            "session_id",
-            "tool_name",
-            "prompt_id",
-            "permission_mode",
-          ])
-        : facts,
+    input: facts,
   });
 }
 

@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { parseHook } from "../ingest/hook-record.ts";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -168,6 +170,117 @@ void test("derives measured execution, CI queues and staging occupancy from sour
       { issue: 313, start: issueBegin, end: finish },
       { issue: 41, start, end },
     ]);
+  } finally {
+    derived.close();
+  }
+});
+
+void test("paired background Bash hooks produce one measured local run per completed task", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "metrics-background-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const file = join(root, "metrics.sqlite");
+  const writer = openL1Writer(file, registry);
+  const start = "2026-11-20T15:00:00.000Z";
+  const end = "2026-11-20T15:02:00.000Z";
+  const received = "2026-11-20T15:04:00.000Z";
+  const launch = {
+    hook_event_name: "PostToolUse",
+    session_id: "s",
+    cwd: "/repo",
+    tool_name: "Bash",
+    tool_use_id: "tool_1",
+    background_task_id: "bg",
+  };
+  const facts = {
+    task_id: "bg",
+    tool_use_id: "tool_1",
+    status: "completed",
+    exit_code: 0,
+    ended_at: end,
+  };
+  const notification = {
+    hook_event_name: "UserPromptSubmit",
+    session_id: "s",
+    prompt: "<task-notification>\n<summary>private summary words</summary>\n</task-notification>",
+    task_notification: facts,
+  };
+  function hook(at: string, input: object) {
+    const bytes = Buffer.from(
+      JSON.stringify({
+        v: 1,
+        id: randomUUID(),
+        at,
+        stdin: JSON.stringify(input),
+        project: { dir: "/repo", git: { kind: "directory" } },
+        env: { T3CODE_THREAD_ID: "owner" },
+      }),
+    );
+    const parsed = parseHook(bytes, "/repo/.git");
+    assert.deepEqual(parsed.rejects, []);
+    writer.ingest(parsed.records, received);
+  }
+  try {
+    writer.ingest(
+      [
+        {
+          source: "t3.thread",
+          naturalKey: "owner",
+          sourceVersion: "1",
+          occurredAt: start,
+          scope: { kind: "repo" },
+          payload: { issue: 313, title_kind: "owner", created_at: start },
+        },
+      ],
+      start,
+    );
+    hook(start, launch);
+    hook(start, { ...launch, background_task_id: "orphan" });
+    hook(start, { ...launch, tool_use_id: "unmatched" });
+    hook(start, { ...launch, session_id: "other" });
+    hook("2026-11-20T15:05:00.000Z", {
+      ...notification,
+      task_notification: { ...facts, ended_at: null },
+    });
+    hook(received, notification);
+    hook(start, { ...launch, background_task_id: "stopped" });
+    hook(received, {
+      ...notification,
+      task_notification: {
+        ...facts,
+        task_id: "stopped",
+        status: "stopped",
+        exit_code: null,
+        ended_at: null,
+      },
+    });
+  } finally {
+    writer.close();
+  }
+  const raw = new DatabaseSync(file, { readOnly: true });
+  try {
+    const hooks = raw.prepare("SELECT payload FROM l1_record WHERE source='claude.hook'").all();
+    assert.equal(hooks.length, 8);
+    assert.doesNotMatch(JSON.stringify(hooks), /private|summary words/u);
+  } finally {
+    raw.close();
+  }
+  execFileSync(process.execPath, [join(import.meta.dirname, "build.ts")], {
+    env: { ...process.env, INSTANT_MADORI_METRICS_HOME: root },
+  });
+  const derived = new DatabaseSync(join(root, "metrics-derived.sqlite"), { readOnly: true });
+  try {
+    assert.deepEqual(
+      derived
+        .prepare(
+          "SELECT actor,issue,start,end,detail FROM span WHERE kind='local_run' ORDER BY detail",
+        )
+        .all()
+        .map(Object.values),
+      [
+        ["owner", 313, start, end, "background:exit 0"],
+        ["owner", 313, start, received, "background:stopped"],
+      ],
+    );
   } finally {
     derived.close();
   }

@@ -306,3 +306,53 @@ void test("Codex recorder and receiver preserve turn and approval facts across r
     }
   }
 });
+
+void test("background hook privacy retains only replay-safe launch and notification facts", () => {
+  const sanitize = registry["claude.hook"].sanitize;
+  const launch = {
+    hook_event_name: "PostToolUse",
+    session_id: "s",
+    cwd: "/repo",
+    tool_name: "Bash",
+    tool_use_id: "tool_1",
+    background_task_id: "bg",
+  };
+  const stored = sanitize({
+    input: {
+      ...launch,
+      prompt: "private prompt",
+      reason: "private reason",
+      tool_response: { stdout: "private output" },
+    },
+  });
+  assert.deepEqual(stored.input, launch);
+  assert.deepEqual(sanitize(stored), stored);
+  const facts = {
+    task_id: "bg",
+    tool_use_id: "tool_1",
+    status: "failed",
+    exit_code: 1,
+    ended_at: null,
+  };
+  const input = {
+    hook_event_name: "UserPromptSubmit",
+    prompt: "private summary /private/file",
+    task_notification: facts,
+  };
+  const row = sanitize({ input });
+  assert.deepEqual(object(row.input).task_notification, facts);
+  assert.doesNotMatch(JSON.stringify(row), /private/u);
+  assert.deepEqual(sanitize(row), row);
+  for (const invalid of [
+    { ...facts, prompt: "extra" },
+    { ...facts, task_id: "bad id" },
+    { ...facts, tool_use_id: "gh" + "p_" + "a".repeat(36) },
+    { ...facts, exit_code: 0.5 },
+    { ...facts, ended_at: "later" },
+  ]) {
+    assert.equal(
+      object(sanitize({ input: { ...input, task_notification: invalid } }).input).task_notification,
+      undefined,
+    );
+  }
+});

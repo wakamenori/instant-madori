@@ -73,7 +73,8 @@ void test("Claude registers the verifier guard alongside the existing metrics ho
     UserPromptSubmit: [{ hooks: [metrics(), guard("UserPromptSubmit")] }],
     PreToolUse: [{ hooks: [guard("PreToolUse")] }],
     Stop: [{ hooks: [metrics(), guard("Stop")] }],
-    PermissionRequest: [{ hooks: [metrics(" permission")] }],
+    PermissionRequest: [{ hooks: [metrics()] }],
+    PostToolUse: [{ matcher: "Bash", hooks: [metrics()] }],
   });
 });
 

@@ -19,6 +19,17 @@ FROM issue_change ic JOIN change c USING(pr) JOIN stg_actions_job j
  ON j.workflow='check' AND (j.head_branch=c.head_ref OR EXISTS(SELECT 1 FROM json_each(j.pr_numbers) WHERE value=c.pr));
 
 CREATE TABLE span AS
+WITH launches AS (
+ SELECT occurred_at,payload->>'$.input.session_id' session,payload->>'$.input.tool_use_id' tool_use_id,
+  payload->>'$.input.background_task_id' task_id
+ FROM stg_claude_hook WHERE payload->>'$.input.hook_event_name'='PostToolUse' AND payload->>'$.input.tool_name'='Bash'
+), notifications AS (
+ SELECT occurred_at,payload->>'$.input.session_id' session,payload->>'$.input.task_notification' notification,natural_key
+ FROM stg_claude_hook WHERE payload->>'$.input.hook_event_name'='UserPromptSubmit' AND payload->>'$.input.task_notification' IS NOT NULL
+), completions AS (
+ SELECT *,row_number() OVER (PARTITION BY session,notification->>'$.tool_use_id',notification->>'$.task_id' ORDER BY occurred_at,natural_key) arrival
+ FROM notifications
+)
 SELECT a.id actor,a.issue,CASE role WHEN 'owner' THEN 'owner_turn' WHEN 'implementer' THEN 'implementer_run'
  WHEN 'advisor' THEN 'advisor_run' WHEN 'verifier' THEN 'verifier_run' ELSE 'coordinator_turn' END kind,r.started_at start,r.completed_at end,
  CASE WHEN a.role='coordinator' THEN (SELECT i.issue FROM stg_t3_message m JOIN inside_actor i ON i.id=m.sender_thread_id
@@ -32,6 +43,11 @@ FROM stg_model_call m JOIN stg_session_thread t USING(session) JOIN inside_actor
 UNION ALL SELECT t.thread_id,i.issue,iif(c.mark='decision','decision','local_run'),c.start,c.end,iif(c.stands_for='local_run','waited:'||c.name,c.name)
 FROM stg_tool_call c JOIN stg_session_thread t USING(session) JOIN inside_actor i ON i.id=t.thread_id
 WHERE c.mark IS NULL OR c.mark='decision' OR c.stands_for='local_run'
+UNION ALL SELECT t.thread_id,i.issue,'local_run',l.occurred_at,coalesce(c.notification->>'$.ended_at',c.occurred_at),
+ 'background:'||coalesce('exit '||(c.notification->>'$.exit_code'),c.notification->>'$.status')
+FROM launches l JOIN completions c ON c.session=l.session AND c.notification->>'$.tool_use_id'=l.tool_use_id
+ AND c.notification->>'$.task_id'=l.task_id AND c.arrival=1
+JOIN stg_session_thread t ON t.session=l.session JOIN inside_actor i ON i.id=t.thread_id
 UNION ALL SELECT j.run_id||'/'||j.run_attempt,ij.issue,'ci_run',min(j.started_at),
  iif(count(*)=count(j.completed_at),max(j.completed_at),NULL),NULL
 FROM stg_actions_job j JOIN check_issue_attempt ij USING(run_id,run_attempt)
