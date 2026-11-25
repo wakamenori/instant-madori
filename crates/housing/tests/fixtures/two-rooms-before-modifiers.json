@@ -1,0 +1,94 @@
+{
+  "version": 1,
+  "house": {
+    "storeys": [{ "id": "s1", "base_elevation": 0.0, "height": 2700.0 }],
+    "vertices": [
+      { "id": "a", "storey": "s1", "at": { "x": 0.0, "y": 0.0 } },
+      { "id": "b", "storey": "s1", "at": { "x": 4000.0, "y": 0.0 } },
+      { "id": "c", "storey": "s1", "at": { "x": 8000.0, "y": 0.0 } },
+      { "id": "d", "storey": "s1", "at": { "x": 8000.0, "y": 5000.0 } },
+      { "id": "e", "storey": "s1", "at": { "x": 4000.0, "y": 5000.0 } },
+      { "id": "g", "storey": "s1", "at": { "x": 0.0, "y": 5000.0 } }
+    ],
+    "boundaries": [
+      {
+        "id": "s-w",
+        "start": "a",
+        "end": "b",
+        "wall": { "offsets": { "left": 60.0, "right": 60.0 }, "height": 2400.0 }
+      },
+      {
+        "id": "s-e",
+        "start": "b",
+        "end": "c",
+        "wall": { "offsets": { "left": 60.0, "right": 60.0 }, "height": 2400.0 }
+      },
+      {
+        "id": "east",
+        "start": "c",
+        "end": "d",
+        "wall": { "offsets": { "left": 60.0, "right": 60.0 }, "height": 2400.0 }
+      },
+      {
+        "id": "n-e",
+        "start": "d",
+        "end": "e",
+        "wall": { "offsets": { "left": 60.0, "right": 60.0 }, "height": 2400.0 }
+      },
+      {
+        "id": "n-w",
+        "start": "e",
+        "end": "g",
+        "wall": { "offsets": { "left": 60.0, "right": 60.0 }, "height": 2400.0 }
+      },
+      {
+        "id": "west",
+        "start": "g",
+        "end": "a",
+        "wall": { "offsets": { "left": 60.0, "right": 60.0 }, "height": 2400.0 }
+      },
+      {
+        "id": "mid",
+        "start": "b",
+        "end": "e",
+        "wall": { "offsets": { "left": 60.0, "right": 60.0 }, "height": 2400.0 }
+      }
+    ],
+    "rooms": [
+      {
+        "id": "left",
+        "name": "left",
+        "usage": "bedroom",
+        "edges": [
+          { "boundary": "s-w", "direction": "forward" },
+          { "boundary": "mid", "direction": "forward" },
+          { "boundary": "n-w", "direction": "forward" },
+          { "boundary": "west", "direction": "forward" }
+        ]
+      },
+      {
+        "id": "right",
+        "name": "right",
+        "usage": "bedroom",
+        "edges": [
+          { "boundary": "s-e", "direction": "forward" },
+          { "boundary": "east", "direction": "forward" },
+          { "boundary": "n-e", "direction": "forward" },
+          { "boundary": "mid", "direction": "reverse" }
+        ]
+      }
+    ],
+    "openings": [
+      {
+        "id": "door",
+        "wall": "mid",
+        "from": "end",
+        "distance": 400.0,
+        "width": 900.0,
+        "height": 2100.0,
+        "sill": 0.0,
+        "fitting": { "kind": "door", "hinge": "start", "opens_to": "left" }
+      }
+    ]
+  }
+}

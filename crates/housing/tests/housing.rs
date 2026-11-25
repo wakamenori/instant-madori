@@ -555,3 +555,12 @@ fn walking_a_loop_twice_reports_the_repeated_boundary_and_vertex() {
         Reason::TooManyRooms { .. } | Reason::SideTaken { .. }
     )));
 }
+
+#[test]
+fn two_rooms_before_modifiers_round_trips() {
+    let fixture = include_str!("fixtures/two-rooms-before-modifiers.json");
+    let house = House::from_json(fixture).unwrap();
+    assert_eq!(house.data(), &two_rooms());
+    let value = |text: &str| serde_json::from_str::<serde_json::Value>(text).unwrap();
+    assert_eq!(value(&house.to_json().unwrap()), value(fixture));
+}
