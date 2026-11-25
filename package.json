@@ -31,7 +31,7 @@
     "globals": "17.14.0",
     "jose": "catalog:",
     "json-schema-to-zod": "catalog:",
-    "knip": "6.45.1",
+    "knip": "6.48.0",
     "lefthook": "2.2.2",
     "prettier": "3.10.1",
     "typescript": "catalog:",
