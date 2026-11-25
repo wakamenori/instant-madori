@@ -1,3 +1,5 @@
+mod paint;
+mod side;
 use crate::{
     commands::{CommandError, execute_checked},
     display::{self, BodyElements, ExportError},
@@ -51,8 +53,65 @@ pub enum BodyDefect {
         element: ElementId,
     },
 }
+impl Entry {
+    fn side_of(&self, role: &FaceRole) -> Option<Side> {
+        match &self.kind {
+            EntryKind::Wall { left, .. } if left == role => Some(Side::Left),
+            EntryKind::Wall { right, .. } if right == role => Some(Side::Right),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum WallColorFailure {
+    RoleNotInTable {
+        face: FaceRole,
+    },
+    NoSideFace {
+        face: FaceRole,
+    },
+    NoUncoveredRegion {
+        face: FaceRole,
+    },
+    SliverRegion {
+        face: FaceRole,
+        clearance: f64,
+    },
+    RoomNotOnSide {
+        face: FaceRole,
+        found: Option<RoomId>,
+    },
+    NoFace {
+        face: FaceRole,
+        point: [f64; 3],
+    },
+    AmbiguousFace {
+        face: FaceRole,
+        point: [f64; 3],
+        bodies: Vec<String>,
+    },
+    StrayColor {
+        body: String,
+        face_index: usize,
+    },
+    ColorMismatch {
+        body: String,
+        face_index: usize,
+        found: [u8; 3],
+    },
+    Unpainted {
+        face: FaceRole,
+        expected_area: f64,
+        painted_area: f64,
+    },
+}
 #[derive(Debug)]
 pub enum BuildError {
+    WallColor {
+        element: ElementId,
+        reason: WallColorFailure,
+    },
     House(Rejections),
     Command {
         element: ElementId,
@@ -66,6 +125,7 @@ pub enum BuildError {
 impl std::fmt::Display for BuildError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::WallColor { element, reason } => write!(f, "{}: {reason:?}", element.as_str()),
             Self::House(e) => write!(f, "{e}"),
             Self::Command { element, source } => write!(f, "{}: {source}", element.as_str()),
             Self::UnexpectedBodies { element, created } => write!(
@@ -108,6 +168,15 @@ impl Source<'_> {
     }
 }
 
+fn storey_base(house: &House, storey: &StoreyId) -> Result<f64, Reason> {
+    house
+        .storeys()
+        .find(|s| &s.data().id == storey)
+        .map(|s| s.data().base_elevation)
+        .ok_or_else(|| Reason::UnknownStorey {
+            storey: storey.as_str().into(),
+        })
+}
 struct Prism {
     outline: SimplePolygon,
     base: f64,
@@ -126,16 +195,7 @@ impl Source<'_> {
             Self::Opening(o) => &o.wall().start().data().storey,
             Self::Floor(r) => r.storey(),
         };
-        let base = house
-            .storeys()
-            .find(|s| &s.data().id == storey)
-            .ok_or_else(|| {
-                reject(Reason::UnknownStorey {
-                    storey: storey.as_str().into(),
-                })
-            })?
-            .data()
-            .base_elevation;
+        let base = storey_base(house, storey).map_err(reject)?;
         Ok(match self {
             Self::Wall(w) => Prism {
                 outline: w.planform()?,
@@ -272,6 +332,12 @@ fn extrude(session: &mut Session, p: &Prism, mut args: Value) -> Result<Extrusio
 
 impl Model {
     pub fn build(house: &House, previous: Option<&Model>) -> Result<Self, BuildError> {
+        let mut model = Self::assemble(house, previous)?;
+        model.paint(house)?;
+        Ok(model)
+    }
+
+    fn assemble(house: &House, previous: Option<&Model>) -> Result<Self, BuildError> {
         let fresh: Vec<_> = house
             .boundaries()
             .map(Source::Wall)
