@@ -20,7 +20,7 @@
     "dev": "node scripts/build/build-wasm.ts && pnpm --filter @madori/web build && node scripts/dev/dev.ts",
     "upstream:check": "node scripts/upstream/upstream.ts check",
     "upstream:update": "node scripts/upstream/upstream.ts update",
-    "setup": "mise install && node scripts/build/rustup-cargo.ts && node scripts/dev/prepare-checkout.ts && cargo install wasm-bindgen-cli --version 0.2.129 --locked --root .tools -j 4 && node scripts/build/build-wasm.ts && pnpm --filter @madori/worker types"
+    "setup": "node scripts/shared/rustup-cargo.ts && mise install && node scripts/dev/prepare-checkout.ts && cargo install wasm-bindgen-cli --version 0.2.129 --locked --root .tools -j 4 && node scripts/build/build-wasm.ts && pnpm --filter @madori/worker types"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
