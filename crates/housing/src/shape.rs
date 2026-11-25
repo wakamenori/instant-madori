@@ -141,18 +141,18 @@ impl Edge {
             (None, Some(arc)) => {
                 let unit = self.b.delta_from(self.a).unit();
                 let offset = arc.center.delta_from(self.a);
-                let along = offset.dot(unit);
+                let foot = offset.dot(unit);
                 let half_sq = (arc.radius - offset.cross(unit).abs())
                     * (arc.radius + offset.cross(unit).abs());
                 let roots = if let Some(p) = shared.into_iter().flatten().next() {
-                    // One root is the common endpoint. Reflect it across the chord midpoint.
-                    let known = p.delta_from(self.a).dot(unit);
-                    [known, 2. * along - known]
+                    let shared_root = p.delta_from(self.a).dot(unit);
+                    let mirrored_root = foot + (foot - shared_root);
+                    [shared_root, mirrored_root]
                 } else {
                     if half_sq < 0. {
                         return false;
                     }
-                    [along - half_sq.sqrt(), along + half_sq.sqrt()]
+                    [foot - half_sq.sqrt(), foot + half_sq.sqrt()]
                 };
                 roots.into_iter().any(|t| {
                     let p = self.a.translated(unit * t);
