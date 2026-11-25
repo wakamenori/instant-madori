@@ -47,6 +47,11 @@ impl SideFrame {
     }
 }
 
+pub(super) enum PlaceError {
+    Color(WallColorFailure),
+    House(Rejections),
+}
+
 pub(super) struct SidePlan {
     pub frame: SideFrame,
     pub spans: Vec<Range<f64>>,
@@ -60,11 +65,10 @@ pub(super) fn plan_side(
     wall: BoundaryView,
     side: Side,
     row: &WallColor,
-    element: &ElementId,
-) -> Result<SidePlan, BuildError> {
+) -> Result<SidePlan, PlaceError> {
     let storey = &wall.start().data().storey;
     let base = storey_base(house, storey).map_err(|reason| {
-        BuildError::House(
+        PlaceError::House(
             Rejection {
                 element: ElementKind::Wall,
                 id: row.wall.as_str().into(),
@@ -74,12 +78,9 @@ pub(super) fn plan_side(
         )
     })?;
     let frame = SideFrame::new(wall, side, base);
-    let outline = wall.planform().map_err(BuildError::House)?;
+    let outline = wall.planform().map_err(PlaceError::House)?;
     let merged = side_spans(&outline, &frame);
-    let fail = |reason| BuildError::WallColor {
-        element: element.clone(),
-        reason,
-    };
+    let fail = PlaceError::Color;
     let height = wall.data().wall.height;
     let holes: Vec<_> = wall.openings().map(|o| o.elevation()).collect();
     let (cells, free_area) = grid(&merged, height, &holes, &row.face).map_err(fail)?;

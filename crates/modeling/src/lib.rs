@@ -4,7 +4,10 @@ pub mod commands;
 pub mod display;
 mod model;
 pub mod sample;
-pub use model::{BodyDefect, BuildError, Entry, EntryKind, Model, WallColorFailure};
+pub use model::{
+    BuildError, Entry, EntryKind, Mismatch, MismatchReason, Mismatches, Model, Subject,
+    WallColorFailure,
+};
 
 use solidcraft_doc::Document;
 use solidcraft_engine::Session;

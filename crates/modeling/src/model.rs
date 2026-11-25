@@ -1,3 +1,6 @@
+mod check;
+mod projection;
+pub use check::{Mismatch, MismatchReason, Mismatches, Subject};
 mod paint;
 mod side;
 use crate::{
@@ -41,16 +44,6 @@ pub enum EntryKind {
         opening: OpeningId,
         host: BoundaryId,
         cut: u64,
-    },
-}
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum BodyDefect {
-    Split {
-        element: ElementId,
-        bodies: Vec<String>,
-    },
-    Missing {
-        element: ElementId,
     },
 }
 impl Entry {
@@ -108,10 +101,6 @@ pub enum WallColorFailure {
 }
 #[derive(Debug)]
 pub enum BuildError {
-    WallColor {
-        element: ElementId,
-        reason: WallColorFailure,
-    },
     House(Rejections),
     Command {
         element: ElementId,
@@ -125,7 +114,6 @@ pub enum BuildError {
 impl std::fmt::Display for BuildError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::WallColor { element, reason } => write!(f, "{}: {reason:?}", element.as_str()),
             Self::House(e) => write!(f, "{e}"),
             Self::Command { element, source } => write!(f, "{}: {source}", element.as_str()),
             Self::UnexpectedBodies { element, created } => write!(
@@ -152,8 +140,8 @@ enum Source<'a> {
     Opening(OpeningView<'a>),
     Floor(RoomView<'a>),
 }
-impl Source<'_> {
-    fn key(&self) -> (ElementKind, &str) {
+impl<'a> Source<'a> {
+    fn key(&self) -> (ElementKind, &'a str) {
         match self {
             Self::Wall(w) => (ElementKind::Wall, w.data().id.as_str()),
             Self::Opening(o) => (ElementKind::Opening, o.data().id.as_str()),
@@ -498,25 +486,6 @@ impl Model {
             .collect();
         names.sort();
         names
-    }
-    pub fn defects(&self) -> Vec<BodyDefect> {
-        self.entries
-            .iter()
-            .filter(|e| !matches!(e.kind, EntryKind::Opening { .. }))
-            .filter_map(|e| {
-                let bodies = self.bodies_of(e.element.as_str());
-                match bodies.len() {
-                    0 => Some(BodyDefect::Missing {
-                        element: e.element.clone(),
-                    }),
-                    1 => None,
-                    _ => Some(BodyDefect::Split {
-                        element: e.element.clone(),
-                        bodies,
-                    }),
-                }
-            })
-            .collect()
     }
     pub fn display(&self) -> Result<DisplayModel, ExportError> {
         let world = self
