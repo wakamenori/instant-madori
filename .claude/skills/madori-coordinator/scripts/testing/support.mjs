@@ -80,7 +80,7 @@ export function repository(files, env) {
   const run = (...args) => git(author, env, ...args);
   git(root, env, "init", "-q", "--bare", "-b", "main", origin);
   git(root, env, "init", "-q", "-b", "main", author);
-  const commit = (changes) => {
+  const commit = (changes, { date, subject = "changes" } = {}) => {
     for (const [name, contents] of Object.entries(changes)) {
       const file = join(author, name);
       if (contents === null) rmSync(file);
@@ -90,7 +90,8 @@ export function repository(files, env) {
       }
     }
     run("add", "-A");
-    run("commit", "-qm", "changes");
+    git(author, date ? { ...env, GIT_COMMITTER_DATE: date } : env, "commit", "-qm", subject);
+    return run("rev-parse", "HEAD");
   };
   commit(files);
   run("remote", "add", "origin", origin);

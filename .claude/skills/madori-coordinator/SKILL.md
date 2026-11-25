@@ -254,28 +254,48 @@ node scripts/dev/staging.ts end <Issue の番号>
 - PR の今の head の最新の `verify` のステータスが `success` である（「検証役を立てる」）。
 - self-hosted runner の `check` が、同じ head で成功した。ブランチ保護が無いので、`gh pr checks` で自分で確かめる。
 - 自分で差分を読んだ。
-- D1 のマイグレーションを加える PR なら、今の main のマイグレーションと番号が衝突しない。PR の `check` は分岐点と比べるので、先に main へ入った同じ番号には、マージ後の main の `check` で初めて気づく。
-- staging が占有されていない（「staging の占有」）か、そのマージがデプロイを起こさない。「staging を占有する」Issue の PR なら、マージの直前に占有を始める（「staging の占有」）。
+- D1 のマイグレーションを加える PR なら、今の main のマイグレーションと番号が衝突しない。PR の `check` は分岐点と比べるので、先に main へ入った同じ番号には、マージの後のデプロイの `pnpm check --full` で初めて気づく。
+- マージの門が通す（次の段落）。
+- staging が占有されていない（「staging の占有」）か、門が `deploys: no` を出した。「staging を占有する」Issue の PR なら、マージの直前に占有を始める（「staging の占有」）。
 
-占有の間にマージするときは、`--match-head-commit` に渡す head で、PR の変更のうち main の `deploy-staging.yml` の `paths-ignore` に入らないファイルを出す。スクリプトは main と PR の head を取得し、一覧を毎回 main から読む。一覧をこのスキルに写さない。
+出荷するコミットの全体検査は、staging へのデプロイの `pnpm check --full` が受け持つ。検査に落ちたコミットはデプロイされない。マージの門は、デプロイを起こすマージを一件ずつにし、main の最新の検査が失敗している間は止める。そのため、出荷するコミットはすべて自分の `--full` を通り、失敗した main に変更が積み重ならない。門は、マージの直前に、PR ごとに番号と head を書き込んで打つ。前のマージより前に打った結果は古い。
 
 ```sh
-node .claude/skills/madori-coordinator/scripts/deploy-files.mjs before <番号> <head>
+node .claude/skills/madori-coordinator/scripts/merge-gate.mjs check <番号> <head>
 ```
 
-0で終わって何も出なければ、デプロイを起こさないので占有の間もマージしてよい。ファイルが出たらデプロイを起こすので、占有が終わるまで待つ。一覧を読み取れないときは、警告と一緒に PR の変更ファイルがすべて出るので、デプロイを起こすマージとして扱う。0以外で終わったら判定できていないので、占有の間はマージしない。
+- 0で終わり、1行目が `merge` なら、マージしてよい。
+- 3で終わり、1行目が `wait` なら、マージしない。理由は `reason:` の行にある。
+  - main が `red` なら、「main が赤のとき」に従う。
+  - main が `running` なら、前のデプロイの結果を待つ。「マージの後」で前倒しした見回りが戻る。
+  - main が `unchecked` なら、main の最新のデプロイを起こすコミットを検査した実行が無い（取り消されたか、作られなかった）。staging が占有されていなければ `gh workflow run deploy-staging.yml --ref main` を打ち、「マージの後」のとおり結果を待つ。
+- 1で終わったら、判定できていない。マージしない。表示された理由を直して打ち直す。
+- `deploys: yes|no` の行は、そのマージがデプロイを起こすかを示す。PR の変更のうち、main の `deploy-staging.yml` の `paths-ignore` に入らないファイルがあれば `yes` で、一覧は毎回 main から読む。`deploys: no` の PR は、main が赤でも、デプロイが動いていても、staging の占有の間も、門が通す。
+
+門は、main の状態を毎回 git と Actions の記録から導き、どこにも書き残さない。main の first parent を新しい順にたどり、`paths-ignore` の外のファイルを変えた最初のコミット（デプロイを起こすコミット）から先頭までのうち、取り消されていない deploy-staging の実行（push と、main での手動の実行）を持つ最も新しいコミットの、最も新しい実行で決める。成功なら `green`、動いていれば `running`、失敗なら `red` で、どの段階で落ちても `red` になる。そのような実行が無ければ `unchecked` である。
 
 ```sh
 gh pr merge <番号> --merge --match-head-commit <head>
 ```
 
-続けてマージするときも、PR ごとに、判定とマージを、番号と head を書き込んだ別々のコマンドで打つ。
+続けてマージするときも、PR ごとに、門とマージを、番号と head を書き込んだ別々のコマンドで打つ。デプロイを起こすマージの後は、そのデプロイが成功するまで、門が次のデプロイを起こすマージを止める。
 
 main が進んだ後に `check` をやり直しても、GitHub は最初のマージのコミットで検査する。新しい main と合わせて検査するには、担当に main を取り込ませて head を新しくする。
 
 ## マージの後
 
-マージで main に入った変更に `paths-ignore` に入らないファイルがあれば、staging へ自動でデプロイされる。結果は見回りで読む。早く読みたいときは、ポーリングせずに、`schedule_task` の一回きりの予定（`schedule: {type: "once", runAt}`、`bindToCurrentThread: true`）で見回りを前倒しする。マージの後は PR の head が main の祖先になるので、`before` ではなく次のコマンドで判定する。マージコミットとその第一親の差分を、マージコミットの `deploy-staging.yml` の一覧で判定する。
+マージで main に入った変更に `paths-ignore` に入らないファイルがあれば、staging へ自動でデプロイされる。次のデプロイを起こすマージはこの結果を待つので、デプロイを起こすマージの後は、ポーリングせずに、`schedule_task` の一回きりの予定（`schedule: {type: "once", runAt}`、`bindToCurrentThread: true`）で12分後に見回りを前倒しする。前倒しした見回りでは、次のコマンドで main の状態を読む。
+
+```sh
+node .claude/skills/madori-coordinator/scripts/merge-gate.mjs status
+```
+
+- `green` なら、デプロイは成功した。次のマージに進む。
+- `running` なら、まだ終わっていない。5分後にもう一度前倒しする。
+- `red` なら、「main が赤のとき」に従う。
+- `unchecked` なら、staging が占有されていなければ `gh workflow run deploy-staging.yml --ref main` を打ち、12分後に前倒しする。
+
+担当にデプロイを知らせるかは、そのマージで動いたデプロイの実行で決める。デプロイが動いたかは、次のコマンドで、マージコミットとその第一親の差分を、マージコミットの `deploy-staging.yml` の一覧で判定する。
 
 ```sh
 node .claude/skills/madori-coordinator/scripts/deploy-files.mjs after <番号>
@@ -284,12 +304,23 @@ node .claude/skills/madori-coordinator/scripts/deploy-files.mjs after <番号>
 - ファイルが出たら、デプロイが動く。そのとき標準エラーに `merge commit <マージ SHA>` が出る。その実行は、マージ SHA で特定する（`gh run list --workflow deploy-staging.yml --branch main --event push --commit <マージ SHA>`）。手で始めた実行は、同じ SHA でも数えない。
 - 0で終わって何も出なければ、デプロイは動かない。そのマージでは、デプロイの結果を待たず、担当にもデプロイを知らせない。
 - 0以外で終わったら、判定できていない。表示された理由を直して打ち直す。
-- デプロイか疎通の確認が失敗したら、原因を環境、コード、不安定な試験のどれかに分ける。分ける前に、落ちた試験の直近の合否を、`node scripts/check/test-history.ts --test <試験名>` で `check` と `deploy-staging` の両方について数え、手元で動かした結果も足す。
-  - 環境なら、「staging の占有」に従って `gh run rerun <run> --failed` でやり直す。
-  - コードなら、直す担当をすぐに立てる。
-  - 不安定なら、AGENTS.md「検査と引き継ぎ」のとおり不具合の Issue にする。やり直しは、不安定か常に落ちるかを見分けるためだけに使う。
 - 落ちる見込みだけを理由に、デプロイを取り消さない。取り消したマージと、検証役が確かめられなかった検査を残したマージは、その結果を読むまで見回りの手順6で追う。
 - Issue の終わった証拠がマージの後の staging での確認を求めるなら、デプロイが終わったら、指揮役が担当のスレッドへ `t3_thread_send` で知らせる。担当のスレッドはマージで settled になり、担当の見張りは消えているため。知らせを受けた担当が確かめて、記録が要るなら記録の PR を作る。
+
+### main が赤のとき
+
+門が `red` を出したら、main の最新の検査が失敗している。直るまでは、デプロイを起こさない PR と、その失敗を直す PR だけをマージする。main が `red` か `unchecked` の間は、staging の占有を始めない。
+
+1. 落ちた段階と試験を読む。落ちた試験の直近の合否を、`node scripts/check/test-history.ts --test <試験名>` で `check` と `deploy-staging` の両方について数え、手元で動かした結果も足す。
+2. 落ちた実行を `gh run rerun <run> --failed` で一度だけやり直し、12分後に見回りを前倒しする。やり直しは、不安定か常に落ちるかを見分けるためだけに使う（AGENTS.md「検査と引き継ぎ」）。
+3. やり直しが成功したら、門はそのまま `green` に戻る。不安定な試験なら不具合の Issue にし、環境の失敗なら、マージした PR に記録する。
+4. 同じように落ちたら、原因を分けてすぐに動く。
+   - コード：main の変更に従って落ちる。直すか戻す担当を立てる。デプロイを起こさないマージ（文書の中のパスなど）との組み合わせで落ちることもあるので、前に `green` だったコミットからのすべてのマージを疑う。
+   - 外の変化（`pnpm audit` の新しい脆弱性など）：追従する担当を立てる。
+   - main の変更に関係なく、どのコミットでも落ちる試験：AGENTS.md のとおり不具合の Issue にし、その試験を一時的に外す担当を立てる。
+   - 続く環境の失敗（runner のディスク、Docker、Cloudflare）：環境を直してからやり直す。
+5. 直す PR は、門が `deploys: yes` を出すなら、`merge-gate.mjs check <番号> <head> --fixes <run>` が通してからマージする。門は、`<run>` が今の `red` の実行のときだけ通す。門が `deploys: no` を出す直し（`.claude/` の試験、`metrics/`、文書など、`--full` が読むがデプロイしないファイル）は、そのままマージし、続けて `gh workflow run deploy-staging.yml --ref main` で直しを含む先頭を検査する。どちらも12分後に見回りを前倒しする。
+6. 占有している担当の Issue のマージが main を赤にしたときは、その直しのマージと、main を検査し直す実行も、その占有に含めて指揮役が行う。
 
 ## 記録と、見つかった問題の行き先
 

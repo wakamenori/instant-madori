@@ -12,7 +12,7 @@ function request([kind, pr, head, ...extra]) {
   throw new UsageError("usage: deploy-files.mjs before <PR> <head> | after <PR>");
 }
 
-function git(...args) {
+export function git(...args) {
   return execFileSync("git", args, { encoding: "utf8", stdio: "pipe", maxBuffer: 64 << 20 });
 }
 
@@ -56,8 +56,7 @@ function pathsIgnore(text) {
   return patterns;
 }
 
-function main() {
-  const { range, listFrom, merge } = compare(request(process.argv.slice(2)));
+export function deployingFiles(listFrom, range, label = "deploy-files") {
   const spec = `${listFrom}:${workflow}`;
   let text = "";
   try {
@@ -78,15 +77,23 @@ function main() {
   );
   if (!patterns.length)
     console.error(
-      `deploy-files: cannot read paths-ignore from ${spec}. Every changed file counts as deploying.`,
+      `${label}: cannot read paths-ignore from ${spec}. Every changed file counts as deploying.`,
     );
+  return files;
+}
+
+function main() {
+  const { range, listFrom, merge } = compare(request(process.argv.slice(2)));
+  const files = deployingFiles(listFrom, range);
   if (files && merge) console.error(`merge commit ${merge}`);
   if (files) process.stdout.write(files.replaceAll("\0", "\n"));
 }
 
-try {
-  main();
-} catch (error) {
-  console.error(`deploy-files: ${error.message}`);
-  process.exitCode = error instanceof UsageError ? 2 : 1;
+if (import.meta.main) {
+  try {
+    main();
+  } catch (error) {
+    console.error(`deploy-files: ${error.message}`);
+    process.exitCode = error instanceof UsageError ? 2 : 1;
+  }
 }
