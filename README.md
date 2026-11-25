@@ -233,20 +233,21 @@ Miniflareのsharp依存は、LGPLのlibvipsを含むため除外しています�
 
 ## 配置と依存関係
 
-| 場所                     | 担当                                                                                   |
-| ------------------------ | -------------------------------------------------------------------------------------- |
-| `apps/web`               | React・TypeScriptの画面                                                                |
-| `apps/worker`            | Cloudflare WorkersのAPI・静的配信・Durable Objects・Workflow                           |
-| `apps/geometry`          | ネイティブRustのHTTP入口、Container用Dockerfile                                        |
-| `crates/display`         | 依存を持たない表示データの型と版付きバイナリ形式                                       |
-| `crates/geometry-api`    | 内部API契約とTypeScript定義の生成                                                      |
-| `crates/housing`         | 住宅データと整合性。環境整備時点ではモジュールの入口のみ                               |
-| `crates/modeling`        | 住宅操作とSolidCraftの接続                                                             |
-| `crates/viewer`          | SolidCraftのgeom・viewport・viewport-gpuを使うWasm                                     |
-| `packages/contracts`     | WebとWorkerで共有するスキーマ。住宅の通信型はRust実装時に生成を追加                    |
-| `third_party/solidcraft` | upstream一式。専用のCargo workspaceとして保持                                          |
-| `docs`                   | 実装計画、過去の判断・検証記録                                                         |
-| `scripts`                | ビルド・起動・検査・upstream更新・デプロイのTypeScriptスクリプト。Node.js 26で直接実行 |
+| 場所                     | 担当                                                                                                                                                                                            |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/web`               | React・TypeScriptの画面                                                                                                                                                                         |
+| `apps/worker`            | Cloudflare WorkersのAPI・静的配信・Durable Objects・Workflow・D1とR2の読み書き・AIとの往復の入口、D1のマイグレーション。AIはlocalとstagingで台本の応答を返し、ほかの環境では未接続              |
+| `apps/geometry`          | ネイティブRustのHTTP入口、Container用Dockerfile                                                                                                                                                 |
+| `crates/display`         | 依存を持たない表示データの型と版付きバイナリ形式                                                                                                                                                |
+| `crates/geometry-api`    | 内部API契約とTypeScript定義の生成                                                                                                                                                               |
+| `crates/housing`         | 共有の境界を持つ住宅データ（加工と物体を含む）の型、参照と数値の検査、寸法・面積、壁の移動・開口・色などの操作、JSONの読み書きとJSON Schemaの導出。依存はserde・serde_json・schemarsだけ        |
+| `crates/modeling`        | 住宅操作とSolidCraftの接続、表示データへの符号化                                                                                                                                                |
+| `crates/viewer`          | SolidCraftのgeom・viewport・viewport-gpuを使うWasm                                                                                                                                              |
+| `packages/contracts`     | WebとWorkerで共有するスキーマと、内部API契約から生成したTypeScript定義。住宅データの型はまだ生成していない                                                                                      |
+| `third_party/solidcraft` | upstream一式。専用のCargo workspaceとして保持                                                                                                                                                   |
+| `docs`                   | 実装計画、過去の判断・検証記録                                                                                                                                                                  |
+| `scripts`                | ビルド・起動・検査・生成・upstream更新・デプロイ・計測のTypeScriptスクリプト。Node.js 26で直接実行                                                                                              |
+| `metrics`                | Software Factoryの計測（取り込み、変換、viewer）。サービスのコードと `scripts/` をimportしない。開発スクリプトからは、`scripts/shared/docker-slots.ts` がDocker枠の記録に計測のフックを使うだけ |
 
 ルートのCargo.lockとpnpm-lock.yamlがサービスの依存関係を固定します。SolidCraftの未使用アプリは通常のビルド対象に含めません。
 
