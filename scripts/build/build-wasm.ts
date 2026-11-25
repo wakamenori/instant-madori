@@ -1,3 +1,4 @@
+import { checkRustupCargo } from "../shared/rustup-cargo.ts";
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { basename, dirname, join, parse, resolve } from "node:path";
@@ -154,4 +155,4 @@ function compile(root: string, bindgen: string, tool: ReturnType<typeof rustBuil
   return local;
 }
 
-if (import.meta.main) buildWasm();
+if (import.meta.main && checkRustupCargo()) buildWasm();

@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
 import childProcess from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -134,4 +135,33 @@ void test("requires the viewer artifact", () => {
     () => verifyProvenance(parseLocalBuild('{"reason":"build-finished"}').units),
     /No madori_viewer unit/u,
   );
+});
+
+void test("rejects a foreign cargo before starting work", (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "foreign-cargo-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const log = join(directory, "calls");
+  writeFileSync(
+    join(directory, "cargo"),
+    '#!/bin/sh\necho "$@" >> "$LOG"\necho "cargo 1.100.0 (Homebrew)"\n',
+    { mode: 0o755 },
+  );
+  const result = childProcess.spawnSync(
+    process.execPath,
+    [fileURLToPath(new URL("./build-wasm.ts", import.meta.url))],
+    {
+      encoding: "utf8",
+      env: {
+        PATH: directory + ":/usr/bin:/bin",
+        HOME: directory,
+        CARGO_HOME: directory,
+        TMPDIR: directory,
+        LOG: log,
+      },
+    },
+  );
+  assert.equal(result.status, 1);
+  assert(result.stderr.includes("[rustup] cargo on PATH is"), result.stderr);
+  assert(!result.stderr.includes("Run pnpm setup to install the matching wasm-bindgen CLI"));
+  assert.equal(readFileSync(log, "utf8"), "--version\n");
 });

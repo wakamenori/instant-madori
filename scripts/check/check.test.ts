@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import {
   existsSync,
@@ -213,6 +213,7 @@ void test("a second Ctrl-C lets check stop its running step", async () => {
   writeFileSync(
     join(directory, "cargo"),
     `#!/bin/sh
+[ -n "$RUSTUP_TOOLCHAIN" ] && exec "$RUSTUP_TOOLCHAIN/bin/cargo" "$@"
 echo '{"packages":[],"workspace_members":[]}'
 `,
     { mode: 0o755 },
@@ -239,6 +240,7 @@ setTimeout(() => process.exit(1), 10000);
         ...process.env,
         PATH: directory + ":" + process.env["PATH"],
         STEP_PID: pidFile,
+        RUSTUP_TOOLCHAIN: undefined,
         // The outer pnpm check is writing its own results while this test runs.
         MADORI_TEST_RESULTS_DIR: join(directory, "results"),
       },
@@ -489,4 +491,48 @@ void test("full checks stop before container integration and pruning when disk f
     lines[0] ?? "",
     / stopped before taking a development slot for pnpm check --full: 11\.9 GiB free/,
   );
+});
+
+void test("rejects a foreign cargo before starting work", (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "foreign-cargo-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const log = join(directory, "calls");
+  writeFileSync(
+    join(directory, "cargo"),
+    '#!/bin/sh\necho "$@" >> "$LOG"\necho "cargo 1.100.0 (Homebrew)"\n',
+    { mode: 0o755 },
+  );
+  const result = spawnSync(
+    process.execPath,
+    [fileURLToPath(new URL("./check.ts", import.meta.url)), "--fast"],
+    {
+      encoding: "utf8",
+      env: {
+        PATH: directory + ":/usr/bin:/bin",
+        HOME: directory,
+        CARGO_HOME: directory,
+        TMPDIR: directory,
+        LOG: log,
+      },
+    },
+  );
+  assert.equal(result.status, 1);
+  assert(result.stderr.includes("[rustup] cargo on PATH is"), result.stderr);
+  assert(!result.stdout.includes("[check] Format service files"));
+  assert.equal(readFileSync(log, "utf8"), "--version\n");
+});
+
+void test("shows usage without cargo", (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "check-help-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const result = spawnSync(
+    process.execPath,
+    [fileURLToPath(new URL("./check.ts", import.meta.url)), "--help"],
+    {
+      encoding: "utf8",
+      env: { PATH: directory, HOME: directory, TMPDIR: directory, CARGO_HOME: directory },
+    },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Usage: pnpm check/u);
 });
