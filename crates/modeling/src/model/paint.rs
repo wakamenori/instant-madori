@@ -149,18 +149,13 @@ impl Model {
     }
 
     fn verify(&self, placements: &mut [Placement]) -> Result<(), BuildError> {
-        let Some(first) = placements.first() else {
-            return Ok(());
-        };
-        let fallback = first.element.clone();
         for body in &self.session.model.state().bodies {
             let colors = self.session.doc.face_colors(body);
-            if colors.is_empty() {
+            let Some(owner) = self.owner(&body.name).filter(|_| !colors.is_empty()) else {
                 continue;
-            }
-            let owner = self.owner(&body.name);
+            };
             let stray = |face_index| BuildError::WallColor {
-                element: owner.unwrap_or(&fallback).clone(),
+                element: owner.clone(),
                 reason: WallColorFailure::StrayColor {
                     body: body.name.clone(),
                     face_index,
@@ -182,7 +177,7 @@ impl Model {
                 let placement = placements
                     .iter_mut()
                     .find(|p| {
-                        Some(&p.element) == owner
+                        &p.element == owner
                             && tris.iter().all(|t| {
                                 t.faces(&p.plan) && t.vertices.iter().all(|v| p.contains(*v))
                             })

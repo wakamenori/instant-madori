@@ -1,6 +1,8 @@
 use super::*;
 use std::ops::Range;
 
+const ROOM_PROBE_MM: f64 = 1.;
+
 pub(super) struct SideFrame {
     start: Point,
     axis: [f64; 2],
@@ -84,8 +86,8 @@ pub(super) fn plan_side(
     let mut points = Vec::new();
     for [along, rise] in cells {
         let p = frame.world(along, rise);
-        let x = p[0] + frame.normal[0];
-        let y = p[1] + frame.normal[1];
+        let x = p[0] + frame.normal[0] * ROOM_PROBE_MM;
+        let y = p[1] + frame.normal[1] * ROOM_PROBE_MM;
         let room = house.rooms().filter(|r| r.storey() == storey).find(|r| {
             r.edges()
                 .filter(|e| {
