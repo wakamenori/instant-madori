@@ -1,6 +1,6 @@
 # 案件
 
-利用者は案件一覧の画面（`/`）で案件を作り、新しい順の一覧で見て、続きを読み込む。一覧の行は案件名と作成日時で、押すとその案件画面へ移る。案件を作ると、最初のパターンも一緒にできる。同じ要求を送り直しても二つ目はできず、古い版を元にした変更は拒まれる。名前の変更は、まだ API だけで行う。
+利用者は案件一覧の画面（`/`）で案件を作り、新しい順の一覧で見て、続きを読み込む。一覧の行は案件名と作成日時で、押すとその案件画面へ移る。案件を作ると、最初のパターンも一緒にできる。同じ要求を送り直しても二つ目はできず、古い版を元にした変更は拒まれる。案件を一件読むと、一覧の行と同じ名前と版が返る。名前の変更と一件の読取りは、まだ API だけで行う。
 
 ## Sub-features
 
@@ -11,13 +11,14 @@
 - `project-replay`：同じ `requestId` と同じ本文を送り直すと、最初の結果が返る。
 - `project-reuse`：同じ `requestId` で本文を変えると拒まれる。
 - `project-list`：新しい順に一覧できる。
+- `project-read`：ID で一件を読むと、一覧の行と同じ値（名前と版を含む）が返る。名前を変えた後は、新しい名前と版が返る。
 - `project-rename`：今の版を添えると名前が変わり、版が一つ増える。
 - `project-conflict`：古い版を添えると拒まれる。
 
 ## How to get to it (user POV)
 
 - 画面のポートの `/` が案件一覧。案件画面の上の `案件一覧` のリンクからも戻る。
-- API は `POST /api/projects`、`GET /api/projects`、`PATCH /api/projects/<id>` を使う。名前の変更は、画面からはまだできない。
+- API は `POST /api/projects`、`GET /api/projects`、`GET /api/projects/<id>`、`PATCH /api/projects/<id>` を使う。名前の変更と一件の読取りは、画面からはまだできない。
 
 ## Driving it with T3 preview and curl
 
@@ -34,7 +35,8 @@ Preconditions:
 - **送り直す。** 同じ `RID` と本文で、出力先だけ `"$D/replay.json"` にして送る。`201` で、`project.id` が `create.json` と同じ。
 - **本文を変えて送り直す。** 同じ `RID` で `name` を `別の名前` にして、出力先を `"$D/reuse.json"` にする。`422` で、本文が `{"error":"request_id_reused"}`。
 - **一覧。** `curl -sS -o "$D/list.json" -w '%{http_code}\n' "$API/projects"`。`200` で、`.projects[0].id` が作った案件。
-- **名前を変える。** `PID=$(jq -r .project.id "$D/create.json")` と `V=$(jq .project.version "$D/create.json")` を設定し、`curl -sS -o "$D/rename.json" -w '%{http_code}\n' -X PATCH "$API/projects/$PID" -H "$J" -H "$O" -d "{\"requestId\":\"$(uuidgen)\",\"version\":$V,\"name\":\"名前を変えた案件\"}"`。`200` で、`project.version` が `V + 1`。一覧を読み直すと、新しい名前になっている。
+- **一件を読む。** `PID=$(jq -r .project.id "$D/create.json")` と `V=$(jq .project.version "$D/create.json")` を設定し、`curl -sS -o "$D/read.json" -w '%{http_code}\n' "$API/projects/$PID"`。`200` で、`jq -e --slurpfile r "$D/read.json" --arg id "$PID" '(.projects[] | select(.id == $id)) == $r[0].project' "$D/list.json"` が `true`。存在しない ID（`$(uuidgen | tr A-Z a-z)`）を読むと、`404` で本文が `{"error":"not_found"}`。
+- **名前を変える。** `curl -sS -o "$D/rename.json" -w '%{http_code}\n' -X PATCH "$API/projects/$PID" -H "$J" -H "$O" -d "{\"requestId\":\"$(uuidgen)\",\"version\":$V,\"name\":\"名前を変えた案件\"}"`。`200` で、`project.version` が `V + 1`。一覧を読み直すと、新しい名前になっている。出力先を `"$D/read-renamed.json"` にして一件を読み直すと、`200` で、`jq -e --slurpfile r "$D/read-renamed.json" '.project == $r[0].project' "$D/rename.json"` が `true`（名前が `名前を変えた案件`、版が `V + 1`）。
 - **古い版で変える。** 同じ PATCH を、新しい `requestId` と元の `V` で送り、出力先を `"$D/conflict.json"` にする。`409` で、本文が `{"error":"version_conflict"}`。
 
 ## Gotchas

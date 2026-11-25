@@ -71,6 +71,20 @@ await test("Projects and patterns", async (t) => {
     );
   });
 
+  await t.test("reading a project by ID returns its list row", async () => {
+    const owner = newUser("read");
+    const { project } = await createProject(worker, owner, "山田様邸");
+    await createProject(worker, owner, "佐藤様邸");
+    const list = await listAllProjects(worker, owner);
+    const response = await worker.call(`/api/projects/${project.id}`, { as: owner });
+    assert.equal(response.status, 200);
+    const read = projectResponseSchema.parse(await response.json());
+    assert.deepEqual(
+      read.project,
+      list.projects.find(({ id }) => id === project.id),
+    );
+  });
+
   await t.test(
     "patterns are numbered without gaps or duplicates and listed in that order",
     async () => {
@@ -103,6 +117,8 @@ await test("Projects and patterns", async (t) => {
     const stranger = newUser("stranger");
     const { project, pattern } = await createProject(worker, owner);
     const attempts = [
+      worker.call(`/api/projects/${project.id}`, { as: stranger }),
+      worker.call(`/api/projects/${crypto.randomUUID()}`, { as: stranger }),
       worker.call(`/api/projects/${project.id}/patterns`, { as: stranger }),
       worker.call(`/api/projects/${project.id}/patterns`, {
         method: "POST",
@@ -152,6 +168,10 @@ await test("Projects and patterns", async (t) => {
     // The response is the stored request result, built before the update ran; it must
     // equal the row the update actually left.
     assert.deepEqual((await listAllProjects(worker, owner)).projects, [after]);
+
+    const read = await worker.call(`/api/projects/${project.id}`, { as: owner });
+    assert.equal(read.status, 200);
+    assert.deepEqual(projectResponseSchema.parse(await read.json()).project, after);
 
     const stale = await worker.call(`/api/projects/${project.id}`, {
       method: "PATCH",

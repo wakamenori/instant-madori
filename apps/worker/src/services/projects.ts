@@ -18,6 +18,16 @@ export function listProjects(
   return store.projects.list({ ...query, limit: projectPageSize });
 }
 
+export type GetProjectOutcome = { kind: "found"; project: Project } | { kind: "not_found" };
+
+export async function getProject(
+  { store }: StoreDeps<"projects", "get">,
+  scope: { ownerId: OwnerId; projectId: string },
+): Promise<GetProjectOutcome> {
+  const project = await store.projects.get(scope);
+  return project === null ? { kind: "not_found" } : { kind: "found", project };
+}
+
 export type CreateProjectOutcome =
   { kind: "created"; project: Project; pattern: Pattern } | { kind: "request_id_reused" };
 

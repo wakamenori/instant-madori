@@ -8,7 +8,7 @@ import type {
   ProjectListResponse,
   ProjectResponse,
 } from "@madori/contracts";
-import { createProject, listProjects, renameProject } from "../services/projects.ts";
+import { createProject, getProject, listProjects, renameProject } from "../services/projects.ts";
 import { decodeProjectCursor, encodeProjectCursor } from "./cursor.ts";
 import { ApiFailure, readJsonBody, readQuery } from "./http.ts";
 import { param } from "./router.ts";
@@ -49,6 +49,22 @@ export const projectRoutes: Route[] = [
           );
         case "request_id_reused":
           throw new ApiFailure("request_id_reused");
+      }
+    },
+  },
+  {
+    method: "GET",
+    path: "/api/projects/:projectId",
+    async handle(context) {
+      const outcome = await getProject(context.deps, {
+        ownerId: context.user.id,
+        projectId: param(context, "projectId"),
+      });
+      switch (outcome.kind) {
+        case "found":
+          return Response.json({ project: outcome.project } satisfies ProjectResponse);
+        case "not_found":
+          throw new ApiFailure(outcome.kind);
       }
     },
   },
