@@ -1,3 +1,4 @@
+import { checkRustupCargo } from "../shared/rustup-cargo.ts";
 import { rustBuildTool } from "../shared/rust-build.ts";
 import { machineSlots, requireFreeDisk, withDockerSlot } from "../shared/docker-slots.ts";
 import { access, glob } from "node:fs/promises";
@@ -226,6 +227,7 @@ async function main() {
   }
   const mode = modes[0] === "--fast" || modes[0] === "--full" ? modes[0] : "default";
   process.chdir(fileURLToPath(repositoryRoot));
+  if (!checkRustupCargo()) return;
 
   const active = new Set<ReturnType<typeof start>>();
   const interruption = new AbortController();

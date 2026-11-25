@@ -23,7 +23,7 @@ mise exec -- pnpm dev
 
 初回はRust・Wasmと依存ライブラリをビルドします。`pnpm setup`はツールの準備、releaseのWasmバインディング・Worker型の生成、コミット時の検査フックの登録を行います。wasm-bindgen CLIはライブラリと同じ版を、このリポジトリの`.tools/`へインストールします。依存のインストールだけではGitフックを変更しません。
 
-Rustは、rustupのcargoで動かします。`rust-toolchain.toml` の版とWasmのターゲットは、rustupを通したときだけ使われます。`mise exec` とmiseを有効にしたシェルでは、`mise.toml` が `$CARGO_HOME/bin`（既定は `~/.cargo/bin`）をPATHの先頭に置くので、Homebrewなどで入れた別のrustがPATHの前の方にあっても、rustupのcargoを使います。`pnpm setup` は、cargoを使う前に、PATHで最初に見つかるcargoがrustupのものかを確かめ、違えばそのcargoの場所と直し方を表示して止まります。miseを使わない場合は、rustupのcargoがあるフォルダーを、ほかのcargoより前にPATHに置いてください。`$CARGO_HOME/bin` はmiseで固定したツールよりも前に来るので、そこに `cargo install` で入れた `cargo-deny` や `cargo-machete` があると、固定した版の代わりにそれが動きます。
+Rustは、rustupのcargoで動かします。`rust-toolchain.toml` の版とWasmのターゲットは、rustupを通したときだけ使われます。`mise exec` とmiseを有効にしたシェルでは、`mise.toml` が `$CARGO_HOME/bin`（既定は `~/.cargo/bin`）をPATHの先頭に置くので、Homebrewなどで入れた別のrustがPATHの前の方にあっても、rustupのcargoを使います。`pnpm setup`・`pnpm check`・`pnpm dev`・`pnpm build` は、cargoを使う前に、PATHで最初に見つかるcargoがrustupのものかを確かめます。そのcargoに、`RUSTUP_TOOLCHAIN` で一時的な仮のtoolchainを指定して `cargo --version` を一度だけ実行し、仮のtoolchainが動けばrustupのcargoとみなします。rustupのcargoでなければ、その場所、理由、直し方を表示して止まります。直し方は、`$CARGO_HOME/bin` にcargoがあればmiseを通して実行し直すこと、無ければrustupを入れることです。miseを使わない場合は、rustupのcargoがあるフォルダーを、ほかのcargoより前にPATHに置いてください。Homebrewのrustupも、`$(brew --prefix rustup)/bin` をほかのcargoより前にPATHに置けば使えます。`$CARGO_HOME/bin` はmiseで固定したツールよりも前に来るので、そこに `cargo install` で入れた `cargo-deny` や `cargo-machete` があると、固定した版の代わりにそれが動きます。
 
 新しいworktreeで `pnpm setup` を実行すると、メインのチェックアウトから `.tools/` をcopy-on-writeで複製します。Rustの `target/` は各worktreeで空から始めます。手元のRustの検査とreleaseのWasmビルドは、miseで固定したmbxを通して、別のworktreeでコンパイルした同じ入力の成果物を再利用します。mbxは初めて使うときにmiseがインストールします。
 
