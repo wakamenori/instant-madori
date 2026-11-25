@@ -12,6 +12,7 @@ pub(crate) struct Index {
     pub incident: BTreeMap<VertexId, Vec<usize>>,
     pub openings: BTreeMap<OpeningId, usize>,
     pub openings_by_wall: BTreeMap<BoundaryId, Vec<usize>>,
+    pub modifier_sketches: BTreeMap<ModifierId, (usize, crate::WallSketch)>,
     pub colors: BTreeMap<(BoundaryId, Side), usize>,
     pub sides: BTreeMap<BoundaryId, Sides>,
 }
@@ -68,6 +69,11 @@ impl Checks {
                 data.boundaries
                     .iter()
                     .map(|row| (Kind::Boundary, row.id.as_str())),
+            )
+            .chain(
+                data.modifiers
+                    .iter()
+                    .map(|row| (Kind::Modifier, row.id.as_str())),
             )
             .chain(data.rooms.iter().map(|row| (Kind::Room, row.id.as_str())))
             .chain(
@@ -151,6 +157,7 @@ impl Index {
         for boundary in &data.boundaries {
             checks.sides(boundary, index.sides.get(&boundary.id), &data.rooms);
         }
+        index.index_modifiers(data, &mut checks.0);
         index.index_colors(data, &mut checks);
         for vertex in &data.vertices {
             if !index.incident.contains_key(&vertex.id) {

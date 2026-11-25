@@ -22,6 +22,7 @@ id!(VertexId);
 id!(BoundaryId);
 id!(RoomId);
 id!(OpeningId);
+id!(ModifierId);
 
 pub(crate) fn valid_id(id: &str) -> bool {
     !id.is_empty()

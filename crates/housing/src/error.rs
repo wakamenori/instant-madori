@@ -12,6 +12,7 @@ pub enum ElementKind {
     Wall,
     Opening,
     WallColor,
+    Modifier,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, JsonSchema)]
 pub struct Rejections(Vec<Rejection>);

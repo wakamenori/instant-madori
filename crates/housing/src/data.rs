@@ -12,6 +12,8 @@ pub struct HouseData {
     pub openings: Vec<Opening>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub wall_colors: Vec<WallColor>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub modifiers: Vec<crate::Modifier>,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]

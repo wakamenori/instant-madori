@@ -79,14 +79,8 @@ pub struct Elevation {
 
 impl Elevation {
     fn wall(wall: BoundaryView<'_>) -> Self {
-        let length = wall
-            .end()
-            .data()
-            .at
-            .delta_from(wall.start().data().at)
-            .length();
         Self {
-            along: 0.0..length,
+            along: 0.0..wall.length(),
             rise: 0.0..wall.data().wall.height,
         }
     }
