@@ -54,6 +54,7 @@ export const lastFinishedJobSql = `SELECT ${finishedJobJson("j", "m", "r")} AS j
   FROM messages m INDEXED BY messages_inputs CROSS JOIN jobs j ON j.message_id = m.id AND j.pattern_id = m.pattern_id
   LEFT JOIN revisions r ON r.job_id = j.id AND r.pattern_id = j.pattern_id
   WHERE m.pattern_id = ? AND m.owner_id = ? AND m.kind IN ('instruction', 'answer') AND j.state IN (${finishedJobStates})
+    AND j.generation > 0
   ORDER BY m.number DESC LIMIT 1`;
 
 export async function getPatternState(

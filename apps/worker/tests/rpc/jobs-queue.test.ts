@@ -88,11 +88,11 @@ await test("State queue reads scale with queued jobs instead of completed histor
       for (const queued of [0, 3, 30]) {
         await db.raw
           .prepare(
-            `UPDATE jobs SET state = CASE WHEN message_id IN
-        (SELECT id FROM messages WHERE pattern_id = ? AND number > 3030 - ?)
-        THEN 'queued' ELSE ? END, generation = CASE WHEN ? = 'completed' THEN 1 ELSE 0 END WHERE pattern_id = ?`,
+            `UPDATE jobs SET state = CASE WHEN m.number > 3030 - ? THEN 'queued' ELSE ? END,
+             generation = CASE WHEN m.number > 3030 - ? THEN 0 ELSE 1 END
+             FROM messages m WHERE m.id = jobs.message_id AND jobs.pattern_id = ?`,
           )
-          .bind(patternId, queued, finished, finished, patternId)
+          .bind(queued, finished, queued, patternId)
           .run();
         const result = await db.raw
           .prepare(queuedJobsSql)
@@ -108,18 +108,6 @@ await test("State queue reads scale with queued jobs instead of completed histor
           result.meta.rows_read <= 4 * queued + 2,
           JSON.stringify({ analyzed, queued, rowsRead: result.meta.rows_read }),
         );
-        const terminal = await db.raw
-          .prepare(lastFinishedJobSql)
-          .bind(patternId, ownerId)
-          .all<{ json: string }>();
-        assert(terminal.results[0]);
-        const last = finishedJobSchema.parse(JSON.parse(terminal.results[0].json));
-        assert.equal(last.number, 3030 - queued);
-        assert.equal(last.state, finished);
-        assert(
-          terminal.meta.rows_read <= 3 * queued + 5,
-          JSON.stringify({ analyzed, queued, finished, rowsRead: terminal.meta.rows_read }),
-        );
         const terminalPlan = await db.raw
           .prepare(`EXPLAIN QUERY PLAN ${lastFinishedJobSql}`)
           .bind(patternId, ownerId)
@@ -129,9 +117,36 @@ await test("State queue reads scale with queued jobs instead of completed histor
             (row) => row.detail.includes("messages_inputs") && row.detail.includes("pattern_id=?"),
           ),
         );
-        const state = await db.store.revisions.state({ ownerId, patternId });
-        assert.deepEqual(state?.queuedJobs, jobs);
-        assert.deepEqual(state?.lastFinishedJob, last);
+        for (const neverRun of [0, 30]) {
+          await db.raw
+            .prepare(
+              `UPDATE jobs SET state = 'cancelled', generation = 0 WHERE message_id IN
+               (SELECT id FROM messages WHERE pattern_id = ? AND number > ? AND number <= ?)`,
+            )
+            .bind(patternId, 3030 - queued - neverRun, 3030 - queued)
+            .run();
+          const terminal = await db.raw
+            .prepare(lastFinishedJobSql)
+            .bind(patternId, ownerId)
+            .all<{ json: string }>();
+          assert(terminal.results[0]);
+          const last = finishedJobSchema.parse(JSON.parse(terminal.results[0].json));
+          assert.equal(last.number, 3030 - queued - neverRun);
+          assert.equal(last.state, finished);
+          assert(
+            terminal.meta.rows_read <= 3 * (queued + neverRun) + 5,
+            JSON.stringify({
+              analyzed,
+              queued,
+              neverRun,
+              finished,
+              rowsRead: terminal.meta.rows_read,
+            }),
+          );
+          const state = await db.store.revisions.state({ ownerId, patternId });
+          assert.deepEqual(state?.queuedJobs, jobs);
+          assert.deepEqual(state?.lastFinishedJob, last);
+        }
         const plan = await db.raw
           .prepare(`EXPLAIN QUERY PLAN ${queuedJobsSql}`)
           .bind(patternId, ownerId)

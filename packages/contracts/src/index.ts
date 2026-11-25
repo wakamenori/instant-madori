@@ -279,6 +279,7 @@ export const patternStateResponseSchema = z.object({
   runningJob: acceptedJobSchema.nullable(),
   queueHold: queueHoldSchema.nullable(),
   queuedJobs: z.array(acceptedJobSchema),
+  /** The finished job with the greatest message number among jobs that ran. Jobs stopped or cancelled while queued never appear. */
   lastFinishedJob: finishedJobSchema.nullable(),
 });
 
