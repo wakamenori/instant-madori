@@ -229,3 +229,330 @@ fn shortening_wall_rejects_stranded_modifier_atomically() {
     );
     assert_eq!(h.to_json().unwrap(), saved);
 }
+
+fn uv(u: f64, v: f64) -> PlanePoint {
+    PlanePoint { u, v }
+}
+fn path(start: PlanePoint, segments: Vec<Segment<PlanePoint>>) -> Profile<PlanePoint> {
+    Profile { start, segments }
+}
+fn edge(u: f64, v: f64) -> Segment<PlanePoint> {
+    Segment::Line { to: uv(u, v) }
+}
+fn arc(u: f64, v: f64, x: f64, y: f64) -> Segment<PlanePoint> {
+    Segment::Arc {
+        through: uv(u, v),
+        to: uv(x, y),
+    }
+}
+fn chair(h: &House) -> Object {
+    Object {
+        id: ObjectId::new("chair"),
+        name: "chair".into(),
+        placement: Placement::Room {
+            storey: h.data().storeys[0].id.clone(),
+            at: point((4300, 2500)),
+            rotation: 90.,
+        },
+        solids: vec![Solid {
+            combine: Combine::Add,
+            plane: Plane::Xy { z: 20. },
+            depth: 300.,
+            profile: path(
+                uv(-200., -150.),
+                vec![
+                    edge(200., -150.),
+                    edge(200., 150.),
+                    edge(-200., 150.),
+                    edge(-200., -150.),
+                ],
+            ),
+        }],
+    }
+}
+fn shelf(h: &House) -> Object {
+    let mut s = chair(h);
+    s.id = ObjectId::new("shelf");
+    s.placement = Placement::Wall {
+        wall: shared(h, 500.).wall,
+        from: WallEnd::Start,
+        face: toward(h, 1),
+        distance: 2500.,
+        height: 1000.,
+    };
+    s
+}
+#[test]
+fn shelf_moves_and_chair_changes_rooms() {
+    let h = verification();
+    let chair = chair(&h);
+    let shelf = shelf(&h);
+    let mut outside = chair.clone();
+    outside.id = ObjectId::new("outside");
+    if let Placement::Room { at, .. } = &mut outside.placement {
+        at.x = 9000.;
+    }
+    let mut exterior = shelf.clone();
+    exterior.id = ObjectId::new("exterior");
+    exterior.placement = Placement::Wall {
+        wall: wall(&h, (8100, -100), (8100, 5100)),
+        from: WallEnd::End,
+        face: FaceRole::Exterior {},
+        distance: 500.,
+        height: 0.,
+    };
+    let r = shared(&h, 500.);
+    let mut data = h.into_data();
+    data.objects = vec![
+        chair.clone(),
+        shelf.clone(),
+        outside.clone(),
+        exterior.clone(),
+    ];
+    let h = House::new(data).unwrap();
+    let (next, _) = h.move_wall(&r).unwrap();
+    assert_eq!(next.data().objects, h.data().objects);
+    for (house, i) in [(&h, 1), (&next, 0)] {
+        assert_eq!(
+            house
+                .object(&chair.id)
+                .unwrap()
+                .room()
+                .unwrap()
+                .unwrap()
+                .data()
+                .id,
+            house.data().rooms[i].id
+        );
+    }
+    let mounted = h.object(&shelf.id).unwrap();
+    assert_eq!(
+        mounted.room().unwrap().unwrap().data().id,
+        h.data().rooms[1].id
+    );
+    let origin = mounted.frame().origin;
+    assert_eq!(
+        next.object(&shelf.id).unwrap().frame().origin,
+        Point3 {
+            x: origin.x + 500.,
+            ..origin
+        }
+    );
+    for id in [outside.id, exterior.id] {
+        assert!(h.object(&id).unwrap().room().unwrap().is_none())
+    }
+}
+#[test]
+fn chair_extent_is_in_its_own_coordinates() {
+    let h = verification();
+    let c = chair(&h);
+    let mut data = h.into_data();
+    data.objects.push(c.clone());
+    let h = House::new(data).unwrap();
+    assert_eq!(
+        h.object(&c.id).unwrap().extent(),
+        Extent {
+            x: -200.0..200.,
+            y: -150.0..150.,
+            z: 20.0..320.
+        }
+    );
+}
+#[test]
+fn all_effects_and_placements_round_trip() {
+    let h = verification();
+    let mut cut = arch(shared(&h, 500.).wall, WallEnd::Start, 2500.);
+    let mut data = h.data().clone();
+    data.objects = vec![chair(&h), shelf(&h)];
+    data.modifiers.push(cut.clone());
+    for (id, to) in [
+        ("both", AddTo::Both {}),
+        (
+            "left",
+            AddTo::Face {
+                face: toward(&h, 0),
+            },
+        ),
+    ] {
+        cut.id = ModifierId::new(id);
+        cut.effect = Effect::Add {
+            to,
+            protrusion: 20.,
+        };
+        data.modifiers.push(cut.clone())
+    }
+    let h = House::new(data).unwrap();
+    assert_eq!(
+        h.modifiers().map(|m| m.sketch().depth).collect::<Vec<_>>(),
+        vec![-60.0..60., -80.0..80., -80.0..60.]
+    );
+    assert_eq!(House::from_json(&h.to_json().unwrap()).unwrap(), h);
+}
+fn house_with(o: Object) -> Result<House, Rejections> {
+    let mut data = verification().into_data();
+    data.objects.push(o);
+    House::new(data)
+}
+fn object_errors(o: Object) -> Vec<Reason> {
+    let id = o.id.clone();
+    house_with(o)
+        .unwrap_err()
+        .as_slice()
+        .iter()
+        .filter(|e| e.element == ElementKind::Object && e.id == id.as_str())
+        .map(|e| e.reason.clone())
+        .collect()
+}
+#[test]
+fn objects_need_material_a_face_and_wall_space() {
+    let h = verification();
+    let mut o = shelf(&h);
+    if let Placement::Wall { distance, .. } = &mut o.placement {
+        *distance = 5150.;
+    }
+    assert!(
+        object_errors(o.clone())
+            .iter()
+            .any(|r| matches!(r, Reason::PastWallEnd { reach: 5350., .. }))
+    );
+    if let Placement::Wall { face, .. } = &mut o.placement {
+        *face = FaceRole::Exterior {};
+    }
+    assert!(
+        object_errors(o)
+            .iter()
+            .any(|r| matches!(r, Reason::MissingFace { .. }))
+    );
+    let mut c = chair(&h);
+    c.solids[0].combine = Combine::Cut;
+    assert!(object_errors(c.clone()).contains(&Reason::NoMaterial {}));
+    c.solids.clear();
+    assert!(object_errors(c).contains(&Reason::NoMaterial {}));
+}
+#[test]
+fn invalid_profiles_identify_crossings_and_degenerate_arcs() {
+    let h = verification();
+    for (segments, cross) in [
+        (
+            vec![
+                edge(100., 100.),
+                edge(0., 100.),
+                edge(100., 0.),
+                edge(0., 0.),
+            ],
+            true,
+        ),
+        (vec![arc(500., 0.000001, 1000., 0.), edge(0., 0.)], false),
+        (vec![arc(50., 50., 100., 0.), arc(50., 50., 0., 0.)], true),
+        (
+            vec![
+                arc(50., 50., 100., 0.),
+                edge(100., 70.),
+                edge(0., 20.),
+                edge(0., 0.),
+            ],
+            true,
+        ),
+    ] {
+        let mut c = chair(&h);
+        c.solids[0].profile = path(uv(0., 0.), segments);
+        assert!(object_errors(c).iter().any(|r| if cross {
+            matches!(r, Reason::ProfileCrossing { .. })
+        } else {
+            matches!(r, Reason::DegenerateSegment { .. })
+        }));
+    }
+}
+#[test]
+fn circular_profiles_allow_d_shapes_lenses_and_quarter_arcs() {
+    let h = verification();
+    let k = 50. / 2f64.sqrt();
+    for segments in [
+        vec![arc(50., 50., 100., 0.), edge(0., 0.)],
+        vec![arc(50., 50., 100., 0.), arc(50., -20., 0., 0.)],
+        vec![
+            arc(50. - k, k, 50., 50.),
+            arc(50. + k, k, 100., 0.),
+            edge(0., 0.),
+        ],
+    ] {
+        let mut c = chair(&h);
+        c.solids[0].profile = path(uv(0., 0.), segments);
+        house_with(c).unwrap();
+    }
+}
+#[test]
+fn inclined_tangent_joins_are_valid() {
+    let h = verification();
+    for degree in 0..360 {
+        let (s, c) = f64::from(degree).to_radians().sin_cos();
+        let rotate = |x: f64, y: f64| uv(x * c - y * s, x * s + y * c);
+        let start = rotate(0., 0.);
+        let mut o = chair(&h);
+        o.solids[0].profile = path(
+            start,
+            vec![
+                Segment::Arc {
+                    through: rotate(100., 100.),
+                    to: rotate(200., 0.),
+                },
+                Segment::Line {
+                    to: rotate(200., -100.),
+                },
+                Segment::Line {
+                    to: rotate(0., -100.),
+                },
+                Segment::Line { to: start },
+            ],
+        );
+        house_with(o).unwrap();
+    }
+}
+
+#[test]
+fn additive_solids_define_extent_in_three_planes() {
+    let h = verification();
+    let mut c = chair(&h);
+    let mut slab = c.solids[0].clone();
+    slab.plane = Plane::Xz { y: 400. };
+    c.solids.push(slab.clone());
+    slab.plane = Plane::Yz { x: -600. };
+    c.solids.push(slab.clone());
+    slab.combine = Combine::Cut;
+    slab.plane = Plane::Xy { z: 1500. };
+    c.solids.push(slab);
+    let id = c.id.clone();
+    assert_eq!(
+        house_with(c).unwrap().object(&id).unwrap().extent(),
+        Extent {
+            x: -600.0..200.,
+            y: -200.0..700.,
+            z: -150.0..320.
+        }
+    );
+}
+
+#[test]
+fn bad_references_ids_and_numbers_identify_the_object() {
+    let h = verification();
+    let mut c = chair(&h);
+    c.id = ObjectId::new(h.data().rooms[0].id.as_str());
+    c.solids[0].profile.start.u = f64::INFINITY;
+    if let Placement::Room { storey, .. } = &mut c.placement {
+        *storey = StoreyId::new("absent");
+    }
+    let errors = object_errors(c);
+    for reason in [
+        Reason::DuplicateId {
+            first: ElementKind::Room,
+        },
+        Reason::UnknownStorey {
+            storey: "absent".into(),
+        },
+        Reason::NotFinite {
+            field: "solids[0].profile.start.u".into(),
+        },
+    ] {
+        assert!(errors.contains(&reason), "{errors:?}");
+    }
+}

@@ -12,6 +12,7 @@ pub(crate) struct Index {
     pub incident: BTreeMap<VertexId, Vec<usize>>,
     pub openings: BTreeMap<OpeningId, usize>,
     pub openings_by_wall: BTreeMap<BoundaryId, Vec<usize>>,
+    pub objects: BTreeMap<ObjectId, crate::object::PlacedObject>,
     pub modifier_sketches: BTreeMap<ModifierId, (usize, crate::WallSketch)>,
     pub colors: BTreeMap<(BoundaryId, Side), usize>,
     pub sides: BTreeMap<BoundaryId, Sides>,
@@ -70,16 +71,21 @@ impl Checks {
                     .iter()
                     .map(|row| (Kind::Boundary, row.id.as_str())),
             )
-            .chain(
-                data.modifiers
-                    .iter()
-                    .map(|row| (Kind::Modifier, row.id.as_str())),
-            )
             .chain(data.rooms.iter().map(|row| (Kind::Room, row.id.as_str())))
             .chain(
                 data.openings
                     .iter()
                     .map(|row| (Kind::Opening, row.id.as_str())),
+            )
+            .chain(
+                data.modifiers
+                    .iter()
+                    .map(|row| (Kind::Modifier, row.id.as_str())),
+            )
+            .chain(
+                data.objects
+                    .iter()
+                    .map(|row| (Kind::Object, row.id.as_str())),
             );
         for (kind, id) in ids {
             if !valid_id(id) {
@@ -158,6 +164,7 @@ impl Index {
             checks.sides(boundary, index.sides.get(&boundary.id), &data.rooms);
         }
         index.index_modifiers(data, &mut checks.0);
+        index.index_objects(data, &mut checks.0);
         index.index_colors(data, &mut checks);
         for vertex in &data.vertices {
             if !index.incident.contains_key(&vertex.id) {

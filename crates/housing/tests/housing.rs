@@ -90,6 +90,7 @@ fn two_rooms() -> HouseData {
             ),
         ],
         wall_colors: vec![],
+        objects: vec![],
         modifiers: vec![],
         openings: vec![Opening {
             id: OpeningId::new("door"),

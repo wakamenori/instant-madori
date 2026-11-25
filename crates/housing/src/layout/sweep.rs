@@ -265,6 +265,7 @@ impl Walls {
             boundaries: vec![],
             vertices: vec![],
             wall_colors: vec![],
+            objects: vec![],
             modifiers: vec![],
             openings: vec![],
         };
