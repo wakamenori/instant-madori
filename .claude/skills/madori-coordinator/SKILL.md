@@ -36,7 +36,7 @@ pstack の poteto-mode の Orchestrate に従い、各 PR は Autopilot-full の
 - 段階の milestone は plan.md 6章の段階に一つずつ作る。名前に節の番号を付けない（例：サービス基盤）。milestone の番号は、6章の節と同じ順にする。このほかに、常設の milestone「開発基盤」と「期限なし」がある。
 - 計画にある作業は、着手する前にすべて Issue にする。plan.md にだけ書かれた作業を残さない。
 - Issue は一つの PR で終わる作業にし、[種類別のテンプレート](../../../.github/ISSUE_TEMPLATE/)の欄をすべて埋める。milestone は「Issue の置き場」で決める。
-- 利用者に見える振る舞いを変える Issue は、「触ってよいパス」に verify-madori の `features/` を入れる。担当は同じ PR で地図を直すため（madori-owner「確かめる」）。
+- 住宅相談サービスの利用者の画面と経路（`apps/web`、`apps/worker` と、その奥の形状 Container。ローカルと staging の両方）の振る舞いを変える Issue は、「触ってよいパス」に verify-madori の `features/` を入れる。担当は同じ PR で地図を直すため（madori-owner「確かめる」）。開発の仕組みの画面（計測の viewer など）だけを変える Issue には地図を入れず、終わった証拠に、振る舞いを確かめる入口（生成コマンドとブラウザなど）を書く。担当と検証役は、その入口で確かめる。
 
 ### 種類とラベル
 
