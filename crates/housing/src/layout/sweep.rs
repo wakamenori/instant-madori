@@ -235,7 +235,26 @@ impl Walls {
                     .max(common.min.y - common.max.y)
                     .max(0.0);
                 let at = Position(Coord::new(common.min.x), Coord::new(common.min.y));
-                let rooms: BTreeSet<_> = a.segment.rooms().chain(b.segment.rooms()).collect();
+                let (x0, x1) = (
+                    common.min.x.min(common.max.x),
+                    common.min.x.max(common.max.x),
+                );
+                let (y0, y1) = (
+                    common.min.y.min(common.max.y),
+                    common.min.y.max(common.max.y),
+                );
+                let between = bodies.iter().filter(|wall| {
+                    x0 <= wall.centre.min.x
+                        && wall.centre.max.x <= x1
+                        && y0 <= wall.centre.min.y
+                        && wall.centre.max.y <= y1
+                });
+                let rooms: BTreeSet<_> = a
+                    .segment
+                    .rooms()
+                    .chain(b.segment.rooms())
+                    .chain(between.flat_map(|wall| wall.segment.rooms()))
+                    .collect();
                 let hit = (gap, at, (a.thickness + b.thickness) / 2.0);
                 let entry = gaps.entry(rooms).or_insert(hit);
                 if (gap, at) < (entry.0, entry.1) {
