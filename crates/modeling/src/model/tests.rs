@@ -688,3 +688,145 @@ fn seeds_outside_the_projected_walls_report_no_region() {
         assert!(matches!(mismatch.reason,MismatchReason::NoRegion{seed} if seed.x>20000.));
     }
 }
+
+#[test]
+fn reloaded_house_moves_like_the_unsaved_one() {
+    let (house, wall) = blue_wall(two_openings());
+    let mut data = house.into_data();
+    let request = WallMove {
+        wall: wall.clone(),
+        toward: FaceRole::Room {
+            room: data.rooms[1].id.clone(),
+        },
+        distance: 500.,
+    };
+    let point = |along, up| WallPoint { along, up };
+    let line = |along, up| Segment::Line {
+        to: point(along, up),
+    };
+    data.modifiers.push(Modifier {
+        id: ModifierId::new("arch"),
+        wall: wall.clone(),
+        from: WallEnd::Start,
+        effect: Effect::Cut {},
+        profile: Profile {
+            start: point(2500., 0.),
+            segments: vec![
+                line(3400., 0.),
+                line(3400., 1800.),
+                Segment::Arc {
+                    through: point(2950., 2250.),
+                    to: point(2500., 1800.),
+                },
+                line(2500., 0.),
+            ],
+        },
+    });
+    let placements = [
+        (
+            "shelf",
+            Placement::Wall {
+                wall,
+                face: FaceRole::Room {
+                    room: data.rooms[0].id.clone(),
+                },
+                from: WallEnd::Start,
+                distance: 4200.,
+                height: 1000.,
+            },
+        ),
+        (
+            "chair",
+            Placement::Room {
+                storey: data.storeys[0].id.clone(),
+                at: pt(6000., 2500.),
+                rotation: 0.,
+            },
+        ),
+    ];
+    for (name, placement) in placements {
+        data.objects.push(Object {
+            id: ObjectId::new(name),
+            name: name.into(),
+            placement,
+            solids: vec![Solid {
+                combine: Combine::Add,
+                plane: Plane::Xy { z: 0. },
+                depth: 100.,
+                profile: Profile {
+                    start: PlanePoint { u: 0., v: 0. },
+                    segments: [(200., 0.), (200., 150.), (0., 150.), (0., 0.)]
+                        .map(|(u, v)| Segment::Line {
+                            to: PlanePoint { u, v },
+                        })
+                        .to_vec(),
+                },
+            }],
+        });
+    }
+
+    let house = House::new(data).unwrap();
+    let before = Model::build(&house, None).unwrap();
+    let saved = house.to_json().unwrap();
+    let (loaded_house, loaded) = Model::load(&saved).unwrap();
+    let bytes = |model: &Model| model.display().unwrap().encode().unwrap();
+    let original_bytes = bytes(&before);
+    assert_eq!(loaded_house, house);
+    assert_eq!(loaded.entries(), before.entries());
+    assert_eq!(bytes(&loaded), original_bytes);
+
+    let (moved, _) = house.move_wall(&request).unwrap();
+    let (moved_loaded, _) = loaded_house.move_wall(&request).unwrap();
+    let unsaved = Model::build(&moved, Some(&before)).unwrap();
+    let reloaded = Model::build(&moved_loaded, Some(&loaded)).unwrap();
+    let moved_bytes = bytes(&unsaved);
+    assert_eq!(bytes(&reloaded), moved_bytes);
+    assert_eq!(reloaded.entries(), unsaved.entries());
+    assert_ne!(moved_bytes, original_bytes);
+}
+
+#[test]
+fn load_rejects_unknown_versions_invalid_houses_and_unbuildable_walls() {
+    let house = two_openings();
+    let saved = house.to_json().unwrap();
+    let unknown_version = saved.replace(r#""version":1"#, r#""version":2"#);
+    assert!(matches!(
+        Model::load(&unknown_version),
+        Err(LoadError::House(ReadError::UnsupportedVersion {
+            found: 2,
+            newest: 1
+        }))
+    ));
+
+    let wall = shared(&house);
+    let door = house.openings().find(|o| o.data().wall == wall).unwrap();
+    let invalid = saved.replace(
+        &format!(r#""wall":"{}""#, wall.as_str()),
+        r#""wall":"missing""#,
+    );
+    let expected = Rejection {
+        element: ElementKind::Opening,
+        id: door.data().id.as_str().into(),
+        reason: Reason::UnknownWall {
+            wall: "missing".into(),
+        },
+    };
+    assert!(
+        matches!(Model::load(&invalid), Err(LoadError::House(ReadError::Rejected(r))) if r.as_slice() == [expected])
+    );
+
+    let mut data = fixture().into_data();
+    let vertex = data
+        .vertices
+        .iter_mut()
+        .find(|v| v.at == pt(4000., -100.))
+        .unwrap();
+    vertex.at.y = 1000.;
+    let vertex_id = vertex.id.clone();
+    let unbuildable = House::new(data).unwrap().to_json().unwrap();
+    assert!(
+        matches!(Model::load(&unbuildable), Err(LoadError::Build(BuildError::House(r))) if r.as_slice().iter().any(|e|
+            e.element == ElementKind::Vertex && e.id == vertex_id.as_str() && matches!(e.reason, Reason::UnresolvedJoint { .. })
+        ))
+    );
+}

@@ -3,6 +3,7 @@ mod projection;
 pub use check::{Mismatch, MismatchReason, Mismatches, Subject};
 mod paint;
 mod side;
+mod snapshot;
 use crate::{
     commands::{CommandError, execute_checked},
     display::{self, BodyElements, ExportError},
@@ -10,6 +11,7 @@ use crate::{
 use madori_display::{DisplayModel, ElementId};
 use madori_housing::*;
 use serde_json::{Value, json};
+pub use snapshot::LoadError;
 use solidcraft_doc::FeatureKind;
 use solidcraft_engine::{Session, schema::ParamCheck};
 use std::collections::{BTreeMap, HashMap, HashSet};

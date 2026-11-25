@@ -5,7 +5,7 @@ pub mod display;
 mod model;
 pub mod sample;
 pub use model::{
-    BuildError, Entry, EntryKind, Mismatch, MismatchReason, Mismatches, Model, Subject,
+    BuildError, Entry, EntryKind, LoadError, Mismatch, MismatchReason, Mismatches, Model, Subject,
     WallColorFailure,
 };
 
