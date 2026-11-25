@@ -303,7 +303,7 @@ node .claude/skills/madori-coordinator/scripts/deploy-files.mjs after <番号>
 T3 の定期タスクが、1時間ごとに `/madori-coordinator 見回り` を送る。次を順に行う。何も変わっていなければ、ユーザーへ報告せずに終える。見回りと進み具合の報告は、次の段階へ進むのに残る Issue と、今の段階で作った Issue と閉じた Issue の数から始める。
 
 1. メインのチェックアウトを `git pull --ff-only` で main に合わせる。
-2. `df -h /` で空きを確かめる。20 GiB を切っていたら、次を片付けてから進む。空きが戻るまで、新しいスレッドを立てない。片付けるのは次の二つだけにする。ユーザーの個人のデータやキャッシュの削除は頼まない。二つ目の `docker image prune -a -f` は、どのプロジェクトのものかを問わず、使われていないイメージをすべて消す（#402）。
+2. `df -h /` で空きを確かめる。20 GiB を切っていたら、次を片付けてから進む。空きが戻るまで、新しいスレッドを立てない。片付けるのは次の二つだけにする。ユーザーの個人のデータやキャッシュの削除は頼まない。
    - 使い終わった worktree。残す worktree のパスを集め、一つずつ `--keep` に書いて次を実行する。残すものが一つも無ければ、`--keep` の代わりに `--keep-none` を付ける。
 
      ```sh
@@ -321,7 +321,15 @@ T3 の定期タスクが、1時間ごとに `/madori-coordinator 見回り` を�
      - 2で終わり、`--keep` のパスが worktree でないと出たら、そのパスのスレッドを `t3_thread_read` で読み直す。返るパスが同じで `does not exist` と出ていれば、そのスレッドの worktree はもう無いので、`--keep` から外して打ち直す。返るパスが違えば写し間違いなので、直して打ち直す。
      - 1で終わったら、`failed` の行を報告に書き、手で消さない。
 
-   - 使っていない Docker のイメージ（`docker image prune -a -f`）
+   - このリポジトリの形状サービスのイメージ。メインのチェックアウトで次を実行する。`pnpm docker:prune-images` を使わないのは、`git pull` で lockfile が変わると、`pnpm` が `node_modules` の食い違いを理由に実行を断るためである。
+
+     ```sh
+     node scripts/dev/prune-images.ts
+     ```
+
+     - このコマンドは、Container が使うイメージと、動いている Wrangler（`pnpm dev`、実 Container の試験、runner の `pnpm check --full`、staging へのデプロイ）がタグを付けたイメージを残す。ほかのプロジェクトのイメージには触らない。残す規則は README にある。
+     - これのほかに、Docker のイメージ、ビルドキャッシュ、Container、ボリュームを消すコマンドを打たない。`docker image prune -a` は、Container を作る前のイメージを消し、そのセッションのジョブやデプロイを失敗させる（#402）。
+     - 1で終わったら、出た行を報告に書き、手で消さない。
 3. 担当ごとに、コミット、push、PR、`check` の動きを確かめる。報告の来た PR と、報告は無いが `check` の通った PR には、検証役を立てる。承認待ちで止まったスレッドは「承認待ちで止まったとき」のとおりに扱う。ほかの理由で止まった担当は、新しい担当に入れ替える。
 4. `node scripts/shared/docker-slots.ts status` で、Docker の枠を持つプロセスを見る。`pnpm dev` が枠を持っていて、それを起動したスレッドがターンを終えて待っているなら、そのスレッドに `pnpm dev` を止めるよう頼む。
 5. 終わった検証役の判定を読み、「マージを決める」に進む。
