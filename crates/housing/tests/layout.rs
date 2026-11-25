@@ -249,6 +249,24 @@ fn valid_joints_courtyards_and_separate_buildings() {
             ],
         ),
         (
+            "5 mm stagger",
+            vec![
+                (0, 0, 3000, 3000),
+                (0, 3000, 3000, 6000),
+                (3000, 0, 6000, 3005),
+                (3000, 3005, 6000, 6000),
+            ],
+        ),
+        (
+            "50 mm offset",
+            vec![
+                (0, 0, 3000, 3000),
+                (3000, 0, 6000, 3000),
+                (0, 3000, 3050, 6000),
+                (3050, 3000, 6000, 6000),
+            ],
+        ),
+        (
             "split perimeter",
             vec![
                 (900, 1200, 7200, 7200),
@@ -301,6 +319,10 @@ fn area_example_and_four_way_joint_share_vertices() {
 fn rejects_overlapping_wall_bodies_and_diagonal_pinch() {
     for (second, gap) in [
         ((4005, 0, 8000, 4000), 5.0),
+        ((4000, 3995, 8000, 8000), 5.0),
+        ((3995, 4000, 8000, 8000), 5.0),
+        ((4000, 3950, 8000, 8000), 50.0),
+        ((3950, 4000, 8000, 8000), 50.0),
         ((4000, 150, 8000, 4000), 150.0),
         ((4150, 4150, 8000, 8000), 150.0),
     ] {
@@ -324,7 +346,7 @@ fn rejects_overlapping_wall_bodies_and_diagonal_pinch() {
 #[test]
 fn invalid_numbers_report_request_fields_before_generation() {
     one_error(&layout(&[]), &[], Reason::NoRooms {});
-    for width in [0, -5, 190] {
+    for width in [0, -5, 190, 200] {
         one_error(
             &layout(&[(0, 0, width, 1000)]),
             &[1],
@@ -335,6 +357,7 @@ fn invalid_numbers_report_request_fields_before_generation() {
             },
         );
     }
+    assert!(build(&layout(&[(0, 0, 201, 1000)])).is_ok());
     let mut input = evidence();
     input.rooms[0].min.x = f64::NAN;
     one_error(
