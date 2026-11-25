@@ -8,6 +8,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { createConnection } from "node:net";
+import { dockerTetherEnv } from "../shared/docker-tether.ts";
 import { repositoryRoot } from "../shared/repository.ts";
 import { cleanupSteps } from "../shared/processes.ts";
 import type { ProcessOutcome } from "../shared/processes.ts";
@@ -29,6 +30,42 @@ export interface DevSession {
   readonly wranglerArgs: readonly string[];
   readonly viteArgs: readonly string[];
   readonly viteEnv: Readonly<Record<"MADORI_DEV_WORKER_PORT", string>>;
+}
+
+export interface Launch {
+  readonly command: string;
+  readonly args: readonly string[];
+  readonly options: { readonly cwd: string; readonly env: NodeJS.ProcessEnv };
+}
+
+export function devContainersEnabled(env: NodeJS.ProcessEnv): boolean {
+  return env["MADORI_DEV_CONTAINERS"] !== "0";
+}
+
+export function devServers(
+  session: DevSession,
+  env: NodeJS.ProcessEnv,
+): readonly [wrangler: Launch, vite: Launch] {
+  const jobTestHold = env["MADORI_DEV_JOB_TEST_HOLD"];
+  return [
+    {
+      command: process.execPath,
+      args: [
+        "node_modules/wrangler/bin/wrangler.js",
+        "dev",
+        "--local",
+        ...session.wranglerArgs,
+        ...(jobTestHold === undefined ? [] : ["--var", `JOB_TEST_HOLD:${jobTestHold}`]),
+        ...(devContainersEnabled(env) ? [] : ["--enable-containers=false"]),
+      ],
+      options: { cwd: "apps/worker", env: { ...env, ...dockerTetherEnv(env) } },
+    },
+    {
+      command: process.execPath,
+      args: ["node_modules/vite/bin/vite.js", ...session.viteArgs],
+      options: { cwd: "apps/web", env: { ...env, ...session.viteEnv } },
+    },
+  ];
 }
 
 export function devWorkerPort(env: NodeJS.ProcessEnv): Port {
