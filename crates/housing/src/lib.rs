@@ -11,6 +11,7 @@ mod layout;
 mod measure;
 mod opening;
 mod planform;
+mod shape;
 mod topology;
 mod wall_move;
 
@@ -23,4 +24,5 @@ pub use layout::*;
 pub use measure::*;
 pub use opening::{Elevation, OpeningAdjustment, OpeningPlacement, OpeningView, Passage};
 pub use planform::SimplePolygon;
+pub use shape::{PlanePoint, Profile, Segment, WallPoint};
 pub use wall_move::*;

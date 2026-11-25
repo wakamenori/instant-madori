@@ -39,7 +39,7 @@ impl Sides {
     }
 }
 
-const LIMIT_MM: f64 = 10_000_000.0;
+pub(crate) const LIMIT_MM: f64 = 10_000_000.0;
 
 #[derive(Default)]
 struct Checks(Vec<Rejection>);

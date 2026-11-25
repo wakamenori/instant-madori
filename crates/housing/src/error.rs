@@ -36,6 +36,21 @@ pub struct Rejection {
 #[derive(Clone, Debug, PartialEq, Serialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Reason {
+    DegenerateProfile {
+        field: String,
+    },
+    DegenerateSegment {
+        field: String,
+    },
+    OpenProfile {
+        field: String,
+        gap: f64,
+    },
+    ProfileCrossing {
+        field: String,
+        first: u32,
+        second: u32,
+    },
     InvalidId {},
     DuplicateId {
         first: ElementKind,
