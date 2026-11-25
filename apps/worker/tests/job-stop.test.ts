@@ -153,7 +153,7 @@ await test("Job stop through workerd HTTP", { timeout: 120_000 }, async (t) => {
       assert.equal(await (await stop(b.jobId, finishedId)).text(), finishedText);
       const after = await state(pattern.id);
       assert.deepEqual(after.queuedJobs, []);
-      assert.deepEqual(after.lastFinishedJob, { ...b, state: "cancelled" });
+      assert.equal(after.lastFinishedJob, null);
     },
   );
   await t.test(
