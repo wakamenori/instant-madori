@@ -1,10 +1,16 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtemp, mkdir, rm, writeFile, truncate } from "node:fs/promises";
+import { copyFile, mkdtemp, mkdir, rm, writeFile, truncate } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
-import { nodeTestFlags, parseLibtest, readArtifact } from "./test-results.ts";
+import {
+  cargoTestFlags,
+  nodeTestFlags,
+  parseLibtest,
+  readArtifact,
+  rustBinaryId,
+} from "./test-results.ts";
 
 async function temporary(t: TestContext) {
   const dir = await mkdtemp(join(tmpdir(), "madori-results-"));
@@ -79,6 +85,51 @@ void test("reporter records load crashes and successful files", async (t) => {
       "fixture.mjs": "pass",
       "fixture.mjs > fixture.mjs": "pass",
     },
+  );
+});
+void test("cargo records same-named library, binary and integration tests separately", async (t) => {
+  const cwd = await temporary(t);
+  const dir = join(cwd, "results");
+  await mkdir(dir);
+  await mkdir(join(cwd, "src"));
+  await mkdir(join(cwd, "tests"));
+  await copyFile(
+    new URL("../../rust-toolchain.toml", import.meta.url),
+    join(cwd, "rust-toolchain.toml"),
+  );
+  await writeFile(
+    join(cwd, "Cargo.toml"),
+    '[workspace]\n[package]\nname = "same-name"\nversion = "0.1.0"\nedition = "2024"\n',
+  );
+  await writeFile(
+    join(cwd, "Cargo.lock"),
+    'version = 4\n[[package]]\nname = "same-name"\nversion = "0.1.0"\n',
+  );
+  await writeFile(join(cwd, "src/lib.rs"), "#[test] fn library() {}");
+  await writeFile(join(cwd, "src/main.rs"), "fn main() {}\n#[test] fn binary() {}");
+  await writeFile(join(cwd, "tests/same_name.rs"), "#[test] fn integration() {}");
+  const env = { ...process.env };
+  delete env.NODE_TEST_CONTEXT;
+  env.CARGO_TARGET_DIR = join(cwd, "target");
+  const run = spawnSync("cargo", cargoTestFlags(dir, cwd), { cwd, env, encoding: "utf8" });
+  assert.equal(run.status, 0, run.stderr + run.stdout);
+  assert.deepEqual(Object.fromEntries((await readArtifact(dir)).map((r) => [r.id, r.outcome])), {
+    "same-name/src/lib.rs": "pass",
+    "same-name/src/lib.rs::library": "pass",
+    "same-name/src/main.rs": "pass",
+    "same-name/src/main.rs::binary": "pass",
+    "same-name/tests/same_name.rs": "pass",
+    "same-name/tests/same_name.rs::integration": "pass",
+  });
+});
+void test("Rust binary ids use the executable rule's first prerequisite with spaces", () => {
+  const exe = "/ws/build dir/test";
+  const rule = String.raw`/ws/build\ dir/test: crates/my\ pkg/tests/a\ b.rs crates/my\ pkg/src/other.rs`;
+  const depInfo = exe + ".d: other.rs\n" + rule;
+  assert.equal(rustBinaryId(depInfo, exe, "/ws", "/ws/crates/my pkg", "pkg"), "pkg/tests/a b.rs");
+  assert.throws(
+    () => rustBinaryId(exe + ".d: other.rs", exe, "/ws", "/ws/crates/my pkg", "pkg"),
+    /Missing crate root for executable/u,
   );
 });
 void test("libtest counts individual tests and distinguishes a failed process", () => {
