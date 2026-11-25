@@ -14,7 +14,16 @@ function missing() {
   console.error("HTTP 404");
   process.exit(1);
 }
-if (matches("pr", "view", number, "--json", "mergeCommit")) {
+const actions = "repos/{owner}/{repo}/actions/";
+const runsSha = argv[1]?.match(/head_sha=([0-9a-f]{40})&per_page=100$/)?.[1];
+const jobsId = argv[1]?.match(/runs\/(\d+)\/jobs$/)?.[1];
+if (
+  matches("api", actions + `workflows/deploy-staging.yml/runs?head_sha=${runsSha}&per_page=100`)
+) {
+  console.log(JSON.stringify({ workflow_runs: state.runs?.[runsSha] ?? [] }));
+} else if (matches("api", actions + `runs/${jobsId}/jobs`)) {
+  console.log(JSON.stringify({ jobs: state.jobs?.[jobsId] ?? [] }));
+} else if (matches("pr", "view", number, "--json", "mergeCommit")) {
   if (!state.prs?.[number]) missing();
   console.log(JSON.stringify(state.prs[number]));
 } else if (matches("api", path)) {
