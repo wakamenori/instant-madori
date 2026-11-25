@@ -20,7 +20,13 @@ export const spool = z.object({
 });
 const hook = z.record(z.string(), z.json()).and(
   z.object({
-    hook_event_name: z.enum(["SessionStart", "UserPromptSubmit", "Stop", "PermissionRequest"]),
+    hook_event_name: z.enum([
+      "SessionStart",
+      "UserPromptSubmit",
+      "Stop",
+      "PermissionRequest",
+      "PostToolUse",
+    ]),
     session_id: z.string().min(1).max(256),
   }),
 );
