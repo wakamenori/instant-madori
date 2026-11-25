@@ -116,7 +116,7 @@ fn two_rooms_export_and_measure() {
         (sum - 13_818_600_000.).abs() <= tolerance,
         "{sum} +/- {tolerance}"
     );
-    assert!(m.defects().is_empty());
+    assert_eq!(m.check(&h), Ok(()));
     let display = m.display().unwrap();
     assert_eq!(display.bodies().len(), 9);
     let ids: Vec<_> = display
@@ -164,12 +164,15 @@ fn full_height_door_and_second_cut() {
         let m = Model::build(&h, None).unwrap();
         let names = m.bodies_of(wall.as_str());
         assert_eq!(names.len(), 2);
-        assert_eq!(
-            m.defects(),
-            [BodyDefect::Split {
-                element: ElementId::parse(wall.as_str()).unwrap(),
-                bodies: names
-            }]
+        assert!(
+            m.check(&h)
+                .unwrap_err()
+                .as_slice()
+                .contains(&Mismatch::element(
+                    ElementKind::Wall,
+                    wall.as_str(),
+                    MismatchReason::Split { bodies: names }
+                ))
         );
         assert_eq!(
             m.display()
@@ -195,10 +198,19 @@ fn split_feature_preserves_owner() {
     execute_checked(
         &mut m.session,
         "solid.split_body",
-        &json!({"body":wall.as_str(),"plane":{"origin":[0,0,1200],"normal":[0,0,1]}}),
+        &json!({"body":wall.as_str(),"plane":{"origin":[4000,2500,0],"normal":[0,1,0]}}),
     )
     .unwrap();
-    assert_eq!(m.bodies_of(wall.as_str()).len(), 2);
+    let bodies = m.bodies_of(wall.as_str());
+    assert_eq!(bodies.len(), 2);
+    assert_eq!(
+        m.check(&h).unwrap_err().as_slice(),
+        [Mismatch::element(
+            ElementKind::Wall,
+            wall.as_str(),
+            MismatchReason::Split { bodies }
+        )]
+    );
     assert_eq!(
         m.display()
             .unwrap()
@@ -361,6 +373,7 @@ fn blue_wall(h: House) -> (House, BoundaryId) {
 fn moved() -> (Model, BoundaryId) {
     let (h, wall) = blue_wall(fixture());
     let old = Model::build(&h, None).unwrap();
+    assert_eq!(old.check(&h), Ok(()));
     let east = h
         .rooms()
         .find(|r| r.edges().any(|e| e.from.x > 4000.))
@@ -454,9 +467,9 @@ fn full_height_door_paints_both_bodies() {
 fn narrow_pier_receives_blue() {
     assert_door(101.5);
 }
-fn corrupt_table(swap: bool) -> (BuildError, BoundaryId) {
+fn corrupt_table(swap: bool) -> (Mismatches, BoundaryId, FaceRole) {
     let (h, wall) = blue_wall(fixture());
-    let mut model = Model::assemble(&h, None).unwrap();
+    let mut model = Model::build(&h, None).unwrap();
     let (left, right) = model
         .entries
         .iter_mut()
@@ -476,22 +489,38 @@ fn corrupt_table(swap: bool) -> (BuildError, BoundaryId) {
     } else {
         *right = FaceRole::Exterior {};
     }
-    (model.paint(&h).unwrap_err(), wall)
+    (
+        model.check(&h).unwrap_err(),
+        wall,
+        h.data().wall_colors[0].face.clone(),
+    )
 }
 #[test]
 fn missing_table_role_reports_wall() {
-    let (err, wall) = corrupt_table(false);
+    let (err, wall, face) = corrupt_table(false);
     assert!(err.to_string().contains(wall.as_str()));
-    assert!(
-        matches!(err,BuildError::WallColor{element,reason:WallColorFailure::RoleNotInTable{..}} if element.as_str()==wall.as_str())
-    );
+    assert!(err.as_slice().contains(&Mismatch::element(
+        ElementKind::WallColor,
+        wall.as_str(),
+        MismatchReason::WallColor(WallColorFailure::RoleNotInTable { face })
+    )));
 }
 #[test]
 fn swapped_table_roles_fail_room_check() {
-    let (err, wall) = corrupt_table(true);
-    assert!(
-        matches!(err,BuildError::WallColor{element,reason:WallColorFailure::RoomNotOnSide{..}} if element.as_str()==wall.as_str())
-    );
+    let (err, wall, face) = corrupt_table(true);
+    let h = fixture();
+    let east = h
+        .rooms()
+        .find(|r| r.edges().any(|e| e.from.x > 4000.))
+        .unwrap();
+    assert!(err.as_slice().contains(&Mismatch::element(
+        ElementKind::WallColor,
+        wall.as_str(),
+        MismatchReason::WallColor(WallColorFailure::RoomNotOnSide {
+            face,
+            found: Some(east.data().id.clone())
+        })
+    )));
 }
 #[test]
 fn zero_offset_side_receives_blue() {
@@ -530,4 +559,132 @@ fn elevated_storey_paints_at_its_base() {
         3940.,
         3000.,
     );
+}
+
+#[test]
+fn two_room_fixture_matches_cad() {
+    let h = fixture();
+    assert_eq!(Model::build(&h, None).unwrap().check(&h), Ok(()));
+}
+#[test]
+fn missing_wall_entry_reports_wall_and_body() {
+    let h = fixture();
+    let wall = shared(&h);
+    let mut m = Model::build(&h, None).unwrap();
+    m.entries.retain(|e| e.element.as_str() != wall.as_str());
+    for keep_piece in [true, false] {
+        if !keep_piece {
+            m.pieces.retain(|_, owner| owner.as_str() != wall.as_str());
+        }
+        let errors = m.check(&h).unwrap_err();
+        assert!(errors.as_slice().contains(&Mismatch::element(
+            ElementKind::Wall,
+            wall.as_str(),
+            MismatchReason::NotInTable {}
+        )));
+        assert!(errors.as_slice().contains(&Mismatch {
+            subject: Subject::Body {
+                name: wall.as_str().into()
+            },
+            reason: MismatchReason::NoElement {}
+        }));
+    }
+}
+
+#[test]
+fn thicker_shared_wall_reduces_both_rooms() {
+    let h = fixture();
+    let mut data = h.data().clone();
+    data.boundaries
+        .iter_mut()
+        .find(|w| w.id == shared(&h))
+        .unwrap()
+        .wall
+        .offsets = SideOffsets {
+        left: 100.,
+        right: 100.,
+    };
+    let m = Model::build(&House::new(data).unwrap(), None).unwrap();
+    let errors = m.check(&h).unwrap_err();
+    assert_eq!(errors.as_slice().len(), 2);
+    for (room, mismatch) in h.rooms().zip(errors.as_slice()) {
+        assert_eq!(
+            mismatch.subject,
+            Subject::Element {
+                kind: ElementKind::Room,
+                id: room.data().id.as_str().into()
+            }
+        );
+        assert!(
+            matches!(mismatch.reason,MismatchReason::AreaMismatch{expected_m2,projected_m2,..}
+            if (expected_m2-19.7).abs()<1e-8 && (projected_m2-19.5).abs()<1e-8)
+        );
+    }
+}
+#[test]
+fn short_wall_gap_enlarges_southwest_room() {
+    let h = House::from_layout(
+        &OperationId::new("gap"),
+        &RoomLayout {
+            rooms: [
+                ("SW", pt(0., 0.), pt(2000., 2000.)),
+                ("SE", pt(2000., 0.), pt(4000., 2000.)),
+                ("N", pt(1860., 2000.), pt(4000., 4000.)),
+            ]
+            .into_iter()
+            .map(|(name, min, max)| LayoutRoom {
+                name: name.into(),
+                usage: RoomUse::Other,
+                min,
+                max,
+            })
+            .collect(),
+            walls: LayoutWalls {
+                exterior_thickness: 100.,
+                interior_thickness: 300.,
+                height: 2400.,
+            },
+        },
+    )
+    .unwrap();
+    let m = Model::build(&h, None).unwrap();
+    let errors = m.check(&h).unwrap_err();
+    assert_eq!(errors.as_slice().len(), 1, "{errors}");
+    let mismatch = &errors.as_slice()[0];
+    let southwest = h.rooms().find(|r| r.data().name == "SW").unwrap();
+    assert_eq!(
+        mismatch.subject,
+        Subject::Element {
+            kind: ElementKind::Room,
+            id: southwest.data().id.as_str().into()
+        }
+    );
+    assert!(
+        matches!(mismatch.reason,MismatchReason::AreaMismatch{expected_m2,projected_m2,..}
+        if (expected_m2-3.42).abs()<1e-8 && (projected_m2-expected_m2-10.*100./1e6).abs()<1e-8),
+        "{errors}"
+    );
+}
+
+#[test]
+fn seeds_outside_the_projected_walls_report_no_region() {
+    let h = fixture();
+    let m = Model::build(&h, None).unwrap();
+    let mut data = h.data().clone();
+    for vertex in &mut data.vertices {
+        vertex.at.x += 20000.;
+    }
+    let shifted = House::new(data).unwrap();
+    let errors = m.check(&shifted).unwrap_err();
+    assert_eq!(errors.as_slice().len(), 2);
+    for (room, mismatch) in shifted.rooms().zip(errors.as_slice()) {
+        assert_eq!(
+            mismatch.subject,
+            Subject::Element {
+                kind: ElementKind::Room,
+                id: room.data().id.as_str().into()
+            }
+        );
+        assert!(matches!(mismatch.reason,MismatchReason::NoRegion{seed} if seed.x>20000.));
+    }
 }
