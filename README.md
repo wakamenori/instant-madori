@@ -223,7 +223,7 @@ Dependabotはnpm・Cargoの更新提案用に残し、upstream本体はsubtree�
 
 開発用Macで2台のself-hosted runnerを動かします。PRごとに `.github/workflows/check.yml` の `mode` ジョブが `madori-light` 上で変更ファイルを `scripts/check/ci-mode.ts` に渡します。`check` ジョブは通常モードなら `madori-light`、`--full` なら `madori` で `pnpm setup` と検査を実行します。stagingへのデプロイは `madori` が担当するので、通常モードの検査はデプロイ中にも開始できます。最後に、自動修正で差分が出ていないことを確かめます。GitHubのrunnerは使いません。無料プランのprivateリポジトリでは2コア・ディスクの空き13 GBで、`--full` がディスク不足で失敗し、無料枠も足りないためです。
 
-`pnpm check` は試験ごとの結果を `target/test-results/` に書きます。保存先は `MADORI_TEST_RESULTS_DIR` で変更できます。Rustのdoc-testとexampleの試験は `deps` の外の実行ファイルで動き、結果を記録できないので、`scripts/check/test-results.ts` はそれらを実行せずに失敗させます。試験は `#[test]` に移すか、doc-testのコードブロックに `no_run`・`ignore`・`text` のどれかを付けてください。`check` と `deploy-staging` は、失敗した回も含め、結果を成果物 `test-results-v1-<workflow>-<attempt>` として30日間保存します。取り消した回は保存しません。
+`pnpm check` は試験ごとの結果を `target/test-results/` に書きます。保存先は `MADORI_TEST_RESULTS_DIR` で変更できます。Rustのdoc-testとexampleの試験は `deps` の外の実行ファイルで動き、結果を記録できないので、`scripts/check/test-results.ts` はそれらを実行せずに失敗させます。試験は `#[test]` に移すか、doc-testのコードブロックに `no_run`・`ignore`・`text` のどれかを付けてください。`check` と `deploy-staging` は、失敗した回も含め、結果を成果物 `test-results-v1-<workflow>-<attempt>` として30日間保存します。取り消した回は保存しません。成果物の保存が失敗しても、5分で止まっても、検査とデプロイの結果は変わりません。
 
 `node scripts/check/test-history.ts` で直近200件の成果物を集計し、試験ごとの失敗率を表示します。スキップは分母から除きます。`--last N` で件数を変えられます。`--all` は安定した試験も表示します。`--test <文字列>` は名前にその文字列を含む試験を表示します。判定は次の順です。
 
