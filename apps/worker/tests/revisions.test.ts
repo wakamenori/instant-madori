@@ -71,7 +71,7 @@ await test("Immutable revisions through local D1, R2 and public HTTP", async (t)
       assert.equal(lastFinishedJob?.state, "completed");
       assert(lastFinishedJob?.state === "completed");
       assert.deepEqual(lastFinishedJob.revision, latest);
-      assert.equal(lastFinishedJob.number, 52);
+      assert.equal(lastFinishedJob.number, 103);
       assert.deepEqual(current, {
         pattern,
         currentRevision: latest,

@@ -1,12 +1,9 @@
 import type { Ai } from "./round-trip.ts";
 import { scriptedAi } from "./scripted.ts";
-import type { ScriptStep } from "./scripted.ts";
-
-const developmentScript: readonly ScriptStep[] = [
-  { stop: "end", parts: [{ kind: "text", text: "台本のAIの応答です。案は変えていません。" }] },
-];
+import { developmentScript } from "./scripts.ts";
 
 const noProviderAi: Ai = {
+  model: "none",
   roundTrip: () =>
     Promise.resolve({
       kind: "failed",

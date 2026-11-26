@@ -9,7 +9,11 @@ function plain(value: unknown): void {
   );
   for (const child of Object.values(value)) plain(child);
 }
-export function stepEngine({ rerun, loseResults }: { rerun?: string; loseResults?: string } = {}) {
+export function stepEngine({
+  rerun,
+  loseResults,
+  loseResultsOnce,
+}: { rerun?: string; loseResults?: string; loseResultsOnce?: string } = {}) {
   const cache = new Map<string, unknown>();
   const attempts: string[] = [];
   const steps: JobSteps = {
@@ -28,7 +32,8 @@ export function stepEngine({ rerun, loseResults }: { rerun?: string; loseResults
           }
           const result = await body();
           plain(result);
-          if (name === loseResults) throw new Error("Step result lost");
+          if (name === loseResults || (name === loseResultsOnce && attempt === 0))
+            throw new Error("Step result lost");
           cache.set(name, result);
           return structuredClone(result);
         } catch (error) {

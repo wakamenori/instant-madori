@@ -1,20 +1,26 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { geometryClient } from "../../src/geometry/geometry-client.ts";
-import { renderPatternSample } from "../../src/services/geometry.ts";
+import { applyHouseOperations } from "../../src/services/geometry.ts";
 
 function renderWithRejection(error: unknown) {
   const geometry = geometryClient((name) => {
     assert.equal(name, "pattern:pattern-1");
     return {
-      applyOperations() {
+      sampleDisplay() {
         throw new Error("Unexpected applyOperations");
       },
       // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- RPC can reject with foreign values.
-      sampleDisplay: () => Promise.reject(error),
+      applyOperations: () => Promise.reject(error),
     };
   });
-  return renderPatternSample({ geometry }, { patternId: "pattern-1", traceId: "trace-1" });
+  return applyHouseOperations({ geometry }, "pattern-1", {
+    job_id: "trace-1",
+    generation: 1,
+    operation_id: "op",
+    snapshot: { kind: "empty" },
+    operations: [],
+  });
 }
 
 void test("retryable and overloaded RPC failures retry, foreign errors propagate unchanged", async () => {

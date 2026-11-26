@@ -1,13 +1,8 @@
+import { saveJobSnapshot } from "./snapshot-support.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { openJobDatabase, applyJobMigrations, now } from "./jobs-support.ts";
-import {
-  stopJob,
-  acceptInstruction,
-  claimNextJob,
-  completeJob,
-  saveJobSnapshot,
-} from "../../src/services/jobs.ts";
+import { stopJob, acceptInstruction, claimNextJob, completeJob } from "../../src/services/jobs.ts";
 import { requestKey } from "../../src/services/requests.ts";
 import { createStore } from "../../src/storage/store.ts";
 import { d1 } from "../../src/storage/d1.ts";
@@ -143,9 +138,12 @@ await test("Stop orders against commit on real D1 and R2", async (t) => {
     assert.deepEqual(await saveJobSnapshot(deps, { right, display: new Uint8Array([4]) }), {
       kind: "execution_lost",
     });
-    assert.deepEqual(await completeJob(deps, { right, snapshot, name: "案" }), {
-      kind: "execution_lost",
-    });
+    assert.deepEqual(
+      await completeJob(deps, { right, snapshot, explanation: "fixture", name: "案" }),
+      {
+        kind: "execution_lost",
+      },
+    );
     assert.deepEqual(await db.store.jobs.failAndHoldQueue(right, now), { kind: "not_recorded" });
     assert.deepEqual(await counts(), before);
     assert.deepEqual(
@@ -165,9 +163,15 @@ await test("Stop orders against commit on real D1 and R2", async (t) => {
         return bucket.head(key);
       },
     });
-    assert.deepEqual(await completeJob({ ...deps, store }, { right, snapshot, name: "案" }), {
-      kind: "execution_lost",
-    });
+    assert.deepEqual(
+      await completeJob(
+        { ...deps, store },
+        { right, snapshot, explanation: "fixture", name: "案" },
+      ),
+      {
+        kind: "execution_lost",
+      },
+    );
     assert.deepEqual(await counts(), before);
     assert.equal(
       await db.raw.prepare("SELECT state FROM jobs WHERE id = ?").bind(job.jobId).first("state"),
@@ -184,7 +188,7 @@ await test("Stop orders against commit on real D1 and R2", async (t) => {
 
   await t.test("completion first records the revision and reserves the request ID", async () => {
     const { right, snapshot, job, patternId } = await ready();
-    const done = await completeJob(deps, { right, snapshot, name: "案" });
+    const done = await completeJob(deps, { right, snapshot, explanation: "fixture", name: "案" });
     assert(done.kind === "committed");
     const before = await counts();
     const requestId = crypto.randomUUID();
@@ -219,7 +223,10 @@ await test("Stop orders against commit on real D1 and R2", async (t) => {
       },
     );
     assert.equal(reused.kind, "request_id_reused");
-    assert.deepEqual(await completeJob(deps, { right, snapshot, name: "案" }), done);
+    assert.deepEqual(
+      await completeJob(deps, { right, snapshot, explanation: "fixture", name: "案" }),
+      done,
+    );
     assert.deepEqual(await counts(), before);
   });
 
@@ -229,7 +236,7 @@ await test("Stop orders against commit on real D1 and R2", async (t) => {
       const before = await counts();
       const [stopped, completed] = await Promise.all([
         stop(job.jobId),
-        completeJob(deps, { right, snapshot, name: "案" }),
+        completeJob(deps, { right, snapshot, explanation: "fixture", name: "案" }),
       ]);
       assert(stopped.kind === "applied");
       if (stopped.result.outcome === "stopped") {

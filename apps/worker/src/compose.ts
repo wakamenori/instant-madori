@@ -1,3 +1,4 @@
+import { turnCodec } from "./ai/turns.ts";
 import { selectAi } from "./ai/select.ts";
 import { jobTestHoldSettingSchema } from "./services/job-test-hold.ts";
 import { geometryClient } from "./geometry/geometry-client.ts";
@@ -67,7 +68,7 @@ export function jobWorkflowDeps(
   env: Pick<Env, "DB" | "BLOBS" | "GEOMETRY" | "PATTERNS" | "ENVIRONMENT" | "JOB_TEST_HOLD">,
   runtime: Runtime,
 ): JobWorkflowDeps {
-  const { jobs, snapshots } = createStore(d1(env.DB), r2(env.BLOBS));
+  const { jobs, snapshots, work } = createStore(d1(env.DB), r2(env.BLOBS));
   return {
     store: {
       jobs: {
@@ -75,10 +76,14 @@ export function jobWorkflowDeps(
         check: jobs.check,
         complete: jobs.complete,
         failAndHoldQueue: jobs.failAndHoldQueue,
+        startContext: jobs.startContext,
+        recordAi: jobs.recordAi,
         ownedBySubject: jobs.ownedBySubject,
       },
-      snapshots: { write: snapshots.write },
+      snapshots,
+      work,
     },
+    turns: turnCodec,
     ai: selectAi(env),
     testHold: jobTestHoldSettingSchema.parse(env),
     runtime,

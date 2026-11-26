@@ -1,3 +1,6 @@
+/// <reference lib="es2024.promise" />
+import { writeSnapshot } from "../../src/storage/snapshots.ts";
+import { r2 } from "../../src/storage/r2.ts";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
@@ -33,19 +36,19 @@ await test("Committed snapshot files on D1 and R2", async (t) => {
   await applyJobMigrations(db);
   const pattern = await snapshotPattern(db);
   const { ownerId, patternId } = pattern;
-  async function commit(version: 1 | 2 = 2) {
+  async function commit() {
     const right = await pattern.claim();
     const snapshot = await db.store.snapshots.write(right, {
       id: crypto.randomUUID(),
       now,
       display,
-      ...(version === 2 ? { house } : {}),
+      house,
     });
-    const done = await completeJob(db, { right, snapshot, name: "plan" });
+    const done = await completeJob(db, { right, snapshot, explanation: "fixture", name: "plan" });
     assert(done.kind === "committed");
     const revisionId = done.revision.id;
     const row = await pattern.snapshot(revisionId);
-    assert.equal(row.formatVersion, version);
+    assert.equal(row.formatVersion, 2);
     const prefix = `owners/${ownerId}/snapshots/${row.id}/`;
     return { row, revisionId, prefix };
   }
@@ -148,7 +151,6 @@ await test("Committed snapshot files on D1 and R2", async (t) => {
     );
   });
   await t.test("current and frozen display-only snapshots open", async () => {
-    const current = await commit(1);
     const id = crypto.randomUUID();
     const revisionId = crypto.randomUUID();
     const prefix = `owners/${ownerId}/snapshots/${id}/`;
@@ -162,7 +164,7 @@ await test("Committed snapshot files on D1 and R2", async (t) => {
           sha256: hash(display),
         },
       });
-    assert.equal(await manifestText(current.row.manifestKey), manifest(current.prefix));
+
     await db.bucket.put(prefix + "display.mdsp", display);
     await db.bucket.put(prefix + "manifest.json", manifest(prefix));
     await db.raw.batch([
@@ -175,11 +177,41 @@ await test("Committed snapshot files on D1 and R2", async (t) => {
         )
         .bind(revisionId, patternId, ownerId, id, now, patternId),
     ]);
-    for (const row of [current.row, await pattern.snapshot(revisionId)]) {
+    {
+      const row = await pattern.snapshot(revisionId);
       const opened = await db.store.snapshots.open(row);
       assert.equal(opened.house, null);
       assert.deepEqual(await opened.display.read(), display);
     }
+  });
+  await t.test("every artifact write resolves before the manifest is created", async () => {
+    const right = await pattern.claim();
+    const bucket = r2(db.bucket);
+    const written = new Set<string>();
+    const barrier = Promise.withResolvers<void>();
+    const arrived = Promise.withResolvers<void>();
+    const pending = writeSnapshot(
+      {
+        ...bucket,
+        async putNew(key, ...args) {
+          if (key.endsWith("/manifest.json")) assert.equal(written.size, 5);
+          else {
+            arrived.resolve();
+            await barrier.promise;
+          }
+          await bucket.putNew(key, ...args);
+          written.add(key);
+        },
+      },
+      right,
+      { id: crypto.randomUUID(), now, display, house },
+    );
+    await arrived.promise;
+    barrier.resolve();
+    await pending;
+    assert.equal(written.size, 6);
+    const done = await db.store.jobs.failAndHoldQueue(right, now);
+    assert.equal(done.kind, "recorded");
   });
   await t.test("duplicate storeys leave the snapshot prefix empty", async () => {
     const right = await pattern.claim();

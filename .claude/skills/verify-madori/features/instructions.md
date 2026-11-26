@@ -1,14 +1,15 @@
 # 指示を送る
 
-利用者は、パターンに文章で指示を送る。Worker は指示を受け付けて番号を振り、仕事として待ち行列に入れる。仕事は画面を閉じても進み、受け付けた順に一件ずつ動く。今はAIを使わず、仕事が一件終わるごとに、固定のサンプルの形を表示データに持つ案「サンプルの形」が一件増える。同じ指示を送り直しても、二つ目の仕事はできない。
+利用者は、パターンに文章で指示を送る。Worker は指示を受け付けて番号を振り、仕事として待ち行列に入れる。仕事は画面を閉じても進み、受け付けた順に一件ずつ動く。手元と staging の仕事は台本の AI と往復し、AI の住宅操作を Container で適用する。仕事が一件終わるごとに、台本の付けた名前の案が一件増え、会話に AI の説明が一件増える。既定の台本は、空のパターンでは一部屋の LDK に外壁のドアと窓と壁の色を作り、案のあるパターンでは壁の色を一つ変えて、どちらも「台本の案」で確定する。指示の1行目に `台本:<名前>` を書くと、別の台本を選べる。同じ指示を送り直しても、二つ目の仕事はできない。
 
 ## Sub-features
 
 - `instruction-accept`：受け付けると `202` と仕事の番号が返る。
 - `instruction-replay`：同じ `requestId` と本文を送り直すと、同じ仕事が返る。
-- `instruction-run`：仕事が終わると、パターンの状態の `runningJob` と `queuedJobs` が空になり、今の案が「サンプルの形」になり、`lastFinishedJob` がその仕事になる。
-- `instruction-view`：できた案を開くと、サンプルの表示データが返る。
-- `instruction-chain`：二つ目の指示の案は、一つ目の案を編集元に持つ。仕事一件につき案は一件。
+- `instruction-run`：仕事が終わると、パターンの状態の `runningJob` と `queuedJobs` が空になり、今の案が「台本の案」になり、`lastFinishedJob` がその仕事になる。会話の最後に、その仕事の AI の説明が付く。
+- `instruction-view`：できた案を開くと、住宅の表示データと、平面図のある階の一覧（`x-floor-plan-storeys`）が返る。
+- `instruction-chain`：二つ目の指示の案は、一つ目の案を編集元に持つ。仕事一件につき案は一件。二つ目の指示の番号は、一つ目の説明の後の `3` になる。
+- `instruction-script`：1行目が `台本:unresolved` の指示は、確定を止める検査が直らないまま4回 `finish` して `failed` で終わり、案は増えない。知らない台本の名前でも `failed` で終わり、案は増えない。
 - `instruction-invalid`：空白だけの本文は拒まれる。
 - `instruction-attach`：自分の資産の ID を `attachmentIds` に並べて送ると `202`。会話の行の `attachmentIds` が、送った順に小文字の資産 ID を返す。受付の応答と `state` のジョブは添付を持たない。
 - `instruction-attach-replay`：同じ `requestId`・本文・添付で送り直すと同じ仕事が返り、添付の行は増えない。同じ `requestId` で添付の順を変えると `422` で `request_id_reused`。
@@ -30,10 +31,12 @@ Preconditions:
 
 - **送る。** `RID=$(uuidgen)` で `curl -sS -o "$D/accept.json" -w '%{http_code}\n' -X POST "$API/patterns/$PAT/messages" -H "$J" -H "$O" -d "{\"requestId\":\"$RID\",\"body\":\"南向きの居間を広くしたい\"}"`。`202` で、`job.number` が `1`。
 - **送り直す。** 同じ `RID` と本文で、出力先を `"$D/replay.json"` にして送る。`202` で、`job.jobId` が `accept.json` と同じ。
-- **終わるまで待つ。** `settle state-1` が成功する。`$D/state-1.json` の `currentRevision.name` が `サンプルの形`、`currentRevision.baseRevisionId` が `null`、`lastFinishedJob.state` が `completed` で `lastFinishedJob.revision.id` が `currentRevision.id` と同じ。`REV1=$(jq -r .currentRevision.id "$D/state-1.json")` を設定する。
-- **案を開く。** `curl -sS -o "$D/view-1.bin" -D "$D/view-1.headers" -w '%{http_code} %{content_type}\n' "$API/revisions/$REV1/view"`。`200 application/vnd.madori.display; version=1` で、`$D/view-1.headers` の `x-revision-id` が `$REV1`。
-- **二つ目を送る。** 新しい `requestId` と本文 `窓を大きくしたい` で、出力先を `"$D/accept-2.json"` にして送る。`202` で、`job.number` が `2`。`settle state-2` が成功し、`$D/state-2.json` の `currentRevision.number` が `2`、`currentRevision.baseRevisionId` が `$REV1`。
-- **案の一覧。** `curl -sS -o "$D/revisions.json" -w '%{http_code}\n' "$API/patterns/$PAT/revisions"`。`200` で、`revisions` が二件。番号は `2`、`1` の順で、どちらの `name` も `サンプルの形`。`nextCursor` が `null`。
+- **終わるまで待つ。** `settle state-1` が成功する。`$D/state-1.json` の `currentRevision.name` が `台本の案`、`currentRevision.baseRevisionId` が `null`、`lastFinishedJob.state` が `completed` で `lastFinishedJob.revision.id` が `currentRevision.id` と同じ。`REV1=$(jq -r .currentRevision.id "$D/state-1.json")` を設定する。
+- **案を開く。** `curl -sS -o "$D/view-1.bin" -D "$D/view-1.headers" -w '%{http_code} %{content_type}\n' "$API/revisions/$REV1/view"`。`200 application/vnd.madori.display; version=1` で、`$D/view-1.headers` の `x-revision-id` が `$REV1`、`x-floor-plan-storeys` が空でない一つの階の ID。
+- **説明を読む。** `curl -sS -o "$D/messages-1.json" -w '%{http_code}\n' "$API/patterns/$PAT/messages"`。`200` で、`jq -c '[.messages[] | {number, kind, body}]' "$D/messages-1.json"` が二件を新しい順に出す。一件目は番号 `2`、種類 `explanation`、本文 `LDKの外壁に玄関ドアと窓を設けました。` に続けて空行、`仮置きした条件`、`・平屋を想定しました。`。二件目は番号 `1` の `instruction`。説明の `jobId` と `revision.id` は、`accept.json` の `job.jobId` と `$REV1`。
+- **二つ目を送る。** 新しい `requestId` と本文 `窓を大きくしたい` で、出力先を `"$D/accept-2.json"` にして送る。`202` で、`job.number` が `3`。`settle state-2` が成功し、`$D/state-2.json` の `currentRevision.number` が `2`、`currentRevision.baseRevisionId` が `$REV1`。
+- **案の一覧。** `curl -sS -o "$D/revisions.json" -w '%{http_code}\n' "$API/patterns/$PAT/revisions"`。`200` で、`revisions` が二件。番号は `2`、`1` の順で、どちらの `name` も `台本の案`。会話を読み直すと、番号 `4` の説明の本文が `LDKの壁の色を変更しました。` で始まる。`nextCursor` が `null`。
+- **台本を選ぶ。** 新しい `requestId` で本文を `"台本:unresolved\n確かめる"` にし、出力先を `"$D/script-unresolved.json"` にして送る。`202`。`settle state-script-unresolved` が成功し、`lastFinishedJob.state` が `failed`、`currentRevision.number` が `2` のまま、`queueHold` が `null`。`$EVIDENCE/dev.log` のこの仕事の `job.finished` の行に `"reason":"checks_unresolved"` が出て、`job.step` の `round 2 finish` から `round 5 finish` までの四行が `"outcome":"blocked"`。本文を `"台本:nothing\n確かめる"` にして同じく送ると、`failed` で終わり、`job.finished` の理由は `ai_rejected`。どちらも案は増えない。
 - **空白だけの本文。** 新しい `requestId` で `"body":"   "` を送り、出力先を `"$D/blank.json"` にする。`400` で、本文が `{"error":"invalid_request"}`。
 
 添付を確かめる手順は、上の手順と同じ回のパターン `$PAT` を使い、Bash の呼び出しごとに次の三つを定義する。

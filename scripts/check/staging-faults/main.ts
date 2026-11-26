@@ -49,7 +49,7 @@ export function faultTarget(jsonc: string) {
       }),
     })
     .parse(ts.parseConfigFileTextToJson("wrangler.jsonc", jsonc).config);
-  assert(staging.vars?.at === "before_render", "staging JOB_TEST_HOLD must be before_render");
+  assert(staging.vars?.at === "first_answer", "staging JOB_TEST_HOLD must be first_answer");
   return { ...stagingTarget(jsonc), service: staging.name };
 }
 export async function runFaultJourney(

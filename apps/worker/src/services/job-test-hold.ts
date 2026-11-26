@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export type TestHoldPoint = "before_render" | "before_commit";
+type TestHoldPoint = "first_answer" | "finish_answer";
 export interface JobTestHold {
   at: TestHoldPoint;
   seconds: number;
@@ -15,11 +15,11 @@ export const jobTestHoldSettingSchema = z
   .transform((env, context): JobTestHold | null => {
     const setting = env.JOB_TEST_HOLD;
     if (setting === undefined || setting === "none") return null;
-    const match = /^(before_render|before_commit):([1-9][0-9]{0,3})$/u.exec(setting);
+    const match = /^(first_answer|finish_answer):([1-9][0-9]{0,3})$/u.exec(setting);
     const at = match?.[1];
     const seconds = Number(match?.[2]);
     if (
-      (at !== "before_render" && at !== "before_commit") ||
+      (at !== "first_answer" && at !== "finish_answer") ||
       seconds > 7200 ||
       (env.ENVIRONMENT !== "local" && env.ENVIRONMENT !== "staging")
     ) {

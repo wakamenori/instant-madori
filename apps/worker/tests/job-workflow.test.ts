@@ -145,8 +145,10 @@ await test(
             ...(line["reason"] ? { reason: line["reason"] } : {}),
           })),
           [
+            { step: "start job", outcome: "started", attempt: 1 },
+            { step: "round 1 ai", outcome: "answered", attempt: 1 },
             {
-              step: "render snapshot",
+              step: "round 1 call 1 edit_house",
               attempt: 1,
               outcome: "not_committed",
               reason: "containers_disabled",
@@ -220,7 +222,7 @@ await test(
           const steps = lines.flatMap((line, index) =>
             line["event"] === "job.step" && line["jobId"] === job.jobId ? [index] : [],
           );
-          assert.equal(steps.length, 3);
+          assert.equal(steps.length, 5);
           assert(
             steps.every((index) => index > previous && index < finish),
             "all steps follow the previous job's end",

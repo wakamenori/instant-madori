@@ -41,6 +41,9 @@ export async function applyJobMigrations(db: Awaited<ReturnType<typeof openJobDa
   ])
     await db.apply(await readFile(migration, "utf8"));
   await applyAttachmentMigrations(db);
+  await db.apply(
+    await readFile(new URL("../../migrations/0010_job_ai_versions.sql", import.meta.url), "utf8"),
+  );
 }
 export const now = "2026-11-15T00:00:00.000Z";
 

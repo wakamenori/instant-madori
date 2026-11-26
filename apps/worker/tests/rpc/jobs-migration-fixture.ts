@@ -1,11 +1,8 @@
+import { saveJobSnapshot } from "./snapshot-support.ts";
+import { URL } from "node:url";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import {
-  acceptInstruction,
-  claimNextJob,
-  saveJobSnapshot,
-  completeJob,
-} from "../../src/services/jobs.ts";
+import { acceptInstruction, claimNextJob, completeJob } from "../../src/services/jobs.ts";
 import {
   openJobDatabase,
   applyAttachmentMigrations,
@@ -105,6 +102,9 @@ try {
   assert.deepEqual((await db.raw.prepare("PRAGMA foreign_key_check").all()).results, []);
   await db.apply(await readFile(queueHoldMigration, "utf8"));
   await db.apply(await readFile(conversationMigration, "utf8"));
+  await db.apply(
+    await readFile(new URL("../../migrations/0007_snapshot_format_2.sql", import.meta.url), "utf8"),
+  );
   await applyAttachmentMigrations(db);
   const deps = { store: db.store, runtime: db.runtime, wakePattern: async () => {} };
   const accepted = await acceptInstruction(deps, {
@@ -119,6 +119,7 @@ try {
   const saved = await saveJobSnapshot(deps, { right: claimed.right, display: new Uint8Array([1]) });
   assert(saved.kind === "saved");
   const completed = await completeJob(deps, {
+    explanation: "fixture",
     right: claimed.right,
     snapshot: saved.snapshot,
     name: "R5",

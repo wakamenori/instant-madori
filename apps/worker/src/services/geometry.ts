@@ -1,3 +1,4 @@
+import type { ApplyOperationsRequest } from "@madori/contracts/geometry-internal";
 import type { ServiceDeps } from "./deps.ts";
 import type { UnavailableReason } from "../geometry/container-gateway.ts";
 import type { DisplayArtifact, GeometryResult } from "../geometry/geometry-protocol.ts";
@@ -17,30 +18,22 @@ type PermanentUnavailable = {
 }[UnavailableReason];
 export type GeometryFailure =
   PermanentUnavailable | Extract<GeometryResult<DisplayArtifact>, { kind: "failed" }>["reason"];
-export type PatternSample =
-  | { kind: "rendered"; display: Uint8Array<ArrayBuffer> }
-  | { kind: "retry"; reason: UnavailableReason }
-  | { kind: "failed"; reason: GeometryFailure };
-
 function permanentUnavailable(reason: UnavailableReason): reason is PermanentUnavailable {
   return afterUnavailable[reason] === "fail";
 }
 
-export async function renderPatternSample(
+export async function applyHouseOperations(
   { geometry }: Pick<ServiceDeps, "geometry">,
-  input: { patternId: string; traceId: string },
-): Promise<PatternSample> {
-  const result = await geometry({ kind: "pattern", patternId: input.patternId }).sampleDisplay({
-    traceId: input.traceId,
-  });
-  switch (result.kind) {
-    case "ok":
-      return { kind: "rendered", display: new Uint8Array(result.value.bytes) };
-    case "failed":
-      return { kind: "failed", reason: result.reason };
-    case "unavailable": {
-      const reason = result.reason;
-      return permanentUnavailable(reason) ? { kind: "failed", reason } : { kind: "retry", reason };
-    }
-  }
+  patternId: string,
+  request: ApplyOperationsRequest,
+) {
+  const response = await geometry({ kind: "pattern", patternId }).applyOperations(
+    { traceId: request.job_id },
+    request,
+  );
+  if (response.kind !== "unavailable") return response;
+  const reason = response.reason;
+  return permanentUnavailable(reason)
+    ? { kind: "failed" as const, reason }
+    : { kind: "retry" as const, reason };
 }

@@ -66,11 +66,11 @@ await test("Job test hold configuration fails closed", () => {
     loadConfig({ ...env, JOB_TEST_HOLD: "none" });
     for (const value of [
       "",
-      "before_render:0",
-      "before_commit:7201",
-      "before_render:01",
+      "first_answer:0",
+      "finish_answer:7201",
+      "first_answer:01",
       "after_render:10",
-      "before_render:1.5",
+      "first_answer:1.5",
       123,
     ]) {
       assert.throws(() => loadConfig({ ...env, JOB_TEST_HOLD: value }), {
@@ -79,7 +79,7 @@ await test("Job test hold configuration fails closed", () => {
       });
     }
   }
-  for (const value of ["before_render:1", "before_commit:7200"]) {
+  for (const value of ["first_answer:1", "finish_answer:7200"]) {
     loadConfig({ ...local, JOB_TEST_HOLD: value });
     loadConfig({ ...remote, JOB_TEST_HOLD: value });
     assert.throws(

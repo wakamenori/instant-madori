@@ -1,4 +1,6 @@
-import { scriptedAi } from "../../src/ai/scripted.ts";
+import { saveJobSnapshot } from "./snapshot-support.ts";
+import { turnCodec } from "../../src/ai/turns.ts";
+import { editingAi, appliedFixture } from "./operations-support.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
@@ -9,7 +11,6 @@ import {
   reconcilePattern,
   recovery,
   runJob,
-  saveJobSnapshot,
   stopJob,
   sweepStalledPatterns,
 } from "../../src/services/jobs.ts";
@@ -63,23 +64,15 @@ await test("Pattern reconciliation on D1", async (t) => {
       store: db.store,
       runtime,
       jobRuns,
-      ai: scriptedAi([]),
+      turns: turnCodec,
+      ai: editingAi,
       testHold: null,
       wakePattern: async () => {},
       geometry: () => ({
-        applyOperations() {
-          throw new Error("Unexpected applyOperations");
+        sampleDisplay() {
+          throw new Error("Unexpected sampleDisplay");
         },
-        sampleDisplay: () =>
-          Promise.resolve({
-            kind: "ok" as const,
-            start: "warm" as const,
-            ms: 1,
-            value: {
-              bytes: new Uint8Array([1]).buffer,
-              contentType: "application/octet-stream" as const,
-            },
-          }),
+        applyOperations: () => Promise.resolve(appliedFixture),
       }),
     };
     async function accept() {
@@ -188,7 +181,12 @@ await test("Pattern reconciliation on D1", async (t) => {
         ].sort(),
       );
       assert.deepEqual(
-        await completeJob(f.deps, { right, name: "old", snapshot: saved.snapshot }),
+        await completeJob(f.deps, {
+          right,
+          explanation: "fixture",
+          name: "old",
+          snapshot: saved.snapshot,
+        }),
         { kind: "execution_lost" },
       );
       assert.equal((await f.run(right.reference)).kind, "not_running");

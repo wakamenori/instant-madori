@@ -1,3 +1,4 @@
+import { saveJobSnapshot } from "./snapshot-support.ts";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { URL, fileURLToPath } from "node:url";
@@ -5,12 +6,7 @@ import { join } from "node:path";
 import process from "node:process";
 import { getTestPlatformProxy } from "./platform-proxy.ts";
 import { z } from "zod";
-import {
-  acceptInstruction,
-  claimNextJob,
-  saveJobSnapshot,
-  completeJob,
-} from "../../src/services/jobs.ts";
+import { acceptInstruction, claimNextJob, completeJob } from "../../src/services/jobs.ts";
 import { createStore } from "../../src/storage/store.ts";
 import { d1 } from "../../src/storage/d1.ts";
 import { r2 } from "../../src/storage/r2.ts";
@@ -106,12 +102,26 @@ try {
   );
   const saved = await saveJobSnapshot(deps, { right, display });
   assert(saved.kind === "saved");
-  const committed = await completeJob(deps, { right, snapshot: saved.snapshot, name: "初案" });
+  const committed = await completeJob(deps, {
+    right,
+    snapshot: saved.snapshot,
+    explanation: "explanation",
+    name: "初案",
+  });
   assert(committed.kind === "committed");
   const jobId = right.reference.jobId;
   const answerJobId = crypto.randomUUID();
   const ids = [accepted.job.messageId];
   for (let number = 2; number <= 55; number++) {
+    if (number === 2) {
+      const explanation = await db
+        .prepare("SELECT id FROM messages WHERE job_id=? AND kind='explanation'")
+        .bind(jobId)
+        .first<string>("id");
+      assert(explanation);
+      ids.push(explanation);
+      continue;
+    }
     const id = crypto.randomUUID();
     ids.push(id);
     const kind =

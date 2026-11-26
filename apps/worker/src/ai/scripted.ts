@@ -69,12 +69,15 @@ function matchesCalls(turn: AssistantTurn, reply: Reply): boolean {
   return reply.results.every((result) => pending.delete(result.callId)) && pending.size === 0;
 }
 
-function answer(steps: readonly AiResponse[], conversation: Conversation): AiResult {
+type Script = (conversation: Conversation) => ScriptStep;
+type Next = (conversation: Conversation) => AiResponse | undefined;
+
+function answer(next: Next, conversation: Conversation): AiResult {
   if (conversation.opening.length === 0) {
     return { kind: "failed", reason: "rejected", detail: "empty opening message" };
   }
   for (const [index, round] of conversation.rounds.entries()) {
-    const step = steps[index];
+    const step = next({ ...conversation, rounds: conversation.rounds.slice(0, index) });
     if (!step || !sameTurn(round.assistant, step.assistant)) {
       return {
         kind: "failed",
@@ -87,7 +90,7 @@ function answer(steps: readonly AiResponse[], conversation: Conversation): AiRes
     }
   }
   return (
-    steps[conversation.rounds.length] ?? {
+    next(conversation) ?? {
       kind: "failed",
       reason: "script_ended",
       detail: "the script has ended",
@@ -95,24 +98,49 @@ function answer(steps: readonly AiResponse[], conversation: Conversation): AiRes
   );
 }
 
-export function scriptedAi(script: readonly ScriptStep[]): Ai {
-  const ids = new Set<string>();
-  const steps = script.map((step, index): AiResponse => {
-    if (step.parts.length === 0) throw new Error(`step ${index} has no parts`);
-    const calls = step.parts.filter((part) => part.kind === "tool_call");
-    if ((step.stop === "tool_calls") !== calls.length > 0) {
-      throw new Error(`step ${index} has a stop reason inconsistent with its tool calls`);
-    }
-    for (const call of calls) {
-      if (ids.has(call.id)) throw new Error(`step ${index} repeats a tool call id`);
-      if (!isObjectJson(call.inputJson)) throw new Error(`step ${index} has invalid tool input`);
-      ids.add(call.id);
-    }
-    return Object.freeze({
-      kind: "ok",
-      assistant: receivedTurn("scripted", step.parts, step.usage ?? zeroUsage),
-      stop: step.stop,
-    });
+function response(step: ScriptStep, index: number, ids: Set<string>): AiResponse {
+  if (step.parts.length === 0) throw new Error(`step ${index} has no parts`);
+  const calls = step.parts.filter((part) => part.kind === "tool_call");
+  if ((step.stop === "tool_calls") !== calls.length > 0) {
+    throw new Error(`step ${index} has a stop reason inconsistent with its tool calls`);
+  }
+  for (const call of calls) {
+    if (ids.has(call.id)) throw new Error(`step ${index} repeats a tool call id`);
+    if (!isObjectJson(call.inputJson)) throw new Error(`step ${index} has invalid tool input`);
+    ids.add(call.id);
+  }
+  return Object.freeze({
+    kind: "ok",
+    assistant: receivedTurn("scripted", step.parts, step.usage ?? zeroUsage),
+    stop: step.stop,
   });
-  return { roundTrip: ({ conversation }) => Promise.resolve(answer(steps, conversation)) };
+}
+
+export function scriptedAi(script: readonly ScriptStep[] | Script): Ai {
+  const ids = new Set<string>();
+  const fixed =
+    typeof script === "function" ? null : script.map((step, i) => response(step, i, ids));
+  return {
+    model: "scripted",
+    roundTrip: ({ conversation }) => {
+      const seen = new Set<string>();
+      try {
+        return Promise.resolve(
+          answer(
+            (view) =>
+              typeof script === "function"
+                ? response(script(view), view.rounds.length, seen)
+                : fixed?.[view.rounds.length],
+            conversation,
+          ),
+        );
+      } catch (error) {
+        return Promise.resolve({
+          kind: "failed",
+          reason: "rejected",
+          detail: error instanceof Error ? error.message : "script expectation failed",
+        });
+      }
+    },
+  };
 }

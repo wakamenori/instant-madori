@@ -6,6 +6,10 @@ import { jsonRows, rows } from "./d1.ts";
 import type { D1 } from "./d1.ts";
 import { revisionJson } from "./revisions.ts";
 
+export const queueHeadSql = `SELECT q.id FROM jobs q CROSS JOIN messages m
+            ON m.id = q.message_id AND m.pattern_id = q.pattern_id
+            WHERE q.pattern_id = ? AND q.state = 'queued' ORDER BY m.number LIMIT 1`;
+
 const executionSchema = z.object({
   jobId: z.uuid(),
   patternId: z.uuid(),
@@ -47,9 +51,7 @@ class JobExecutionRight {
         base_revision_id = (SELECT r.id FROM revisions r
           WHERE r.pattern_id = jobs.pattern_id ORDER BY r.number DESC LIMIT 1), updated_at = ?
         WHERE pattern_id = ? AND state = 'queued'
-          AND id = (SELECT q.id FROM jobs q JOIN messages m
-            ON m.id = q.message_id AND m.pattern_id = q.pattern_id
-            WHERE q.pattern_id = ? AND q.state = 'queued' ORDER BY m.number LIMIT 1)
+          AND id = (${queueHeadSql})
           AND NOT EXISTS (SELECT 1 FROM jobs a WHERE a.pattern_id = ?
             AND a.state IN (${activeJobStates}))
           AND ${queueNotHeld}

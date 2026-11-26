@@ -120,7 +120,7 @@ function staging(fault: Fault) {
     const claimed = version();
     log(job, "pattern.advanced", "claimed");
     if (!(fault === "missing hold" && job.number === 3))
-      log(job, "job.step", "hold", { step: "check test hold before render" });
+      log(job, "job.step", "hold", { step: "round 1 ai" });
     later(60_000, () => {
       if (running?.jobId === job.jobId)
         log(
@@ -143,7 +143,7 @@ function staging(fault: Fault) {
         last = { ...job, state: "completed", revision };
         finished.set(job.jobId, last);
         running = null;
-        log(job, "job.step", "saved", { step: "render snapshot" });
+        log(job, "job.step", "edited", { step: "round 1 call 1 edit_house" });
         log(job, "job.finished", "committed", { revisionId: revision.id }, claimed);
         if (fault === "changed display") displays.set(first.id, "different bytes");
         if (fault === "advance failed") log(job, "pattern.advance_failed", "failed");
@@ -301,7 +301,7 @@ function staging(fault: Fault) {
           vars: {
             ENVIRONMENT: "staging",
             APP_ORIGINS: "https://staging.test",
-            JOB_TEST_HOLD: "before_render:180",
+            JOB_TEST_HOLD: "first_answer:180",
           },
         },
       },

@@ -19,7 +19,7 @@
 Preconditions:
 
 - 「終わった後に止める」には Container が必要。
-- SKILL.md の「起動」の `pnpm dev` を、`MADORI_DEV_JOB_TEST_HOLD=before_render:30` を付けて起動している。仕事は実行権を取った後、描画の前に30秒待つ。待ちを付けずに動いていたら、片付けてから、SKILL.md の「起動」の三行を、`perl` の行の先頭に `MADORI_DEV_JOB_TEST_HOLD=before_render:30 ` を足して実行し直す。`dev.pgid` を書く行も実行する。抜くと、片付けが前のプロセスグループを指したままになる。
+- SKILL.md の「起動」の `pnpm dev` を、`MADORI_DEV_JOB_TEST_HOLD=first_answer:30` を付けて起動している。仕事は実行権を取り、台本のAIの最初の応答を受け取った後、住宅を変える前に30秒待つ。待ちを付けずに動いていたら、片付けてから、SKILL.md の「起動」の三行を、`perl` の行の先頭に `MADORI_DEV_JOB_TEST_HOLD=first_answer:30 ` を足して実行し直す。`dev.pgid` を書く行も実行する。抜くと、片付けが前のプロセスグループを指したままになる。
 - [案件](./projects.md)の「作る」を済ませ、`PAT=$(jq -r .pattern.id "$EVIDENCE/projects/create.json")` を設定している。
 - `. "$EVIDENCE/dev.env"` で `API` と `O` を読み込み、`J='content-type: application/json'` と `D="$EVIDENCE/stop"` を設定し、`$D` がある。
 - 送る関数 `send() { curl -sS -o "$D/${1}.json" -w '%{http_code}\n' -X POST "$API/patterns/$PAT/messages" -H "$J" -H "$O" -d "{\"requestId\":\"$(uuidgen)\",\"body\":\"${2}\"}"; }`、止める関数 `stop() { curl -sS -o "$D/${1}.json" -w '%{http_code}\n' -X POST "$API/jobs/${2}/stop" -H "$J" -H "$O" -d "{\"requestId\":\"${3}\"}"; }`、状態を読む関数 `state() { curl -sS -o "$D/${1}.json" "$API/patterns/$PAT/state"; }` を定義している。
@@ -34,8 +34,8 @@ Preconditions:
 
 ## Gotchas
 
-- 待ちを付けずに起動すると、サンプルの仕事は数秒で終わる。実行中の停止は確定と競い、`already_finished` と `completed` が返ることがある。誤りではなく、確定が先だったという答えである。
-- 待ちは手元のすべての仕事に掛かる。止めていない仕事も、描画の前に30秒待つ。
+- 待ちを付けずに起動すると、台本のAIの仕事は数秒で終わる。実行中の停止は確定と競い、`already_finished` と `completed` が返ることがある。誤りではなく、確定が先だったという答えである。
+- 待ちは手元のすべての仕事に掛かる。止めていない仕事も、最初の応答の後に30秒待つ。
 - 止めた仕事の Workflow は、待ちが終わるまで残る。その間にも、保留していない待機列の次の指示や、再開した指示は動き出す。止めた仕事の `job.finished` は、待ちが終わってから出る。
 - 保留にならなかった場合は待機列が進むので、次の仕事が実行されて終わると `lastFinishedJob` はその仕事に置き換わる。停止の直後に state を読む。
 - `lastFinishedJob` は、実行した仕事のうち、終わったもので受付の番号が最も大きいものを指す。待機中に止めた B は実行していないので、A より番号が大きくても指さない。

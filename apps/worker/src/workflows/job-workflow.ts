@@ -30,6 +30,7 @@ export class JobWorkflow extends WorkflowEntrypoint<Env, JobExecutionReference> 
               step: name,
               attempt,
               outcome: settled.kind,
+              ...settled.timings,
               ...("reason" in settled ? { reason: settled.reason } : {}),
               ...("revisionId" in settled ? { revisionId: settled.revisionId } : {}),
             });
@@ -53,6 +54,7 @@ export class JobWorkflow extends WorkflowEntrypoint<Env, JobExecutionReference> 
       {
         ...ids,
         outcome: end.kind,
+        ...(end.ms === undefined ? {} : { ms: end.ms }),
         ...(end.kind === "committed"
           ? { revisionId: end.revisionId }
           : end.kind === "cancelled"
