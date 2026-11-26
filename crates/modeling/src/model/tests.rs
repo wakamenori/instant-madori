@@ -490,6 +490,9 @@ fn assert_west_triangle(vertices: [[f64; 3]; 3], x: f64) {
 fn assert_blue_wall(m: &Model, wall: &BoundaryId, count: usize, x: f64, base: f64) {
     let names = m.bodies_of(wall.as_str());
     assert_eq!(names.len(), count);
+    assert_blue_faces(m, &names, x, base);
+}
+fn assert_blue_faces(m: &Model, names: &[String], x: f64, base: f64) {
     for body in &m.session.model.state().bodies {
         let colors = m.session.doc.face_colors(body);
         if !names.contains(&body.name) {
@@ -928,4 +931,246 @@ fn load_rejects_unknown_versions_invalid_houses_and_unbuildable_walls() {
             e.element == ElementKind::Vertex && e.id == vertex_id.as_str() && matches!(e.reason, Reason::UnresolvedJoint { .. })
         ))
     );
+}
+
+fn assign_wall_face(
+    m: &mut Model,
+    wall: &BoundaryId,
+    point: [f64; 3],
+    color: [u8; 3],
+) -> (String, usize) {
+    let mut hits = Vec::new();
+    let state = m.session.model.state();
+    for name in m.bodies_of(wall.as_str()) {
+        let body = state.body(&name).unwrap();
+        for face in
+            solidcraft_doc::appearance::faces_within(body, point.into(), LENGTH_TOLERANCE_MM)
+        {
+            hits.push((name.clone(), face));
+        }
+    }
+    let [(body, face)]: [_; 1] = hits.try_into().unwrap();
+    execute_checked(
+        &mut m.session,
+        "appearance.assign",
+        &json!({"body": body, "faces": [point], "color": color}),
+    )
+    .unwrap();
+    (body, face)
+}
+
+#[test]
+fn color_on_opposite_face_reports_stray_color() {
+    let (h, wall) = blue_wall(fixture());
+    let mut m = Model::build(&h, None).unwrap();
+    let (body, face_index) = assign_wall_face(&mut m, &wall, [4060., 2500., 1200.], [0, 0, 255]);
+    let errors = m.check(&h).unwrap_err();
+    assert!(errors.to_string().contains(wall.as_str()));
+    assert_eq!(
+        errors.as_slice(),
+        [Mismatch::element(
+            ElementKind::Wall,
+            wall.as_str(),
+            MismatchReason::WallColor(WallColorFailure::StrayColor { body, face_index })
+        )]
+    );
+}
+
+#[test]
+fn repainted_face_reports_found_color() {
+    let (h, wall) = blue_wall(fixture());
+    let mut m = Model::build(&h, None).unwrap();
+    let found = [255, 0, 0];
+    let (body, face_index) = assign_wall_face(&mut m, &wall, [3940., 2500., 1200.], found);
+    let errors = m.check(&h).unwrap_err();
+    assert!(errors.to_string().contains(wall.as_str()));
+    assert_eq!(
+        errors.as_slice(),
+        [Mismatch::element(
+            ElementKind::WallColor,
+            wall.as_str(),
+            MismatchReason::WallColor(WallColorFailure::ColorMismatch {
+                body,
+                face_index,
+                found
+            })
+        )]
+    );
+}
+
+#[test]
+fn partly_painted_wall_reports_unpainted_area() {
+    let (h, wall) = blue_wall(fixture());
+    let h = opening(&h, "door", wall.clone(), 900., 900., 2400., 0.);
+    let mut m = Model::assemble(&h, None).unwrap();
+    let point = [3940., 2500., 1200.];
+    assign_wall_face(&mut m, &wall, point, [0, 0, 255]);
+    let errors = m.check(&h).unwrap_err();
+    assert!(errors.to_string().contains(wall.as_str()));
+    assert_eq!(
+        errors.as_slice(),
+        [Mismatch::element(
+            ElementKind::WallColor,
+            wall.as_str(),
+            MismatchReason::WallColor(WallColorFailure::Unpainted {
+                face: h.data().wall_colors[0].face.clone(),
+                expected_area: 4100. * 2400.,
+                painted_area: 3300. * 2400.
+            })
+        )]
+    );
+}
+
+#[test]
+fn removed_room_reports_stale_entry() {
+    let h = fixture();
+    let mut m = Model::build(&h, None).unwrap();
+    m.entries.push(Entry {
+        element: ElementId::parse("ghost").unwrap(),
+        kind: EntryKind::Floor {
+            room: RoomId::new("ghost"),
+        },
+    });
+    assert_eq!(
+        m.check(&h).unwrap_err().as_slice(),
+        [Mismatch::element(
+            ElementKind::Room,
+            "ghost",
+            MismatchReason::StaleEntry {}
+        )]
+    );
+}
+
+#[test]
+fn rehosted_opening_reports_both_walls() {
+    let h = two_openings();
+    let mut m = Model::build(&h, None).unwrap();
+    let (opening, host) = m
+        .entries
+        .iter_mut()
+        .find_map(|e| match &mut e.kind {
+            EntryKind::Opening { opening, host, .. } => Some((opening, host)),
+            _ => None,
+        })
+        .unwrap();
+    let expected = host.clone();
+    let recorded = h
+        .boundaries()
+        .find(|w| w.data().id != expected)
+        .unwrap()
+        .data()
+        .id
+        .clone();
+    *host = recorded.clone();
+    let mismatch = Mismatch::element(
+        ElementKind::Opening,
+        opening.as_str(),
+        MismatchReason::HostMismatch { recorded, expected },
+    );
+    assert_eq!(m.check(&h).unwrap_err().as_slice(), [mismatch]);
+}
+
+#[test]
+fn opening_requires_an_existing_cut_feature() {
+    let h = two_openings();
+    let mut m = Model::build(&h, None).unwrap();
+    let floor = h.rooms().next().unwrap();
+    let extrude = m
+        .session
+        .model
+        .state()
+        .body(floor.data().id.as_str())
+        .unwrap()
+        .feature;
+    for replacement in [u64::MAX, extrude] {
+        let (opening, cut) = m
+            .entries
+            .iter_mut()
+            .find_map(|e| match &mut e.kind {
+                EntryKind::Opening { opening, cut, .. } => Some((opening, cut)),
+                _ => None,
+            })
+            .unwrap();
+        *cut = replacement;
+        let mismatch = Mismatch::element(
+            ElementKind::Opening,
+            opening.as_str(),
+            MismatchReason::CutMissing { cut: replacement },
+        );
+        assert_eq!(m.check(&h).unwrap_err().as_slice(), [mismatch]);
+    }
+}
+
+#[test]
+fn sliver_room_reports_insufficient_seed_clearance() {
+    let h = fixture();
+    let wall = shared(&h);
+    let m = Model::build(&h, None).unwrap();
+    let room = h
+        .rooms()
+        .find(|r| r.edges().any(|e| e.from.x < 4000.))
+        .unwrap()
+        .data()
+        .id
+        .clone();
+    let west = FaceRole::Room { room: room.clone() };
+    let left = h.boundary(&wall).unwrap().face(Side::Left).role() == west;
+    let mut data = h.into_data();
+    let offsets = &mut data
+        .boundaries
+        .iter_mut()
+        .find(|w| w.id == wall)
+        .unwrap()
+        .wall
+        .offsets;
+    let width = 1. / 512.;
+    if left {
+        offsets.left = 4000. - width;
+    } else {
+        offsets.right = 4000. - width;
+    }
+    let errors = m.check(&House::new(data).unwrap()).unwrap_err();
+    let expected = Mismatch::element(
+        ElementKind::Room,
+        room.as_str(),
+        MismatchReason::NoSeed {
+            clearance: width / 2.,
+        },
+    );
+    assert_eq!(
+        errors
+            .as_slice()
+            .iter()
+            .filter(|e| e.subject == expected.subject)
+            .collect::<Vec<_>>(),
+        [&expected]
+    );
+}
+
+#[test]
+fn paint_ignores_touching_face_with_opposite_normal() {
+    let (h, wall) = blue_wall(fixture());
+    let mut m = Model::assemble(&h, None).unwrap();
+    let names = m.bodies_of(wall.as_str());
+    assert_eq!(names.len(), 1);
+    extrude(
+        &mut m.session,
+        &Prism {
+            outline: SimplePolygon::new(vec![
+                pt(3840., 1000.),
+                pt(3940., 1000.),
+                pt(3940., 4000.),
+                pt(3840., 4000.),
+            ])
+            .unwrap(),
+            base: 0.,
+            height: 2400.,
+        },
+        json!({"operation":"new","body_name":"probe"}),
+    )
+    .unwrap();
+    m.pieces
+        .insert("probe".into(), ElementId::parse(wall.as_str()).unwrap());
+    m.paint(&h).unwrap();
+    assert_blue_faces(&m, &names, 3940., 0.);
 }
