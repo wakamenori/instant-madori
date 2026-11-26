@@ -12,7 +12,7 @@
 - `view-zoom`：ホイールで拡大・縮小する。
 - `view-pan`：右ドラッグ、Shift＋ドラッグ、Ctrl＋ドラッグで、モデルが回らずにカーソルについて平行に動く。動かしてから拡大すると、部屋の中を近くから見られる。中ボタンのドラッグでは何も動かない。キャンバスの上では右クリックのメニューが出ない。
 - `view-reset`：`視点を戻す` を押すと、回転・移動・拡大のどの後でも、案を開いたときと同じ視点に戻る。案が無いあいだ、ボタンは押せない。
-- `view-floor-plan`：今の仕事が作る案は平面図を持たないので、表示データの応答の `x-floor-plan-storeys` が空の値で付き、平面図を求めると `404` で `not_found` が返る。`storey` を付けずに求めると `400` で `invalid_request` が返る。
+- `view-floor-plan`：仕事が作る案は平面図を持つので、表示データの応答の `x-floor-plan-storeys` に一つの階の ID が付き、その階の平面図が `image/svg+xml` で返る。平面図の応答は `content-security-policy` と `x-content-type-options: nosniff` を持つ。案に無い階を求めると `404` で `not_found`、`storey` を付けずに求めると `400` で `invalid_request` が返る。
 - `view-not-found`：存在しない案件と他人の案件は `この案件は見つかりません。`、それ以外の知らないパスは `このページはありません。` と出る。
 
 ## How to get to it (user POV)
@@ -27,15 +27,15 @@
 
 Preconditions:
 
-- Container が必要。実行中・待機中・保留の表示を確かめるときは、[SKILL.md の「起動」](../SKILL.md#起動)の手順で `MADORI_DEV_JOB_TEST_HOLD=before_render:60` を付けて起動する。仕事は描画の前に 60 秒待つので、状態の行を確かめる時間がある。
+- Container が必要。実行中・待機中・保留の表示を確かめるときは、[SKILL.md の「起動」](../SKILL.md#起動)の手順で `MADORI_DEV_JOB_TEST_HOLD=first_answer:60` を付けて起動する。仕事は台本の AI の最初の応答の後に 60 秒待つので、状態の行を確かめる時間がある。
 - 状態確認が通っている。
 - `$EVIDENCE/project-view/` がある。`. "$EVIDENCE/dev.env"` で `API` と `O` を読み込み、`D="$EVIDENCE/project-view"` と `J='content-type: application/json'` を設定している。
 - 状態を読む関数を定義している。`st() { curl -sS "$API/patterns/$PAT/state" | jq -c '{running: .runningJob.number, queued: [.queuedJobs[].number], hold: .queueHold.job.number, revision: .currentRevision.number}'; }`
 
 - **案件を作って開く。** `preview_open` に `target: { kind: "environment-port", port: <WEB_PORT> }`、`open: false`、`reuseExistingTab: false` を渡し、返った `tabId` を以後のすべての呼び出しに渡す。`preview_act` の `click` で `locator: 'role=button[name="新しい案件を作る"]'` を押す。`preview_wait_for` で `text: "まだ案がありません。"` と `urlIncludes: "/projects/"` を待つ。見出しが `パターン1` で、`<日時> 作成` の日時が一覧のその行と同じ。`preview_evaluate` の `location.pathname` から ID を取り、`PID=<ID>` と `PAT=$(curl -sS "$API/projects/$PID/patterns" | jq -r '.patterns[0].id')` を設定する。
 - **指示を送り、開き直す。** `curl -sS -o "$D/accept-1.json" -w '%{http_code}\n' -X POST "$API/patterns/$PAT/messages" -H "$J" -H "$O" -d "{\"requestId\":\"$(uuidgen)\",\"body\":\"小さな平屋を作ってください。\"}"`。`202`。`st` の `running` が `1`。`preview_navigate` で同じタブを `target: { kind: "environment-port", port: <WEB_PORT>, path: "/projects/<PID>" }` に開き直し、`preview_wait_for` で `text: "指示を実行しています…"` を待つ。`preview_snapshot` に `save: true` を付けて撮り、`screenshotPath` を `$D/running.png` に写す。
-- **確定を待つ。** 再読込せずに、`preview_wait_for` で `text: "案1「サンプルの形」を表示しています。"` を `timeoutMs: 60000` で待つ。届かなければ、もう一度待つ。状態の行が消え、モデルが描かれる。撮って `$D/drawn.png` に写し、Read で開いて、床と 3 枚の壁と、奥の壁の開口が見えることを確かめる。`preview_evaluate` で `performance.getEntriesByType('resource').filter((e) => e.name.includes('/state')).length` を 5 秒おいて二度読む。二つは同じで、読み直しが止まっている。
-- **平面図の階を読む。** 確定を待った後に、`REV=$(curl -sS "$API/patterns/$PAT/state" | jq -r .currentRevision.id)` を設定する。`curl -sS -o "$D/view.bin" -D "$D/view.headers" -w '%{http_code} %{content_type}\n' "$API/revisions/$REV/view"`。`200 application/vnd.madori.display; version=1`。`tr -d '\r' < "$D/view.headers" | grep -ixE 'x-floor-plan-storeys: *'` が値の無い `x-floor-plan-storeys:` の一行を出し、`tr -d '\r' < "$D/view.headers" | grep -i '^x-revision-id:'` が `$REV` を出す。`curl -sS -o "$D/floor-plan.json" -w '%{http_code}\n' "$API/revisions/$REV/floor-plan?storey=s1"`。`404` で、本文が `{"error":"not_found"}`。`?storey=s1` を外し、出力先を `"$D/floor-plan-no-storey.json"` にして送ると、`400` で本文が `{"error":"invalid_request"}`。
+- **確定を待つ。** 再読込せずに、`preview_wait_for` で `text: "案1「台本の案」を表示しています。"` を `timeoutMs: 60000` で待つ。届かなければ、もう一度待つ。状態の行が消え、モデルが描かれる。撮って `$D/drawn.png` に写し、Read で開いて、一部屋の 4 枚の壁と、床まで届くドアの開口と、窓の開口が見えることを確かめる。台本が色を塗るのは部屋の側の面なので、最初の視点からは見えないことがある。`preview_evaluate` で `performance.getEntriesByType('resource').filter((e) => e.name.includes('/state')).length` を 5 秒おいて二度読む。二つは同じで、読み直しが止まっている。
+- **平面図の階を読む。** 確定を待った後に、`REV=$(curl -sS "$API/patterns/$PAT/state" | jq -r .currentRevision.id)` を設定する。`curl -sS -o "$D/view.bin" -D "$D/view.headers" -w '%{http_code} %{content_type}\n' "$API/revisions/$REV/view"`。`200 application/vnd.madori.display; version=1`。`STOREY=$(tr -d '\r' < "$D/view.headers" | sed -nE 's/^x-floor-plan-storeys: *//Ip')` が空でない一つの階の ID になり、`tr -d '\r' < "$D/view.headers" | grep -i '^x-revision-id:'` が `$REV` を出す。`curl -sS -o "$D/floor-plan.svg" -D "$D/floor-plan.headers" -w '%{http_code} %{content_type}\n' "$API/revisions/$REV/floor-plan?storey=$STOREY"`。`200 image/svg+xml` で、見出しに `x-revision-id: $REV`、`content-security-policy: default-src 'none'; frame-ancestors 'self'`、`x-content-type-options: nosniff` がある。`storey=s1` に変え、出力先を `"$D/floor-plan-other.json"` にして送ると、`404` で本文が `{"error":"not_found"}`。`storey` を外し、出力先を `"$D/floor-plan-no-storey.json"` にして送ると、`400` で本文が `{"error":"invalid_request"}`。
 - **保留を見る。** 二つ送る。上の「指示を送り、開き直す」の `curl` を、本文を `保留の確認1` と `保留の確認2`、出力先を `"$D/accept-a.json"` と `"$D/accept-b.json"` にして続けて送る。どちらも `202`。`st` が `running` に一件、`queued` に一件を返すまで待つ。開き直して、`preview_wait_for` で `text: "待機中の指示が1件あります。"` を待つ。`A=$(jq -r .job.jobId "$D/accept-a.json")` で `curl -sS -o "$D/stop-a.json" -w '%{http_code}\n' -X POST "$API/jobs/$A/stop" -H "$J" -H "$O" -d "{\"requestId\":\"$(uuidgen)\"}"`。`200` で、`outcome` が `stopped`。再読込せずに、`preview_wait_for` で `text: "待機中の指示（1件）が保留されています。"` を待ち、撮って `$D/held.png` に写す。開き直しても同じ行が出て、`/state` の読み出しは 4 秒おいても 1 回のまま。
 - **保留を解く。** `curl -sS -o "$D/cancel.json" -w '%{http_code}\n' -X POST "$API/patterns/$PAT/queue/cancel" -H "$J" -H "$O" -d "{\"requestId\":\"$(uuidgen)\",\"heldBy\":\"$A\"}"`。`200`。`st` の `running` が `null`、`queued` が `[]`、`hold` が `null`。片付けの前に、必ずこの状態にする。
 - **起動し直して開く。** 片付けてから起動し直し、起動の確認で新しい `WEB_PORT` を得る。`preview_navigate` で同じタブを `target: { kind: "environment-port", port: <新しい WEB_PORT>, path: "/projects/<PID>" }` に開く。前と同じパターン名、日時、案が出る。`preview_evaluate` で `Object.keys(localStorage)` が `[]` で、画面がブラウザに保存した値を使っていないことも確かめる。
@@ -82,7 +82,7 @@ Preconditions:
 
 - 画面は、どの仕事が最後に終わったか（`lastFinishedJob`）をまだ表示しない。表示は #113 で加える。終わり方は `stop` の応答や state で確かめる。
 - 何も動いていない画面は、状態を読み直さない。画面を開いたまま curl で指示を送っても、開き直すまで表示は変わらない。送ってから開くか、送った後に開き直す。
-- 仕事が速く終わると、開き直したときにはもう確定していて、実行中の行は見えない。実行中の表示を確かめるときは `MADORI_DEV_JOB_TEST_HOLD=before_render:60` で起動する。
+- 仕事が速く終わると、開き直したときにはもう確定していて、実行中の行は見えない。実行中の表示を確かめるときは `MADORI_DEV_JOB_TEST_HOLD=first_answer:60` で起動する。
 - ビューアは、状態の行の下にあり、高さが画面の 65% ほどある。案の名前と状態の行はビューアの上なので、スクロールせずに読める。
 - `preview_act` の `scroll` は、キャンバスに `wheel` を送らない。拡大は `preview_evaluate` で合成した `WheelEvent` で確かめ、報告にもそう書く。実際のホイールやトラックパッドの操作感は確かめていない。
 - `preview_act` の `drag` は、`button: "right"` も `modifiers: ["Shift"]` も無視し、いつも左ボタンだけで送る。視点の移動は回転として届く。移動は `preview_evaluate` で合成した `PointerEvent` で確かめ、報告にもそう書く。合成したイベントは既定の動作を起こさないので、実際のマウスでの右クリックのメニューやフォーカスの動きは確かめていない。Windows で右ボタンをキャンバスの外で離したときのメニューも確かめていない。
@@ -92,5 +92,5 @@ Preconditions:
 - 新しいイメージの最初の仕事は、Container を冷えた状態から起こすので 1 分近くかかることがある。その間は `指示を実行しています…` のまま。
 - WebGPU の無いブラウザでは `WebGPUを利用できるブラウザで開いてください。` と出る。T3 のプレビューの Chromium は WebGPU を使える。
 - Rust や Wasm を変えたら、起動し直すまで画面に反映されない。
-- 今の仕事が作る案は平面図を持たない版1の案なので、本物のアプリでは階の一覧がいつも空で、平面図はいつも `404` になる。平面図を持つ案（版2）の2Dと3Dは、`apps/worker/tests/revisions.test.ts` が確かめている。アプリで確かめたと書かない。
+- 平面図を持たない案（版1）の、空の階の一覧と `404` の平面図は、手元の新しい D1 では作れない。`apps/worker/tests/revisions.test.ts` が確かめている。アプリで確かめたと書かない。
 - `curl -D` が書く見出しの行末には `\r` が付く。空の値は `tr -d '\r'` を通してから `grep` で確かめる。

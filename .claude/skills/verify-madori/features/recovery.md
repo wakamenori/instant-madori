@@ -17,8 +17,8 @@
 
 Preconditions:
 
-- 仕事は描画まで進まないので、Container は不要。Container の要る地図と同じ回で確かめないなら、[SKILL.md の「起動」](../SKILL.md#起動)の手順で `MADORI_DEV_CONTAINERS=0` を付けて起動する。
-- SKILL.md の「起動」の `pnpm dev` を、`MADORI_DEV_JOB_TEST_HOLD=before_render:420` を付けて起動している。仕事は実行権を取った後、描画の前に7分待つ。待ちを付けずに動いていたら、片付けてから、SKILL.md の「起動」の三行を、`perl` の行の先頭に `MADORI_DEV_JOB_TEST_HOLD=before_render:420 ` を足して実行し直す。`dev.pgid` を書く行も実行する。
+- 仕事は待ちの間に住宅を変えないので、Container は不要。Container の要る地図と同じ回で確かめないなら、[SKILL.md の「起動」](../SKILL.md#起動)の手順で `MADORI_DEV_CONTAINERS=0` を付けて起動する。
+- SKILL.md の「起動」の `pnpm dev` を、`MADORI_DEV_JOB_TEST_HOLD=first_answer:420` を付けて起動している。仕事は実行権を取り、台本のAIの最初の応答を受け取った後、住宅を変える前に7分待つ。待ちを付けずに動いていたら、片付けてから、SKILL.md の「起動」の三行を、`perl` の行の先頭に `MADORI_DEV_JOB_TEST_HOLD=first_answer:420 ` を足して実行し直す。`dev.pgid` を書く行も実行する。
 - 起動の確認は一つ目（`/api/me`）だけを行う。二つ目は指示を最後まで流すので、7分の待ちで時間切れになる。
 - [案件](./projects.md)の「作る」を済ませ、`PAT=$(jq -r .pattern.id "$EVIDENCE/projects/create.json")` を設定している。
 - [指示を止める](./stop.md)の `J`・`O`・`API`・`send`・`stop`・`state` を、`D="$EVIDENCE/recovery"` にして定義し、`$D` がある。
@@ -32,7 +32,7 @@ Preconditions:
 
 ## Gotchas
 
-- 待ちを付けずに起動すると、サンプルの仕事は数秒で終わり、確かめの繰り返しも定期実行の対象も残らない。
+- 待ちを付けずに起動すると、台本のAIの仕事は数秒で終わり、確かめの繰り返しも定期実行の対象も残らない。
 - 待ちは手元のすべての仕事に掛かる。ほかの手順を続けるなら、片付けて待ちなしで起動し直す。
 - 定期実行は、5分以上前に取った実行権か、5分以上前に受け付けた待機中の指示があるパターンだけを起こす。待機列が保留中で実行中の指示が無いパターンは起こさない。`found` が `0` の回はログに出ない。
 - 再読込すると、その時点の Workflow は再開しない。これはローカルの `wrangler dev` の制約で、本番の Workflow はデプロイを越えて続く。再読込の確認の後は、止めずに放っておくと、そのパターンの後の指示はすべて待機中のまま残る。

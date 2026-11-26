@@ -22,7 +22,7 @@
 Preconditions:
 
 - 再開した指示や待機中の指示が完了することを確かめるには Container が必要。
-- SKILL.md の「起動」の `pnpm dev` を、`MADORI_DEV_JOB_TEST_HOLD=before_render:30` を付けて起動している。起動し直し方は[指示を止める](./stop.md)の Preconditions にある。
+- SKILL.md の「起動」の `pnpm dev` を、`MADORI_DEV_JOB_TEST_HOLD=first_answer:30` を付けて起動している。起動し直し方は[指示を止める](./stop.md)の Preconditions にある。
 - [案件](./projects.md)の「作る」を済ませ、`PAT=$(jq -r .pattern.id "$EVIDENCE/projects/create.json")` を設定している。
 - `. "$EVIDENCE/dev.env"` で `API` と `O` を読み込み、`J='content-type: application/json'` と `D="$EVIDENCE/queue-hold"` を設定し、`$D` がある。
 - [指示を止める](./stop.md)の `send`・`stop`・`state` を、出力先を `$D` にして定義している。
@@ -43,7 +43,7 @@ Preconditions:
 ## Gotchas
 
 - 保留は実行中の指示が終わったときだけ決まる。待機中の指示を止めても保留にならない（[指示を止める](./stop.md)の「待機中を止める」）。実行中の指示が止まったときに待機中の指示が無ければ、保留にならない。
-- 失敗での保留を見るには、片付けてから [SKILL.md の「起動」](../SKILL.md#起動) の手順で `MADORI_DEV_CONTAINERS=0` と `MADORI_DEV_JOB_TEST_HOLD=before_render:30` を付けて起動し直し、「二つ送る」を行う。A は待ちの後に失敗し、`queueHold.job.state` が `failed` になる。再開した B も失敗し、そのときに待機中の指示が無ければ保留にならない。
+- 失敗での保留を見るには、片付けてから [SKILL.md の「起動」](../SKILL.md#起動) の手順で `MADORI_DEV_CONTAINERS=0` と `MADORI_DEV_JOB_TEST_HOLD=first_answer:30` を付けて起動し直し、「二つ送る」を行う。A は待ちの後に失敗し、`queueHold.job.state` が `failed` になる。再開した B も失敗し、そのときに待機中の指示が無ければ保留にならない。
 - 止めた A の Workflow は、待ちが終わるまで残る。再開した B が A の `job.finished` より先に動き出すのは誤りではない。
 - 再開の `409` は、保留が解けたか、別の指示の停止・失敗で保留し直したことを示す。state を読み直し、今の `queueHold.job.jobId` で送り直す。
 - 保留中は、待ちを付けた仕事も含めて何も動かない。`settle` は保留中に終わらないので、再開か取り消しの後に使う。
