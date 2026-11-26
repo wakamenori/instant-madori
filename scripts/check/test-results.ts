@@ -1,7 +1,8 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
+import { realpathSync } from "node:fs";
 import { appendFile, mkdir, readdir, readFile, rm, rmdir, stat } from "node:fs/promises";
-import { basename, dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import type { TestEvent } from "node:test/reporters";
 import { z } from "zod";
 
@@ -37,8 +38,13 @@ export function nodeTestFlags(dir: string, suite: "typescript" | "container") {
   ];
 }
 
-export function cargoTestFlags(dir: string) {
-  const runner = [process.execPath, import.meta.filename, resolve(dir, "rust.jsonl")];
+export function cargoTestFlags(dir: string, workspaceRoot = process.cwd()) {
+  const runner = [
+    process.execPath,
+    import.meta.filename,
+    resolve(dir, "rust.jsonl"),
+    realpathSync(workspaceRoot),
+  ];
   return [
     "test",
     "--locked",
@@ -113,6 +119,25 @@ export default async function* reporter(source: AsyncIterable<TestEvent>) {
     yield line({ id, outcome: state.fileFailed && !state.failed ? "fail" : "pass" });
 }
 
+export function rustBinaryId(
+  depInfo: string,
+  exe: string,
+  workspaceRoot: string,
+  manifestDir: string,
+  pkg: string,
+) {
+  for (const row of depInfo.split(/\r?\n/u)) {
+    const ruleEnd = row.indexOf(": ");
+    if (ruleEnd < 0 || row.slice(0, ruleEnd).replaceAll("\\ ", " ") !== exe) continue;
+    const root = /^(?:\\ |[^\s])+/u.exec(row.slice(ruleEnd + 2).trimStart())?.[0];
+    if (root) {
+      const path = resolve(workspaceRoot, root.replaceAll("\\ ", " "));
+      return pkg + "/" + relative(manifestDir, path).split(sep).join("/");
+    }
+  }
+  throw new Error(`Missing crate root for executable ${exe} in ${exe}.d`);
+}
+
 export function parseLibtest(binary: string, stdout: string, code: number | null): TestResult[] {
   const records: TestResult[] = [];
   const counts = { pass: 0, fail: 0, skip: 0 };
@@ -168,8 +193,9 @@ export async function readArtifact(dir: string) {
 }
 
 if (import.meta.main) {
-  const [destination, exe, ...args] = process.argv.slice(2);
-  if (!destination || !exe) throw new Error("Expected a destination and test executable");
+  const [destination, workspaceRoot, exe, ...args] = process.argv.slice(2);
+  if (!destination || !workspaceRoot || !exe)
+    throw new Error("Expected a destination, workspace root and test executable");
   const record = basename(dirname(exe)) === "deps";
   const child = spawn(exe, args, { stdio: ["inherit", record ? "pipe" : "inherit", "inherit"] });
   const chunks: Buffer[] = [];
@@ -179,7 +205,15 @@ if (import.meta.main) {
   if (record) {
     const pkg = process.env.CARGO_PKG_NAME;
     if (!pkg) throw new Error("Missing CARGO_PKG_NAME");
-    const binary = pkg + "/" + basename(exe).replace(/-[a-f\d]+$/u, "");
+    const manifestDir = process.env.CARGO_MANIFEST_DIR;
+    if (!manifestDir) throw new Error("Missing CARGO_MANIFEST_DIR");
+    const binary = rustBinaryId(
+      await readFile(exe + ".d", "utf8"),
+      exe,
+      workspaceRoot,
+      manifestDir,
+      pkg,
+    );
     await appendFile(
       destination,
       parseLibtest(binary, Buffer.concat(chunks).toString(), code).map(line).join(""),
