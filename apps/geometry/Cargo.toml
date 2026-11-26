@@ -8,6 +8,7 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+madori-housing.workspace = true
 madori-geometry-api.workspace = true
 axum.workspace = true
 madori-modeling.workspace = true

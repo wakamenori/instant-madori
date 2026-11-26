@@ -1984,6 +1984,7 @@ dependencies = [
  "axum",
  "madori-display",
  "madori-geometry-api",
+ "madori-housing",
  "madori-modeling",
  "serde_json",
  "tokio",
