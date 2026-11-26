@@ -262,6 +262,13 @@ impl Walls {
                 }
             }
         }
+        for strip in self.uncovered_strips_beside_feet(&joints, layout.walls) {
+            let hit = (strip.piece, strip.at, strip.reach);
+            let entry = gaps.entry(strip.rooms).or_insert(hit);
+            if strip.piece < entry.0 {
+                *entry = hit;
+            }
+        }
         errors.extend(gaps.into_iter().map(|(rooms, (gap, at, minimum))| {
             (
                 at,
@@ -270,6 +277,73 @@ impl Walls {
         }));
         errors.sort_by_key(|(at, error)| (error.rooms.first().map(|r| r.number), *at));
         errors.into_iter().map(|(_, e)| e).collect()
+    }
+
+    fn uncovered_strips_beside_feet(
+        &self,
+        joints: &BTreeMap<Position, Vec<(Line, &Segment)>>,
+        walls: LayoutWalls,
+    ) -> Vec<UncoveredStrip> {
+        let mut found = vec![];
+        for (&at, joint) in joints {
+            let [a, b, c] = joint.as_slice() else {
+                continue;
+            };
+            let (line, members, stem) = if a.0 == b.0 {
+                (a.0, [a.1, b.1], c.1)
+            } else if a.0 == c.0 {
+                (a.0, [a.1, c.1], b.1)
+            } else {
+                (b.0, [b.1, c.1], a.1)
+            };
+            let origin = match line.along {
+                Axis::X => at.0,
+                Axis::Y => at.1,
+            };
+            let reach = stem.thickness(walls) / 2.0;
+            let stem_rises = stem.from == line.at;
+            let overlaps_stem_at = |end: Coord| {
+                joints
+                    .get(&line.position(end))
+                    .into_iter()
+                    .flatten()
+                    .any(|(l, s)| *l != line && (s.from == line.at) == stem_rises)
+            };
+            for member in members {
+                let forward = member.from == origin;
+                let far = if forward { member.to } else { member.from };
+                let piece = (far.0 - origin.0).abs();
+                if piece >= reach || overlaps_stem_at(far) {
+                    continue;
+                }
+                let limit = if forward {
+                    origin.0 + reach
+                } else {
+                    origin.0 - reach
+                };
+                let thinner = self.0.get(&line).into_iter().flatten().filter(|other| {
+                    let within = if forward {
+                        far <= other.from && other.from.0 < limit
+                    } else {
+                        other.to <= far && limit < other.to.0
+                    };
+                    within && other.thickness(walls) < member.thickness(walls)
+                });
+                for other in thinner {
+                    found.push(UncoveredStrip {
+                        at,
+                        rooms: stem
+                            .rooms()
+                            .chain(member.rooms())
+                            .chain(other.rooms())
+                            .collect(),
+                        piece,
+                        reach,
+                    });
+                }
+            }
+        }
+        found
     }
 
     pub(super) fn emit(&self, layout: &RoomLayout, scope: &IdScope) -> HouseData {
@@ -371,4 +445,12 @@ struct WallBody<'a> {
     thickness: f64,
     centre: Bounds,
     bounds: Bounds,
+}
+/// A T-foot whose through wall thins within `reach` of the joint. The foot stops at the face of the short `piece` and
+/// leaves the strip up to the thinner wall's face uncovered.
+struct UncoveredStrip {
+    at: Position,
+    rooms: BTreeSet<usize>,
+    piece: f64,
+    reach: f64,
 }

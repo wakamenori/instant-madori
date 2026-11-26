@@ -629,7 +629,7 @@ fn short_wall_gap_enlarges_southwest_room() {
             rooms: [
                 ("SW", pt(0., 0.), pt(2000., 2000.)),
                 ("SE", pt(2000., 0.), pt(4000., 2000.)),
-                ("N", pt(1860., 2000.), pt(4000., 4000.)),
+                ("N", pt(1850., 2000.), pt(4000., 4000.)),
             ]
             .into_iter()
             .map(|(name, min, max)| LayoutRoom {
@@ -647,6 +647,13 @@ fn short_wall_gap_enlarges_southwest_room() {
         },
     )
     .unwrap();
+    let mut data = h.data().clone();
+    for vertex in &mut data.vertices {
+        if vertex.at.x == 1850. {
+            vertex.at.x = 1860.;
+        }
+    }
+    let h = House::new(data).unwrap();
     let m = Model::build(&h, None).unwrap();
     let errors = m.check(&h).unwrap_err();
     assert_eq!(errors.as_slice().len(), 1, "{errors}");
