@@ -1,6 +1,6 @@
 use crate::{
     modifier::{UP, WallPlane},
-    planform::{between, exact_orientation},
+    planform::contains,
     shape::profile_bounds,
     topology::{Index, Range as NumberRange, number_reason},
     *,
@@ -300,19 +300,6 @@ impl<'a> ObjectView<'a> {
             }
         }
     }
-}
-fn contains(outline: &[Point], p: Point) -> bool {
-    let mut inside = false;
-    for (&a, &b) in outline.iter().zip(outline.iter().cycle().skip(1)) {
-        let turn = exact_orientation(a, b, p);
-        if turn.is_eq() && between(a, b, p) {
-            return true;
-        }
-        if (a.y > p.y) != (b.y > p.y) && turn.is_gt() == (b.y > a.y) {
-            inside = !inside
-        }
-    }
-    inside
 }
 impl House {
     pub fn object(&self, id: &ObjectId) -> Option<ObjectView<'_>> {
