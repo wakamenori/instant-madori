@@ -16,4 +16,13 @@ export const healthSchema = z.object({ "protocol": z.number().int().gte(0).lte(4
 
 export type Health = z.output<typeof healthSchema>;
 
-export const geometryBodySchemas = { applyOperationsOutcomeSchema, applyOperationsRequestSchema, errorBodySchema, healthSchema };
+export const houseSummarySchema = z.object({ "openings": z.array(z.object({ "distance": z.number(), "from": z.enum(["start","end"]), "height": z.number(), "id": z.string(), "kind": z.enum(["door","window"]), "sill": z.number(), "wall": z.string(), "width": z.number() })), "provisional": z.array(z.object({ "kind": z.literal("orientation"), "north": z.literal("+y") })), "rooms": z.array(z.object({ "id": z.string(), "interior": z.discriminatedUnion("kind", [z.object({ "area": z.object({ "m2": z.string(), "tatami": z.string() }), "corners": z.array(z.object({ "x": z.number(), "y": z.number() })), "kind": z.literal("measured"), "sides": z.array(z.number()) }), z.object({ "kind": z.literal("unmeasured") })]), "name": z.string(), "usage": z.enum(["ldk","living","dining","kitchen","bedroom","japanese_room","entrance","hall","toilet","washroom","bathroom","storage","other"]), "walls": z.array(z.string()) })), "storeys": z.array(z.object({ "height": z.number(), "id": z.string(), "reference_area": z.union([z.object({ "m2": z.string(), "tatami": z.string() }), z.null()]).optional() })), "walls": z.array(z.object({ "end": z.object({ "x": z.number(), "y": z.number() }), "facing": z.union([z.literal("north"), z.literal("north_east"), z.literal("east"), z.literal("south_east"), z.literal("south"), z.literal("south_west"), z.literal("west"), z.literal("north_west"), z.literal(null)]).optional(), "height": z.number(), "id": z.string(), "left": z.discriminatedUnion("kind", [z.object({ "kind": z.literal("room"), "room": z.string() }), z.object({ "kind": z.literal("exterior") })]), "length": z.number(), "right": z.discriminatedUnion("kind", [z.object({ "kind": z.literal("room"), "room": z.string() }), z.object({ "kind": z.literal("exterior") })]), "start": z.object({ "x": z.number(), "y": z.number() }), "thickness": z.number() })) })
+
+export type HouseSummary = z.output<typeof houseSummarySchema>;
+
+export const summarizeHouseRequestSchema = z.object({ "snapshot": z.discriminatedUnion("kind", [z.object({ "kind": z.literal("empty") }).strict(), z.object({ "json": z.string(), "kind": z.literal("house") }).strict()]) }).strict()
+
+export type SummarizeHouseRequest = z.input<typeof summarizeHouseRequestSchema>;
+
+export const geometryBodySchemas = { applyOperationsOutcomeSchema, applyOperationsRequestSchema, errorBodySchema, healthSchema, houseSummarySchema, summarizeHouseRequestSchema };
+export const houseSummarySchemaVersion = "sha256:3645b5340c25278396d9105fcdbcac5856871268b655eee9291ca30ef2d1ab8a";

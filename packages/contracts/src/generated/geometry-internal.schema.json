@@ -9165,5 +9165,453 @@
       "title": "Health",
       "type": "object"
     }
+  },
+  "houseSummarySchema": {
+    "direction": "response",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "openings": {
+          "items": {
+            "properties": {
+              "distance": {
+                "type": "number"
+              },
+              "from": {
+                "enum": [
+                  "start",
+                  "end"
+                ],
+                "type": "string"
+              },
+              "height": {
+                "type": "number"
+              },
+              "id": {
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "door",
+                  "window"
+                ],
+                "type": "string"
+              },
+              "sill": {
+                "type": "number"
+              },
+              "wall": {
+                "type": "string"
+              },
+              "width": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "id",
+              "kind",
+              "wall",
+              "from",
+              "distance",
+              "width",
+              "height",
+              "sill"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "provisional": {
+          "items": {
+            "discriminator": {
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "properties": {
+                  "kind": {
+                    "const": "orientation",
+                    "type": "string"
+                  },
+                  "north": {
+                    "enum": [
+                      "+y"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "north"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "type": "array"
+        },
+        "rooms": {
+          "items": {
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "interior": {
+                "discriminator": {
+                  "propertyName": "kind"
+                },
+                "oneOf": [
+                  {
+                    "properties": {
+                      "area": {
+                        "properties": {
+                          "m2": {
+                            "type": "string"
+                          },
+                          "tatami": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "m2",
+                          "tatami"
+                        ],
+                        "type": "object"
+                      },
+                      "corners": {
+                        "items": {
+                          "properties": {
+                            "x": {
+                              "type": "number"
+                            },
+                            "y": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "x",
+                            "y"
+                          ],
+                          "type": "object"
+                        },
+                        "type": "array"
+                      },
+                      "kind": {
+                        "const": "measured",
+                        "type": "string"
+                      },
+                      "sides": {
+                        "items": {
+                          "type": "number"
+                        },
+                        "type": "array"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "area",
+                      "corners",
+                      "sides"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "kind": {
+                        "const": "unmeasured",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind"
+                    ],
+                    "type": "object"
+                  }
+                ]
+              },
+              "name": {
+                "type": "string"
+              },
+              "usage": {
+                "enum": [
+                  "ldk",
+                  "living",
+                  "dining",
+                  "kitchen",
+                  "bedroom",
+                  "japanese_room",
+                  "entrance",
+                  "hall",
+                  "toilet",
+                  "washroom",
+                  "bathroom",
+                  "storage",
+                  "other"
+                ],
+                "type": "string"
+              },
+              "walls": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "usage",
+              "walls",
+              "interior"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "storeys": {
+          "items": {
+            "properties": {
+              "height": {
+                "type": "number"
+              },
+              "id": {
+                "type": "string"
+              },
+              "reference_area": {
+                "properties": {
+                  "m2": {
+                    "type": "string"
+                  },
+                  "tatami": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "m2",
+                  "tatami"
+                ],
+                "type": [
+                  "object",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "height"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "walls": {
+          "items": {
+            "properties": {
+              "end": {
+                "properties": {
+                  "x": {
+                    "type": "number"
+                  },
+                  "y": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y"
+                ],
+                "type": "object"
+              },
+              "facing": {
+                "enum": [
+                  "north",
+                  "north_east",
+                  "east",
+                  "south_east",
+                  "south",
+                  "south_west",
+                  "west",
+                  "north_west",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "height": {
+                "type": "number"
+              },
+              "id": {
+                "type": "string"
+              },
+              "left": {
+                "discriminator": {
+                  "propertyName": "kind"
+                },
+                "oneOf": [
+                  {
+                    "properties": {
+                      "kind": {
+                        "const": "room",
+                        "type": "string"
+                      },
+                      "room": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "room"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "kind": {
+                        "const": "exterior",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind"
+                    ],
+                    "type": "object"
+                  }
+                ]
+              },
+              "length": {
+                "type": "number"
+              },
+              "right": {
+                "discriminator": {
+                  "propertyName": "kind"
+                },
+                "oneOf": [
+                  {
+                    "properties": {
+                      "kind": {
+                        "const": "room",
+                        "type": "string"
+                      },
+                      "room": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "room"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "kind": {
+                        "const": "exterior",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind"
+                    ],
+                    "type": "object"
+                  }
+                ]
+              },
+              "start": {
+                "properties": {
+                  "x": {
+                    "type": "number"
+                  },
+                  "y": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y"
+                ],
+                "type": "object"
+              },
+              "thickness": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "id",
+              "start",
+              "end",
+              "length",
+              "thickness",
+              "height",
+              "left",
+              "right"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "storeys",
+        "rooms",
+        "walls",
+        "openings",
+        "provisional"
+      ],
+      "title": "HouseSummary",
+      "type": "object"
+    }
+  },
+  "summarizeHouseRequestSchema": {
+    "direction": "request",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "snapshot": {
+          "discriminator": {
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "const": "empty",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "json": {
+                  "type": "string"
+                },
+                "kind": {
+                  "const": "house",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "json"
+              ],
+              "type": "object"
+            }
+          ]
+        }
+      },
+      "required": [
+        "snapshot"
+      ],
+      "title": "SummarizeHouseRequest",
+      "type": "object"
+    }
   }
 }

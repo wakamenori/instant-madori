@@ -121,8 +121,20 @@ async fn apply_operations(
     )
         .into_response())
 }
+async fn summarize_house(
+    JsonRequest(request): JsonRequest<madori_geometry_api::summary::SummarizeHouseRequest>,
+) -> Result<Json<madori_geometry_api::summary::HouseSummary>, ServiceError> {
+    routes::SUMMARIZE_HOUSE
+        .handle(request, crate::summary::summarize)
+        .map(Json)
+        .map_err(|_| ServiceError(ErrorCode::InvalidBody))
+}
 pub fn router(state: AppState) -> Router {
     let protected = Router::new()
+        .route(
+            routes::SUMMARIZE_HOUSE.route.path,
+            register(routes::SUMMARIZE_HOUSE.route, summarize_house),
+        )
         .route(
             routes::SAMPLE_DISPLAY.path,
             register(routes::SAMPLE_DISPLAY, sample_display),
@@ -482,6 +494,7 @@ mod tests {
                     "job_id":"job","operation_id":"op","generation":1,"snapshot":{"kind":"empty"},
                     "operations":[{"kind":"remove_opening","id":"missing"}]
                 }).to_string()),
+                _ if route.path == routes::SUMMARIZE_HOUSE.route.path => Body::from(r#"{"snapshot":{"kind":"empty"}}"#),
                 _ => return Err(format!("Missing request fixture for {}", route.path).into()),
             };
             let res = app()?

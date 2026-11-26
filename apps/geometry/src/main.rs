@@ -4,6 +4,7 @@ mod inspection;
 mod operations;
 #[cfg(test)]
 mod operations_tests;
+mod summary;
 use std::net::SocketAddr;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
