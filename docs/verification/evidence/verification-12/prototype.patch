@@ -1,0 +1,2544 @@
+diff --git a/crates/modeling/src/model.rs b/crates/modeling/src/model.rs
+index 867f97ba3..3ca2a23ec 100644
+--- a/crates/modeling/src/model.rs
++++ b/crates/modeling/src/model.rs
+@@ -518,4 +518,6 @@ mod probe_kit;
+ #[cfg(test)]
+ mod roof_probe;
+ #[cfg(test)]
++mod sun_probe;
++#[cfg(test)]
+ mod wall_probe;
+diff --git a/crates/modeling/src/model/sun_probe.rs b/crates/modeling/src/model/sun_probe.rs
+new file mode 100644
+index 000000000..a46724d4e
+--- /dev/null
++++ b/crates/modeling/src/model/sun_probe.rs
+@@ -0,0 +1,267 @@
++#![allow(clippy::unwrap_used)]
++use super::probe_kit::Cad;
++use serde_json::{Value, json};
++use solidcraft_engine::{
++    Session,
++    geom::{Mesh, MeshIndex, prelude::*},
++    kernel,
++};
++use std::{collections::BTreeMap, time::Instant};
++mod exact;
++mod grid;
++mod run;
++mod scene;
++#[derive(Clone, Copy, Debug, Default)]
++struct V(f64, f64, f64);
++impl V {
++    fn add(self, b: V) -> V {
++        V(self.0 + b.0, self.1 + b.1, self.2 + b.2)
++    }
++    fn sub(self, b: V) -> V {
++        self.add(b.mul(-1.))
++    }
++    fn mul(self, k: f64) -> V {
++        V(self.0 * k, self.1 * k, self.2 * k)
++    }
++    fn dot(self, b: V) -> f64 {
++        self.0 * b.0 + self.1 * b.1 + self.2 * b.2
++    }
++    fn cross(self, b: V) -> V {
++        V(
++            self.1 * b.2 - self.2 * b.1,
++            self.2 * b.0 - self.0 * b.2,
++            self.0 * b.1 - self.1 * b.0,
++        )
++    }
++    fn unit(self) -> V {
++        self.mul(1. / self.dot(self).sqrt())
++    }
++    fn arr(self) -> [f64; 3] {
++        [self.0, self.1, self.2]
++    }
++}
++type P = [f64; 2];
++type Poly = Vec<P>;
++type Bounds = [P; 2];
++fn cross(a: P, b: P, c: P) -> f64 {
++    (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
++}
++fn bounds<'a>(pts: impl Iterator<Item = &'a P>) -> Bounds {
++    let mut b = [[f64::INFINITY; 2], [f64::NEG_INFINITY; 2]];
++    for p in pts {
++        for i in 0..2 {
++            b[0][i] = b[0][i].min(p[i]);
++            b[1][i] = b[1][i].max(p[i]);
++        }
++    }
++    b
++}
++fn within(b: Bounds, p: P) -> bool {
++    (0..2).all(|k| p[k] >= b[0][k] - 1e-7 && p[k] <= b[1][k] + 1e-7)
++}
++struct Face {
++    brep_o: V,
++    brep_n: V,
++    id: String,
++    o: V,
++    n: V,
++    u: V,
++    v: V,
++    role: usize,
++    tris: Vec<[P; 3]>,
++    loops: Vec<Poly>,
++    b: Bounds,
++    recv: bool,
++}
++impl Face {
++    fn uv(&self, q: V) -> P {
++        let d = q.sub(self.o);
++        [d.dot(self.u), d.dot(self.v)]
++    }
++    fn xyz(&self, p: P) -> V {
++        self.o.add(self.u.mul(p[0])).add(self.v.mul(p[1]))
++    }
++    fn project(&self, q: V, s: V) -> P {
++        self.uv(q.sub(s.mul(q.sub(self.o).dot(self.n) / s.dot(self.n))))
++    }
++    fn inside(&self, p: P) -> bool {
++        within(self.b, p)
++            && self
++                .tris
++                .iter()
++                .any(|t| (0..3).all(|i| cross(t[i], t[(i + 1) % 3], p) >= -1e-7))
++    }
++    fn hit(&self, q: V, s: V) -> bool {
++        let den = s.dot(self.brep_n);
++        if den.abs() < 1e-12 {
++            return false;
++        }
++        let t = self.brep_o.sub(q).dot(self.brep_n) / den;
++        if t <= 1e-7 {
++            return false;
++        }
++        let p = self.uv(q.add(s.mul(t)));
++        if !within(self.b, p) {
++            return false;
++        }
++        let mut inside = false;
++        for ring in &self.loops {
++            for i in 0..ring.len() {
++                let a = ring[i];
++                let b = ring[(i + 1) % ring.len()];
++                if cross(a, b, p).abs() < 1e-7 && within(bounds([&a, &b].into_iter()), p) {
++                    return true;
++                }
++                if (a[1] > p[1]) != (b[1] > p[1])
++                    && p[0] < (b[0] - a[0]) * (p[1] - a[1]) / (b[1] - a[1]) + a[0]
++                {
++                    inside = !inside
++                }
++            }
++        }
++        inside
++    }
++}
++struct Data {
++    mesh: Mesh,
++    index: MeshIndex,
++    faces: Vec<Face>,
++    openings: Vec<Vec<V>>,
++    prep: f64,
++    brep_ms: f64,
++}
++impl Data {
++    fn from(sc: &scene::Scene) -> Self {
++        let start = Instant::now();
++        let world = sc.session.world_state().unwrap();
++        let mut mesh = Mesh::default();
++        let mut faces = vec![];
++        let mut brep_ms = 0.;
++        for body in &world.bodies {
++            if body.name.starts_with("Glass") {
++                continue;
++            }
++            let m = body.mesh();
++            let base = mesh.positions.len() as u32;
++            mesh.positions.extend(&m.positions);
++            mesh.triangles
++                .extend(m.triangles.iter().map(|t| t.map(|i| i + base)));
++            let t = Instant::now();
++            let state = sc.session.model.state();
++            let rec = kernel::brep_record(&state.body(&body.name).unwrap().body).unwrap();
++            brep_ms += ms(t);
++            let mut groups = BTreeMap::<u32, Vec<[V; 3]>>::new();
++            for (tri, id) in m.triangles.iter().zip(&m.tri_face) {
++                groups.entry(*id).or_default().push(tri.map(|i| {
++                    let p = m.positions[i as usize];
++                    V(p.x, p.y, p.z)
++                }));
++            }
++            for (id, tris) in groups {
++                let [a, b, c] = tris[0];
++                let n = b.sub(a).cross(c.sub(a)).unit();
++                let u = if n.0.abs() < 0.9 {
++                    V(1., 0., 0.)
++                } else {
++                    V(0., 1., 0.)
++                };
++                let v = n.cross(u).unit();
++                let u = v.cross(n);
++                let mut f = Face {
++                    brep_o: a,
++                    brep_n: n,
++                    id: format!("{}/{}", body.name, id),
++                    o: a,
++                    n,
++                    u,
++                    v,
++                    role: if n.2 > 1e-7 {
++                        0
++                    } else if n.2 < -1e-7 {
++                        2
++                    } else {
++                        1
++                    },
++                    tris: vec![],
++                    loops: vec![],
++                    b: [[0.; 2]; 2],
++                    recv: false,
++                };
++                let mut center = V::default();
++                let mut area = 0.;
++                for tri in tris {
++                    let p = tri.map(|q| f.uv(q));
++                    let w = cross(p[0], p[1], p[2]);
++                    center = center.add(tri[0].add(tri[1]).add(tri[2]).mul(w / 3.));
++                    area += w;
++                    f.tris.push(p);
++                }
++                let pos = center.mul(1. / area).add(n.mul(10.)).arr();
++                f.recv = !body.name.starts_with("Neighbor")
++                    && !body.name.starts_with("Furniture")
++                    && sc.air.iter().any(|ab| {
++                        (0..3).all(|i| pos[i] > ab[0].arr()[i] && pos[i] < ab[1].arr()[i])
++                    });
++                f.b = bounds(f.tris.iter().flatten());
++                let t = Instant::now();
++                let rf = &rec.faces[id as usize];
++                let surface = json!(&rf.surface);
++                let vec = |name: &str| {
++                    let [x, y, z]: [f64; 3] =
++                        serde_json::from_value(surface[name].clone()).unwrap();
++                    V(x, y, z)
++                };
++                f.brep_o = vec("origin");
++                f.brep_n = match surface["kind"].as_str().unwrap() {
++                    "plane" => vec("u_axis").cross(vec("v_axis")).unit(),
++                    "plane_through" => vec("u_point")
++                        .sub(f.brep_o)
++                        .cross(vec("v_point").sub(f.brep_o))
++                        .unit(),
++                    other => panic!("fixture has nonplanar face {other}"),
++                };
++                for lp in &rf.loops {
++                    let lp = json!(lp);
++                    let mut ring = vec![];
++                    for edge in lp["edges"].as_array().unwrap() {
++                        let e = &rec.edges[edge["edge"].as_u64().unwrap() as usize];
++                        let [x, y, z] = rec.vertices
++                            [e.vertices[usize::from(!edge["forward"].as_bool().unwrap())] as usize]
++                            .point;
++                        ring.push(f.uv(V(x, y, z)));
++                    }
++                    f.loops.push(ring)
++                }
++                brep_ms += ms(t);
++                faces.push(f);
++            }
++        }
++        let index = MeshIndex::new(&mesh);
++        Self {
++            mesh,
++            index,
++            faces,
++            openings: sc.openings.clone(),
++            prep: ms(start) - brep_ms,
++            brep_ms,
++        }
++    }
++    fn mesh_lit(&self, q: V, s: V) -> bool {
++        self.index
++            .raycast(&self.mesh, q.arr().into(), s.arr().into())
++            .is_none()
++    }
++}
++fn ms(t: Instant) -> f64 {
++    t.elapsed().as_secs_f64() * 1000.
++}
++#[derive(Default)]
++struct ResultRow {
++    area: f64,
++    rays: u64,
++    r1: u64,
++    r2: u64,
++    diff: u64,
++    examples: Vec<Value>,
++    error: Option<String>,
++}
+diff --git a/crates/modeling/src/model/sun_probe/bench/Dockerfile b/crates/modeling/src/model/sun_probe/bench/Dockerfile
+new file mode 100644
+index 000000000..023883dbe
+--- /dev/null
++++ b/crates/modeling/src/model/sun_probe/bench/Dockerfile
+@@ -0,0 +1,61 @@
++# syntax=docker/dockerfile:1
++FROM --platform=$BUILDPLATFORM rust:1.99.1-bookworm AS build
++ARG BUILDPLATFORM
++ARG TARGETPLATFORM
++WORKDIR /src
++COPY rust-toolchain.toml ./
++# Pinning Debian packages would prevent security updates in fresh image builds.
++# hadolint ignore=DL3008
++RUN if [ "$TARGETPLATFORM" != "linux/amd64" ]; then echo "Unsupported target: $TARGETPLATFORM (expected linux/amd64)" >&2; exit 1; fi \
++    && if [ "$BUILDPLATFORM" != "$TARGETPLATFORM" ]; then \
++        apt-get update \
++        && apt-get install -y --no-install-recommends gcc-x86-64-linux-gnu libc6-dev-amd64-cross \
++        && rm -rf /var/lib/apt/lists/*; fi \
++    && rustup target add x86_64-unknown-linux-gnu
++COPY Cargo.toml Cargo.lock ./
++COPY .cargo .cargo
++COPY apps/geometry apps/geometry
++COPY crates crates
++COPY third_party/solidcraft third_party/solidcraft
++WORKDIR /app
++SHELL ["/bin/bash", "-euo", "pipefail", "-c"]
++# Every checkout and the runner share one target/. Cargo rebuilds a path crate when a source file is newer than its
++# last compile, and COPY keeps each checkout's file times, so building /src directly recompiles identical crates for
++# a newer checkout and reuses another checkout's crates for an older one. The cache keeps a copy of the sources next
++# to target/ and rewrites only the entries whose content differs, so a file's time in the copy is when its content
++# arrived. The copy and target/ share one cache record, so pruning removes both together, and sharing=locked gives
++# them to one build at a time. Change the id when this layout or the copying changes, so that builds from branches
++# with an older Dockerfile do not use the same cache.
++# Cargo records each source by its canonical path, so it watches the target a symlink had at compile time.
++# The copy therefore contains only files and directories and omits links whose targets are missing.
++RUN --mount=type=cache,target=/usr/local/cargo/registry \
++    --mount=type=cache,target=/usr/local/cargo/git \
++    --mount=type=cache,id=instant-madori-geometry-build-v2,target=/app,sharing=locked \
++    <<'EOF'
++export LC_ALL=C
++no_hash=$(printf '%064d' 0)
++# One NUL-terminated record per entry under $1 except target/: kind (d or f), 64-character content hash, two spaces, path.
++entries() {
++    find -L "$1" -mindepth 1 -path "$1/target" -prune -o -type d -printf "d$no_hash  %P\0"
++    find -L "$1" -path "$1/target" -prune -o -type f -print0 | xargs -0r sha256sum -z | sed -z "s|^|f|; s|  $1/|  |"
++}
++entries /src | sort -z > /tmp/wanted
++entries /app | sort -z > /tmp/present
++comm -z -13 /tmp/wanted /tmp/present | cut -z -c68- > /tmp/removed
++comm -z -23 /tmp/wanted /tmp/present | cut -z -c68- > /tmp/written
++sed -z 's|^|/app/|' /tmp/removed | xargs -0r rm -rf --
++tar -C /src --null --verbatim-files-from --no-recursion --dereference -T /tmp/written -cf - | tar -C /app -xmf -
++written=$(tr -cd '\0' < /tmp/written | wc -c)
++echo "Source copy: removed $(tr -cd '\0' < /tmp/removed | wc -c), wrote $written entries"
++if [ "$written" -le 20 ]; then tr '\0' '\n' < /tmp/written; fi
++if [ "$BUILDPLATFORM" != "$TARGETPLATFORM" ]; then
++    export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=x86_64-linux-gnu-gcc
++fi
++cargo test --locked --release -p madori-modeling --no-run --target x86_64-unknown-linux-gnu --message-format=json-render-diagnostics >/tmp/artifacts
++# Select this invocation's harness even when cached binaries from older builds exist.
++test_bin=$(sed -n '/"executable":"[^"]*madori_modeling-/s/.*"executable":"\([^"]*\)".*/\1/p' /tmp/artifacts | tail -1)
++cp "$test_bin" /probe
++EOF
++FROM debian:bookworm-slim
++COPY --from=build /probe /usr/local/bin/probe
++ENTRYPOINT ["probe","sun_probe_measure","--nocapture"]
+diff --git a/crates/modeling/src/model/sun_probe/bench/dev.sh b/crates/modeling/src/model/sun_probe/bench/dev.sh
+new file mode 100644
+index 000000000..85adfd17b
+--- /dev/null
++++ b/crates/modeling/src/model/sun_probe/bench/dev.sh
+@@ -0,0 +1,12 @@
++#!/bin/bash
++set -eu
++raw="$PWD/docs/verification/evidence/verification-12/raw"
++df -h /
++SUN_OUT="$raw/dev.jsonl" mise exec -- node --input-type=module <<'JS'
++import { rustBuildTool } from "./scripts/shared/rust-build.ts";
++import { spawnSync } from "node:child_process";
++const {command,env}=rustBuildTool();
++if(command!=="mbx") throw Error("mbx required");
++process.exit(spawnSync(command,["test","-p","madori-modeling","sun_probe","--","--nocapture"],{env,stdio:"inherit"}).status??1);
++JS
++df -h /
+diff --git a/crates/modeling/src/model/sun_probe/bench/export.sh b/crates/modeling/src/model/sun_probe/bench/export.sh
+new file mode 100644
+index 000000000..dc8745277
+--- /dev/null
++++ b/crates/modeling/src/model/sun_probe/bench/export.sh
+@@ -0,0 +1,12 @@
++#!/bin/bash
++set -eu
++raw="$PWD/docs/verification/evidence/verification-12/raw"
++df -h /
++SUN_SCENES="$raw/scenes" mise exec -- node --input-type=module <<'JS'
++import { rustBuildTool } from "./scripts/shared/rust-build.ts";
++import { spawnSync } from "node:child_process";
++const {command,env}=rustBuildTool();
++if(command!=="mbx") throw Error("mbx required");
++process.exit(spawnSync(command,["test","-p","madori-modeling","export_fixtures","--","--nocapture"],{env,stdio:"inherit"}).status??1);
++JS
++df -h /
+diff --git a/crates/modeling/src/model/sun_probe/bench/linux.sh b/crates/modeling/src/model/sun_probe/bench/linux.sh
+new file mode 100644
+index 000000000..971bf1f27
+--- /dev/null
++++ b/crates/modeling/src/model/sun_probe/bench/linux.sh
+@@ -0,0 +1,22 @@
++#!/bin/bash
++set -euo pipefail
++bench=crates/modeling/src/model/sun_probe/bench
++raw="$PWD/docs/verification/evidence/verification-12/raw"
++if [[ ${1:-} != slot ]]; then
++  exec mise exec -- node scripts/shared/docker-slots.ts run -- bash "$bench/linux.sh" slot
++fi
++disk(){ df -h /; test "$(df -k / | awk 'END{print $4}')" -gt 12582912; }
++{
++uname -m
++docker info --format 'Docker {{.Architecture}}'
++settings="$HOME/Library/Group Containers/group.com.docker/settings-store.json"
++if [[ -r "$settings" ]]; then rg -i 'rosetta' "$settings" || true; fi
++} > "$raw/environment.txt"
++disk
++docker build --progress=plain --platform linux/amd64 -f "$bench/Dockerfile" -t sunlight-probe-203 . 2>&1 | tee "$raw/build.log"
++disk
++for method in G A Q E-convex E-kernel B; do
++  docker run --rm --platform linux/amd64 --entrypoint uname sunlight-probe-203 -m
++  docker run --rm --platform linux/amd64 -v "$raw:/out" -e SUN_HOUSE=1 -e SUN_METHOD="$method" -e SUN_OUT="/out/$method.jsonl" sunlight-probe-203 | tee "$raw/$method.log"
++  disk
++done
+diff --git a/crates/modeling/src/model/sun_probe/bench/summary.py b/crates/modeling/src/model/sun_probe/bench/summary.py
+new file mode 100644
+index 000000000..d35409e7e
+--- /dev/null
++++ b/crates/modeling/src/model/sun_probe/bench/summary.py
+@@ -0,0 +1,52 @@
++"""Render the registered comparisons from the JSON Lines, from the repo root."""
++import json
++import re
++import statistics
++from pathlib import Path
++from collections import defaultdict
++
++raw = Path("docs/verification/evidence/verification-12/raw")
++def load(name):
++    return [json.loads(line) for line in (raw / name).read_text().splitlines()]
++lines = []
++def section(name, headings):
++    lines.extend(["", "## " + name, "", "| " + " | ".join(headings) + " |",
++                  "|" + "---|" * len(headings)])
++def row(*cols):
++    lines.append("| " + " | ".join(map(str, cols)) + " |")
++def interval(nums):
++    return f"{statistics.median(nums):.3f} ({min(nums):.3f}–{max(nums):.3f})"
++def errors(r):
++    return [f["error"] for f in r["faces"].values() if f["error"]]
++def accuracy(r, i, tol):
++    e=r["errors"][i]
++    if errors(r): return "演算エラー"
++    return f"{e:+.6f} {'○' if abs(e)<=tol else '×'}"
++lines.append("# 日差しの試作の計測値")
++dev=load("dev.jsonl")
++groups=defaultdict(list)
++for r in dev: groups[(r["method"],r["pitch"])].append(r)
++section("解析解との差（m²）",["方式","mm","床","壁","勾配天井","勾配例の北壁","水平天井最大 m²","届かない面最大 m²","B/G 不一致点"])
++for (m,p),records in groups.items():
++    floor,wall,slope=[next(r for r in records if r["case"]==c) for c in ("floor","wall","slope")]
++    ceiling=max(r["areas"][2] for r in records if r["case"] in ("floor","wall"))
++    dark=max(floor["areas"][1:]+[wall["areas"][0],slope["areas"][0]])
++    row(m,p,accuracy(floor,0,.020463),accuracy(wall,1,.012326),accuracy(slope,2,.010867),accuracy(slope,1,.00671832),f"{ceiling:.8g}",f"{dark:.8g}",sum(r["different_points"] for r in records) if m=="B" else "—")
++section("細い日差し。床面積の誤差（m²）、許容差20%",["方式","mm","0°","7.125°","10°","12.680°","隙間50","隙間20"])
++for (m,p),records in groups.items():
++    row(m,p,*[accuracy(r,0,r["expected"][0]*.2)+(" 消失" if r["areas"][0]==0 and not errors(r) else "") for r in records if r["case"] in ("slit","gap20","gap50")])
++section("家一軒。Linux amd64 release、5回の中央値（最小–最大）",["方式","mm","条件","前処理 ms","計算 ms","VmHWM KiB","R1 B","R2 B","R3 B","光線","失敗面数"])
++for m in ["G","A","Q","E-convex","E-kernel","B"]:
++    if not (raw/(m+".log")).exists() or not re.search(r"VmHWM:\s*(\d+)",(raw/(m+".log")).read_text()):
++        row(m,"—","未計測",*(["—"]*7),"—"); continue
++    rs=load(m+".jsonl"); mem=re.search(r"VmHWM:\s*(\d+)",(raw/(m+".log")).read_text()).group(1)
++    bykey=defaultdict(list)
++    for r in rs: bykey[(r["pitch"],r["sun"])].append(r)
++    for (p,s),runs in bykey.items():
++        assert len(runs)==5, (m,p,s,len(runs))
++        r=runs[0]
++        row(m,p,s,interval([i["prep_ms"]+(i["brep_prep_ms"] if m=="B" else 0) for i in runs]),interval([i["ms"] for i in runs]),mem,r["r1"],r["r2"],r["r3"],r["rays"],len(errors(r)))
++lines.extend(["","R1 は凸片または境界輪の頂点座標と受光面ID。R2 は受光面ID・原点・間隔に20 B、非空行の番号とrun数に8 B、runの開始と長さに8 B。Q のセルは最小格子へ展開してrunを結合した。R3 は面内の最長三角形辺が間隔以下になるよう全三角形を同じ分割数で等分し、面内で共有する頂点を一度数えた場合。各頂点13 B。","",
++"Q の最小間隔は200 mmを二分するため、指定25・10・5 mmに対して実際は25・6.25・3.125 mm。A は各開口の8隅の投影を含む矩形の和を使う。R1・R2は光のない面を省略。VmHWM は場面作成と全条件を含む方式別プロセスの最高値。前処理はSessionからの表示メッシュ取得・結合・受光面整理・BVH作成、Bは追加でB-repの取得と平面・輪の準備を含む。","",
++"macOS は精度の照合のみ。Linux の amd64 バイナリは arm64 Docker 上で実行。時刻別の方向、面別の異常、点の不一致の例は JSON Lines に記録した。"])
++(raw/"summary.md").write_text("\n".join(lines)+"\n")
+diff --git a/crates/modeling/src/model/sun_probe/exact.rs b/crates/modeling/src/model/sun_probe/exact.rs
+new file mode 100644
+index 000000000..27258b910
+--- /dev/null
++++ b/crates/modeling/src/model/sun_probe/exact.rs
+@@ -0,0 +1,134 @@
++use super::*;
++fn clip<T: Copy>(poly: &[T], distance: impl Fn(T) -> f64, lerp: impl Fn(T, T, f64) -> T) -> Vec<T> {
++    let mut out = vec![];
++    for i in 0..poly.len() {
++        let a = poly[i];
++        let b = poly[(i + 1) % poly.len()];
++        let (da, db) = (distance(a), distance(b));
++        if da >= 0. {
++            out.push(a)
++        }
++        if (da > 0. && db < 0.) || (da < 0. && db > 0.) {
++            out.push(lerp(a, b, da / (da - db)));
++        }
++    }
++    out
++}
++fn area(p: &[P]) -> f64 {
++    (1..p.len().saturating_sub(1))
++        .map(|i| cross(p[0], p[i], p[i + 1]) / 2.)
++        .sum()
++}
++fn overlap(a: Bounds, b: Bounds) -> bool {
++    (0..2).all(|i| a[0][i] < b[1][i] && b[0][i] < a[1][i])
++}
++fn subtract(p: Poly, shadow: &Poly, out: &mut Vec<Poly>) {
++    if !overlap(bounds(p.iter()), bounds(shadow.iter())) {
++        out.push(p);
++        return;
++    }
++    let mut inside = p;
++    for i in 0..shadow.len() {
++        let a = shadow[i];
++        let b = shadow[(i + 1) % shadow.len()];
++        let d = |v| cross(a, b, v);
++        let interp = |a: P, b: P, t: f64| [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
++        let outside = clip(&inside, |v| -d(v), interp);
++        if area(&outside) > 1e-8 {
++            out.push(outside)
++        }
++        inside = clip(&inside, d, interp);
++        if area(&inside) < 1e-8 {
++            break;
++        }
++    }
++}
++fn region(p: &Poly) -> Value {
++    let pts = |i: usize| json!(p[i]);
++    json!({"outer":{"segs":(0..p.len()).map(|i|json!({"type":"line","a":pts(i),"b":pts((i+1)%p.len())})).collect::<Vec<_>>()},"holes":[]})
++}
++pub(super) fn run(d: &Data, f: &Face, s: V, kernel_mode: bool) -> ResultRow {
++    let mut pieces: Vec<Poly> = f.tris.iter().map(|t| t.to_vec()).collect();
++    let mut shadows = vec![];
++    for tri in &d.mesh.triangles {
++        let tri = tri.map(|i| {
++            let p = d.mesh.positions[i as usize];
++            V(p.x, p.y, p.z)
++        });
++        let front = clip(
++            &tri,
++            |v| v.sub(f.o).dot(f.n) - 1e-7,
++            |a, b, t| a.add(b.sub(a).mul(t)),
++        );
++        let mut p: Poly = front.iter().map(|q| f.project(*q, s)).collect();
++        let a = area(&p);
++        if a.abs() < 1e-8 || !overlap(f.b, bounds(p.iter())) {
++            continue;
++        }
++        if a < 0. {
++            p.reverse()
++        }
++        shadows.push(p);
++    }
++    let mut row = ResultRow::default();
++    if kernel_mode {
++        for p in pieces {
++            let mut rs = vec![serde_json::from_value(region(&p)).unwrap()];
++            for sh in &shadows {
++                if rs.is_empty() {
++                    break;
++                }
++                let b = serde_json::from_value(region(sh)).unwrap();
++                match kernel::planar_regions_boolean(&rs, &[b], kernel::BoolOp::Cut, 1e-7) {
++                    Ok(v) => rs = v,
++                    Err(e) => {
++                        if std::env::var_os("SUN_DIAG").is_some() {
++                            println!("failed cut {} {} {e}", json!(rs), region(sh));
++                        }
++                        row.error = Some(e.to_string());
++                        return row;
++                    }
++                }
++            }
++            for r in rs {
++                row.area += r.area();
++                row.r1 += r.loops().map(|l| l.segs.len() as u64 * 8).sum::<u64>();
++            }
++        }
++    } else {
++        for sh in shadows {
++            let mut next = vec![];
++            for p in pieces {
++                subtract(p, &sh, &mut next)
++            }
++            pieces = next;
++            if pieces.is_empty() {
++                break;
++            }
++        }
++        for p in pieces {
++            row.area += area(&p);
++            row.r1 += 8 * p.len() as u64;
++        }
++    }
++    if row.r1 > 0 {
++        row.r1 += 8
++    }
++    row
++}
++
++pub(super) fn kernel_sample() {
++    let a = vec![[0., 0.], [10., 0.], [0., 10.]];
++    for b in [
++        vec![[1., 1.], [2., 1.], [1., 2.]],
++        a.clone(),
++        vec![[4., -1.], [8., -1.], [4., 5.]],
++    ] {
++        let reg = |p| serde_json::from_value(region(p)).unwrap();
++        println!(
++            "cut {a:?} {b:?} {:?}",
++            kernel::planar_regions_boolean(&[reg(&a)], &[reg(&b)], kernel::BoolOp::Cut, 1e-7)
++                .map(|r| r.len())
++        );
++    }
++}
+diff --git a/crates/modeling/src/model/sun_probe/grid.rs b/crates/modeling/src/model/sun_probe/grid.rs
+new file mode 100644
+index 000000000..f56806ee4
+--- /dev/null
++++ b/crates/modeling/src/model/sun_probe/grid.rs
+@@ -0,0 +1,146 @@
++use super::*;
++struct Grid<'a> {
++    d: &'a Data,
++    f: &'a Face,
++    s: V,
++    method: &'a str,
++    step: f64,
++    compare: bool,
++    r: ResultRow,
++    runs: BTreeMap<i32, Vec<(i32, i32)>>,
++}
++impl Grid<'_> {
++    fn lit(&mut self, p: P) -> bool {
++        if !self.f.inside(p) {
++            return false;
++        }
++        self.r.rays += 1;
++        let q = self.f.xyz(p).add(self.f.n.mul(0.5));
++        if self.method == "B" {
++            let lit = !self.d.faces.iter().any(|face| face.hit(q, self.s));
++            if self.compare && self.d.mesh_lit(q, self.s) != lit {
++                self.r.diff += 1;
++                if self.r.examples.len() < 4 {
++                    self.r
++                        .examples
++                        .push(json!({"point":q.arr(),"brep_lit":lit}));
++                }
++            }
++            lit
++        } else {
++            self.d.mesh_lit(q, self.s)
++        }
++    }
++    fn cell(&mut self, x: i32, y: i32, k: i32) {
++        let (origin, step) = (self.f.b[0], self.step);
++        let p = |i: f64, j: f64| {
++            [
++                origin[0] + (f64::from(x) + i) * step,
++                origin[1] + (f64::from(y) + j) * step,
++            ]
++        };
++        let size = f64::from(k);
++        let center = self.lit(p(size / 2., size / 2.));
++        if k > 1
++            && [(0., 0.), (0., size), (size, 0.), (size, size)]
++                .iter()
++                .any(|&(i, j)| self.lit(p(i, j)) != center)
++        {
++            let h = k / 2;
++            for i in [0, h] {
++                for j in [0, h] {
++                    self.cell(x + i, y + j, h)
++                }
++            }
++        } else if center {
++            self.r.area += (size * self.step).powi(2);
++            for j in y..y + k {
++                let row = self.runs.entry(j).or_default();
++                if let Some(last) = row.last_mut()
++                    && last.1 == x
++                {
++                    last.1 = x + k
++                } else {
++                    row.push((x, x + k))
++                }
++            }
++        }
++    }
++}
++pub(super) fn run(d: &Data, f: &Face, s: V, method: &str, pitch: f64, compare: bool) -> ResultRow {
++    let k = if method == "Q" {
++        (200. / pitch).log2().ceil().exp2() as i32
++    } else {
++        1
++    };
++    let step = if method == "Q" {
++        200. / f64::from(k)
++    } else {
++        pitch
++    };
++    let mut g = Grid {
++        d,
++        f,
++        s,
++        step,
++        method,
++        compare,
++        r: Default::default(),
++        runs: Default::default(),
++    };
++    let count = |i: usize| ((f.b[1][i] - f.b[0][i]) / step).ceil() as i32;
++    let mut boxes = vec![f.b];
++    if method == "A" {
++        boxes = d
++            .openings
++            .iter()
++            .map(|op| {
++                bounds(
++                    op.iter()
++                        .map(|q| f.project(*q, s))
++                        .collect::<Vec<_>>()
++                        .iter(),
++                )
++            })
++            .filter(|b| (0..2).all(|i| b[1][i] >= f.b[0][i] && b[0][i] <= f.b[1][i]))
++            .collect();
++    }
++    let idx = |v: f64, i: usize| ((v - f.b[0][i]) / step - 0.5).ceil() as i32;
++    for y in (0..count(1)).step_by(k as usize) {
++        let mut ranges = vec![];
++        for b in &boxes {
++            if method != "A" {
++                ranges.push((0, count(0)));
++                break;
++            }
++            let cy = f.b[0][1] + (f64::from(y) + 0.5) * step;
++            if cy >= b[0][1] && cy <= b[1][1] {
++                ranges.push((idx(b[0][0], 0).max(0), idx(b[1][0] + 1e-8, 0).min(count(0))))
++            }
++        }
++        ranges.sort();
++        let mut end = 0;
++        for (lo, hi) in ranges {
++            for x in (lo.max(end)..hi).step_by(k as usize) {
++                g.cell(x, y, k)
++            }
++            end = end.max(hi);
++        }
++    }
++    if !g.runs.is_empty() {
++        g.r.r2 = 20;
++        for (_, mut runs) in g.runs {
++            runs.sort();
++            let mut last = -1;
++            g.r.r2 += 8;
++            for (a, b) in runs {
++                if a > last {
++                    g.r.r2 += 8
++                }
++                last = last.max(b);
++            }
++        }
++    }
++
++    g.r
++}
+diff --git a/crates/modeling/src/model/sun_probe/run.rs b/crates/modeling/src/model/sun_probe/run.rs
+new file mode 100644
+index 000000000..da1efa160
+--- /dev/null
++++ b/crates/modeling/src/model/sun_probe/run.rs
+@@ -0,0 +1,258 @@
++use super::*;
++use std::io::Write;
++fn sun(alt: f64, az: f64) -> V {
++    let a = alt.to_radians();
++    let b = az.to_radians();
++    V(a.cos() * b.sin(), -a.cos() * b.cos(), a.sin())
++}
++fn conditions(case: &str) -> Vec<(&str, V, [Option<f64>; 3])> {
++    let none = [None; 3];
++    match case {
++        "floor" => vec![
++            ("S30", sun(30., 0.), [Some(2.046307), Some(0.), Some(0.)]),
++            ("S60", sun(60., 0.), [None, None, Some(0.)]),
++        ],
++        "wall" => vec![("S20", sun(20., 0.), [Some(0.), Some(1.232647), Some(0.)])],
++        "slope" => vec![(
++            "S20",
++            sun(20., 0.),
++            [Some(0.), Some(0.671832), Some(1.086707)],
++        )],
++        "slit" => [
++            (0., 0.076603),
++            (7.125, 0.037967),
++            (10., 0.022186),
++            (12.680, 0.007449),
++        ]
++        .into_iter()
++        .map(|(a, e)| ("slit", sun(30., a), [Some(e), None, None]))
++        .collect(),
++        "gap20" | "gap50" => vec![(
++            "S30",
++            sun(30., 0.),
++            [
++                Some(if case == "gap20" { 0.034105 } else { 0.085263 }),
++                None,
++                None,
++            ],
++        )],
++        _ => vec![
++            ("Dec09", V(0.585938, -0.734734, 0.341821), none),
++            ("Dec12", V(-0.084803, -0.855773, 0.510353), none),
++            (
++                "Dec15",
++                V(
++                    -0.7058857256555522,
++                    -0.6648279244185717,
++                    0.24439552620501964,
++                ),
++                none,
++            ),
++            ("Mar12", sun(54.3, 0.), none),
++            ("Jun12", V(-0.070828, -0.210205, 0.975088), none),
++            ("night", sun(-5., 0.), none),
++        ],
++    }
++}
++#[test]
++fn sun_probe_measure() {
++    let house = std::env::var_os("SUN_HOUSE").is_some();
++    let selected = std::env::var("SUN_METHOD").unwrap_or_default();
++    let path = std::env::var("SUN_OUT").ok();
++    let mut file = path.map(|p| std::fs::File::create(p).unwrap());
++    for case in if house {
++        vec!["house"]
++    } else {
++        vec!["floor", "wall", "slope", "slit", "gap50", "gap20"]
++    } {
++        let scene = scene::create(case);
++        for rep in 0..if house { 5 } else { 1 } {
++            let d = Data::from(&scene);
++            for (label, s, expected) in conditions(case) {
++                let s = s.unit();
++                for method in ["G", "A", "Q", "E-convex", "E-kernel", "B"] {
++                    if !selected.is_empty() && method != selected {
++                        continue;
++                    }
++                    for &pitch in match method {
++                        "B" | "G" => &[200, 100, 50, 25, 10][..],
++                        "A" | "Q" => &[25, 10, 5],
++                        _ => &[0],
++                    } {
++                        let r3: u64 = if pitch == 0 {
++                            0
++                        } else {
++                            let step = if method == "Q" {
++                                200. / (200. / pitch as f64).log2().ceil().exp2()
++                            } else {
++                                pitch as f64
++                            };
++                            d.faces
++                                .iter()
++                                .filter(|f| f.recv)
++                                .map(|f| {
++                                    let mut verts = std::collections::BTreeSet::new();
++                                    let mut edges = std::collections::BTreeSet::new();
++                                    let mut longest: f64 = 0.;
++                                    for t in &f.tris {
++                                        for i in 0..3 {
++                                            let (a, b) = (t[i], t[(i + 1) % 3]);
++                                            longest = longest.max((a[0] - b[0]).hypot(a[1] - b[1]));
++                                            let key = |q: P| q.map(|v| (v * 1e6).round() as i64);
++                                            let mut e = [key(a), key(b)];
++                                            verts.insert(e[0]);
++                                            e.sort();
++                                            edges.insert(e);
++                                        }
++                                    }
++                                    let n = (longest / step).ceil() as u64;
++                                    13 * (verts.len() as u64
++                                        + edges.len() as u64 * (n - 1)
++                                        + f.tris.len() as u64 * (n - 1) * n.saturating_sub(2) / 2)
++                                })
++                                .sum()
++                        };
++                        let start = Instant::now();
++                        let mut roles = [0.; 3];
++                        let mut faces = BTreeMap::new();
++                        let mut total = ResultRow::default();
++                        for f in d.faces.iter().filter(|f| f.recv) {
++                            let r = if s.2 <= 0. || s.dot(f.n) <= 1e-10 {
++                                ResultRow::default()
++                            } else if method.starts_with("E-") {
++                                exact::run(&d, f, s, method == "E-kernel")
++                            } else {
++                                grid::run(&d, f, s, method, f64::from(pitch), !house)
++                            };
++                            roles[f.role] += r.area / 1e6;
++                            total.rays += r.rays;
++                            total.r1 += r.r1;
++                            total.r2 += r.r2;
++
++                            total.diff += r.diff;
++                            faces.insert(&f.id,json!({"role":(["floor","wall","ceiling"][f.role]),"area":r.area/1e6,"diff":r.diff,"examples":r.examples,"error":r.error}));
++                        }
++                        let elapsed = ms(start);
++                        let row = json!({"case":case,"sun":label,"s":s.arr(),"method":method,"pitch":pitch,"rep":rep,"areas":roles,"faces":faces,"expected":expected,"errors":(0..3).map(|i|expected[i].map(|e|roles[i]-e)).collect::<Vec<_>>(),"rays":total.rays,"prep_ms":d.prep,"brep_prep_ms":d.brep_ms,"ms":elapsed,"r1":total.r1,"r2":total.r2,"r3":r3,"different_points":if house{None}else{Some(total.diff)},"profile":if cfg!(debug_assertions){"dev"}else{"release"},"os":std::env::consts::OS,"arch":std::env::consts::ARCH});
++                        if let Some(file) = &mut file {
++                            writeln!(file, "{row}").unwrap()
++                        } else {
++                            println!("{row}")
++                        }
++                    }
++                }
++            }
++        }
++    }
++    if let Ok(status) = std::fs::read_to_string("/proc/self/status") {
++        println!(
++            "{}",
++            status
++                .lines()
++                .find(|l| l.starts_with("VmHWM:"))
++                .unwrap_or("VmHWM unavailable")
++        );
++    }
++}
++
++#[test]
++fn export_fixtures() {
++    let Ok(dir) = std::env::var("SUN_SCENES") else {
++        return;
++    };
++    std::fs::create_dir_all(&dir).unwrap();
++    for case in ["floor", "wall", "slope", "slit", "gap50", "gap20", "house"] {
++        let scene = scene::create(case);
++        let d = Data::from(&scene);
++        let world = scene.session.world_state().unwrap();
++        let mut vertices = vec![];
++        let mut triangles = vec![];
++        let mut groups = BTreeMap::<String, Vec<usize>>::new();
++        for body in &world.bodies {
++            let mesh = body.mesh();
++            let base = vertices.len() as u32;
++            vertices.extend(
++                mesh.positions
++                    .iter()
++                    .map(|p| [p.x as f32, p.y as f32, p.z as f32]),
++            );
++            for (tri, id) in mesh.triangles.iter().zip(&mesh.tri_face) {
++                groups
++                    .entry(format!("{}/{}", body.name, id))
++                    .or_default()
++                    .push(triangles.len());
++                triangles.push((tri.map(|i| i + base), body.name.starts_with("Glass")));
++            }
++        }
++        let mut w =
++            std::io::BufWriter::new(std::fs::File::create(format!("{dir}/{case}.scene")).unwrap());
++        writeln!(w, "SUN1 {}", vertices.len()).unwrap();
++        for [x, y, z] in vertices {
++            writeln!(w, "{x:?} {y:?} {z:?}").unwrap();
++        }
++        writeln!(w, "{}", triangles.len()).unwrap();
++        for ([a, b, c], g) in &triangles {
++            writeln!(w, "{a} {b} {c} {}", u8::from(*g)).unwrap();
++        }
++        let faces: Vec<_> = d.faces.iter().filter(|f| f.recv).collect();
++        println!(
++            "{case} total={} faces={} opaque={}",
++            triangles.len(),
++            faces.len(),
++            d.mesh.triangles.len()
++        );
++        writeln!(w, "{}", faces.len()).unwrap();
++        for f in faces {
++            let ids = &groups[&f.id];
++            write!(
++                w,
++                "{} {} {} {} {} {} {} {} {}",
++                f.id,
++                f.role,
++                f.n.0,
++                f.n.1,
++                f.n.2,
++                f.o.0,
++                f.o.1,
++                f.o.2,
++                ids.len()
++            )
++            .unwrap();
++            for i in ids {
++                write!(w, " {i}").unwrap();
++            }
++            writeln!(w).unwrap();
++        }
++        writeln!(w, "{}", scene.openings.len()).unwrap();
++        for op in scene.openings {
++            for V(x, y, z) in op {
++                writeln!(w, "{x} {y} {z}").unwrap();
++            }
++        }
++        let suns = conditions(case);
++        writeln!(w, "{}", suns.len()).unwrap();
++        for (label, s, ex) in suns {
++            let V(x, y, z) = s.unit();
++            writeln!(
++                w,
++                "{label} {x} {y} {z} {} {} {}",
++                ex[0].unwrap_or(-1.),
++                ex[1].unwrap_or(-1.),
++                ex[2].unwrap_or(-1.)
++            )
++            .unwrap();
++            if case == "house" {
++                let mut areas = [0.; 3];
++                for f in d
++                    .faces
++                    .iter()
++                    .filter(|f| f.recv && z > 0. && s.unit().dot(f.n) > 1e-10)
++                {
++                    areas[f.role] += exact::run(&d, f, s.unit(), false).area / 1e6;
++                }
++                println!("reference {label} {areas:?}");
++            }
++        }
++    }
++    exact::kernel_sample();
++}
+diff --git a/crates/modeling/src/model/sun_probe/scene.rs b/crates/modeling/src/model/sun_probe/scene.rs
+new file mode 100644
+index 000000000..4626e07e7
+--- /dev/null
++++ b/crates/modeling/src/model/sun_probe/scene.rs
+@@ -0,0 +1,240 @@
++use super::*;
++pub struct Scene {
++    pub session: Session,
++    pub air: Vec<[V; 2]>,
++    pub openings: Vec<Vec<V>>,
++}
++fn block(c: &mut Cad, name: &str, a: [f64; 3], b: [f64; 3]) {
++    c.prism(
++        name,
++        &[[a[0], a[1]], [b[0], a[1]], [b[0], b[1]], [a[0], b[1]]],
++        a[2],
++        b[2],
++    )
++    .unwrap()
++}
++fn hole(c: &mut Cad, ops: &mut Vec<Vec<V>>, body: &str, a: [f64; 3], b: [f64; 3], glass: bool) {
++    block(c, "cutter", a, b);
++    c.combine(body, "cutter", "cut", false).unwrap();
++    let mut corners = vec![];
++    for x in [a[0], b[0]] {
++        for y in [a[1], b[1]] {
++            for z in [a[2], b[2]] {
++                corners.push(V(x, y, z));
++            }
++        }
++    }
++    if glass {
++        let y = (a[1] + b[1]) * 0.5;
++        block(
++            c,
++            &format!("Glass{}", ops.len()),
++            [a[0], y, a[2]],
++            [b[0], y + 2., b[2]],
++        );
++    }
++    ops.push(corners);
++}
++pub fn create(case: &str) -> Scene {
++    let mut session = Session::default();
++    let mut c = Cad {
++        session: &mut session,
++        count: 0,
++        elapsed: Default::default(),
++    };
++    let mut openings = vec![];
++    let mut air = vec![];
++    let house = case == "house";
++    let slope = case == "slope";
++    let depth = if house {
++        3900.
++    } else if slope {
++        3000.
++    } else if case == "wall" {
++        2000.
++    } else {
++        4000.
++    };
++    let width = if house { 4800. } else { 4000. };
++    let height = if slope { 4000. } else { 2400. };
++    for level in 0..if house { 2 } else { 1 } {
++        for row in 0..if house { 2 } else { 1 } {
++            for col in 0..if house { 2 } else { 1 } {
++                let x = (width + 200.) * f64::from(col);
++                let y = (depth + 200.) * f64::from(row);
++                let z = 2600. * f64::from(level);
++                let tag = format!("{level}{row}{col}");
++                let name = |s: &str| format!("{s}{tag}");
++                air.push([V(x, y, z), V(x + width, y + depth, z + height)]);
++                block(
++                    &mut c,
++                    &name("floor"),
++                    [x, y, z - 100.],
++                    [x + width, y + depth, z],
++                );
++                if house && level == 1 && row == 1 && col == 1 {
++                    hole(
++                        &mut c,
++                        &mut openings,
++                        &name("floor"),
++                        [x + 500., y + 600., z - 100.],
++                        [x + 1500., y + 2200., z],
++                        false,
++                    );
++                }
++                if slope {
++                    let h = height - depth * 30f64.to_radians().tan();
++                    let outline = [
++                        [0., height],
++                        [depth, h],
++                        [depth, h + 160.],
++                        [0., height + 160.],
++                    ];
++                    c.extrude(
++                        json!({"plane":{"origin":[0,0,0],"x_dir":[0,1,0],"y_dir":[0,0,1]}}),
++                        &outline,
++                        width,
++                        json!({"body_name":"roof","operation":"new"}),
++                    )
++                    .unwrap();
++                } else if !house || level == 1 {
++                    block(
++                        &mut c,
++                        &name("ceiling"),
++                        [x, y, z + height],
++                        [x + width, y + depth, z + height + 100.],
++                    );
++                } else {
++                    block(
++                        &mut c,
++                        &name("ceiling"),
++                        [x, y, z + height],
++                        [x + width, y + depth, z + height + 100.],
++                    );
++                    if row == 1 && col == 1 {
++                        hole(
++                            &mut c,
++                            &mut openings,
++                            &name("ceiling"),
++                            [x + 500., y + 600., z + height],
++                            [x + 1500., y + 2200., z + height + 100.],
++                            false,
++                        );
++                    }
++                }
++                for (s, ya, yb) in [
++                    ("south", y - 200., y),
++                    ("north", y + depth, y + depth + 200.),
++                ] {
++                    if house && s == "north" && row == 0 {
++                        continue;
++                    }
++                    let h = if slope && s == "north" {
++                        height - depth * 30f64.to_radians().tan()
++                    } else {
++                        height
++                    };
++                    block(&mut c, &name(s), [x, ya, z], [x + width, yb, z + h]);
++                    if s == "south" && row == 0 || house {
++                        let interior = house && s == "south" && row == 1;
++                        let w = if case.starts_with("slit") || house && tag == "100" && s == "south"
++                        {
++                            50.
++                        } else {
++                            1200.
++                        };
++                        let lo = if slope {
++                            2800.
++                        } else if interior {
++                            0.
++                        } else {
++                            900.
++                        };
++                        let hi = if slope {
++                            3600.
++                        } else if case.starts_with("slit") {
++                            1900.
++                        } else {
++                            2000.
++                        };
++                        hole(
++                            &mut c,
++                            &mut openings,
++                            &name(s),
++                            [x + (width - w) / 2., ya, z + lo],
++                            [x + (width + w) / 2., yb, z + hi],
++                            !interior,
++                        );
++                        if house && row == 0 && s == "south" {
++                            hole(
++                                &mut c,
++                                &mut openings,
++                                &name(s),
++                                [
++                                    x + 300.,
++                                    ya,
++                                    z + if level == 0 && col == 0 { 0. } else { 900. },
++                                ],
++                                [x + 1100., yb, z + 2000.],
++                                level != 0 || col != 0,
++                            );
++                        }
++                    }
++                }
++                for (s, xa, xb) in [("west", x - 200., x), ("east", x + width, x + width + 200.)] {
++                    if house && s == "east" && col == 0 {
++                        continue;
++                    }
++                    block(&mut c, &name(s), [xa, y, z], [xb, y + depth, z + height]);
++                    if house && col == 1 && s == "west" {
++                        hole(
++                            &mut c,
++                            &mut openings,
++                            &name(s),
++                            [xa, y + 800., z],
++                            [xb, y + 1800., z + 2100.],
++                            false,
++                        );
++                    }
++                }
++                if house {
++                    block(
++                        &mut c,
++                        &name("Furniture"),
++                        [x + 600., y + 600., z],
++                        [x + 1500., y + 1550., z + 1100.],
++                    );
++                }
++            }
++        }
++    }
++    if house {
++        block(
++            &mut c,
++            "roof",
++            [-800., -800., 5100.],
++            [10600., 8800., 5300.],
++        );
++    }
++    if house || case.starts_with("gap") {
++        let gap = if case == "gap20" { 20. } else { 50. };
++        let mid = width / 2.;
++        block(
++            &mut c,
++            "NeighborW",
++            [mid - gap / 2. - 8000., -11200., 0.],
++            [mid - gap / 2., -3200., 6500.],
++        );
++        block(
++            &mut c,
++            "NeighborE",
++            [mid + gap / 2., -11200., 0.],
++            [mid + gap / 2. + 8000., -3200., 6500.],
++        );
++    }
++    Scene {
++        session,
++        air,
++        openings,
++    }
++}
+diff --git a/crates/modeling/src/model/sun_probe/standalone/Cargo.lock b/crates/modeling/src/model/sun_probe/standalone/Cargo.lock
+new file mode 100644
+index 000000000..a06eccbc4
+--- /dev/null
++++ b/crates/modeling/src/model/sun_probe/standalone/Cargo.lock
+@@ -0,0 +1,7 @@
++# This file is automatically @generated by Cargo.
++# It is not intended for manual editing.
++version = 4
++
++[[package]]
++name = "sunbench"
++version = "0.1.0"
+diff --git a/crates/modeling/src/model/sun_probe/standalone/Cargo.toml b/crates/modeling/src/model/sun_probe/standalone/Cargo.toml
+new file mode 100644
+index 000000000..82ef9743b
+--- /dev/null
++++ b/crates/modeling/src/model/sun_probe/standalone/Cargo.toml
+@@ -0,0 +1,8 @@
++[workspace]
++[package]
++name = "sunbench"
++version = "0.1.0"
++edition = "2024"
++
++[lib]
++crate-type = ["cdylib","rlib"]
+diff --git a/crates/modeling/src/model/sun_probe/standalone/Dockerfile b/crates/modeling/src/model/sun_probe/standalone/Dockerfile
+new file mode 100644
+index 000000000..a2c1692d2
+--- /dev/null
++++ b/crates/modeling/src/model/sun_probe/standalone/Dockerfile
+@@ -0,0 +1,17 @@
++FROM --platform=$BUILDPLATFORM rust:1.99.1-bookworm AS build
++ARG BUILDPLATFORM
++ARG TARGETPLATFORM
++WORKDIR /src
++COPY rust-toolchain.toml ./
++RUN if [ "$TARGETPLATFORM" != "linux/amd64" ]; then echo "Unsupported target: $TARGETPLATFORM (expected linux/amd64)" >&2; exit 1; fi \
++    && if [ "$BUILDPLATFORM" != "$TARGETPLATFORM" ]; then \
++        apt-get update \
++        && apt-get install -y --no-install-recommends gcc-x86-64-linux-gnu libc6-dev-amd64-cross \
++        && rm -rf /var/lib/apt/lists/*; fi \
++    && rustup target add x86_64-unknown-linux-gnu
++COPY crates/modeling/src/model/sun_probe/standalone/ .
++ENV CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=x86_64-linux-gnu-gcc CARGO_TARGET_DIR=/src/target/sunbench
++RUN cargo build --release --target x86_64-unknown-linux-gnu
++FROM debian:bookworm-slim
++COPY --from=build /src/target/sunbench/x86_64-unknown-linux-gnu/release/sunbench /usr/bin/sunbench
++ENTRYPOINT ["/usr/bin/sunbench"]
+diff --git a/crates/modeling/src/model/sun_probe/standalone/compare.py b/crates/modeling/src/model/sun_probe/standalone/compare.py
+new file mode 100644
+index 000000000..96c7a981b
+--- /dev/null
++++ b/crates/modeling/src/model/sun_probe/standalone/compare.py
+@@ -0,0 +1,28 @@
++import json,math,subprocess
++from collections import defaultdict
++from pathlib import Path
++raw=Path("docs/verification/evidence/verification-12/raw")
++rows=defaultdict(list)
++for line in (raw/"dev.jsonl").read_text().splitlines():
++    r=json.loads(line)
++    if r["method"] in ["G","A","Q","E-convex"]:
++        rows[r["case"],r["method"],r["pitch"]].append(r)
++count=0
++mismatches=0
++for (case,m,p),expected in rows.items():
++    result=subprocess.check_output(["target/sunbench/release/sunbench",raw/"scenes"/(case+".scene"),str(["G","A","Q","E-convex"].index(m)),str(p),"0","1"],text=True)
++    for r,line in zip(expected,result.splitlines(),strict=True):
++        actual=json.loads(line)
++        for role,(a,b) in enumerate(zip(r["areas"],actual["areas"])):
++            if m=="E-convex":
++                matches=abs(a-b)<=1e-6
++            else:
++                step=200/2**math.ceil(math.log2(200/p)) if m=="Q" else p
++                matches=round(a*1e6/step**2)==round(b*1e6/step**2)
++            if not matches:
++                print(case,m,p,r["s"],role,a,b)
++                mismatches+=1
++            count+=1
++print("compared role areas:",count)
++print("mismatches:",mismatches)
++assert mismatches==0
+diff --git a/crates/modeling/src/model/sun_probe/standalone/e2_cases.py b/crates/modeling/src/model/sun_probe/standalone/e2_cases.py
+new file mode 100644
+index 000000000..606a6723f
+--- /dev/null
++++ b/crates/modeling/src/model/sun_probe/standalone/e2_cases.py
+@@ -0,0 +1,75 @@
++import json, math, os, subprocess, sys
++from pathlib import Path
++from e2_scenes import raw, scenes, convert
++adv = raw.parent/"interrogate"
++sys.path.insert(0,str(adv/"adversary-1"))
++from scene import Scene
++tmp = Path("target/sunbench/cases")
++tmp.mkdir(exist_ok=True)
++old = raw/"scenes"
++source = tmp/"source.scene"
++test = tmp/"test.scene"
++exe = tmp.parent/"release/sunbench"
++
++def transform(script,*args):
++    subprocess.run([sys.executable,"-B",adv/script,*map(str,args)],stdout=subprocess.DEVNULL,check=True)
++def run(path,m):
++    return list(map(json.loads,subprocess.check_output([exe,path,str(m),"25","0","1"],text=True).splitlines()))
++def check(label,case,src,angle=0,scale=1,shift=(0,0,0),grid=False):
++    convert(src,test,case,angle,scale,shift)
++    reference=run(test,0) if grid else []
++    for i,(e,e2) in enumerate(zip(run(test,3),run(test,4))):
++        exp = list(Scene(src).suns[i][2])
++        if case=="slit":
++            b=math.radians([0,7.125,10,12.680][i]);a=math.pi/6
++            exp=[(.05-.2*math.tan(b))*(1-.2*math.tan(a)/math.cos(b))*math.cos(b)/math.tan(a),0,0]
++        if case.startswith("gap"):exp[1:]=[0,0]
++        if scale!=1:
++            exp[1]*=scale
++            exp[2]*=math.hypot(math.cos(math.pi/6),scale*math.sin(math.pi/6))
++        if grid:exp=reference[i]["areas"]
++        if label=="roof45":
++            e["areas"]=[dict(e["faces"]).get("roof/1",0)]
++            e2["areas"]=[dict(e2["faces"]).get("roof/1",0)]
++            exp=[0]
++        if label=="grazing":
++            e["areas"]=[dict(e["faces"]).get("west000/4",0)]
++            e2["areas"]=[dict(e2["faces"]).get("west000/4",0)]
++            exp=[0]
++        yield dict(case=case,variant=label,idx=i,sun=e["sun"],expected=exp,E=e["areas"],E2=e2["areas"])
++def cases():
++    for p in sorted(old.glob("*.scene")):
++        if p.stem!="house":yield from check("fixed",p.stem,p)
++    for case in ["wall","slope","floor","slit","gap20"]:
++        for angle in range(0,91,5):
++            for mode in ["f64plane","meshplane"]:
++                transform("adversary-1/rotate.py",old/(case+".scene"),source,angle)
++                if mode=="meshplane":transform("adversary-1/meshplane.py",source,source)
++                yield from check(f"{mode} {angle}°",case,source,angle)
++    for c in [0.52,math.sqrt(.48),math.sqrt(.75),1.04]:
++        transform("adversary-1/scale.py",old/"slope.scene",source,c)
++        yield from check(f"pitch {math.degrees(math.atan(c/math.sqrt(3))):.1f}°","slope",source,scale=c)
++    for dz in [.1,1,10,1000.1]:
++        transform("adversary-1/shift.py",old/"slope.scene",source,0,0,dz)
++        yield from check(f"dz {dz} mm","slope",source,shift=(0,0,dz))
++    transform("adversary-2/eave.py",old/"slope.scene",source)
++    yield from check("eave","slope",source)
++    for name,case,alt,az in [("roof45","slope",45,0),("grazing","wall",20,1e-8)]:
++        a,b=map(math.radians,(alt,az))
++        sc=Scene(old/(case+".scene"))
++        sc.suns=[[name,[math.cos(a)*math.sin(b),-math.cos(a)*math.cos(b),math.sin(a)],[-1]*3]]
++        sc.write(source)
++        yield from check(name,case,source)
++    sc=Scene(old/"house.scene")
++    ids=[i for i,t in enumerate(sc.ts) if max(sc.vs[k][1] for k in t[:3])>=-1000]
++    remap={j:i for i,j in enumerate(ids)}
++    sc.ts=[sc.ts[i] for i in ids]
++    for f in sc.faces:f[4]=[remap[i] for i in f[4]]
++    sc.write(source)
++    convert(source,scenes/"house-noneighbors.scene","house")
++    transform("adversary-1/rotate.py",source,source,30)
++    yield from check("no neighbors 30° (G25)","house",source,angle=30,grid=True)
++
++if __name__=="__main__":
++    with (raw/"e2-cases.jsonl").open("w") as out:
++        for record in cases():print(json.dumps(record,ensure_ascii=False),file=out)
+diff --git a/crates/modeling/src/model/sun_probe/standalone/e2_measure.py b/crates/modeling/src/model/sun_probe/standalone/e2_measure.py
+new file mode 100644
+index 000000000..85995bfbe
+--- /dev/null
++++ b/crates/modeling/src/model/sun_probe/standalone/e2_measure.py
+@@ -0,0 +1,38 @@
++import json, re, subprocess, sys
++from pathlib import Path
++from e2_scenes import convert,raw,scenes
++base=Path(__file__).parent
++target=Path("target/sunbench")
++def measure(platform, label, scene, n=0, pitch=1000):
++    args=list(map(str,[4,pitch,n,5]))
++    if platform=="macos":
++        cmd=["/usr/bin/time","-l",target/"release/sunbench",scene,*args]
++    elif platform=="wasm":
++        cmd=["/usr/bin/time","-l","node",base/"wasm.mjs",target/"wasm32-unknown-unknown/release/sunbench.wasm",scene,*args]
++    else:
++        cmd=["docker","run","--rm","--platform","linux/amd64","-v",f"{scene.resolve()}:/house:ro","sunbench-e2","/house",*args]
++    r=subprocess.run(cmd,capture_output=True,text=True,check=True)
++    rss=int(re.search(r"VmHWM:\s*(\d+)" if platform=="linux" else r"(\d+)\s+maximum resident set size",r.stderr)[1])*(1024 if platform=="linux" else 1)
++    rows=list(map(json.loads,r.stdout.splitlines()))
++    assert len(rows)==30
++    for row in rows:
++        row.update(platform=platform,scenario=label,rss_bytes=rss)
++        if platform=="wasm":row["linear_bytes"]=int(re.search(r"wasm_bytes (\d+)",r.stderr)[1])
++        yield row
++def jobs(platform):
++    house=scenes/"house.scene"
++    yield from measure(platform,"baseline",house)
++    if platform=="linux":return
++    yield from measure(platform,"no neighbors",scenes/"house-noneighbors.scene")
++    for n in (4,16,32,64):yield from measure(platform,"cylinders",house,n)
++    for pitch in (500,2000):yield from measure(platform,"cell size",house,pitch=pitch)
++    for n in (100000,400000):
++        src=target/"cases"/"below.scene"; dst=src.with_suffix(".sun2")
++        subprocess.run([sys.executable,"-B",raw.parent/"interrogate/adversary-1/addtris.py",raw/"scenes/house.scene",src,str(n)],check=True)
++        convert(src,dst,"house")
++        yield from measure(platform,f"underground {n}",dst)
++if __name__=="__main__":
++    platform=sys.argv[1]
++    with (raw/f"e2-{platform}.jsonl").open("w") as out:
++        for row in jobs(platform):
++            print(json.dumps(row,separators=(',',':')),file=out)
+diff --git a/crates/modeling/src/model/sun_probe/standalone/e2_scenes.py b/crates/modeling/src/model/sun_probe/standalone/e2_scenes.py
+new file mode 100644
+index 000000000..789ed79a3
+--- /dev/null
++++ b/crates/modeling/src/model/sun_probe/standalone/e2_scenes.py
+@@ -0,0 +1,32 @@
++import math
++from pathlib import Path
++
++raw = Path("docs/verification/evidence/verification-12/raw")
++scenes = raw / "scenes2"
++
++
++def convert(src, dst, case, angle=0, scale=1, shift=(0, 0, 0)):
++    house = case == "house"
++    size = range(2 if house else 1)
++    width = 4800 if house else 4000
++    depth = 3900 if house else {"wall": 2000, "slope": 3000}.get(case, 4000)
++    height = 4000 if case == "slope" else 2400
++    c, s = math.cos(math.radians(angle)), math.sin(math.radians(angle))
++    rooms = []
++    for level in size:
++        for row in size:
++            for col in size:
++                z = 2600 * level
++                values = [scale*z + shift[2], scale*(z+height) + shift[2]]
++                for dx, dy in ((0, 0), (width, 0), (width, depth), (0, depth)):
++                    x, y = col*(width+200)+dx, row*(depth+200)+dy
++                    values.extend([x*c-y*s+shift[0], x*s+y*c+shift[1]])
++                rooms.append(" ".join(map(str, values)))
++    dst.write_text(src.read_text().replace("SUN1", "SUN2", 1).rstrip() + "\n" +
++                   str(len(rooms)) + "\n" + "\n".join(rooms) + "\n")
++
++
++if __name__ == "__main__":
++    scenes.mkdir(exist_ok=True)
++    for src in (raw/"scenes").glob("*.scene"):
++        convert(src, scenes/src.name, src.stem)
+diff --git a/crates/modeling/src/model/sun_probe/standalone/measure.py b/crates/modeling/src/model/sun_probe/standalone/measure.py
+new file mode 100644
+index 000000000..071b5ff38
+--- /dev/null
++++ b/crates/modeling/src/model/sun_probe/standalone/measure.py
+@@ -0,0 +1,23 @@
++import json,re,subprocess,sys
++from pathlib import Path
++platform=sys.argv[1]
++base=Path(__file__).parent
++raw=Path("docs/verification/evidence/verification-12/raw")
++scene=raw/"scenes/house.scene"
++target=Path("target/sunbench")
++jobs=[(0,10,0),(0,25,0),(1,5,0),(2,5,0),(3,0,0)]
++if platform!="linux":jobs += [(m,p,n) for n in (4,16) for m,p in [(3,0),(0,25)]]
++with (raw/(platform+".jsonl")).open("w") as out:
++    for m,p,n in jobs:
++        args=list(map(str,[m,p,n,5]))
++        if platform=="macos":cmd=["/usr/bin/time","-l",target/"release/sunbench",scene,*args]
++        elif platform=="wasm":cmd=["node",base/"wasm.mjs",target/"wasm32-unknown-unknown/release/sunbench.wasm",scene,*args]
++        else:cmd=["docker","run","--rm","--platform","linux/amd64","-v",f"{scene.resolve()}:/house:ro","sunbench-203","/house",*args]
++        print(platform,m,p,n,flush=True)
++        result=subprocess.run(cmd,capture_output=True,text=True,check=True)
++        pattern={"macos":r"(\d+)\s+maximum resident set size","wasm":r"wasm_bytes (\d+)","linux":r"VmHWM:\s*(\d+)"}[platform]
++        mem=int(re.search(pattern,result.stderr)[1])*(1024 if platform=="linux" else 1)
++        for line in result.stdout.splitlines():
++            row=json.loads(line)
++            print(json.dumps(dict(platform=platform,memory_bytes=mem,**row),separators=(',',':')),file=out)
++        out.flush()
+diff --git a/crates/modeling/src/model/sun_probe/standalone/src/bvh.rs b/crates/modeling/src/model/sun_probe/standalone/src/bvh.rs
+new file mode 100644
+index 000000000..be0e04b32
+--- /dev/null
++++ b/crates/modeling/src/model/sun_probe/standalone/src/bvh.rs
+@@ -0,0 +1,100 @@
++use super::V;
++#[derive(Clone, Copy)]
++pub(crate) struct Ray {
++    axes: [usize; 3],
++    sx: f64,
++    sy: f64,
++    inv: [f64; 3],
++}
++impl Ray {
++    pub fn new(s: V) -> Self {
++        let d = s.arr();
++        let k = (0..3)
++            .max_by(|&i, &j| d[i].abs().total_cmp(&d[j].abs()))
++            .unwrap();
++        let x = (k + 1) % 3;
++        let y = (k + 2) % 3;
++        Self {
++            axes: [x, y, k],
++            sx: d[x] / d[k],
++            sy: d[y] / d[k],
++            inv: d.map(|v| 1. / v),
++        }
++    }
++    fn hit(self, q: V, tri: &[V; 3]) -> bool {
++        let [x, y, z] = self.axes;
++        let p = tri.map(|v| {
++            let a = v.sub(q).arr();
++            [
++                a[x] - self.sx * a[z],
++                a[y] - self.sy * a[z],
++                a[z] * self.inv[z],
++            ]
++        });
++        let edge = |i: usize, j: usize| p[i][0] * p[j][1] - p[i][1] * p[j][0];
++        let w = [edge(1, 2), edge(2, 0), edge(0, 1)];
++        if w.iter().any(|&v| v < 0.) && w.iter().any(|&v| v > 0.) {
++            return false;
++        }
++        let det = w.iter().sum::<f64>();
++        let t = w[0] * p[0][2] + w[1] * p[1][2] + w[2] * p[2][2];
++        det * t > 0.
++    }
++}
++enum Branch {
++    Leaf(Vec<[V; 3]>),
++    Pair(Box<[Tree; 2]>),
++}
++pub(crate) struct Tree {
++    lo: [f64; 3],
++    hi: [f64; 3],
++    branch: Branch,
++}
++impl Tree {
++    pub fn new(ts: &mut [[V; 3]]) -> Self {
++        let mut lo = [f64::INFINITY; 3];
++        let mut hi = [f64::NEG_INFINITY; 3];
++        for p in ts.iter().flatten() {
++            for (k, v) in p.arr().into_iter().enumerate() {
++                lo[k] = lo[k].min(v - 1e-8);
++                hi[k] = hi[k].max(v + 1e-8);
++            }
++        }
++        let branch = if ts.len() <= 4 {
++            Branch::Leaf(ts.to_vec())
++        } else {
++            let k = (0..3)
++                .max_by(|&i, &j| (hi[i] - lo[i]).total_cmp(&(hi[j] - lo[j])))
++                .unwrap();
++            let center = |t: &[V; 3]| t.iter().map(|v| v.arr()[k]).sum::<f64>();
++            let mid = ts.len() / 2;
++            ts.select_nth_unstable_by(mid, |a, b| center(a).total_cmp(&center(b)));
++            let (a, b) = ts.split_at_mut(mid);
++            Branch::Pair(Box::new([Self::new(a), Self::new(b)]))
++        };
++        Self { lo, hi, branch }
++    }
++    pub fn clear(&self, q: V, r: Ray) -> bool {
++        let mut near = 0f64;
++        let mut far = f64::INFINITY;
++        for (i, v) in q.arr().into_iter().enumerate() {
++            if r.inv[i].is_infinite() {
++                if v < self.lo[i] || v > self.hi[i] {
++                    return true;
++                }
++            } else {
++                let a = (self.lo[i] - v) * r.inv[i];
++                let b = (self.hi[i] - v) * r.inv[i];
++                near = near.max(a.min(b));
++                far = far.min(a.max(b));
++                if near > far {
++                    return true;
++                }
++            }
++        }
++        match &self.branch {
++            Branch::Leaf(ts) => !ts.iter().any(|t| r.hit(q, t)),
++            Branch::Pair(k) => k[0].clear(q, r) && k[1].clear(q, r),
++        }
++    }
++}
+diff --git a/crates/modeling/src/model/sun_probe/standalone/src/e2.rs b/crates/modeling/src/model/sun_probe/standalone/src/e2.rs
+new file mode 100644
+index 000000000..8283864ec
+--- /dev/null
++++ b/crates/modeling/src/model/sun_probe/standalone/src/e2.rs
+@@ -0,0 +1,107 @@
++use super::*;
++
++fn trim(poly: Poly, distance: impl Fn(P) -> f64) -> Poly {
++    exact::clip(
++        &poly,
++        |p| {
++            let d = distance(p);
++            if d.abs() < 0.001 { 0. } else { d }
++        },
++        |a, b, t| [a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])],
++    )
++}
++pub(super) fn regions(d: &Data) -> Vec<(usize, Vec<Poly>)> {
++    let mut result = vec![];
++    for (i, f) in d.faces.iter().enumerate() {
++        for r in &d.rooms {
++            if f.role == 0 && (f.n.2 < 0.999999 || (f.o.2 - r.bottom).abs() > 0.01) {
++                continue;
++            }
++            let mut pieces = vec![];
++            for tri in &f.tris {
++                let mut p = tri.to_vec();
++                for j in 0..4 {
++                    let a = r.corners[j];
++                    let b = r.corners[(j + 1) % 4];
++                    let len = (a[0] - b[0]).hypot(a[1] - b[1]);
++                    p = trim(p, |uv| {
++                        let q = f.xyz(uv);
++                        cross(a, b, [q.0, q.1]) / len
++                    });
++                }
++                if f.role == 1 {
++                    p = trim(p, |uv| f.xyz(uv).2 - r.bottom);
++                    p = trim(p, |uv| r.top - f.xyz(uv).2);
++                } else if f.role == 2
++                    && !p.iter().any(|uv| {
++                        let z = f.xyz(*uv).2;
++                        z > r.bottom + 0.01 && z <= r.top + 0.01
++                    })
++                {
++                    continue;
++                }
++                if exact::area(&p) > 1e-8 {
++                    pieces.push(p);
++                }
++            }
++            if !pieces.is_empty() {
++                result.push((i, pieces));
++            }
++        }
++    }
++    result
++}
++pub(super) struct Grid {
++    cells: std::collections::HashMap<(i32, i32), Vec<usize>>,
++    u: V,
++    v: V,
++    size: f64,
++}
++impl Grid {
++    fn key(&self, p: V) -> [i32; 2] {
++        [self.u, self.v].map(|n| (p.dot(n) / self.size).floor() as i32)
++    }
++    fn cells_for(&self, pts: impl Iterator<Item = V>) -> impl Iterator<Item = (i32, i32)> {
++        let mut lo = [i32::MAX; 2];
++        let mut hi = [i32::MIN; 2];
++        for p in pts {
++            let k = self.key(p);
++            for i in 0..2 {
++                lo[i] = lo[i].min(k[i]);
++                hi[i] = hi[i].max(k[i]);
++            }
++        }
++        (lo[0]..=hi[0]).flat_map(move |x| (lo[1]..=hi[1]).map(move |y| (x, y)))
++    }
++    pub(super) fn new(d: &Data, s: V, size: f64) -> Self {
++        let axis = if s.0.abs() < 0.9 {
++            V(1., 0., 0.)
++        } else {
++            V(0., 1., 0.)
++        };
++        let u = s.cross(axis).unit();
++        let mut grid = Self {
++            cells: Default::default(),
++            u,
++            v: s.cross(u),
++            size,
++        };
++        for (i, tri) in d.opaque.iter().enumerate() {
++            for key in grid.cells_for(tri.iter().copied()).collect::<Vec<_>>() {
++                grid.cells.entry(key).or_default().push(i);
++            }
++        }
++        grid
++    }
++    pub(super) fn query(&self, f: &Face, pieces: &[Poly]) -> Vec<usize> {
++        let mut ids = vec![];
++        for k in self.cells_for(pieces.iter().flatten().map(|p| f.xyz(*p))) {
++            if let Some(list) = self.cells.get(&k) {
++                ids.extend_from_slice(list);
++            }
++        }
++        ids.sort_unstable();
++        ids.dedup();
++        ids
++    }
++}
+diff --git a/crates/modeling/src/model/sun_probe/standalone/src/exact.rs b/crates/modeling/src/model/sun_probe/standalone/src/exact.rs
+new file mode 100644
+index 000000000..f8318a6a9
+--- /dev/null
++++ b/crates/modeling/src/model/sun_probe/standalone/src/exact.rs
+@@ -0,0 +1,120 @@
++use super::*;
++pub(super) fn clip<T: Copy>(
++    poly: &[T],
++    distance: impl Fn(T) -> f64,
++    lerp: impl Fn(T, T, f64) -> T,
++) -> Vec<T> {
++    let mut out = vec![];
++    for i in 0..poly.len() {
++        let a = poly[i];
++        let b = poly[(i + 1) % poly.len()];
++        let (da, db) = (distance(a), distance(b));
++        if da >= 0. {
++            out.push(a)
++        }
++        if (da > 0. && db < 0.) || (da < 0. && db > 0.) {
++            out.push(lerp(a, b, da / (da - db)));
++        }
++    }
++    out
++}
++pub(super) fn area(p: &[P]) -> f64 {
++    (1..p.len().saturating_sub(1))
++        .map(|i| cross(p[0], p[i], p[i + 1]) / 2.)
++        .sum()
++}
++fn overlap(a: Bounds, b: Bounds) -> bool {
++    (0..2).all(|i| a[0][i] < b[1][i] && b[0][i] < a[1][i])
++}
++fn subtract(p: Poly, shadow: &Poly, out: &mut Vec<Poly>) {
++    if !overlap(bounds(p.iter()), bounds(shadow.iter())) {
++        out.push(p);
++        return;
++    }
++    let mut inside = p;
++    for i in 0..shadow.len() {
++        let a = shadow[i];
++        let b = shadow[(i + 1) % shadow.len()];
++        let d = |v| cross(a, b, v);
++        let interp = |a: P, b: P, t: f64| [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
++        let outside = clip(&inside, |v| -d(v), interp);
++        if area(&outside) > 1e-8 {
++            out.push(outside)
++        }
++        inside = clip(&inside, d, interp);
++        if area(&inside) < 1e-8 {
++            break;
++        }
++    }
++}
++pub(super) fn run(d: &Data, f: &Face, s: V) -> ResultRow {
++    solve(
++        f,
++        s,
++        f.tris.iter().map(|t| t.to_vec()).collect(),
++        d.opaque.iter(),
++        1e-7,
++    )
++}
++pub(super) fn solve<'a>(
++    f: &Face,
++    s: V,
++    mut pieces: Vec<Poly>,
++    triangles: impl Iterator<Item = &'a [V; 3]>,
++    eps: f64,
++) -> ResultRow {
++    let receiver = bounds(pieces.iter().flatten());
++    let mut shadows = vec![];
++    for tri in triangles {
++        let distance = |v: V| {
++            let d = v.sub(f.o).dot(f.n);
++            if eps == 0.01 {
++                if d.abs() <= eps { 0. } else { d }
++            } else {
++                d - eps
++            }
++        };
++        if !tri.iter().any(|&v| distance(v) > 0.) {
++            continue;
++        }
++        let front = clip(tri, distance, |a, b, t| a.add(b.sub(a).mul(t)));
++        let mut p: Poly = front.iter().map(|q| f.project(*q, s)).collect();
++        let a = area(&p);
++        if a.abs() < 1e-8 || !overlap(receiver, bounds(p.iter())) {
++            continue;
++        }
++        if a < 0. {
++            p.reverse()
++        }
++        shadows.push(p);
++    }
++    let mut row = ResultRow::default();
++    row.candidates = shadows.len() as u64;
++    row.peak = pieces.len() as u64;
++    {
++        for sh in shadows {
++            let mut next = vec![];
++            for p in pieces {
++                row.attempts += 1;
++                if overlap(bounds(p.iter()), bounds(sh.iter())) {
++                    row.cuts += 1;
++                }
++                subtract(p, &sh, &mut next)
++            }
++            row.peak = row.peak.max(next.len() as u64);
++            row.pieces += next.len() as u64;
++            pieces = next;
++            if pieces.is_empty() {
++                break;
++            }
++        }
++        for p in pieces {
++            row.area += area(&p);
++            row.r1 += 8 * p.len() as u64;
++        }
++    }
++    if row.r1 > 0 {
++        row.r1 += 8
++    }
++    row
++}
+diff --git a/crates/modeling/src/model/sun_probe/standalone/src/grid.rs b/crates/modeling/src/model/sun_probe/standalone/src/grid.rs
+new file mode 100644
+index 000000000..286407db9
+--- /dev/null
++++ b/crates/modeling/src/model/sun_probe/standalone/src/grid.rs
+@@ -0,0 +1,133 @@
++use super::*;
++struct Grid<'a> {
++    d: &'a Data,
++    f: &'a Face,
++    s: V,
++    ray: bvh::Ray,
++    step: f64,
++
++    r: ResultRow,
++    runs: BTreeMap<i32, Vec<(i32, i32)>>,
++}
++impl Grid<'_> {
++    fn lit(&mut self, p: P) -> bool {
++        if !self.f.inside(p) {
++            return false;
++        }
++        self.r.rays += 1;
++        let q = self.f.xyz(p).add(self.f.n.mul(0.5));
++        self.d.bvh.clear(q, self.ray)
++    }
++    fn cell(&mut self, x: i32, y: i32, k: i32) {
++        let (origin, step) = (self.f.b[0], self.step);
++        let p = |i: f64, j: f64| {
++            [
++                origin[0] + (f64::from(x) + i) * step,
++                origin[1] + (f64::from(y) + j) * step,
++            ]
++        };
++        let size = f64::from(k);
++        let center = self.lit(p(size / 2., size / 2.));
++        if k > 1
++            && [(0., 0.), (0., size), (size, 0.), (size, size)]
++                .iter()
++                .any(|&(i, j)| self.lit(p(i, j)) != center)
++        {
++            let h = k / 2;
++            for i in [0, h] {
++                for j in [0, h] {
++                    self.cell(x + i, y + j, h)
++                }
++            }
++        } else if center {
++            self.r.area += (size * self.step).powi(2);
++            for j in y..y + k {
++                let row = self.runs.entry(j).or_default();
++                if let Some(last) = row.last_mut()
++                    && last.1 == x
++                {
++                    last.1 = x + k
++                } else {
++                    row.push((x, x + k))
++                }
++            }
++        }
++    }
++}
++pub(super) fn run(d: &Data, f: &Face, s: V, method: &str, pitch: f64) -> ResultRow {
++    let k = if method == "Q" {
++        (200. / pitch).log2().ceil().exp2() as i32
++    } else {
++        1
++    };
++    let step = if method == "Q" {
++        200. / f64::from(k)
++    } else {
++        pitch
++    };
++    let mut g = Grid {
++        d,
++        f,
++        s,
++        step,
++        ray: bvh::Ray::new(s),
++
++        r: Default::default(),
++        runs: Default::default(),
++    };
++    let count = |i: usize| ((f.b[1][i] - f.b[0][i]) / step).ceil() as i32;
++    let mut boxes = vec![f.b];
++    if method == "A" {
++        boxes = d
++            .openings
++            .iter()
++            .map(|op| {
++                bounds(
++                    op.iter()
++                        .map(|q| f.project(*q, s))
++                        .collect::<Vec<_>>()
++                        .iter(),
++                )
++            })
++            .filter(|b| (0..2).all(|i| b[1][i] >= f.b[0][i] && b[0][i] <= f.b[1][i]))
++            .collect();
++    }
++    let idx = |v: f64, i: usize| ((v - f.b[0][i]) / step - 0.5).ceil() as i32;
++    for y in (0..count(1)).step_by(k as usize) {
++        let mut ranges = vec![];
++        for b in &boxes {
++            if method != "A" {
++                ranges.push((0, count(0)));
++                break;
++            }
++            let cy = f.b[0][1] + (f64::from(y) + 0.5) * step;
++            if cy >= b[0][1] && cy <= b[1][1] {
++                ranges.push((idx(b[0][0], 0).max(0), idx(b[1][0] + 1e-8, 0).min(count(0))))
++            }
++        }
++        ranges.sort();
++        let mut end = 0;
++        for (lo, hi) in ranges {
++            for x in (lo.max(end)..hi).step_by(k as usize) {
++                g.cell(x, y, k)
++            }
++            end = end.max(hi);
++        }
++    }
++    if !g.runs.is_empty() {
++        g.r.r2 = 20;
++        for (_, mut runs) in g.runs {
++            runs.sort();
++            let mut last = -1;
++            g.r.r2 += 8;
++            for (a, b) in runs {
++                if a > last {
++                    g.r.r2 += 8
++                }
++                last = last.max(b);
++            }
++        }
++    }
++
++    g.r
++}
+diff --git a/crates/modeling/src/model/sun_probe/standalone/src/lib.rs b/crates/modeling/src/model/sun_probe/standalone/src/lib.rs
+new file mode 100644
+index 000000000..330a33e83
+--- /dev/null
++++ b/crates/modeling/src/model/sun_probe/standalone/src/lib.rs
+@@ -0,0 +1,402 @@
++use std::collections::BTreeMap;
++mod bvh;
++mod e2;
++mod exact;
++mod grid;
++#[derive(Clone, Copy, Debug, Default)]
++struct V(f64, f64, f64);
++impl V {
++    fn add(self, b: V) -> V {
++        V(self.0 + b.0, self.1 + b.1, self.2 + b.2)
++    }
++    fn sub(self, b: V) -> V {
++        self.add(b.mul(-1.))
++    }
++    fn mul(self, k: f64) -> V {
++        V(self.0 * k, self.1 * k, self.2 * k)
++    }
++    fn dot(self, b: V) -> f64 {
++        self.0 * b.0 + self.1 * b.1 + self.2 * b.2
++    }
++    fn cross(self, b: V) -> V {
++        V(
++            self.1 * b.2 - self.2 * b.1,
++            self.2 * b.0 - self.0 * b.2,
++            self.0 * b.1 - self.1 * b.0,
++        )
++    }
++    fn unit(self) -> V {
++        self.mul(1. / self.dot(self).sqrt())
++    }
++    fn arr(self) -> [f64; 3] {
++        [self.0, self.1, self.2]
++    }
++}
++type P = [f64; 2];
++type Poly = Vec<P>;
++type Bounds = [P; 2];
++fn cross(a: P, b: P, c: P) -> f64 {
++    (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
++}
++fn bounds<'a>(pts: impl Iterator<Item = &'a P>) -> Bounds {
++    let mut b = [[f64::INFINITY; 2], [f64::NEG_INFINITY; 2]];
++    for p in pts {
++        for i in 0..2 {
++            b[0][i] = b[0][i].min(p[i]);
++            b[1][i] = b[1][i].max(p[i]);
++        }
++    }
++    b
++}
++fn within(b: Bounds, p: P) -> bool {
++    (0..2).all(|k| p[k] >= b[0][k] - 1e-7 && p[k] <= b[1][k] + 1e-7)
++}
++struct Face {
++    own: Vec<usize>,
++    id: String,
++    o: V,
++    n: V,
++    u: V,
++    v: V,
++    role: usize,
++    tris: Vec<[P; 3]>,
++
++    b: Bounds,
++}
++impl Face {
++    fn uv(&self, q: V) -> P {
++        let d = q.sub(self.o);
++        [d.dot(self.u), d.dot(self.v)]
++    }
++    fn xyz(&self, p: P) -> V {
++        self.o.add(self.u.mul(p[0])).add(self.v.mul(p[1]))
++    }
++    fn project(&self, q: V, s: V) -> P {
++        self.uv(q.sub(s.mul(q.sub(self.o).dot(self.n) / s.dot(self.n))))
++    }
++    fn inside(&self, p: P) -> bool {
++        within(self.b, p)
++            && self
++                .tris
++                .iter()
++                .any(|t| (0..3).all(|i| cross(t[i], t[(i + 1) % 3], p) >= -1e-7))
++    }
++}
++#[derive(Default)]
++struct ResultRow {
++    area: f64,
++    rays: u64,
++    r1: u64,
++    r2: u64,
++    candidates: u64,
++    cuts: u64,
++    attempts: u64,
++    peak: u64,
++    pieces: u64,
++}
++struct Room {
++    bottom: f64,
++    top: f64,
++    corners: [P; 4],
++}
++struct Data {
++    rooms: Vec<Room>,
++    opaque: Vec<[V; 3]>,
++    bvh: bvh::Tree,
++    faces: Vec<Face>,
++    openings: Vec<Vec<V>>,
++    suns: Vec<(String, V)>,
++}
++fn furniture(ts: &mut Vec<[V; 3]>, n: usize) {
++    for level in 0..2 {
++        for row in 0..2 {
++            for col in 0..2 {
++                for i in 0..n {
++                    let x = (col * 5000
++                        + if n <= 16 {
++                            1900 + (i % 4) * 730
++                        } else {
++                            250 + (i % 8) * 600
++                        }) as f64;
++                    let y = (row * 4100
++                        + if n <= 16 {
++                            450 + (i / 4) * 900
++                        } else {
++                            240 + (i / 8) * 480
++                        }) as f64;
++                    let z = (level * 2600) as f64;
++                    let point = |j: usize, h: f64| {
++                        let a = (j % 64) as f64 * std::f64::consts::TAU / 64.;
++                        V(
++                            (x + 200. * a.cos()) as f32 as f64,
++                            (y + 200. * a.sin()) as f32 as f64,
++                            z + h,
++                        )
++                    };
++                    for j in 0..64 {
++                        let a = point(j, 0.);
++                        let b = point(j + 1, 0.);
++                        let c = point(j, 700.);
++                        let d = point(j + 1, 700.);
++                        ts.extend([
++                            [a, b, c],
++                            [b, d, c],
++                            [V(x, y, z), b, a],
++                            [V(x, y, z + 700.), c, d],
++                        ]);
++                    }
++                }
++            }
++        }
++    }
++}
++struct Reader<'a>(std::str::SplitWhitespace<'a>);
++impl Reader<'_> {
++    fn token(&mut self) -> &str {
++        self.0.next().unwrap()
++    }
++    fn n(&mut self) -> usize {
++        self.token().parse().unwrap()
++    }
++    fn scalar(&mut self) -> f64 {
++        self.token().parse().unwrap()
++    }
++    fn v(&mut self) -> V {
++        V(self.scalar(), self.scalar(), self.scalar())
++    }
++}
++impl Data {
++    fn read(input: &str, n: usize, ray: bool) -> Self {
++        let mut r = Reader(input.split_whitespace());
++        let rooms_present = match r.token() {
++            "SUN1" => false,
++            "SUN2" => true,
++            _ => panic!("unknown scene"),
++        };
++        let vs: Vec<_> = (0..r.n())
++            .map(|_| {
++                let p = r.v().arr().map(|x| x as f32 as f64);
++                V(p[0], p[1], p[2])
++            })
++            .collect();
++        let mut opaque = vec![];
++        let mut indices = vec![];
++        let ts: Vec<_> = (0..r.n())
++            .map(|_| {
++                let t = [vs[r.n()], vs[r.n()], vs[r.n()]];
++                let solid = r.n() == 0;
++                indices.push(if solid { Some(opaque.len()) } else { None });
++                if solid {
++                    opaque.push(t);
++                }
++                t
++            })
++            .collect();
++        let faces = (0..r.n())
++            .map(|_| {
++                let id = r.token().to_owned();
++                let role = r.n();
++                let n = r.v();
++                let o = r.v();
++                let u = if n.0.abs() < 0.9 {
++                    V(1., 0., 0.)
++                } else {
++                    V(0., 1., 0.)
++                };
++                let v = n.cross(u).unit();
++                let u = v.cross(n);
++                let mut f = Face {
++                    own: vec![],
++                    id,
++                    role,
++                    n,
++                    o,
++                    u,
++                    v,
++                    tris: vec![],
++                    b: [[0.; 2]; 2],
++                };
++                f.tris = (0..r.n())
++                    .map(|_| {
++                        let i = r.n();
++                        f.own.extend(indices[i]);
++                        ts[i].map(|q| f.uv(q))
++                    })
++                    .collect();
++                f.b = bounds(f.tris.iter().flatten());
++                f
++            })
++            .collect();
++        let openings = (0..r.n())
++            .map(|_| (0..8).map(|_| r.v()).collect())
++            .collect();
++        let suns = (0..r.n())
++            .map(|_| {
++                let name = r.token().to_string();
++                let s = r.v();
++                r.v();
++                (name, s)
++            })
++            .collect();
++        let rooms = if rooms_present {
++            (0..r.n())
++                .map(|_| Room {
++                    bottom: r.scalar(),
++                    top: r.scalar(),
++                    corners: std::array::from_fn(|_| [r.scalar(), r.scalar()]),
++                })
++                .collect()
++        } else {
++            vec![]
++        };
++        furniture(&mut opaque, n);
++        let bvh = if ray {
++            bvh::Tree::new(&mut opaque.clone())
++        } else {
++            bvh::Tree::new(&mut [])
++        };
++        Self {
++            rooms,
++            opaque,
++            bvh,
++            faces,
++            openings,
++            suns,
++        }
++    }
++}
++#[cfg(target_arch = "wasm32")]
++#[link(wasm_import_module = "env")]
++unsafe extern "C" {
++    fn clock_ms() -> f64;
++    fn output(p: *const u8, n: usize);
++}
++fn now() -> f64 {
++    #[cfg(target_arch = "wasm32")]
++    unsafe {
++        return clock_ms();
++    }
++    #[cfg(not(target_arch = "wasm32"))]
++    {
++        static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
++        START
++            .get_or_init(std::time::Instant::now)
++            .elapsed()
++            .as_secs_f64()
++            * 1000.
++    }
++}
++fn emit(line: String) {
++    #[cfg(target_arch = "wasm32")]
++    unsafe {
++        output(line.as_ptr(), line.len())
++    }
++    #[cfg(not(target_arch = "wasm32"))]
++    println!("{line}");
++}
++pub fn bench(input: &str, m: usize, pitch: usize, n: usize, reps: usize) {
++    let method = ["G", "A", "Q", "E-convex", "E2"][m];
++    for rep in 0..reps {
++        let t = now();
++        let d = Data::read(input, n, m < 3);
++        let regions = if m == 4 {
++            assert!(!d.rooms.is_empty());
++            e2::regions(&d)
++        } else {
++            vec![]
++        };
++        let prep = now() - t;
++        for (idx, (sun, s)) in d.suns.iter().enumerate() {
++            let t = now();
++            let mut areas = [0.; 3];
++            let mut counts = [0u64; 8];
++            let mut candidates = vec![];
++            let mut pairs = 0;
++            let mut indexed = 0;
++            let mut face_areas = vec![];
++            if m == 4 && s.2 > 0. {
++                let grid = e2::Grid::new(&d, *s, if pitch == 0 { 1000. } else { pitch as f64 });
++                indexed = d.opaque.len();
++                for (i, pieces) in &regions {
++                    let f = &d.faces[*i];
++                    if s.dot(f.n) <= 0.01 {
++                        continue;
++                    }
++                    let ids = grid.query(f, pieces);
++                    pairs += ids.len();
++                    let r = exact::solve(
++                        f,
++                        *s,
++                        pieces.clone(),
++                        ids.into_iter()
++                            .filter(|i| !f.own.contains(i))
++                            .map(|i| &d.opaque[i]),
++                        0.01,
++                    );
++                    areas[f.role] += r.area / 1e6;
++                    face_areas.push((f.id.as_str(), r.area / 1e6));
++                    counts[1] += r.r1;
++                    counts[3] += r.candidates;
++                    counts[4] += r.cuts;
++                    counts[5] += r.pieces;
++                    counts[6] += r.attempts;
++                    counts[7] = counts[7].max(r.peak);
++                    candidates.push(r.candidates);
++                }
++            }
++            for f in d.faces.iter().filter(|_| m != 4) {
++                let r = if s.2 <= 0. || s.dot(f.n) <= 1e-10 {
++                    ResultRow::default()
++                } else if m == 3 {
++                    exact::run(&d, f, *s)
++                } else {
++                    grid::run(&d, f, *s, method, pitch as f64)
++                };
++                areas[f.role] += r.area / 1e6;
++                face_areas.push((f.id.as_str(), r.area / 1e6));
++                for (a, b) in counts.iter_mut().zip([
++                    r.rays,
++                    r.r1,
++                    r.r2,
++                    r.candidates,
++                    r.cuts,
++                    r.pieces,
++                    r.attempts,
++                ]) {
++                    *a += b
++                }
++                counts[7] = counts[7].max(r.peak);
++                candidates.push(r.candidates);
++            }
++            let ms = now() - t;
++            let faces = face_areas
++                .iter()
++                .map(|(id, a)| format!("[\"{id}\",{a}]"))
++                .collect::<Vec<_>>()
++                .join(",");
++            emit(format!(
++                r#"{{"method":"{method}","pitch":{pitch},"rep":{rep},"n":{n},"sun":"{sun}","idx":{idx},"prep":{prep},"ms":{ms},"areas":{areas:?},"counts":{counts:?},"face_candidates":{candidates:?},"regions":{},"faces":[{faces}],"pairs":{pairs},"indexed":{indexed},"opaque":{}}}"#,
++                regions.len(),
++                d.opaque.len()
++            ));
++        }
++    }
++}
++#[cfg(target_arch = "wasm32")]
++#[unsafe(no_mangle)]
++pub extern "C" fn alloc(n: usize) -> *mut u8 {
++    Box::into_raw(vec![0u8; n].into_boxed_slice()).cast()
++}
++#[cfg(target_arch = "wasm32")]
++#[unsafe(no_mangle)]
++pub unsafe extern "C" fn run(
++    p: *mut u8,
++    len: usize,
++    m: usize,
++    pitch: usize,
++    n: usize,
++    reps: usize,
++) {
++    let input = unsafe { Box::from_raw(std::ptr::slice_from_raw_parts_mut(p, len)) };
++    bench(std::str::from_utf8(&input).unwrap(), m, pitch, n, reps)
++}
+diff --git a/crates/modeling/src/model/sun_probe/standalone/src/main.rs b/crates/modeling/src/model/sun_probe/standalone/src/main.rs
+new file mode 100644
+index 000000000..f498b63eb
+--- /dev/null
++++ b/crates/modeling/src/model/sun_probe/standalone/src/main.rs
+@@ -0,0 +1,14 @@
++fn main() {
++    let mut args = std::env::args().skip(1);
++    let input = std::fs::read_to_string(args.next().unwrap()).unwrap();
++    let mut n = || args.next().unwrap().parse().unwrap();
++    sunbench::bench(&input, n(), n(), n(), n());
++    if let Ok(s) = std::fs::read_to_string("/proc/self/status") {
++        eprintln!(
++            "{}",
++            s.lines()
++                .find(|s| s.starts_with("VmHWM"))
++                .unwrap_or("unknown")
++        );
++    }
++}
+diff --git a/crates/modeling/src/model/sun_probe/standalone/summarize.py b/crates/modeling/src/model/sun_probe/standalone/summarize.py
+new file mode 100644
+index 000000000..91a21e864
+--- /dev/null
++++ b/crates/modeling/src/model/sun_probe/standalone/summarize.py
+@@ -0,0 +1,54 @@
++import json
++from pathlib import Path
++from statistics import median
++from collections import defaultdict
++
++raw=Path("docs/verification/evidence/verification-12/raw")
++groups=defaultdict(list)
++for platform in ["macos","wasm","linux"]:
++    for line in (raw/(platform+".jsonl")).read_text().splitlines():
++        r=json.loads(line)
++        groups[platform,r["method"],r["pitch"],r["n"]].append(r)
++
++for (platform,m,p,n),rows in groups.items():
++    reference=groups["macos",m,p,n]
++    assert {(r["rep"],r["idx"]) for r in rows}=={(i,j) for i in range(5) for j in range(6)}
++    for r in rows:
++        ref=reference[r["idx"]]
++        assert r["sun"]==ref["sun"]
++        assert all(abs(a-b)<=1e-6 for a,b in zip(r["areas"],ref["areas"],strict=True))
++        if m!="E-convex":
++            assert r["counts"][:3]==ref["counts"][:3]
++
++def times(xs):
++    fmt=lambda x: f"{x:.3f}" if x<1 else f"{x:.2f}"
++    return f"{fmt(median(xs))} ({fmt(min(xs))}–{fmt(max(xs))})"
++
++summary=raw/"summary.md"
++old=summary.read_text().split("## 家一軒")[0]
++lines=[old+"## 家一軒の計測", "", "Apple M4 Pro。Linux amd64 は arm64 Docker 上のエミュレーション。家一軒は三角形1,148枚、遮る三角形1,016枚、受光面48面。時間は5回の中央値（最小–最大）、単位 ms。前処理には書き出し済みの場面のパースと受光面の構築を含み、格子方式では BVH も構築する。CAD のメッシュ生成、ファイル読み込み、Wasm のロード、描画は時間に含まない。方式・間隔・家具数ごとに別プロセスで5回走らせた。macOS は最大 RSS、Linux は VmHWM、Wasm は線形メモリの最大サイズ。", ""]
++suns=["Dec09","Dec12","Dec15","Mar12","Jun12","night"]
++for sweep in (False,True):
++    if sweep: lines+=["### 部屋あたりの円柱数と時間","","各円柱は上下の蓋を含めて256三角形。配置は4列、各階4室。N=0は同じ基準計測を再掲。",""]
++    lines+=["| 環境 | 方式 | mm | N | 遮る三角形 | 前処理 | "+" | ".join(suns)+" | 最大 MiB |","|"+"---|"*13]
++    for (platform,m,p,n),rows in groups.items():
++        if sweep:
++            if platform=="linux" or (m,p) not in [("E-convex",0),("G",25)]:continue
++        elif n:continue
++        assert len(rows)==30
++        parts=[platform,m,str(p),str(n),str(rows[0]['opaque']),times([r['prep'] for r in rows if r['idx']==0])]
++        parts += [times([r['ms'] for r in rows if r['sun']==sun]) for sun in suns]
++        parts += [f"{rows[0]['memory_bytes']/2**20:.3f}"]
++        lines+=["| "+" | ".join(parts)+" |"]
++    lines+=[""]
++lines+=["### 処理量と結果サイズ","","E の候補は受光面の平面で切り、影の外接矩形が面と重なった三角形。試行は凸片と影の対、切り取りはそのうち外接矩形が重なった対。片の累計は影を1枚処理するごとの残存片数を足した値。ピークは単一面の同時片数。面別候補は生データの face_candidates（場面ファイルの面順）にある。","","| N | 太陽 | 候補合計 | 面別候補最大 | 試行 | 切り取り | 片のピーク | 片の累計 | R1 B |","|---|---|---|---|---|---|---|---|---|"]
++for n in (0,4,16):
++    for r in groups["macos","E-convex",0,n][:6]:
++        rays,r1,r2,c,cuts,pieces,attempts,peak=r["counts"]
++        lines+=["| "+" | ".join(map(str,[n,r["sun"],c,max(r["face_candidates"]),attempts,cuts,peak,pieces,r1]))+" |"]
++lines+=["","| 太陽 | G 10 光線 | G 25 光線 | A 5 光線 | Q 5 光線 | A 5 R2 B |","|---|---|---|---|---|---|"]
++for i,sun in enumerate(suns):
++    counts=[groups["macos",m,p,0][i]["counts"] for m,p in [("G",10),("G",25),("A",5),("Q",5)]]
++    lines+=["| "+" | ".join(map(str,[sun,*[c[0] for c in counts],counts[2][2]]))+" |"]
++lines+=["","R1 は光が届いた面ごとに8 B、凸片の頂点ごとに8 B。R2 は面ごとに20 B、非空行ごとに8 B、連続区間ごとに8 Bで見積もった。結果をシリアライズする時間は含まない。Q の指定5 mmに対応する最小格子は3.125 mm。",""]
++summary.write_text("\n".join(lines))
+diff --git a/crates/modeling/src/model/sun_probe/standalone/wasm.mjs b/crates/modeling/src/model/sun_probe/standalone/wasm.mjs
+new file mode 100644
+index 000000000..b78377dd2
+--- /dev/null
++++ b/crates/modeling/src/model/sun_probe/standalone/wasm.mjs
+@@ -0,0 +1,15 @@
++import { readFileSync } from "node:fs";
++const [wasm, scene, ...args] = process.argv.slice(2);
++const { instance } = await WebAssembly.instantiate(readFileSync(wasm), {
++  env: {
++    clock_ms: () => performance.now(),
++    output: (p, n) =>
++      console.log(new TextDecoder().decode(new Uint8Array(instance.exports.memory.buffer, p, n))),
++  },
++});
++const { alloc, memory, run } = instance.exports;
++const bytes = readFileSync(scene),
++  p = alloc(bytes.length);
++new Uint8Array(memory.buffer, p, bytes.length).set(bytes);
++run(p, bytes.length, ...args.map(Number));
++console.error("wasm_bytes", memory.buffer.byteLength);
