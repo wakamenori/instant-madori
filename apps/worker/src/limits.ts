@@ -12,7 +12,12 @@ export type PriceCategory = "input" | "cacheWrite5m" | "cacheWrite1h" | "cacheRe
 
 interface AiModelSpec {
   readonly toolUseSystemTokens: number;
-  readonly image: { readonly tilePx: number; readonly maxTokens: number };
+  readonly image: {
+    readonly maxBase64Bytes: number;
+    readonly downscaleEdgePx: number;
+    readonly tilePx: number;
+    readonly maxTokens: number;
+  };
   readonly microUsdPerMillionTokens: Readonly<Record<PriceCategory, number>>;
 }
 
@@ -21,7 +26,8 @@ interface AiModelSpec {
 export const aiModels = {
   "claude-opus-5-5": {
     toolUseSystemTokens: 286,
-    image: { tilePx: 28, maxTokens: 4_784 },
+    // The vision doc gives 10 MB per image without saying 10^6 or 2^20; take the smaller.
+    image: { maxBase64Bytes: 10_000_000, downscaleEdgePx: 2_576, tilePx: 28, maxTokens: 4_784 },
     microUsdPerMillionTokens: {
       input: 4_000_000,
       cacheWrite5m: 5_000_000,
@@ -34,10 +40,19 @@ export const aiModels = {
 
 export type AiModelId = keyof typeof aiModels;
 
+const ai = { model: "claude-opus-5-5" } as const;
+const aiImage = aiModels[ai.model].image;
+
 export const limits = {
   aiCost: { monthly: microUsd(100_000_000), perInstruction: microUsd(5_000_000) },
-  ai: { model: "claude-opus-5-5" },
+  ai,
+  assets: {
+    // The largest size whose base64 (4 * ceil(n / 3) bytes) stays strictly below the limit.
+    maxBytes: 3 * Math.floor((aiImage.maxBase64Bytes - 1) / 4),
+    maxEdgePx: aiImage.downscaleEdgePx,
+  },
 } as const satisfies {
   aiCost: { monthly: MicroUsd; perInstruction: MicroUsd };
   ai: { model: AiModelId };
+  assets: { maxBytes: number; maxEdgePx: number };
 };

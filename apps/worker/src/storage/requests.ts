@@ -7,7 +7,6 @@ import { parseJsonColumn, StorageCorruption } from "./rows.ts";
 /** The row `recordStatement` returns. */
 const recordedRowSchema = z.object({ result: z.string() });
 
-/** A row of `requests` as `storedResult` reads it. */
 const storedRowSchema = z.object({
   operation: z.string(),
   fingerprint: z.string(),
@@ -52,7 +51,7 @@ export function mapOnce<T, U>(once: Once<T>, transform: (result: T) => U): Once<
   }
 }
 
-async function storedResult<T>(
+export async function findOnce<T>(
   db: D1,
   key: RequestKey,
   schema: z.ZodType<T>,
@@ -128,7 +127,7 @@ function recordedBy(key: RequestKey): SqlPart {
 }
 
 /** Tables that once-only operations may change. Names are code constants, never input. */
-type OnceTable = "projects" | "patterns" | "jobs";
+type OnceTable = "assets" | "projects" | "patterns" | "jobs";
 
 /** Companions must leave every row and column read by the main precondition intact. */
 export interface OnceCompanion {
@@ -298,7 +297,7 @@ export async function runOnce<T>(db: D1, schema: z.ZodType<T>, batch: OnceBatch)
     if (error instanceof StorageCorruption) throw error;
     let stored: Once<T> | null;
     try {
-      stored = await storedResult(db, key, schema);
+      stored = await findOnce(db, key, schema);
     } catch (lookupError) {
       // Keep both causes; otherwise the lookup failure would hide why the batch failed.
       throw new AggregateError(
@@ -314,5 +313,5 @@ export async function runOnce<T>(db: D1, schema: z.ZodType<T>, batch: OnceBatch)
   if (recorded !== undefined) {
     return { kind: "applied", result: parseJsonColumn(recorded.result, schema, key.operation) };
   }
-  return (await storedResult(db, key, schema)) ?? { kind: "not_applied" };
+  return (await findOnce(db, key, schema)) ?? { kind: "not_applied" };
 }
