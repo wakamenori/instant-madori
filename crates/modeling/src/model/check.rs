@@ -146,9 +146,19 @@ impl Model {
                 }
             } else {
                 let bodies = self.bodies_of(entry.element.as_str());
+                let expected = match source {
+                    Source::Wall(w) => match WallCuts::of(w) {
+                        Ok(cuts) => cuts.pieces(),
+                        Err(rejections) => {
+                            report(MismatchReason::Housing { rejections });
+                            continue;
+                        }
+                    },
+                    _ => 1,
+                };
                 match bodies.len() {
                     0 => report(MismatchReason::NoBody {}),
-                    1 => {}
+                    n if n == expected => {}
                     _ => report(MismatchReason::Split { bodies }),
                 }
             }

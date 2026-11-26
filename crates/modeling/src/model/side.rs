@@ -11,7 +11,7 @@ pub(super) struct SideFrame {
     base: f64,
 }
 impl SideFrame {
-    fn new(wall: BoundaryView, side: Side, base: f64) -> Self {
+    pub(super) fn new(wall: BoundaryView, side: Side, base: f64) -> Self {
         let start = wall.start().data().at;
         let end = wall.end().data().at;
         let (dx, dy) = (end.x - start.x, end.y - start.y);
@@ -82,7 +82,8 @@ pub(super) fn plan_side(
     let merged = side_spans(&outline, &frame);
     let fail = PlaceError::Color;
     let height = wall.data().wall.height;
-    let holes: Vec<_> = wall.openings().map(|o| o.elevation()).collect();
+    let cuts = WallCuts::of(wall).map_err(PlaceError::House)?;
+    let holes: Vec<_> = cuts.holes().collect();
     let (cells, free_area) = grid(&merged, height, &holes, &row.face).map_err(fail)?;
     let mut points = Vec::new();
     for [along, rise] in cells {
@@ -143,102 +144,63 @@ fn side_spans(outline: &SimplePolygon, frame: &SideFrame) -> Vec<Range<f64>> {
     merged
 }
 
-fn root(parents: &mut [usize], mut i: usize) -> usize {
-    while parents[i] != i {
-        parents[i] = parents[parents[i]];
-        i = parents[i];
-    }
-    i
-}
-
 fn grid(
     spans: &[Range<f64>],
     height: f64,
-    holes: &[Elevation],
+    holes: &[&Elevation],
     face: &FaceRole,
 ) -> Result<(Vec<[f64; 2]>, f64), WallColorFailure> {
-    let mut xs = Vec::new();
-    let mut zs = vec![0., height];
-    for span in spans {
-        xs.extend([span.start, span.end]);
-        for hole in holes {
-            if hole.along.start < span.end && hole.along.end > span.start {
-                xs.extend([
-                    hole.along.start.max(span.start),
-                    hole.along.end.min(span.end),
-                ]);
-                zs.extend([
-                    hole.rise.start.clamp(0., height),
-                    hole.rise.end.clamp(0., height),
-                ]);
-            }
-        }
-    }
-    if xs.is_empty() {
+    if spans.is_empty() {
         return Err(WallColorFailure::NoSideFace { face: face.clone() });
     }
-    for cuts in [&mut xs, &mut zs] {
-        cuts.sort_by(f64::total_cmp);
-        cuts.dedup();
+    let grid = cuts::WallGrid::new(spans, height, holes);
+    if grid.components.is_empty() {
+        return Err(WallColorFailure::NoUncoveredRegion { face: face.clone() });
     }
-    let rows = zs.len() - 1;
-    let count = (xs.len() - 1) * rows;
-    let mut parents: Vec<_> = (0..count).collect();
-    let mut cells = vec![None; count];
+    let mut points = Vec::new();
     let mut area = 0.;
-    for (i, x) in xs.windows(2).enumerate() {
-        for (j, z) in zs.windows(2).enumerate() {
-            let along = (x[0] + x[1]) * 0.5;
-            let rise = (z[0] + z[1]) * 0.5;
-            if !spans.iter().any(|s| s.contains(&along))
-                || holes
-                    .iter()
-                    .any(|h| h.along.contains(&along) && h.rise.contains(&rise))
-            {
-                continue;
-            }
-            let index = i * rows + j;
-            let (width, height) = (x[1] - x[0], z[1] - z[0]);
-            cells[index] = Some((width.min(height) * 0.5, [along, rise]));
-            area += width * height;
-            for neighbor in [
-                i.checked_sub(1).map(|i| i * rows + j),
-                j.checked_sub(1).map(|j| i * rows + j),
-            ]
-            .into_iter()
-            .flatten()
-            {
-                if cells[neighbor].is_some() {
-                    let a = root(&mut parents, index);
-                    let b = root(&mut parents, neighbor);
-                    parents[a] = b;
+    let mut largest: f64 = 0.;
+    for component in grid.components {
+        largest = largest.max(component.clearance);
+        if component.clearance > LENGTH_TOLERANCE_MM {
+            points.push(component.point);
+            area += component.area;
+        }
+    }
+    if points.is_empty() {
+        return Err(WallColorFailure::SliverRegion {
+            face: face.clone(),
+            clearance: largest,
+        });
+    }
+    Ok((points, area))
+}
+
+pub(super) fn open_seams(
+    wall: BoundaryView<'_>,
+    cuts: &WallCuts,
+) -> Result<Vec<[Point; 2]>, Rejections> {
+    let mut seams = Vec::new();
+    if cuts.open_spans().is_empty() {
+        return Ok(seams);
+    }
+    let outline = wall.planform()?;
+    for side in [Side::Left, Side::Right] {
+        let frame = SideFrame::new(wall, side, 0.);
+        for span in side_spans(&outline, &frame) {
+            for open in cuts.open_spans() {
+                let start = span.start.max(open.start);
+                let end = span.end.min(open.end);
+                if start < end {
+                    seams.push([start, end].map(|along| {
+                        let [x, y, _] = frame.world(along, 0.);
+                        Point { x, y }
+                    }));
                 }
             }
         }
     }
-    let mut picks = BTreeMap::new();
-    for (index, cell) in cells.into_iter().enumerate() {
-        if let Some(cell) = cell {
-            let best = picks.entry(root(&mut parents, index)).or_insert(cell);
-            if cell.0 > best.0 {
-                *best = cell;
-            }
-        }
-    }
-    if picks.is_empty() {
-        return Err(WallColorFailure::NoUncoveredRegion { face: face.clone() });
-    }
-    let mut points = Vec::new();
-    for (clearance, point) in picks.into_values() {
-        if clearance <= LENGTH_TOLERANCE_MM {
-            return Err(WallColorFailure::SliverRegion {
-                face: face.clone(),
-                clearance,
-            });
-        }
-        points.push(point);
-    }
-    Ok((points, area))
+    Ok(seams)
 }
 
 #[cfg(test)]
@@ -249,7 +211,7 @@ mod tests {
         grid(
             std::slice::from_ref(&(0.0..100.0)),
             40.,
-            holes,
+            &holes.iter().collect::<Vec<_>>(),
             &FaceRole::Exterior {},
         )
     }
@@ -301,6 +263,14 @@ mod tests {
         assert!(
             matches!(plan(&[Elevation{along:0.002..100.,rise:0.0..40.}]),Err(WallColorFailure::SliverRegion{clearance,..}) if clearance==LENGTH_TOLERANCE_MM)
         );
+    }
+    #[test]
+    fn unpickable_pier_is_excluded_from_painted_area() {
+        let hole = Elevation {
+            along: 0.0015..60.,
+            rise: 0.0..40.,
+        };
+        assert_eq!(plan(&[hole]).unwrap(), (vec![[80., 20.]], 1600.));
     }
     #[test]
     fn mitred_outline_sets_side_extent() {

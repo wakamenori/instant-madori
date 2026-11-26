@@ -2,7 +2,12 @@ use super::*;
 
 use crate::outline::clearest_point;
 
-fn project(session: &mut Session, base: f64, refs: Vec<Value>) -> Result<u64, CommandError> {
+fn project(
+    session: &mut Session,
+    base: f64,
+    refs: Vec<Value>,
+    seams: Vec<[Point; 2]>,
+) -> Result<u64, CommandError> {
     let sketch = execute_checked(
         session,
         "sketch.create",
@@ -15,6 +20,13 @@ fn project(session: &mut Session, base: f64, refs: Vec<Value>) -> Result<u64, Co
         "sketch.project",
         &json!({"refs":refs,"projection_link":false,"construction":false}),
     )?;
+    for seam in seams {
+        execute_checked(
+            session,
+            "sketch.line",
+            &json!({"points":seam.map(|p|[p.x,p.y]),"closed":false}),
+        )?;
+    }
     execute_checked(session, "sketch.finish", &json!({}))?;
     Ok(sketch)
 }
@@ -68,8 +80,22 @@ impl Model {
                         .then(|| json!({"body":body.name}))
                 })
                 .collect();
+            let mut seams = Vec::new();
+            for wall in house
+                .boundaries()
+                .filter(|w| w.start().data().storey == storey.id)
+            {
+                match WallCuts::of(wall).and_then(|cuts| side::open_seams(wall, &cuts)) {
+                    Ok(lines) => seams.extend(lines),
+                    Err(rejections) => out.push(Mismatch::element(
+                        ElementKind::Wall,
+                        wall.data().id.as_str(),
+                        MismatchReason::Housing { rejections },
+                    )),
+                }
+            }
             let mut projection = self.session.scratch();
-            let sketch = match project(&mut projection, storey.base_elevation, refs) {
+            let sketch = match project(&mut projection, storey.base_elevation, refs, seams) {
                 Ok(id) => id,
                 Err(e) => {
                     out.push(Mismatch::element(
