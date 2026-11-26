@@ -2,6 +2,12 @@ import { spawnSync } from "node:child_process";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+export const mbxStoreSettings = {
+  MBX_GC_AUTO: "1",
+  MBX_GC_MIN_FREE_SIZE: "none",
+  MBX_GC_MAX_TOTAL_SIZE: "8GiB",
+} as const;
+
 export function rustBuildTool() {
   const plain = { command: "cargo", env: process.env, fingerprint: "cargo" };
   if (process.env.GITHUB_ACTIONS !== undefined || process.env.MADORI_MBX === "0") return plain;
@@ -17,9 +23,7 @@ export function rustBuildTool() {
       process.env.XDG_CACHE_HOME ?? join(homedir(), ".cache"),
       "instant-madori/mbx",
     ),
-    MBX_GC_AUTO: "1",
-    MBX_GC_MIN_FREE_SIZE: "20GiB",
-    MBX_GC_MAX_TOTAL_SIZE: "8GiB",
+    ...mbxStoreSettings,
   };
   const fingerprint = JSON.stringify([
     probe.stdout.trim(),
