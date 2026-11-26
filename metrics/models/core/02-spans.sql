@@ -19,7 +19,9 @@ FROM issue_change ic JOIN change c USING(pr) JOIN stg_actions_job j
  ON j.workflow='check' AND (j.head_branch=c.head_ref OR EXISTS(SELECT 1 FROM json_each(j.pr_numbers) WHERE value=c.pr));
 
 CREATE TABLE span AS
-WITH launches AS (
+WITH occupancy_labels AS (
+ SELECT issue,id,event,created_at FROM stg_github_issue_timeline WHERE label='staging を占有中'
+), launches AS (
  SELECT occurred_at,payload->>'$.input.session_id' session,payload->>'$.input.tool_use_id' tool_use_id,
   payload->>'$.input.background_task_id' task_id
  FROM stg_claude_hook WHERE payload->>'$.input.hook_event_name'='PostToolUse' AND payload->>'$.input.tool_name'='Bash'
@@ -64,8 +66,13 @@ FROM (SELECT wait_id,cwd,run_id,run_attempt,min(at) FILTER(WHERE phase='started'
 LEFT JOIN stg_t3_thread t ON d.cwd=t.worktree_path OR substr(d.cwd,1,length(t.worktree_path)+1)=t.worktree_path||'/'
 LEFT JOIN actor a ON a.id=t.id LEFT JOIN stg_actions_job j ON j.run_id=d.run_id AND j.run_attempt=d.run_attempt
 LEFT JOIN issue_job ij ON ij.id=j.id WHERE d.start IS NOT NULL
+UNION ALL SELECT l.id,l.issue,'staging_occupancy',l.created_at,(
+ SELECT min(e.created_at) FROM occupancy_labels e WHERE e.issue=l.issue AND e.event='unlabeled'
+ AND (e.created_at,e.id)>(l.created_at,l.id)),NULL
+FROM occupancy_labels l WHERE l.event='labeled'
 UNION ALL SELECT comment_id,issue_or_pr,'staging_occupancy',started_at,max(ended_at),NULL
-FROM stg_github_comment_block WHERE started_at IS NOT NULL AND issue_or_pr NOT IN (SELECT number FROM stg_github_pr) GROUP BY issue_or_pr,started_at
+FROM stg_github_comment_block WHERE started_at IS NOT NULL AND NOT EXISTS(SELECT 1 FROM occupancy_labels WHERE created_at<=started_at)
+ AND issue_or_pr NOT IN (SELECT number FROM stg_github_pr) GROUP BY issue_or_pr,started_at
 UNION ALL SELECT c.id,c.issue_or_pr,'staging_occupancy',c.created_at,(
  SELECT min(e.created_at) FROM stg_github_comment e,json_each(e.markers) m
  WHERE m.value='staging_occupy_end' AND e.issue_or_pr=c.issue_or_pr AND e.created_at>=c.created_at

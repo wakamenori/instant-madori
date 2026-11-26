@@ -4,6 +4,28 @@ import { candidate, verdict } from "./polled.ts";
 const number = z.int(),
   str = z.string(),
   nullable = str.nullable();
+export const statusSchema = z.object({
+  id: number,
+  state: str,
+  context: str,
+  description: nullable,
+  created_at: str,
+});
+export function statusRecord(data: unknown, pr: number, sha: string) {
+  const { id, state, context, description, created_at } = statusSchema.parse(data);
+  const match = /^attempt (\d+): (PASS|FAIL)(?: (.+))?$/u.exec(description ?? "");
+  return candidate("github.commit_status", pr + "/" + id, created_at, {
+    pr,
+    sha,
+    state,
+    context,
+    description,
+    created_at,
+    attempt: match ? Number(match[1]) : null,
+    verdict: state === "success" ? "PASS" : state === "failure" ? "FAIL" : null,
+    failed_checks: match?.[3]?.split(", ") ?? [],
+  });
+}
 export const reference = z.object({ number });
 const timestamped = { created_at: str, closed_at: nullable, state: str };
 const labels = z.array(z.object({ name: str })).transform((rows) => rows.map((r) => r.name).sort());

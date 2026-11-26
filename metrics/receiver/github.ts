@@ -8,6 +8,8 @@ import {
   changedFile,
   closureReference,
   runRecord,
+  statusSchema,
+  statusRecord,
   timelineEvent,
   timelineRecord,
   commentRecord,
@@ -24,6 +26,7 @@ import type { RecordInput } from "../l1/sources.ts";
 import { candidate } from "../ingest/polled.ts";
 import { additionFields, leadingRecord } from "../ingest/issue-facts.ts";
 
+const commitRef = z.object({ sha: z.string() });
 const label = z.object({ name: z.string() });
 const repo = "https://api.github.com/repos/wakamenori/instant-madori/";
 const first = "2026-11-01T00:00:00.000Z";
@@ -36,7 +39,17 @@ const stateSchema = z.object({
       next: z.string().nullable(),
       context: z.string().optional(),
       cached: z
-        .array(z.union([blockerSchema, runSchema, changedFile, reference, label]))
+        .array(
+          z.union([
+            statusSchema,
+            blockerSchema,
+            runSchema,
+            changedFile,
+            reference,
+            label,
+            commitRef,
+          ]),
+        )
         .optional(),
     }),
   ),
@@ -48,6 +61,7 @@ async function authToken(signal: AbortSignal) {
 export function githubPollers(home: string, tokenFor = authToken, request = fetch): Poller[] {
   const sources = [
     "github.commit",
+    "github.commit_status",
     "github.issue",
     "github.pr",
     "github.issue.timeline",
@@ -62,7 +76,8 @@ export function githubPollers(home: string, tokenFor = authToken, request = fetc
           ? ".3"
           : ".2";
     const path = join(home, name + version + ".cursor.json");
-    let state: z.infer<typeof stateSchema> = { since: first, tags: {} };
+    const initialSince = name === "github.commit_status" ? "2026-11-22T00:00:00.000Z" : first;
+    let state: z.infer<typeof stateSchema> = { since: initialSince, tags: {} };
     try {
       state = stateSchema.parse(JSON.parse(readFileSync(path, "utf8")));
     } catch {
@@ -152,8 +167,12 @@ export function githubPollers(home: string, tokenFor = authToken, request = fetc
                 tag.cached = values.map((v) => changedFile.parse(v));
               if (tag && endpoint.includes("/labels?"))
                 tag.cached = values.map((v) => label.parse(v));
-              if (tag && endpoint.startsWith("commits/"))
+              if (tag && endpoint.includes("/pulls?"))
                 tag.cached = values.map((v) => reference.parse(v));
+              if (tag && endpoint.includes("/statuses?"))
+                tag.cached = values.map((v) => statusSchema.parse(v));
+              if (tag && endpoint.includes("/commits?"))
+                tag.cached = values.map((v) => commitRef.parse(v));
               if (tag && endpoint.includes("/dependencies/blocked_by"))
                 tag.cached = values.map((v) => blockerSchema.parse(v));
             }
@@ -235,7 +254,16 @@ export function githubPollers(home: string, tokenFor = authToken, request = fetc
               })
               .parse(raw);
             if (Date.parse(issue.updated_at) < Date.parse(state.since)) continue;
-            if (name === "github.pr" && issue.pull_request) {
+            if (name === "github.commit_status" && issue.pull_request) {
+              for (const commit of await pages("pulls/" + issue.number + "/commits?per_page=100")) {
+                const { sha } = commitRef.parse(commit);
+                for (const row of await pages("commits/" + sha + "/statuses?per_page=100")) {
+                  const status = statusSchema.parse(row);
+                  if (status.context === "verify")
+                    records.push(statusRecord(status, issue.number, sha));
+                }
+              }
+            } else if (name === "github.pr" && issue.pull_request) {
               const p = await page(repo + "pulls/" + issue.number);
               if (p.data !== null) {
                 const files = await pages("pulls/" + issue.number + "/files?per_page=100");

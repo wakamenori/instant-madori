@@ -289,6 +289,7 @@ void test("a numbered comment supplies only an absent thread, while check names 
  INSERT INTO stg_t3_message VALUES(1,'a','assistant',4,'PASS','x',4,NULL),(2,'a','assistant',5,NULL,'x',NULL,NULL),
  (3,'b','assistant',6,'FAIL','y',6,NULL);
  CREATE TABLE issue_change(issue,pr);INSERT INTO issue_change VALUES(1,2);
+ CREATE TABLE stg_github_commit_status(id,pr,sha,context,attempt,verdict,created_at,failed_checks);
  CREATE TABLE stg_github_comment_block(issue_or_pr,head,attempt,verdict,failed_checks,updated_at,comment_id,decided_at);
  INSERT INTO stg_github_comment_block VALUES(2,'x',1,'PASS','[]',7,1,4),(2,'y',2,'FAIL','["差分"]',8,2,5),
  (2,'z',3,'PASS','[]',10,3,9);
@@ -305,6 +306,20 @@ void test("a numbered comment supplies only an absent thread, while check names 
       [1, "a", null, 5, null],
       [2, "b", "FAIL", 6, '["差分"]'],
       [3, null, "PASS", 9, "[]"],
+    ],
+  );
+  db.exec(`DROP TABLE verification_decision;
+    INSERT INTO stg_github_commit_status VALUES
+    ('2/8',2,'old','verify',1,'PASS',10,'[]'),('2/9',2,'new','verify',1,'FAIL',11,'["検査"]'),
+    ('2/10',2,'later','verify',4,'PASS',12,'[]');`);
+  model(db, "core/02-verification.sql");
+  assert.deepEqual(
+    db.prepare("SELECT * FROM verification_decision ORDER BY round").all().map(Object.values),
+    [
+      [1, 2, "a", "FAIL", "new", 11, 0, 1, '["検査"]'],
+      [1, 2, "b", "FAIL", "y", 6, 0, 2, '["差分"]'],
+      [1, 2, null, "PASS", "z", 9, 0, 3, "[]"],
+      [1, 2, null, "PASS", "later", 12, 0, 4, "[]"],
     ],
   );
 });

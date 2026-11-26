@@ -19,6 +19,9 @@ void test("derives measured execution, CI queues and staging occupancy from sour
   const finish = "2026-11-20T16:30:49.000Z";
   const start = "2026-11-22T02:00:00.000Z";
   const end = "2026-11-22T02:15:00.000Z";
+  const occupied = "2026-11-23T02:00:00.000Z";
+  const released = "2026-11-23T03:00:00.000Z";
+  const next = "2026-11-24T02:00:00.000Z";
   const l1 = openL1Writer(join(root, "metrics.sqlite"), registry);
   function add(source: RecordInput["source"], key: string, payload: RecordInput["payload"]) {
     l1.ingest(
@@ -124,6 +127,22 @@ void test("derives measured execution, CI queues and staging occupancy from sour
     comment(4, 41, "2026-11-22T01:04:44Z", "指揮役：staging の占有を始めた。");
     comment(5, 41, start, "```yaml\nstarted_at: " + start + "\n```");
     comment(6, 41, end, "```yaml\nstarted_at: " + start + "\nended_at: " + end + "\n```");
+    for (const [id, issue, event, label, created_at] of [
+      [10, 42, "labeled", "staging を占有中", occupied],
+      [11, 42, "unlabeled", "staging を占有中", released],
+      [12, 43, "labeled", "staging を占有中", next],
+      [13, 44, "labeled", "other", start],
+    ] as const)
+      add("github.issue.timeline", String(id), {
+        id,
+        issue,
+        event,
+        label,
+        created_at,
+        commit: null,
+        prs: [],
+      });
+    comment(7, 45, next, "```yaml\nstarted_at: " + next + "\n```");
   } finally {
     l1.close();
   }
@@ -169,6 +188,8 @@ void test("derives measured execution, CI queues and staging occupancy from sour
     assert.deepEqual(spans, [
       { issue: 313, start: issueBegin, end: finish },
       { issue: 41, start, end },
+      { issue: 42, start: occupied, end: released },
+      { issue: 43, start: next, end: null },
     ]);
   } finally {
     derived.close();

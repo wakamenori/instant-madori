@@ -12,6 +12,7 @@ export const registry = {
   "docker.slot": event,
   otlp: event,
   "github.commit": event,
+  "github.commit_status": event,
   "classification.backfill": observation,
   "github.issue": observation,
   "github.issue.timeline": event,
