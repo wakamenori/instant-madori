@@ -15,8 +15,10 @@ export const accessAssertionHeader = "cf-access-jwt-assertion";
 
 // API conventions (plan 4.7):
 // - JSON bodies with camelCase fields; IDs are UUIDs; timestamps are ISO 8601 UTC.
-// - Every mutating request carries a client-generated `requestId`. Resending the same
-//   ID with the same body returns the first successful result; failures are not fixed.
+//   The one exception is `POST /api/assets`, whose body is the image itself.
+// - Every mutating request carries a client-generated `requestId`, in the body or, for an
+//   image upload, in the query. Resending the same ID with the same body returns the first
+//   successful result; failures are not fixed.
 // - Updates to management fields send the `version` the client last saw.
 // - Failures are `{ error }` with a code from `apiErrorCodeSchema`; clients branch on it.
 
@@ -28,6 +30,9 @@ export const apiErrorCodeSchema = z.enum([
   "method_not_allowed",
   "invalid_request",
   "payload_too_large",
+  "unsupported_media_type",
+  "invalid_image",
+  "image_dimensions_too_large",
   "version_conflict",
   "request_id_reused",
   "internal_error",
@@ -372,3 +377,25 @@ export const pickResponseSchema = z.object({
   element: pickedElementSchema,
 });
 export type PickResponse = z.infer<typeof pickResponseSchema>;
+
+export const assetMediaTypeSchema = z.enum(["image/png", "image/jpeg"]);
+export type AssetMediaType = z.infer<typeof assetMediaTypeSchema>;
+
+export const createAssetQuerySchema = z.strictObject({ requestId: requestIdSchema });
+
+/** Width and height are read from the file header, before any EXIF orientation. */
+export const assetSchema = z.object({
+  id: idSchema,
+  mediaType: assetMediaTypeSchema,
+  bytes: z.int().positive(),
+  width: z.int().positive(),
+  height: z.int().positive(),
+  sha256: z.string().regex(/^[0-9a-f]{64}$/),
+  createdAt: timestampSchema,
+});
+
+export type Asset = z.infer<typeof assetSchema>;
+
+export const createAssetResponseSchema = z.object({ asset: assetSchema });
+
+export type CreateAssetResponse = z.infer<typeof createAssetResponseSchema>;

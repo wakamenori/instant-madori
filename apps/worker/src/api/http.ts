@@ -8,6 +8,9 @@ const statusByCode = {
   not_selectable: 409,
   method_not_allowed: 405,
   invalid_request: 400,
+  unsupported_media_type: 415,
+  invalid_image: 422,
+  image_dimensions_too_large: 422,
   payload_too_large: 413,
   version_conflict: 409,
   request_id_reused: 422,
@@ -35,6 +38,7 @@ export function parseHttpMethod(method: string): HttpMethod | undefined {
 }
 
 export type RoutePath =
+  | "/api/assets"
   | "/api/me"
   | "/api/jobs/:jobId/stop"
   | "/api/projects"
@@ -67,12 +71,15 @@ export function errorResponse(code: ApiErrorCode, headers: Record<string, string
   return Response.json({ error: code } satisfies ApiError, { status: statusByCode[code], headers });
 }
 
-async function readBodyText(request: Request, maxBytes: number): Promise<string> {
+export async function readBodyBytes(
+  request: Request,
+  maxBytes: number,
+): Promise<Uint8Array<ArrayBuffer>> {
   const declared = request.headers.get("content-length");
   if (declared !== null && Number(declared) > maxBytes) {
     throw new ApiFailure("payload_too_large");
   }
-  if (!request.body) return "";
+  if (!request.body) return new Uint8Array();
   // The runtime types the body stream loosely; each chunk is checked to be bytes.
   const reader: ReadableStreamDefaultReader<unknown> = request.body.getReader();
   const chunks: Uint8Array[] = [];
@@ -94,11 +101,7 @@ async function readBodyText(request: Request, maxBytes: number): Promise<string>
     bytes.set(chunk, offset);
     offset += chunk.byteLength;
   }
-  try {
-    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(bytes);
-  } catch {
-    throw new ApiFailure("invalid_request");
-  }
+  return bytes;
 }
 
 /** Reads a JSON request body and validates it against the contract schema. */
@@ -110,10 +113,10 @@ export async function readJsonBody<T>(
   if (!/^application\/json\s*(;|$)/i.test(request.headers.get("content-type") ?? "")) {
     throw new ApiFailure("invalid_request");
   }
-  const text = await readBodyText(request, maxBytes);
+  const bytes = await readBodyBytes(request, maxBytes);
   let payload: unknown;
   try {
-    payload = JSON.parse(text);
+    payload = JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(bytes));
   } catch {
     throw new ApiFailure("invalid_request");
   }

@@ -1,6 +1,7 @@
 import { reserveAiAttempt, settleAiAttempt } from "./ai-cost.ts";
 import type { D1 } from "./d1.ts";
 import type { R2 } from "./r2.ts";
+import * as assets from "./assets.ts";
 import * as projects from "./projects.ts";
 import * as patterns from "./patterns.ts";
 import * as messages from "./messages.ts";
@@ -22,6 +23,10 @@ export function createStore(db: D1, bucket: R2) {
         job: Parameters<typeof settleAiAttempt>[1],
         input: Parameters<typeof settleAiAttempt>[2],
       ) => settleAiAttempt(db, job, input),
+    },
+    assets: {
+      createOnce: (key: Parameters<typeof assets.createAssetOnce>[2], asset: assets.NewAsset) =>
+        assets.createAssetOnce(db, bucket, key, asset),
     },
     users: {
       upsertAccess: (input: Parameters<typeof upsertAccessUser>[1]) => upsertAccessUser(db, input),
