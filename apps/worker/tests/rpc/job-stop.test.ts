@@ -148,7 +148,10 @@ await test("Stop orders against commit on real D1 and R2", async (t) => {
     });
     assert.deepEqual(await db.store.jobs.failAndHoldQueue(right, now), { kind: "not_recorded" });
     assert.deepEqual(await counts(), before);
-    assert.deepEqual((await db.store.snapshots.display(snapshot)).bytes, new Uint8Array([1, 2, 3]));
+    assert.deepEqual(
+      await (await db.store.snapshots.open(snapshot)).display.read(),
+      new Uint8Array([1, 2, 3]),
+    );
   });
 
   await t.test("a store whose R2 head runs the stop first refuses the commit batch", async () => {

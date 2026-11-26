@@ -119,7 +119,13 @@ try {
         await bucket.put(key, bytes);
       }
     }
-    await assert.rejects(store.snapshots.display(snapshot), StorageCorruption);
+    if (input.target === "manifest")
+      await assert.rejects(store.snapshots.open(snapshot), StorageCorruption);
+    else
+      await assert.rejects(
+        (await store.snapshots.open(snapshot)).display.read(),
+        StorageCorruption,
+      );
     console.log(JSON.stringify({ ok: true }));
   } else if (input.kind === "once") {
     const now = "2026-11-14T00:00:00.000Z";
@@ -230,7 +236,7 @@ try {
       revisionId: first.revision.id,
     });
     assert(snapshot);
-    assert.deepEqual((await store.snapshots.display(snapshot)).bytes, firstDisplay);
+    assert.deepEqual(await (await store.snapshots.open(snapshot)).display.read(), firstDisplay);
     const originalDisplay = await bucket.get(
       snapshot.manifestKey.replace(/manifest\.json$/, "display.mdsp"),
     );

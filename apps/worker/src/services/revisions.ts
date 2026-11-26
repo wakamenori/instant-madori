@@ -29,10 +29,14 @@ export type RevisionViewOutcome =
   | { kind: "not_found" };
 
 export async function getRevisionView(
-  { store }: StoreDeps<"revisions", "snapshot"> & StoreDeps<"snapshots", "display">,
+  { store }: StoreDeps<"revisions", "snapshot"> & StoreDeps<"snapshots", "open">,
   scope: { ownerId: OwnerId; revisionId: string },
 ): Promise<RevisionViewOutcome> {
   const snapshot = await store.revisions.snapshot(scope);
   if (snapshot === null) return { kind: "not_found" };
-  return { kind: "found", artifact: await store.snapshots.display(snapshot) };
+  const opened = await store.snapshots.open(snapshot);
+  return {
+    kind: "found",
+    artifact: { bytes: await opened.display.read(), contentType: opened.display.contentType },
+  };
 }

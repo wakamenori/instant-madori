@@ -216,7 +216,7 @@ await test("Job execution through services on real D1 and R2", async (t) => {
       if (failure !== "revision collision") assert.deepEqual(await count(), before);
       assert.equal(await state(right), "running");
       assert.deepEqual(
-        (await db.store.snapshots.display(snapshot)).bytes,
+        await (await db.store.snapshots.open(snapshot)).display.read(),
         new Uint8Array([1, 2, 3]),
       );
       const retryBefore = await count();
@@ -269,7 +269,7 @@ await test("Job execution through services on real D1 and R2", async (t) => {
           before.map((n) => Number(n) + 1),
         );
         assert.deepEqual(
-          (await db.store.snapshots.display(other.snapshot)).bytes,
+          await (await db.store.snapshots.open(other.snapshot)).display.read(),
           new Uint8Array([1, 2, 3]),
         );
       },
