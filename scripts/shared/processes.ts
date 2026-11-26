@@ -40,21 +40,22 @@ export function startTethered(
   );
 }
 
+export function groupHasLiveMember(group: number): boolean {
+  const rows = execFileSync("ps", ["-A", "-o", "pgid=", "-o", "stat="], { encoding: "utf8" });
+  return rows.split("\n").some((row) => {
+    const [pgid, stat] = row.trim().split(/\s+/);
+    return Number(pgid) === group && !stat?.startsWith("Z");
+  });
+}
+
 export function killGroup(group: number) {
   try {
     process.kill(-group, "SIGKILL");
   } catch (error) {
     if (!(error instanceof Error && "code" in error)) throw error;
     if (error.code === "ESRCH") return;
-    if (error.code === "EPERM") {
-      // macOS returns EPERM when only zombies remain in the group.
-      const rows = execFileSync("ps", ["-A", "-o", "pgid=", "-o", "stat="], { encoding: "utf8" });
-      const hasLiveMember = rows.split("\n").some((row) => {
-        const [pgid, stat] = row.trim().split(/\s+/);
-        return Number(pgid) === group && !stat?.startsWith("Z");
-      });
-      if (!hasLiveMember) return;
-    }
+    // macOS returns EPERM when only zombies remain in the group.
+    if (error.code === "EPERM" && !groupHasLiveMember(group)) return;
     throw error;
   }
 }

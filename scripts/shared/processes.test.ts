@@ -9,7 +9,7 @@ import { test } from "node:test";
 import type { TestContext } from "node:test";
 import { setTimeout } from "node:timers/promises";
 import { z } from "zod";
-import { killGroup, start, startTethered, stop } from "./processes.ts";
+import { groupHasLiveMember, killGroup, start, startTethered, stop } from "./processes.ts";
 
 const zombieGroup = String.raw`
 import json, os, select, signal, subprocess, sys, time
@@ -100,6 +100,19 @@ await test(
     const { run, children } = await zombieFixture(t, true, [false]);
     z.tuple([z.number().int().positive()]).parse(children);
     assert.deepEqual(await run.finished, { kind: "exit", code: 0, signal: null });
+  },
+);
+
+await test(
+  "groupHasLiveMember detects a live member until only zombies remain",
+  { skip: process.platform !== "darwin", timeout: 15_000 },
+  async (t) => {
+    const { run, group, live } = await startZombieGroup(t);
+    assert.equal(groupHasLiveMember(-group), true);
+    process.kill(group, "SIGKILL");
+    await waitForState(live, true);
+    assert.equal(groupHasLiveMember(-group), false);
+    await stop([run]);
   },
 );
 
