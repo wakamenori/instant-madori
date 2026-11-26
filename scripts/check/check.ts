@@ -106,6 +106,7 @@ export async function runChecks(
     ...crates.map((crate) => crate.dir),
   ]);
   await run("Dockerfile", "mise", ["exec", "--", "hadolint", "apps/geometry/Dockerfile"]);
+  await run("GitHub workflows", "mise", ["exec", "--", "actionlint"]);
   const e2eFiles: string[] = [];
   for await (const file of glob("apps/*/tests/**/*.e2e.ts")) e2eFiles.push(file);
   assertContainerE2eFiles(e2eFiles);
