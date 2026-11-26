@@ -164,16 +164,7 @@ fn full_height_door_and_second_cut() {
         let m = Model::build(&h, None).unwrap();
         let names = m.bodies_of(wall.as_str());
         assert_eq!(names.len(), 2);
-        assert!(
-            m.check(&h)
-                .unwrap_err()
-                .as_slice()
-                .contains(&Mismatch::element(
-                    ElementKind::Wall,
-                    wall.as_str(),
-                    MismatchReason::Split { bodies: names }
-                ))
-        );
+        assert_eq!(m.check(&h), Ok(()));
         assert_eq!(
             m.display()
                 .unwrap()
@@ -189,6 +180,107 @@ fn full_height_door_and_second_cut() {
                 < 1.
         );
     }
+}
+fn exterior(h: &House) -> BoundaryId {
+    id(h, pt(-100., -100.), pt(-100., 5100.))
+}
+
+#[test]
+fn openings_explain_wall_bodies() {
+    let door = (900., 900., 2400., 0.);
+    let mut cases = vec![
+        (
+            "transom",
+            false,
+            vec![(900., 900., 2000., 0.), (900., 900., 400., 2000.)],
+            2,
+        ),
+        (
+            "corner",
+            false,
+            vec![(900., 900., 2000., 0.), (1800., 900., 400., 2000.)],
+            2,
+        ),
+        ("T stem", false, vec![(0., 900., 2400., 0.)], 1),
+        ("mitre", true, vec![(0., 900., 2400., 0.)], 2),
+        ("full width", false, vec![(0., 5200., 1100., 900.)], 2),
+        ("high window", false, vec![(900., 900., 1500., 900.)], 1),
+    ];
+    for gap in [0.0005, 1e-7] {
+        cases.push(("lintel", false, vec![(900., 900., 2400. - gap, 0.)], 2));
+    }
+    for (pier, pieces) in [(1e-9, 2), (0.0005, 2), (0.0015, 3), (300., 3)] {
+        cases.push((
+            "pier",
+            false,
+            vec![door, (1800. + pier, 900., 2400., 0.)],
+            pieces,
+        ));
+    }
+    for (case, outer, holes, pieces) in cases {
+        let mut h = fixture();
+        let wall = if outer { exterior(&h) } else { shared(&h) };
+        for (i, &(distance, width, height, sill)) in holes.iter().enumerate() {
+            h = opening(
+                &h,
+                &i.to_string(),
+                wall.clone(),
+                distance,
+                width,
+                height,
+                sill,
+            );
+        }
+        let m = Model::build(&h, None).unwrap();
+        assert_eq!(m.check(&h), Ok(()), "{case} {holes:?}");
+        assert_eq!(m.bodies_of(wall.as_str()).len(), pieces, "{case} {holes:?}");
+    }
+}
+
+#[test]
+fn colors_survive_full_height_cuts() {
+    for (outer, distances) in [
+        (false, vec![900.]),
+        (false, vec![900., 1800.0015]),
+        (true, vec![100.]),
+        (true, vec![100.0005]),
+    ] {
+        let mut h = fixture();
+        let wall = if outer { exterior(&h) } else { shared(&h) };
+        for side in [Side::Left, Side::Right] {
+            let role = h.boundary(&wall).unwrap().face(side).role();
+            if matches!(role, FaceRole::Room { .. }) {
+                h = h.set_wall_color(&wall, &role, BLUE).unwrap();
+            }
+        }
+        for (i, &distance) in distances.iter().enumerate() {
+            h = opening(&h, &i.to_string(), wall.clone(), distance, 900., 2400., 0.);
+        }
+        assert_eq!(
+            Model::build(&h, None).unwrap().check(&h),
+            Ok(()),
+            "{outer} {distances:?}"
+        );
+    }
+}
+
+#[test]
+fn opening_after_removed_wall_reports_findings() {
+    let h = fixture();
+    let wall = shared(&h);
+    let h = opening(&h, "whole", wall.clone(), 100., 5000., 2400., 0.);
+    let h = opening(&h, "joint", wall.clone(), 0., 100., 1000., 1000.);
+    let findings = Model::build(&h, None).unwrap().check(&h).unwrap_err();
+    assert!(findings.as_slice().contains(&Mismatch::element(
+        ElementKind::Wall,
+        wall.as_str(),
+        MismatchReason::NoBody {}
+    )));
+    assert!(findings.as_slice().contains(&Mismatch::element(
+        ElementKind::Opening,
+        h.openings().last().unwrap().data().id.as_str(),
+        MismatchReason::NotInTable {}
+    )));
 }
 #[test]
 fn split_feature_preserves_owner() {
