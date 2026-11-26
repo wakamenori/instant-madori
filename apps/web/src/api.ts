@@ -1,4 +1,6 @@
 import {
+  messageListResponseSchema,
+  acceptInstructionResponseSchema,
   projectListResponseSchema,
   patternListResponseSchema,
   apiErrorSchema,
@@ -9,7 +11,11 @@ import {
   parseFloorPlanStoreys,
   patternStateResponseSchema,
 } from "@madori/contracts";
-import type { ApiErrorCode, CreateProjectRequest } from "@madori/contracts";
+import type {
+  ApiErrorCode,
+  AcceptInstructionRequest,
+  CreateProjectRequest,
+} from "@madori/contracts";
 
 export class ApiError extends Error {
   readonly code: ApiErrorCode | "network" | "unexpected_response";
@@ -23,7 +29,7 @@ async function request<T>(
   path: string,
   signal: AbortSignal,
   decode: (response: Response) => Promise<T>,
-  body?: CreateProjectRequest,
+  body?: CreateProjectRequest | AcceptInstructionRequest,
 ): Promise<T> {
   signal.throwIfAborted();
   try {
@@ -123,5 +129,30 @@ export function fetchFloorPlan(
         throw new ApiError("unexpected_response");
       return response.text();
     },
+  );
+}
+
+export function listMessages(patternId: string, cursor: string | null, signal: AbortSignal) {
+  const query = cursor === null ? "" : `?cursor=${encodeURIComponent(cursor)}`;
+  return request(`/api/patterns/${patternId}/messages${query}`, signal, async (response) => {
+    const result = messageListResponseSchema.safeParse(await jsonBody(response));
+    if (!result.success) throw new ApiError("unexpected_response");
+    return result.data;
+  });
+}
+export function sendInstruction(
+  patternId: string,
+  body: AcceptInstructionRequest,
+  signal: AbortSignal,
+) {
+  return request(
+    `/api/patterns/${patternId}/messages`,
+    signal,
+    async (response) => {
+      const result = acceptInstructionResponseSchema.safeParse(await jsonBody(response));
+      if (!result.success) throw new ApiError("unexpected_response");
+      return result.data.job;
+    },
+    body,
   );
 }

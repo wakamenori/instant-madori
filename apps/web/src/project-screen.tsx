@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
-import { watchProject, type ProjectView } from "./project-session.ts";
+import { ConversationLog, InstructionForm } from "./conversation-view.tsx";
+import { useEffect, useState, useSyncExternalStore } from "react";
+import { createProjectSession, type ProjectView } from "./project-session.ts";
 import { RouteLink } from "./navigation.tsx";
 import { projectsRoute, type ProjectId } from "./route.ts";
 import { formatDateTime } from "./format-date-time.ts";
@@ -21,48 +22,51 @@ function activityText(activity: Extract<ProjectView, { kind: "open" }>["activity
   }
 }
 export function ProjectScreen({ projectId }: { projectId: ProjectId }) {
-  const [view, setView] = useState<ProjectView>({ kind: "opening" });
-  const [generation, setGeneration] = useState(0);
-  useEffect(() => {
-    const controller = new AbortController();
-    void watchProject({ projectId, signal: controller.signal, onView: setView });
-    return () => controller.abort();
-  }, [projectId, generation]);
-  function retry() {
-    setView((current) =>
-      current.kind === "open" ? { ...current, problem: null } : { kind: "opening" },
-    );
-    setGeneration((n) => n + 1);
-  }
-  const problem =
-    view.kind === "failed" ? view.message : view.kind === "open" ? view.problem : null;
+  const [session] = useState(() => createProjectSession(projectId));
+  useEffect(() => session.start(), [session]);
+  const view = useSyncExternalStore(session.subscribe, session.getView);
+  const editing =
+    view.kind === "open" && (view.activity.kind === "working" || view.activity.kind === "queued");
   return (
     <>
       <RouteLink to={projectsRoute}>案件一覧</RouteLink>
       {view.kind === "opening" && <p role="status">案件を開いています…</p>}
       {view.kind === "not_found" && <p role="alert">この案件は見つかりません。</p>}
       {view.kind === "open" && (
-        <>
-          <h1>{view.pattern.name}</h1>
-          <p>
-            <time dateTime={view.pattern.createdAt}>{formatDateTime(view.pattern.createdAt)}</time>{" "}
-            作成
-          </p>
-          <p>
-            {view.shown
-              ? `案${view.shown.revision.number}「${view.shown.revision.name}」を表示しています。`
-              : "まだ案がありません。"}
-          </p>
-          {view.activity.kind !== "idle" && <p role="status">{activityText(view.activity)}</p>}
-        </>
+        <div className="project-layout">
+          <section>
+            <h1>{view.pattern.name}</h1>
+            <p>
+              <time dateTime={view.pattern.createdAt}>
+                {formatDateTime(view.pattern.createdAt)}
+              </time>{" "}
+              作成
+            </p>
+            <p>
+              {view.shown
+                ? `確定済みの案${view.shown.revision.number}「${view.shown.revision.name}」を表示しています。${editing ? "AIが編集中です。" : ""}`
+                : editing
+                  ? "AIが最初の案を編集中です。"
+                  : "まだ案がありません。"}
+            </p>
+            {view.activity.kind !== "idle" && <p role="status">{activityText(view.activity)}</p>}
+            {view.problem && (
+              <p role="alert">
+                {view.problem} <button onClick={session.retry}>再試行</button>
+              </p>
+            )}
+            <ModelViewport label="住宅モデル" display={view.shown?.display ?? null} />
+          </section>
+          <section className="conversation-pane" aria-label="会話">
+            <ConversationLog timeline={view.timeline} onResend={session.resend} />
+            <InstructionForm onSend={session.send} />
+          </section>
+        </div>
       )}
-      {problem && (
+      {view.kind === "failed" && (
         <p role="alert">
-          {problem} <button onClick={retry}>再試行</button>
+          {view.message} <button onClick={session.retry}>再試行</button>
         </p>
-      )}
-      {view.kind === "open" && (
-        <ModelViewport label="住宅モデル" display={view.shown?.display ?? null} />
       )}
     </>
   );
