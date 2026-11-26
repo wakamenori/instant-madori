@@ -9,10 +9,13 @@ import { test } from "node:test";
 import type { TestContext } from "node:test";
 import { setTimeout } from "node:timers/promises";
 import { z } from "zod";
-import { start, startTethered, stop } from "./processes.ts";
+import { killGroup, start, startTethered, stop } from "./processes.ts";
 
 const zombieGroup = String.raw`
-import json, os, select, signal
+import json, os, select, signal, subprocess, sys, time
+
+live_flags = json.loads(sys.argv[1])
+control = int(sys.argv[2])
 
 group = os.getpid()
 ready_read, ready_write = os.pipe()
@@ -20,24 +23,28 @@ if os.fork() == 0:
     os.close(ready_read)
     os.setpgid(0, 0)
     children = []
-    for live in [False, True]:
+    for live in live_flags:
         pid = os.fork()
         if pid == 0:
             os.setpgid(0, group)
             signal.signal(signal.SIGTERM, signal.SIG_IGN)
-            os.write(ready_write, b".")
             if live:
+                os.write(ready_write, b".")
                 signal.pause()
             os._exit(0)
         children.append(pid)
+        if not live:
+            while not subprocess.check_output(["ps", "-o", "stat=", "-p", str(pid)]).strip().startswith(b"Z"):
+                time.sleep(0.01)
+            os.write(ready_write, b".")
     print(json.dumps(children), flush=True)
-    select.select([3], [], [], 20)
+    select.select([control], [], [], 20)
     for pid in children:
         os.kill(pid, signal.SIGKILL)
         os.waitpid(pid, 0)
     os._exit(0)
 os.close(ready_write)
-for _ in range(2):
+for _ in live_flags:
     os.read(ready_read, 1)
 os._exit(0)
 `;
@@ -54,28 +61,47 @@ async function waitForState(pid: number, zombie: boolean) {
   assert.fail(`Process ${pid} did not reach zombie=${zombie}`);
 }
 
-async function startZombieGroup(t: TestContext) {
-  const run = start("/usr/bin/python3", ["-c", zombieGroup], {
-    stdio: ["ignore", "pipe", "inherit", "pipe"],
+async function zombieFixture(t: TestContext, tethered: boolean, live: boolean[]) {
+  // The tether passes only stdio 0-2 on, and Node closes a direct child's stdin when it exits.
+  const control = tethered ? "0" : "3";
+  const launch = tethered ? startTethered : start;
+  const run = launch("/usr/bin/python3", ["-c", zombieGroup, JSON.stringify(live), control], {
+    stdio: tethered ? ["pipe", "pipe", "inherit"] : ["ignore", "pipe", "inherit", "pipe"],
   });
   const closed = once(run.child, "close");
   t.after(async () => {
-    run.child.stdio[3]?.destroy();
+    if (tethered) run.child.stdin?.end();
+    else run.child.stdio[3]?.destroy();
     await closed;
   });
   assert.ok(run.child.stdout);
   const lines = createInterface({ input: run.child.stdout });
   const line: unknown = (await once(lines, "line"))[0];
   assert.ok(typeof line === "string");
+  return { run, children: JSON.parse(line) as unknown };
+}
+
+async function startZombieGroup(t: TestContext) {
+  const { run, children } = await zombieFixture(t, false, [false, true]);
   const [zombie, live] = z
     .tuple([z.number().int().positive(), z.number().int().positive()])
-    .parse(JSON.parse(line));
+    .parse(children);
   assert.deepEqual(await run.finished, { kind: "exit", code: 0, signal: null });
   assert.ok(run.child.pid);
   await waitForState(zombie, true);
   await waitForState(live, false);
   return { run, group: -run.child.pid, zombie, live };
 }
+
+await test(
+  "the tether preserves the server exit code when only zombies remain",
+  { skip: process.platform !== "darwin", timeout: 15_000 },
+  async (t) => {
+    const { run, children } = await zombieFixture(t, true, [false]);
+    z.tuple([z.number().int().positive()]).parse(children);
+    assert.deepEqual(await run.finished, { kind: "exit", code: 0, signal: null });
+  },
+);
 
 await test(
   "macOS signals a mixed group, then reports EPERM for only zombies",
@@ -105,6 +131,31 @@ await test(
     await waitForState(live, true);
   },
 );
+
+for (const code of ["EPERM", "EINVAL"]) {
+  await test(`killGroup rethrows ${code} for a live group`, async (t) => {
+    const run = start(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+      stdio: "ignore",
+    });
+    t.after(async () => {
+      run.child.kill("SIGKILL");
+      await run.finished;
+    });
+    await once(run.child, "spawn");
+    const group = run.child.pid;
+    assert.ok(group);
+    const error = Object.assign(new Error(`kill ${code}`), { code });
+    t.mock.method(process, "kill", (pid: number, signal: NodeJS.Signals) => {
+      assert.equal(pid, -group);
+      assert.equal(signal, "SIGKILL");
+      throw error;
+    });
+    assert.throws(
+      () => killGroup(group),
+      (actual: unknown) => actual === error,
+    );
+  });
+}
 
 for (const termination of ["exit", "signal"] as const) {
   await test(`stop permits EPERM after the child finishes by ${termination}`, async (t) => {

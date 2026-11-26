@@ -29,7 +29,7 @@ Rustは、rustupのcargoで動かします。`rust-toolchain.toml` の版とWasm
 
 共有ストアは `$XDG_CACHE_HOME/instant-madori/mbx`（未設定なら `~/.cache/instant-madori/mbx`）です。mbxの自動回収に8 GiBの予算と、ディスクに残す空き容量20 GiBを設定しています。回収は定期的に行われ、ビルド中は予算を超えることがあります。worktreeの `target/` はこの予算とは別です。
 
-`MADORI_MBX=0 mise exec -- pnpm setup` で通常のCargoを使えます。検査も同じ環境変数を付けて実行してください。mbxが使えないときも、新しいworktreeでは従来どおり `target/` を複製し、自作クレートのソースの更新時刻を進めます。既存の `target/` ディレクトリは保持し、共有先へのシンボリックリンクだけを外します。複製にはmacOSのAPFSまたはLinuxのreflinkが必要です。Gitフックはメインのチェックアウトでだけ登録します。GitHub Actionsはrunnerに保存したtargetと通常のCargoを使います。
+`MADORI_MBX=0 mise exec -- pnpm setup` で通常のCargoを使えます。検査も同じ環境変数を付けて実行してください。mbxが使えないときも、新しいworktreeでは従来どおり `target/` を複製し、自作クレートのソースの更新時刻を進めます。複製はファイルの更新時刻を保ち、ソースの更新時刻は複製を終えてから進めます。進めないと、Cargoは自作クレートの一部を、別のチェックアウトがコンパイルした成果物のまま使います。2026-11-20に `target/` を共有して確かめたときは、11のクレートのうち3つを再利用し、8つを作り直しました。複製元と別のファイルシステムにあるworktreeでは、全体のコピーになるので複製せずに止まります。既存の `target/` ディレクトリは保持し、共有先へのシンボリックリンクだけを外します。複製にはmacOSのAPFSまたはLinuxのreflinkが必要です。Gitフックはメインのチェックアウトでだけ登録します。GitHub Actionsはrunnerに保存したtargetと通常のCargoを使います。
 
 `pnpm dev`は、ローカルのD1へマイグレーションを適用してから次のプロセスを起動し、Ctrl-Cでまとめて終了します。ContainerとプロキシはWranglerが終了時に削除します。終了処理の失敗は報告し、起動・実行結果と終了コードを維持します。
 

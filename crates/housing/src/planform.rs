@@ -1,4 +1,7 @@
-use crate::{BoundaryView, ElementKind, Point, Reason, Rejection, Rejections, joint::Joint};
+use crate::{
+    BoundaryView, ElementKind, Point, Reason, Rejection, Rejections,
+    joint::{Joint, Vector},
+};
 use std::cmp::Ordering;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -146,12 +149,71 @@ impl SimplePolygon {
 impl BoundaryView<'_> {
     pub fn planform(self) -> Result<SimplePolygon, Rejections> {
         let id = self.data().id.as_str();
-        let mut points = Joint::new(self.start())?.end(id)?;
-        points.extend(Joint::new(self.end())?.end(id)?);
-        Ok(SimplePolygon::new(points).map_err(|reason| Rejection {
-            element: ElementKind::Wall,
-            id: id.into(),
-            reason,
-        })?)
+        let start = Joint::new(self.start())?.end(id)?;
+        let end = Joint::new(self.end())?.end(id)?;
+        let along = self.end().data().at.delta_from(self.start().data().at);
+        Ok(
+            SimplePolygon::new(ring_without_zero_length_faces(start, end, along)).map_err(
+                |reason| Rejection {
+                    element: ElementKind::Wall,
+                    id: id.into(),
+                    reason,
+                },
+            )?,
+        )
+    }
+}
+
+fn face_runs_backwards(from: Point, to: Point, direction: Vector) -> bool {
+    to.delta_from(from).dot(direction) < 0.0
+}
+
+fn ring_without_zero_length_faces(start: Vec<Point>, end: Vec<Point>, along: Vector) -> Vec<Point> {
+    let seam = start.len().saturating_sub(1);
+    let mut ring = start;
+    ring.extend(end);
+    let (Some(&first), Some(&last), Some(&start_last), Some(&end_first)) = (
+        ring.first(),
+        ring.last(),
+        ring.get(seam),
+        ring.get(seam + 1),
+    ) else {
+        return ring;
+    };
+    if face_runs_backwards(start_last, end_first, along)
+        || face_runs_backwards(last, first, along * -1.0)
+    {
+        return ring;
+    }
+    if start_last == end_first {
+        cut_slit(&mut ring, seam);
+    }
+    if first == last && ring.first() == Some(&first) {
+        cut_slit(&mut ring, 0);
+    }
+    ring
+}
+
+fn cut_slit(ring: &mut Vec<Point>, mut k: usize) {
+    while ring.len() >= 3 {
+        let n = ring.len();
+        let (prev, next) = ((k + n - 1) % n, (k + 1) % n);
+        let (p, s, q) = (ring[prev], ring[k], ring[next]);
+        let (removed, kept) = if s == q {
+            (next, k)
+        } else if p == s {
+            (prev, k)
+        } else if exact_orientation(p, s, q).is_eq() && !between(p, q, s) {
+            let near = if p.delta_from(s).length() <= q.delta_from(s).length() {
+                prev
+            } else {
+                next
+            };
+            (k, near)
+        } else {
+            return;
+        };
+        ring.remove(removed);
+        k = if kept > removed { kept - 1 } else { kept };
     }
 }

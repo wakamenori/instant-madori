@@ -5,6 +5,7 @@ import {
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -69,6 +70,43 @@ void test("linked checkout clones both caches and refreshes tracked local source
   }
   const mtime = statSync(f.source).mtimeMs;
   assert(mtime >= start - 1 && mtime <= Date.now() + 1);
+});
+
+void test("refuses to clone a target across filesystems without leaving a destination", (t) => {
+  const f = fixture(t);
+  const target = join(f.main, "target");
+  rmSync(target, { recursive: true });
+  symlinkSync("/dev", target);
+  assert.throws(() => f.prepare(f.root), /across filesystems/u);
+  assert.equal(lstatSync(join(f.root, "target"), { throwIfNoEntry: false }), undefined);
+  assert.deepEqual(
+    readdirSync(f.root).filter((name) => name.startsWith("target.clone-")),
+    [],
+  );
+});
+
+void test("refreshes local sources after the clone lands", (t) => {
+  const f = fixture(t);
+  f.prepare(f.root);
+  const sourceTime = statSync(f.source).mtimeMs;
+  const files = readdirSync(join(f.root, "target"), {
+    recursive: true,
+    withFileTypes: true,
+  }).filter((entry) => entry.isFile());
+  assert(files.length > 0);
+  for (const file of files) {
+    const path = join(file.parentPath, file.name);
+    // A clone preserves mtime, but each new inode receives its own ctime.
+    assert(sourceTime >= statSync(path).ctimeMs, `source must be refreshed after cloning ${path}`);
+  }
+});
+
+void test("the clone keeps cached file mtimes", (t) => {
+  const f = fixture(t);
+  const cached = "target/x/y.txt";
+  utimesSync(join(f.main, cached), f.old, f.old);
+  f.prepare(f.root);
+  assert.equal(statSync(join(f.root, cached)).mtimeMs, statSync(join(f.main, cached)).mtimeMs);
 });
 
 void test("replaces a shared target symlink while preserving its source", (t) => {

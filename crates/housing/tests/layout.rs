@@ -442,3 +442,93 @@ fn collects_all_overlaps_in_room_then_position_order() {
         assert_eq!(error.reason, Reason::Overlap { min, max });
     }
 }
+
+struct Xorshift(u64);
+
+impl Xorshift {
+    fn below(&mut self, limit: usize) -> usize {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        (self.0 % limit as u64) as usize
+    }
+}
+
+fn split_rooms(rng: &mut Xorshift, bounds: Corners, depth: usize, rooms: &mut Vec<Corners>) {
+    let (left, bottom, right, top) = bounds;
+    let vertical = rng.below(2) == 0;
+    let (low, high) = if vertical {
+        (left, right)
+    } else {
+        (bottom, top)
+    };
+    if depth == 0 || high - low < 1200 || rng.below(4) == 0 {
+        rooms.push(bounds);
+        return;
+    }
+    let positions = (high - low - 1200) / 50 + 1;
+    let cut = low + 600 + 50 * rng.below(positions as usize) as i32;
+    let (a, b) = if vertical {
+        ((left, bottom, cut, top), (cut, bottom, right, top))
+    } else {
+        ((left, bottom, right, cut), (left, cut, right, top))
+    };
+    split_rooms(rng, a, depth - 1, rooms);
+    split_rooms(rng, b, depth - 1, rooms);
+}
+
+#[test]
+fn accepted_layouts_draw_every_wall() {
+    let mut rng = Xorshift(0x2545_f491_4f6c_dd1d);
+    let thicknesses = [
+        (200., 200.),
+        (200., 120.),
+        (150., 150.),
+        (120., 120.),
+        (100., 200.),
+        (123.4, 123.4),
+        (99.9, 150.3),
+    ];
+    let shifts = [0., 0.1, -3.3, 1234.567];
+    let mut accepted = 0;
+    for _ in 0..4000 {
+        let mut rooms = Vec::new();
+        split_rooms(&mut rng, (0, 0, 8000, 6000), 4, &mut rooms);
+        for _ in 0..rng.below(3).min(rooms.len() - 1) {
+            rooms.remove(rng.below(rooms.len()));
+        }
+        let mut input = layout(&rooms);
+        let (ext, int) = thicknesses[rng.below(thicknesses.len())];
+        input.walls.exterior_thickness = ext;
+        input.walls.interior_thickness = int;
+        let dx = shifts[rng.below(shifts.len())];
+        let dy = shifts[rng.below(shifts.len())];
+        for room in &mut input.rooms {
+            for corner in [&mut room.min, &mut room.max] {
+                corner.x += dx;
+                corner.y += dy;
+            }
+        }
+        let steps = [0., ext / 2., int / 2., ext, int, (ext + int) / 2.];
+        for _ in 0..rng.below(4) {
+            let index = rng.below(input.rooms.len());
+            let room = &mut input.rooms[index];
+            let edge = match rng.below(4) {
+                0 => &mut room.min.x,
+                1 => &mut room.min.y,
+                2 => &mut room.max.x,
+                _ => &mut room.max.y,
+            };
+            let step = steps[rng.below(steps.len())];
+            *edge += if rng.below(2) == 0 { step } else { -step };
+        }
+        if let Ok(house) = build(&input) {
+            accepted += 1;
+            for wall in house.boundaries() {
+                let planform = wall.planform();
+                assert!(planform.is_ok(), "{input:?}: {:?}", planform.err());
+            }
+        }
+    }
+    assert!(accepted >= 1000, "only {accepted} accepted layouts");
+}

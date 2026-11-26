@@ -24,6 +24,7 @@ export const apiErrorCodeSchema = z.enum([
   "unauthenticated",
   "forbidden",
   "not_found",
+  "not_selectable",
   "method_not_allowed",
   "invalid_request",
   "payload_too_large",
@@ -295,3 +296,59 @@ export const revisionListResponseSchema = z.object({
 });
 
 export type RevisionListResponse = z.infer<typeof revisionListResponseSchema>;
+
+export const elementIdSchema = z.string().regex(/^[A-Za-z0-9._:-]{1,64}$/);
+export const faceRoleSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("room"), room: elementIdSchema }),
+  z.strictObject({ kind: z.literal("exterior") }),
+]);
+export type FaceRole = z.infer<typeof faceRoleSchema>;
+
+const vectorSchema = z.strictObject({ x: z.number(), y: z.number(), z: z.number() });
+export const pickRequestSchema = z.strictObject({
+  element: elementIdSchema,
+  hit: z
+    .strictObject({
+      point: vectorSchema,
+      normal: vectorSchema.refine(({ x, y, z }) => x !== 0 || y !== 0 || z !== 0),
+    })
+    .optional(),
+});
+export type PickRequest = z.infer<typeof pickRequestSchema>;
+
+export const pickTargetSchema = z.object({
+  revisionId: idSchema,
+  element: elementIdSchema,
+  face: faceRoleSchema.nullable(),
+});
+export type PickTarget = z.infer<typeof pickTargetSchema>;
+const wallFaceSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("room"), room: elementIdSchema, roomName: z.string() }),
+  z.object({ kind: z.literal("exterior") }),
+]);
+export const pickedElementSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("wall"),
+    id: elementIdSchema,
+    length: z.number(),
+    thickness: z.number(),
+    height: z.number(),
+    faces: z.tuple([wallFaceSchema, wallFaceSchema]),
+  }),
+  z.object({ kind: z.literal("room"), id: elementIdSchema, name: z.string(), usage: z.string() }),
+  z.object({
+    kind: z.literal("opening"),
+    id: elementIdSchema,
+    fitting: z.enum(["window", "door"]),
+    wall: elementIdSchema,
+    width: z.number(),
+    height: z.number(),
+    sill: z.number(),
+  }),
+]);
+export type PickedElement = z.infer<typeof pickedElementSchema>;
+export const pickResponseSchema = z.object({
+  target: pickTargetSchema,
+  element: pickedElementSchema,
+});
+export type PickResponse = z.infer<typeof pickResponseSchema>;

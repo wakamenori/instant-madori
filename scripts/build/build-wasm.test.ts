@@ -1,4 +1,4 @@
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import assert from "node:assert/strict";
 import childProcess from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -36,12 +36,7 @@ function artifacts(t: TestContext) {
   return { output, display, viewer };
 }
 
-void test("the Wasm builder passes release output to wasm-bindgen", (t) => {
-  const { output, viewer, display } = artifacts(t);
-  assert.deepEqual(parseLocalBuild(output).units, [
-    { crate: "madori_viewer", depInfo: viewer },
-    { crate: "madori_display", depInfo: display },
-  ]);
+function withMockBuild(t: TestContext, output: string, run: (root: string) => void) {
   const commands: { file: string; args: readonly string[] | undefined }[] = [];
   t.mock.method(childProcess, "execFileSync", (file: string, args?: readonly string[]) => {
     commands.push({ file, args });
@@ -60,7 +55,7 @@ void test("the Wasm builder passes release output to wasm-bindgen", (t) => {
   const bypass = process.env.MADORI_WASM_CACHE;
   process.env.MADORI_WASM_CACHE = "0";
   try {
-    buildWasm(root);
+    run(root);
   } finally {
     if (bypass === undefined) delete process.env.MADORI_WASM_CACHE;
     else process.env.MADORI_WASM_CACHE = bypass;
@@ -68,6 +63,16 @@ void test("the Wasm builder passes release output to wasm-bindgen", (t) => {
     syncBuiltinESMExports();
   }
 
+  return { commands, logs, root };
+}
+
+void test("the Wasm builder passes release output to wasm-bindgen", (t) => {
+  const { output, viewer, display } = artifacts(t);
+  assert.deepEqual(parseLocalBuild(output).units, [
+    { crate: "madori_viewer", depInfo: viewer },
+    { crate: "madori_display", depInfo: display },
+  ]);
+  const { commands, logs, root } = withMockBuild(t, output, buildWasm);
   const bindgen = join(root, ".tools/bin/wasm-bindgen");
   const input = "target/wasm32-unknown-unknown/release/madori_viewer.wasm";
   assert.deepEqual(commands, [
@@ -100,6 +105,26 @@ void test("the Wasm builder passes release output to wasm-bindgen", (t) => {
     },
   ]);
   assert.deepEqual(logs, [`[wasm] profile=release, wasm-bindgen input=${input}`]);
+});
+
+void test("rejects foreign artifacts before wasm-bindgen can replace existing bindings", (t) => {
+  const { display, output } = artifacts(t);
+  writeFileSync(display, "/another/target/deps/madori_display-123.d: crates/display/src/lib.rs\n");
+  const { root, commands } = withMockBuild(t, output, (root) => {
+    const pkg = join(root, "crates/viewer/pkg");
+    mkdirSync(pkg, { recursive: true });
+    writeFileSync(join(pkg, "madori_viewer.js"), "existing bindings");
+    assert.throws(() => buildWasm(root), /madori_display: \/another\/target.*\nRun pnpm setup/u);
+  });
+  const bindgen = join(root, ".tools/bin/wasm-bindgen");
+  assert.deepEqual(
+    commands.filter(({ file }) => file === bindgen),
+    [{ file: bindgen, args: ["--version"] }],
+  );
+  assert.equal(
+    readFileSync(join(root, "crates/viewer/pkg/madori_viewer.js"), "utf8"),
+    "existing bindings",
+  );
 });
 
 void test("setup, dev and build use the same Wasm builder", () => {
@@ -164,4 +189,37 @@ void test("rejects a foreign cargo before starting work", (t) => {
   assert(result.stderr.includes("[rustup] cargo on PATH is"), result.stderr);
   assert(!result.stderr.includes("Run pnpm setup to install the matching wasm-bindgen CLI"));
   assert.equal(readFileSync(log, "utf8"), "--version\n");
+});
+
+void test("starts the Wasm build after accepting rustup cargo", (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "rustup-cargo-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  writeFileSync(join(directory, "cargo"), '#!/bin/sh\nexec "$RUSTUP_TOOLCHAIN/bin/cargo" "$@"\n', {
+    mode: 0o755,
+  });
+  const preload = join(directory, "missing-bindgen.mjs");
+  writeFileSync(
+    preload,
+    `
+    import childProcess from "node:child_process";
+    import { syncBuiltinESMExports } from "node:module";
+    const original = childProcess.execFileSync;
+    childProcess.execFileSync = (file, ...args) => {
+      if (file.endsWith("/.tools/bin/wasm-bindgen")) throw new Error("missing wasm-bindgen");
+      return original(file, ...args);
+    };
+    syncBuiltinESMExports();
+  `,
+  );
+  const script = fileURLToPath(new URL("./build-wasm.ts", import.meta.url));
+  const result = childProcess.spawnSync(
+    process.execPath,
+    ["--import", pathToFileURL(preload).href, script],
+    {
+      encoding: "utf8",
+      env: { PATH: directory + ":/usr/bin:/bin", HOME: directory, TMPDIR: directory },
+    },
+  );
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(result.stderr, /Run pnpm setup to install the matching wasm-bindgen CLI/u);
 });

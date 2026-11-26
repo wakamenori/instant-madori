@@ -5,6 +5,7 @@ const statusByCode = {
   unauthenticated: 401,
   forbidden: 403,
   not_found: 404,
+  not_selectable: 409,
   method_not_allowed: 405,
   invalid_request: 400,
   payload_too_large: 413,
@@ -45,6 +46,7 @@ export type RoutePath =
   | "/api/patterns/:patternId/queue/cancel"
   | "/api/patterns/:patternId/state"
   | "/api/patterns/:patternId/revisions"
+  | "/api/revisions/:revisionId/pick"
   | "/api/revisions/:revisionId/view";
 
 /** An expected failure that ends the request with an API error code. */
