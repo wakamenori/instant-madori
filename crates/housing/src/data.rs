@@ -194,7 +194,12 @@ impl OpeningSpec {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Fitting {
     Window {},
-    Door { hinge: WallEnd, opens_to: Side },
+    Door {
+        /// Boundary end whose nearer jamb carries the hinges, independent of the opening's `from`.
+        hinge: WallEnd,
+        /// Side of the wall the leaf swings into, looking from the boundary start to the end as for `SideOffsets`: the room on that side, or the exterior when that side has no room.
+        opens_to: Side,
+    },
 }
 
 impl Wall {
