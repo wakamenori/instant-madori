@@ -1,6 +1,6 @@
 // Run in the prototype page (crates/viewer/proto/index.html?pkg=all) after it reports ready:
-//   await (await import("/docs/verification/evidence/verification-10/probes.js")).run()
-// Returns the values that verification-10.md quotes for pixels, decoding and mipmaps.
+//   await (await import("/docs/verification/evidence/verification-11/probes.js")).run()
+// Returns the values that verification-11.md quotes for pixels, decoding and mipmaps.
 const view = () => document.querySelector("#view");
 
 function grab() {

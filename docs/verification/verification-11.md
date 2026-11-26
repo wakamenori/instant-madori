@@ -1,4 +1,4 @@
-# 検証10：木目・タイルの柄を描く経路と、柄の座標の決め方
+# 検証11：木目・タイルの柄を描く経路と、柄の座標の決め方
 
 実施日：2026-11-26。Issue #173。木目の床とタイルの壁を持つ箱の部屋を、二つの描画の経路で試作し、WebGPUを使えるChromium（T3のプレビュー）で描いて比べた。採った方式は次のとおりで、計画の4.8に書いた。
 
@@ -10,7 +10,7 @@
 
 ## 対象と測り方
 
-試作は、使い捨てのコードとして `crates/viewer` の機能 `pattern-proto`・`pattern-a`・`pattern-b` と、viewport-gpuの機能 `pattern-maps` の下に置いた。機能を付けないビルドは、試作の前と同じバイト列のWasmになる。試作のコードは [prototype.patch](evidence/verification-10/prototype.patch)（`eea8ee48c` から `7e8a02037` までの差分）に残し、このブランチには含めない。
+試作は、使い捨てのコードとして `crates/viewer` の機能 `pattern-proto`・`pattern-a`・`pattern-b` と、viewport-gpuの機能 `pattern-maps` の下に置いた。機能を付けないビルドは、試作の前と同じバイト列のWasmになる。試作のコードは [prototype.patch](evidence/verification-11/prototype.patch)（`eea8ee48c` から `7e8a02037` までの差分）に残し、このブランチには含めない。
 
 | 案 | 描き方 |
 | --- | --- |
@@ -36,7 +36,7 @@
 
 計測は、Apple M4 Pro（論理CPU 12、メモリ24 GiB）、macOS 27.2.1、T3 CodeのChromium 152（WebGPU）、Rust 1.99.1、wgpu 30で行った。マシンはほかの担当のビルドと共有しており、負荷平均は計測によって7.6から56だった。フレームの時間は、1920×1200の画面外の描画先へ、`Renderer::prepare`・`paint` と柄の描画を毎フレーム行い、カメラをわずかに揺らしてviewport-gpuの絵の再利用を避け、200フレームの後に `onSubmittedWorkDone` を待った経過時間をフレーム数で割った値である。50フレームの暖機の後、各条件を5回以上測った。
 
-画素の比較と、復号とミップマップの時間は、[probes.js](evidence/verification-10/probes.js) を試作のページで実行して求め、出力を [probes.json](evidence/verification-10/probes.json) に残した。画面は1200×750画素で、RGBの差の合計が6（765のうち）を超える画素を「変わった画素」と数えた。
+画素の比較と、復号とミップマップの時間は、[probes.js](evidence/verification-11/probes.js) を試作のページで実行して求め、出力を [probes.json](evidence/verification-11/probes.json) に残した。画面は1200×750画素で、RGBの差の合計が6（765のうち）を超える画素を「変わった画素」と数えた。
 
 ## 結果
 
@@ -78,7 +78,7 @@ Bの世界の決め方で、同じ視点から内法を3,640 mmと5,460 mmにし
 
 案Aの二つの方式は、北の窓へ向けた画面で、少しでも違う画素が900,000画素のうち368画素、変わった画素は0、RMSEは0.000047だった。平面の面では同じ絵になる。1室の柄の面10面で、投影の情報は面ごとに36バイト（Aの描画の値の整列を含めて48バイト）で計360バイト、頂点ごとの座標は342頂点で2,736バイトだった。試作のBは、パレットの幅（2,048項目）の行の単位で表を確保するので、10面でも98,304バイトのテクスチャを使った。
 
-同じ絵になるのは、世界座標の誤差が小さいときに限る。表示データの位置はf32なので、柄の座標の精度は位置の精度に従う。300 mmの繰り返しを1024画素で描くときの柄の座標の誤差を、f32の計算を写したスクリプトで求めると、原点を住宅の近くへ寄せた場合で、世界の原点から100 mでは0.013画素、1 kmでは0.10画素、住宅データが許す10 kmでは1.7画素だった。頂点ごとにf64で求めた座標は、どこでも0.001画素だった（[precision-sweep.out](evidence/verification-10/interrogate/precision-sweep.out)）。
+同じ絵になるのは、世界座標の誤差が小さいときに限る。表示データの位置はf32なので、柄の座標の精度は位置の精度に従う。300 mmの繰り返しを1024画素で描くときの柄の座標の誤差を、f32の計算を写したスクリプトで求めると、原点を住宅の近くへ寄せた場合で、世界の原点から100 mでは0.013画素、1 kmでは0.10画素、住宅データが許す10 kmでは1.7画素だった。頂点ごとにf64で求めた座標は、どこでも0.001画素だった（[precision-sweep.out](evidence/verification-11/interrogate/precision-sweep.out)）。
 
 ### 円柱の面
 
@@ -86,7 +86,7 @@ Bの世界の決め方で、同じ視点から内法を3,640 mmと5,460 mmにし
 
 ### 描画の時間
 
-同じ条件の連続した計測で、1920×1200、8×8室、ガラスなし、ミップマップあり、異方性16のときの値である（`7e8a02037` の各ビルド、各5回の中央値と範囲、ms/フレーム、負荷平均17〜21）。値は [bench-parent.json](evidence/verification-10/bench-parent.json) にある。
+同じ条件の連続した計測で、1920×1200、8×8室、ガラスなし、ミップマップあり、異方性16のときの値である（`7e8a02037` の各ビルド、各5回の中央値と範囲、ms/フレーム、負荷平均17〜21）。値は [bench-parent.json](evidence/verification-11/bench-parent.json) にある。
 
 | ビルドとモード | 中央値 | 範囲 |
 | --- | ---: | --- |
@@ -94,9 +94,9 @@ Bの世界の決め方で、同じ視点から内法を3,640 mmと5,460 mmにし
 | B、単色（柄の面なし） | 0.383 | 0.382〜0.385 |
 | B、平面投影 | 0.420 | 0.420〜0.421 |
 
-柄の標本そのものは約0.04 msで、残りの約0.19 msは、試作のシェーダーが柄のない画素でも投影の表を読み、微分を求める処理である。二回目の計測（下）の担当は、記録していない一時的な変更で描画面積を4分の1にし、Bの時間が0.411から0.127 msに下がったと報告した（[bench-sampling.json](evidence/verification-10/bench-sampling.json) の `scissorProbe`）。異方性を16から1にしても変わらなかった。画素ごとの処理が制約で、柄の面だけで表を読めば減らせると推定する。60 Hzの一フレーム（16.7 ms）に対して、試作のBの増分は2%未満である。
+柄の標本そのものは約0.04 msで、残りの約0.19 msは、試作のシェーダーが柄のない画素でも投影の表を読み、微分を求める処理である。二回目の計測（下）の担当は、記録していない一時的な変更で描画面積を4分の1にし、Bの時間が0.411から0.127 msに下がったと報告した（[bench-sampling.json](evidence/verification-11/bench-sampling.json) の `scissorProbe`）。異方性を16から1にしても変わらなかった。画素ごとの処理が制約で、柄の面だけで表を読めば減らせると推定する。60 Hzの一フレーム（16.7 ms）に対して、試作のBの増分は2%未満である。
 
-条件を変えた計測は、負荷平均45〜56のときに二回に分けて行った。単色は、どちらの回も柄の機能のないビルドで測った。値はms/フレームの中央値で、各回の値と範囲は [bench-modes.json](evidence/verification-10/bench-modes.json) と [bench-sampling.json](evidence/verification-10/bench-sampling.json) にある。
+条件を変えた計測は、負荷平均45〜56のときに二回に分けて行った。単色は、どちらの回も柄の機能のないビルドで測った。値はms/フレームの中央値で、各回の値と範囲は [bench-modes.json](evidence/verification-11/bench-modes.json) と [bench-sampling.json](evidence/verification-11/bench-sampling.json) にある。
 
 一回目は、案Aと案Bを比べた。案Aは柄の面ごとに描画を一回足すので、8×8室では640回の描画になり、ガラスなしで単色より約0.1 ms長かった。案Bはこの回、すべての画素で3回の標本を取る形だった。
 
@@ -118,7 +118,7 @@ Bの世界の決め方で、同じ視点から内法を3,640 mmと5,460 mmにし
 
 ### Wasmのサイズ
 
-`7e8a02037` の試作をreleaseでビルドし、wasm-bindgenの後の `_bg.wasm` を測った（バイト、[wasm-sizes.txt](evidence/verification-10/wasm-sizes.txt)）。
+`7e8a02037` の試作をreleaseでビルドし、wasm-bindgenの後の `_bg.wasm` を測った（バイト、[wasm-sizes.txt](evidence/verification-11/wasm-sizes.txt)）。
 
 | ビルド | wasm-bindgenの前 | `_bg.wasm` | gzip -9 | Brotli -q 11 |
 | --- | ---: | ---: | ---: | ---: |
@@ -143,7 +143,7 @@ upstreamの変更は、既存のファイル（`capture.rs`・`view.rs`・`lib.r
 ![ミップマップなし](https://github.com/wakamenori/instant-madori/blob/1c5c7dafb068ac81b09c0c5e91862c0bb24460df/issue-173/b-grazing-mips-off-d20ee9467dde.png?raw=true)
 ![GPUで作ったミップマップ](https://github.com/wakamenori/instant-madori/blob/1c5c7dafb068ac81b09c0c5e91862c0bb24460df/issue-173/b-grazing-mips-gpu-ada6c926980f.png?raw=true)
 
-ページで作った1024×1024のJPEG（128,528バイト）を、ブラウザの `createImageBitmap` とキャンバスの `getImageData` でRGBAにする時間は、初回3.7 ms、二回目から5回の中央値3.0 ms（3.0〜3.2 ms）だった。Chromiumは、`imageOrientation` を `none` にしてもEXIFの向きを当てた（[exif-probe.out](evidence/verification-10/interrogate/exif-probe.out)）。表示用の柄は向きの情報を持たない画像にする。
+ページで作った1024×1024のJPEG（128,528バイト）を、ブラウザの `createImageBitmap` とキャンバスの `getImageData` でRGBAにする時間は、初回3.7 ms、二回目から5回の中央値3.0 ms（3.0〜3.2 ms）だった。Chromiumは、`imageOrientation` を `none` にしてもEXIFの向きを当てた（[exif-probe.out](evidence/verification-11/interrogate/exif-probe.out)）。表示用の柄は向きの情報を持たない画像にする。
 
 ## 決め手
 
@@ -151,7 +151,7 @@ upstreamの変更は、既存のファイル（`capture.rs`・`view.rs`・`lib.r
 
 **柄の座標は平面投影とし、頂点ごとの座標は持たない。** 住宅が世界の原点の近くにあれば、平面の面では同じ絵になり、表示データは面ごとの小さな投影で済む。Bで頂点ごとの座標を持つには、三角形の頂点の形式を広げ、viewport-gpuとSolidCraftの画面のコードの多くを変える必要がある。原点から遠い住宅で柄の座標が粗くなるのは、表示データの位置がf32だからで、形も同じく粗くなる。
 
-**壁の投影は、面の法線と世界に固定した原点で決める。** 端点や境界の向きを使うと、伸ばした壁で柄が滑り、分割・統合で向きが反転しうる。画像の行は下へ進むので、vの向きを下向きにし、どの面でも画像が裏返らないようにした（[orientation-rule.out](evidence/verification-10/interrogate/orientation-rule.out)）。
+**壁の投影は、面の法線と世界に固定した原点で決める。** 端点や境界の向きを使うと、伸ばした壁で柄が滑り、分割・統合で向きが反転しうる。画像の行は下へ進むので、vの向きを下向きにし、どの面でも画像が裏返らないようにした（[orientation-rule.out](evidence/verification-11/interrogate/orientation-rule.out)）。
 
 **ミップマップはGPUで作る。** CPUと同じ結果で、時間は1 ms未満だった。保存した柄にミップマップを含める方式は、取得するバイト数が増え、JPEGで小さいレベルが崩れる。
 
@@ -161,14 +161,14 @@ upstreamの変更は、既存のファイル（`capture.rs`・`view.rs`・`lib.r
 
 案2から取り込んだのは、原点を住宅の中心の近くへ繰り返しの整数倍だけ寄せること、柄の識別子に元の資産のSHA-256を使うことである。判定役は、メッシュから描画データを作る経路を `scene_geometry` の一つに保つことも推した。案2の、ミップマップを含めたJPEGを保存する方式は採らなかった。判定役は、SolidCraftのシェーダーの検査が `textureSampleGrad(` も微分として数えると指摘したが、誤りだった（次の節の1）。
 
-二つの案、判定の基準、共通の資料は [evidence/verification-10/design/](evidence/verification-10/design/) にある。
+二つの案、判定の基準、共通の資料は [evidence/verification-11/design/](evidence/verification-11/design/) にある。
 
 ## 反対役の試し
 
 計画と記録の初めの版を、二つのOpus（effort high）の反対役に壊させた。共有のディスクが足りなかったので、作業ツリーを分けず、反対役はリポジトリを読むだけにし、自分のフォルダーのスクリプトと、動いている試作のページで試した。担当がそれぞれの結果を実行し直し、次を確かめて直した。どちらの反対役も、ベンチマークの中央値と範囲、Wasmのサイズ、ガラスでのAの崩れとBの正しさ、世界の決め方で柄が動かないことは、記録のとおりに再現した。
 
 1. **シェーダーの検査の記述が誤っていた（二人とも）。** 検査が探す文字列 `textureSample(` は `textureSampleGrad(` に含まれない（`node -e 'console.log("textureSampleGrad(".includes("textureSample("))'` は `false`）。試作のシェーダーは分岐の後で `textureSampleGrad` を呼び、検査を写したスクリプトを通った。計画から「分岐の前で取るか、検査を変えるか」という決めごとを消した。
-2. **向きの規則で画像が裏返っていた（二人とも）。** 初めの版は、壁のvを+z、床のvを+yとしていたが、画像の行は下へ進むので、どの面でも鏡に映った絵になり、壁では上下も逆になる（[handedness.out](evidence/verification-10/interrogate/handedness.out)）。規則を u = t×n、v = −t に直し、どの面でも裏返らないことを確かめた。試作が描いた向きは計画と違うことを、この記録に書いた。
+2. **向きの規則で画像が裏返っていた（二人とも）。** 初めの版は、壁のvを+z、床のvを+yとしていたが、画像の行は下へ進むので、どの面でも鏡に映った絵になり、壁では上下も逆になる（[handedness.out](evidence/verification-11/interrogate/handedness.out)）。規則を u = t×n、v = −t に直し、どの面でも裏返らないことを確かめた。試作が描いた向きは計画と違うことを、この記録に書いた。
 3. **原点から遠いと柄の座標が粗くなる（反対役1）。** 原点を寄せても、f32の位置そのものが粗いので、10 kmでは1.7画素の誤差になる。計画に精度の範囲を書いた。
 4. **三面投影の軸が決まっていなかった（二人とも）。** 計画の三面投影の第三の軸の長さが書かれておらず、試作は世界の軸で描いていた。計画にwの軸を定め、試作が描いた形をこの記録に書いた。
 5. **ブラウザはEXIFの向きを必ず当てる（反対役1）。** 計画は「向きを変換しない」としていた。Containerが向きの情報を持たない画像を返すことにした。
@@ -192,7 +192,7 @@ upstreamの変更は、既存のファイル（`capture.rs`・`view.rs`・`lib.r
 
 ## 再実行と証拠
 
-証拠は [evidence/verification-10/](evidence/verification-10/) にある。
+証拠は [evidence/verification-11/](evidence/verification-11/) にある。
 
 - `prototype.patch` は、`eea8ee48c` から `7e8a02037` までの試作のコードの差分である。
 - `probes.js` と `probes.json` は、画素の比較、復号、ミップマップの時間である。
@@ -206,12 +206,12 @@ upstreamの変更は、既存のファイル（`capture.rs`・`view.rs`・`lib.r
 ```sh
 git worktree add --detach ../v10-rerun eea8ee48c
 cd ../v10-rerun
-git checkout origin/main -- docs/verification/evidence/verification-10
-git apply docs/verification/evidence/verification-10/prototype.patch
+git checkout origin/main -- docs/verification/evidence/verification-11
+git apply docs/verification/evidence/verification-11/prototype.patch
 mise exec -- pnpm install --frozen-lockfile
 mise exec -- pnpm setup
 for v in base proto a b all; do bash crates/viewer/proto/build.sh "$v"; done
 python3 -m http.server --bind 127.0.0.1 8000
 ```
 
-WebGPUを使えるChromiumで `http://127.0.0.1:8000/crates/viewer/proto/index.html?pkg=all` を開き、ボタンで案、ミップマップ、標本の取り方、異方性、投影の決め方、部屋の長さ、ガラス、部屋の数、視点を切り替える。ページが準備できたら、開発者ツールのコンソールで `await (await import("/docs/verification/evidence/verification-10/probes.js")).run()` を実行すると、`probes.json` の値を出す。`build.sh` はビルドごとにサイズを表示する。SolidCraftをネイティブにビルドすると数GBを使うので、試作はWasmのビルドだけで確かめた。
+WebGPUを使えるChromiumで `http://127.0.0.1:8000/crates/viewer/proto/index.html?pkg=all` を開き、ボタンで案、ミップマップ、標本の取り方、異方性、投影の決め方、部屋の長さ、ガラス、部屋の数、視点を切り替える。ページが準備できたら、開発者ツールのコンソールで `await (await import("/docs/verification/evidence/verification-11/probes.js")).run()` を実行すると、`probes.json` の値を出す。`build.sh` はビルドごとにサイズを表示する。SolidCraftをネイティブにビルドすると数GBを使うので、試作はWasmのビルドだけで確かめた。
