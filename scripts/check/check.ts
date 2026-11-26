@@ -4,7 +4,7 @@ import { machineSlots, requireFreeDisk, withDockerSlot } from "../shared/docker-
 import { access, glob } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { start, stop } from "../shared/processes.ts";
+import { start, stop, type ProcessOutcome } from "../shared/processes.ts";
 import { repositoryRoot, serviceCrates } from "../shared/repository.ts";
 import { assertContainerE2eFiles } from "./layout-contract.ts";
 import { rustSkipBase } from "./rust-inputs.ts";
@@ -17,6 +17,19 @@ const usage = `Usage: pnpm check [--fast | --full] [--rust]
   --full  Also rebuild Wasm bindings, build apps, check local integration and audit dependencies.
 All modes modify service source through formatters and automatic lint fixes.
 Run pnpm setup once before checking. No mode stages files or deploys resources.`;
+
+export class StepFailed extends Error {
+  constructor(label: string, status: string) {
+    super(`${label} failed (${status})`);
+  }
+}
+
+export function assertStepSucceeded(label: string, outcome: ProcessOutcome): void {
+  if (outcome.kind === "error") throw outcome.error;
+  if (outcome.code !== 0) {
+    throw new StepFailed(label, String(outcome.signal ?? outcome.code ?? "unknown exit"));
+  }
+}
 
 export type CheckGates = {
   dockerStage: (stage: () => Promise<void>) => Promise<void>;
@@ -153,6 +166,17 @@ export async function runChecks(
     }
   }
 
+  const failedTests: StepFailed[] = [];
+  async function deferTestFailure(stage: Promise<void>) {
+    try {
+      await stage;
+    } catch (error) {
+      if (!(error instanceof StepFailed)) throw error;
+      failedTests.push(error);
+      console.error(`[check] ${error.message}. The remaining steps still run, then check fails.`);
+    }
+  }
+
   if (mode !== "--fast") {
     const tests: string[] = [];
     for await (const path of glob([
@@ -165,14 +189,18 @@ export async function runChecks(
       tests.push(path);
     if (tests.length === 0) throw new Error("No TypeScript tests found");
     if (!base) gates.rustStage("TypeScript tests");
-    await run("TypeScript tests", process.execPath, [
-      ...nodeTestFlags(resultsDir, "typescript"),
-      ...(base
-        ? ["--test-skip-pattern=^Rust serialized optional responses are accepted by generated zod$"]
-        : []),
-      ...tests.sort(),
-    ]);
-    if (!base) await cargo("Rust tests", ...cargoTestFlags(resultsDir));
+    await deferTestFailure(
+      run("TypeScript tests", process.execPath, [
+        ...nodeTestFlags(resultsDir, "typescript"),
+        ...(base
+          ? [
+              "--test-skip-pattern=^Rust serialized optional responses are accepted by generated zod$",
+            ]
+          : []),
+        ...tests.sort(),
+      ]),
+    );
+    if (!base) await deferTestFailure(cargo("Rust tests", ...cargoTestFlags(resultsDir)));
   }
   if (mode === "--full") {
     await pnpm("Build web", "--filter", "@madori/web", "build");
@@ -192,10 +220,12 @@ export async function runChecks(
       "--containers-rollout=none",
     );
     await gates.dockerStage(async () => {
-      await run("Container integration", process.execPath, [
-        ...nodeTestFlags(resultsDir, "container"),
-        "apps/worker/tests/container.e2e.ts",
-      ]);
+      await deferTestFailure(
+        run("Container integration", process.execPath, [
+          ...nodeTestFlags(resultsDir, "container"),
+          "apps/worker/tests/container.e2e.ts",
+        ]),
+      );
       await script("Prune geometry service images", "scripts/dev/prune-images.ts");
       await script("Prune Docker build cache", "scripts/dev/prune-build-cache.ts");
     });
@@ -214,6 +244,8 @@ export async function runChecks(
       "unused-wrapper",
     ]);
   }
+  if (failedTests.length > 0)
+    throw new Error(failedTests.map((failure) => failure.message).join("; "));
 }
 
 async function main() {
@@ -255,10 +287,7 @@ async function main() {
     const result = await child.finished;
     active.delete(child);
     interruption.signal.throwIfAborted();
-    if (result.kind === "error") throw result.error;
-    if (result.code !== 0) {
-      throw new Error(`${label} failed (${result.signal ?? result.code ?? "unknown exit"})`);
-    }
+    assertStepSucceeded(label, result);
     console.log(`[check] ${label}: ${((performance.now() - stepStarted) / 1000).toFixed(1)}s`);
   }
   const crates = serviceCrates();
