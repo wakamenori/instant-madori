@@ -330,6 +330,7 @@ OTelは、リポジトリではなくこのマシンの設定で有効にする�
 - Codexは、`~/.codex/config.toml` の `[otel]` で有効にする。リポジトリの `.codex/hooks.json` は、SessionStart、UserPromptSubmit、PreToolUse、PostToolUse、PermissionRequest、Stopを登録する。worktreeのセッションも本体のチェックアウトの `.codex/hooks.json` を読み、コマンドはセッションのcwd（worktree）で動く。そのため、定義の承認と変更は本体のチェックアウトに入ってから効き、スクリプトは各worktreeの版が動く。承認は定義のハッシュに結び付くため、各イベントのコマンドは次の2行に固定し、`<Event>` にはイベント名を入れる。
   1. `node metrics/hook/codex.ts <Event> >/dev/null 2>&1 || true` は、ツールの出力を除いてspoolに書く。記録に失敗してもセッションに出力を返さず、作業を続ける。
   2. `node scripts/dev/agent-guard.ts <Event>` は、検証対象のheadが変わらず、その試行の `verify` ステータスがないとき、Stopで一度だけ判定コマンドの実行を促す。GitHubに確認できないときは終了を許す。
+- Codexの承認の要求と回答も、Claude Codeと同じくT3の承認ごとの記録から取る（`approval.wait` の項を参照）。CodexのPermissionRequestのhookの記録は集計に使わない。T3はCodexのスレッドを全権限で動かし、MCPの呼び出しを人に示さずに通すが、PermissionRequestのhookはその呼び出しにも動き、答えの記録を残さないためである。2026年11月22日から26日までの358件は、どれもT3の承認の記録が無く、2秒以内にツールが終わっていた。
 
 受け口はCodexのhookからイベントやターンなどの事実、指示と最終応答から取り出したIssue番号や役割などの要約、コマンドやパスを残したツール入力だけを保存する。Codexは `apply_patch` のパッチ全体を `command` で送るので、`*** Add File:` などのファイルの見出しの行だけを残し、ファイルの中身は捨てる。cwdのgit共通ディレクトリがこのリポジトリと違えば破棄し、一致すれば会話を `t3.codex_link` で照合してから `codex.hook` としてL1に入れる。
 
