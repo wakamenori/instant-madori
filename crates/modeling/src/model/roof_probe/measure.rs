@@ -72,13 +72,6 @@ fn oracle(roofs: &[TrialRoof], joined: bool) -> (f64, f64) {
     }
     (e, v)
 }
-pub(super) fn figures(s: &mut Session, names: &[String]) -> Vec<Value> {
-    execute_checked(s, "inspect.measure", &json!({"bodies":names})).unwrap()["bodies"]
-        .as_array()
-        .unwrap()
-        .clone()
-}
-
 pub(super) struct Row {
     pub closed: bool,
     pub count: usize,
