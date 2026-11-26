@@ -1,0 +1,22 @@
+--- plan.md 4.8 rules (as written) ---
+wall: u = z x n, v = +z                                    n=[0,1,0] u=[-1,0,0] v=[0,0,1] -> MIRRORED
+wall: u = z x n, v = +z                                    n=[0,-1,0] u=[1,0,0] v=[0,0,1] -> MIRRORED
+wall: u = z x n, v = +z                                    n=[1,0,0] u=[0,1,0] v=[0,0,1] -> MIRRORED
+wall: u = z x n, v = +z                                    n=[-1,0,0] u=[0,-1,0] v=[0,0,1] -> MIRRORED
+wall: u = z x n, v = +z                                    n=[0.7071067811865476,0.7071067811865476,0] u=[-0.7071067811865476,0.7071067811865476,0] v=[0,0,1] -> MIRRORED
+floor top: u = +x, v = +y                                  n=[0,0,1] u=[1,0,0] v=[0,1,0] -> MIRRORED
+ceiling (underside): u = +x, v = -y                        n=[0,0,-1] u=[1,0,0] v=[0,-1,0] -> MIRRORED
+--- prototype frames actually rendered (room.rs @7e8a02037, pattern-a/b) ---
+floor face 5: u=[0,240,0] v=[480,0,0]                      n=[0,0,1] u=[0,240,0] v=[480,0,0] -> reads correctly
+south wall inner face 3 (n=+y): u=[600,0,0] v=+z           n=[0,1,0] u=[600,0,0] v=[0,0,600] -> reads correctly
+east wall inner face 0 (n=-x): u=[0,600,0] v=+z            n=[-1,0,0] u=[0,600,0] v=[0,0,600] -> reads correctly
+north wall inner face 2 (n=-y): u=[-600,0,0] v=+z          n=[0,-1,0] u=[-600,0,0] v=[0,0,600] -> reads correctly
+west wall inner face 1 (n=+x): u=[0,-600,0] v=+z           n=[1,0,0] u=[0,-600,0] v=[0,0,600] -> reads correctly
+--- prototype triplanar (viewport-maps.wgsl: scaled.yz on x-facing, scaled.xz on y-facing) ---
+column side facing +x: yz projection                       n=[1,0,0] u=[0,1,0] v=[0,0,1] -> MIRRORED
+column side facing -x: yz projection                       n=[-1,0,0] u=[0,1,0] v=[0,0,1] -> reads correctly
+column side facing +y: xz projection                       n=[0,1,0] u=[1,0,0] v=[0,0,1] -> reads correctly
+column side facing -y: xz projection                       n=[0,-1,0] u=[1,0,0] v=[0,0,1] -> MIRRORED
+--- walls: is the image upright? (image-down must point to world -z) ---
+plan wall v = +z                         image top row at the FLOOR side (upside down)
+prototype wall v = [0,0,600]             image top row at the FLOOR side (upside down)

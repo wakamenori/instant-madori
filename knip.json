@@ -5,6 +5,7 @@
     ".": {
       "entry": [
         ".claude/skills/madori-coordinator/scripts/records.mjs",
+        "scripts/check/check.ts",
         "scripts/check/check-doc-paths.ts",
         "scripts/check/check-skill-arguments.ts",
         "scripts/check/check-layout.ts",
@@ -21,6 +22,7 @@
         "metrics/hook/hook.ts",
         "metrics/hook/codex.ts",
         "scripts/dev/agent-guard.ts",
+        "scripts/dev/prepare-checkout.ts",
         "scripts/dev/staging.ts",
         "metrics/receiver/receiver.ts",
         "metrics/build/build.ts",

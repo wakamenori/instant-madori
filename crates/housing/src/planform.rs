@@ -69,6 +69,20 @@ pub(crate) fn between(a: Point, b: Point, p: Point) -> bool {
     (a.x.min(b.x)..=a.x.max(b.x)).contains(&p.x) && (a.y.min(b.y)..=a.y.max(b.y)).contains(&p.y)
 }
 
+pub(crate) fn contains(outline: &[Point], p: Point) -> bool {
+    let mut inside = false;
+    for (&a, &b) in outline.iter().zip(outline.iter().cycle().skip(1)) {
+        let turn = exact_orientation(a, b, p);
+        if turn.is_eq() && between(a, b, p) {
+            return true;
+        }
+        if (a.y > p.y) != (b.y > p.y) && turn.is_gt() == (b.y > a.y) {
+            inside = !inside
+        }
+    }
+    inside
+}
+
 impl SimplePolygon {
     pub fn new(points: Vec<Point>) -> Result<Self, Reason> {
         if points.iter().any(|p| !p.x.is_finite() || !p.y.is_finite()) {

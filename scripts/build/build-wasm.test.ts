@@ -131,8 +131,14 @@ void test("setup, dev and build use the same Wasm builder", () => {
   const { scripts } = z
     .object({ scripts: z.object({ setup: z.string(), dev: z.string(), build: z.string() }) })
     .parse(JSON.parse(readFileSync(new URL("package.json", repositoryRoot), "utf8")));
-  for (const command of Object.values(scripts)) {
-    assert(command.split(" && ").includes("node scripts/build/build-wasm.ts"), command);
+  for (const [name, command] of Object.entries(scripts)) {
+    const chain =
+      name === "dev"
+        ? command
+        : /^node metrics\/hook\/run-span\.ts (setup|build) -- sh -c '(.*) "\$@"' \1$/u.exec(
+            command,
+          )?.[2];
+    assert(chain?.split(" && ").includes("node scripts/build/build-wasm.ts"), command);
   }
 });
 

@@ -197,13 +197,19 @@ void test("every cargo entry point starts with the rustup check", () => {
       }),
     })
     .parse(JSON.parse(readFileSync(new URL("package.json", repositoryRoot), "utf8")));
-  assert.deepEqual(scripts.setup.split(" && ").slice(0, 2), [
+  function innerChain(name: "setup" | "build") {
+    const prefix = `node metrics/hook/run-span.ts ${name} -- sh -c '`;
+    const suffix = ` "$@"' ${name}`;
+    assert.ok(scripts[name].startsWith(prefix) && scripts[name].endsWith(suffix));
+    return scripts[name].slice(prefix.length, -suffix.length);
+  }
+  assert.deepEqual(innerChain("setup").split(" && ").slice(0, 2), [
     "node scripts/shared/rustup-cargo.ts",
     "mise install",
   ]);
-  for (const command of [scripts.dev, scripts.build])
+  for (const command of [scripts.dev, innerChain("build")])
     assert.equal(command.split(" && ")[0], "node scripts/build/build-wasm.ts");
-  assert.equal(scripts.check, "node scripts/check/check.ts");
+  assert.equal(scripts.check, "node metrics/hook/run-span.ts check -- node scripts/check/check.ts");
 });
 
 void test("mise keeps cargo home first after activation", (t) => {

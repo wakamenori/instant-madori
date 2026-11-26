@@ -556,3 +556,19 @@ fn reports_obstructions_at_both_corners() {
         .collect();
     assert_eq!(vertices, [Some("a"), Some("c")]);
 }
+
+#[test]
+fn a_step_flush_with_the_side_wall_leaves_no_spike_in_the_floor() {
+    let house = layout_with_walls(&[(0, 0, 4000, 3000), (0, 3000, 3950, 6000)], 100., 150.);
+    let floor = house.rooms().next().unwrap().interior().unwrap();
+    assert_eq!(
+        floor.outline(),
+        [
+            point(50, 50),
+            point(3950, 50),
+            point(3950, 2925),
+            point(50, 2925)
+        ]
+    );
+    assert!(floor.area().matches_square_metres(3.9 * 2.875));
+}

@@ -1,0 +1,6 @@
+Run in the prototype page (T3 Code Chromium 152.0.7977.169), 2026-11-26. 64x32 JPEG with EXIF Orientation=6:
+default: 32x64
+{"imageOrientation":"none","colorSpaceConversion":"none"}: 32x64
+{"imageOrientation":"from-image"}: 32x64
+{"imageOrientation":"flipY"}: 32x64
+the same JPEG without EXIF, {"imageOrientation":"none"}: 64x32

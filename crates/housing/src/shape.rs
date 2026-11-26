@@ -303,6 +303,248 @@ pub(crate) fn profile_bounds<P: Coordinates>(
     Ok((low, high))
 }
 
+impl Edge {
+    fn slice(self, y: f64, xs: &mut Vec<f64>) {
+        if let Some(arc) = self.arc {
+            let dy = y - arc.center.y;
+            let dx = ((arc.radius - dy) * (arc.radius + dy)).sqrt();
+            for x in [arc.center.x - dx, arc.center.x + dx] {
+                if arc.contains_angle(angle(arc.center, Point { x, y })) {
+                    xs.push(x);
+                }
+            }
+        } else if (self.a.y < y) != (self.b.y < y) {
+            xs.push(self.a.x + (y - self.a.y) * (self.b.x - self.a.x) / (self.b.y - self.a.y));
+        }
+    }
+
+    fn crossing_heights(self, other: Self, ys: &mut Vec<f64>) {
+        let ab = self.b.delta_from(self.a);
+        let cd = other.b.delta_from(other.a);
+        match (self.arc, other.arc) {
+            (None, None) => {
+                let determinant = ab.cross(cd);
+                let offset = other.a.delta_from(self.a);
+                let (t, u) = (
+                    offset.cross(cd) / determinant,
+                    offset.cross(ab) / determinant,
+                );
+                if (0.0..=1.).contains(&t) && (0.0..=1.).contains(&u) {
+                    ys.push(self.a.translated(ab * t).y);
+                }
+            }
+            (Some(_), None) => other.crossing_heights(self, ys),
+            (None, Some(arc)) => {
+                let unit = ab.unit();
+                let offset = arc.center.delta_from(self.a);
+                let d = offset.cross(unit).abs();
+                let half = ((arc.radius - d) * (arc.radius + d)).sqrt();
+                for t in [offset.dot(unit) - half, offset.dot(unit) + half] {
+                    let p = self.a.translated(unit * t);
+                    if (0.0..=ab.length()).contains(&t) && other.covers_angle(arc, p) {
+                        ys.push(p.y);
+                    }
+                }
+            }
+            (Some(a), Some(b)) => {
+                let centers = b.center.delta_from(a.center);
+                let d = centers.length();
+                if d == 0. || d > a.radius + b.radius || d < (a.radius - b.radius).abs() {
+                    return;
+                }
+                let along = 0.5 * (d + (a.radius - b.radius) * (a.radius + b.radius) / d);
+                let mid = a.center.translated(centers.unit() * along);
+                let half = ((a.radius - along) * (a.radius + along)).max(0.).sqrt();
+                for t in [half, -half] {
+                    let p = mid.translated(centers.unit().left() * t);
+                    if self.covers_angle(a, p) && other.covers_angle(b, p) {
+                        ys.push(p.y);
+                    }
+                }
+            }
+        }
+    }
+}
+struct WallProfile {
+    cut: bool,
+    edges: Vec<Edge>,
+}
+fn clear_intervals(profiles: &[WallProfile], y: f64) -> Vec<(f64, f64)> {
+    let mut events = Vec::new();
+    for profile in profiles {
+        let mut xs = Vec::new();
+        for edge in &profile.edges {
+            edge.slice(y, &mut xs);
+        }
+        xs.sort_by(f64::total_cmp);
+        for pair in xs.as_chunks::<2>().0 {
+            for (x, delta) in [(pair[0], 1), (pair[1], -1)] {
+                events.push((
+                    x,
+                    if profile.cut { delta } else { 0 },
+                    if profile.cut { 0 } else { delta },
+                ));
+            }
+        }
+    }
+    events.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let (mut cuts, mut adds) = (0, 0);
+    let mut start = 0.;
+    let mut result: Vec<(f64, f64)> = Vec::new();
+    for group in events.chunk_by(|a, b| a.0 == b.0) {
+        let before = cuts > 0 && adds == 0;
+        for (_, c, a) in group {
+            cuts += c;
+            adds += a;
+        }
+        let after = cuts > 0 && adds == 0;
+        if after && !before {
+            start = group[0].0;
+        }
+        if before && !after {
+            if let Some((_, end)) = result.last_mut()
+                && start - *end <= TOL
+            {
+                *end = group[0].0;
+            } else {
+                result.push((start, group[0].0));
+            }
+        }
+    }
+    result.retain(|(l, r)| *r - *l > TOL);
+    result
+}
+
+fn wall_profiles(wall: crate::BoundaryView<'_>, house: &crate::House) -> Option<Vec<WallProfile>> {
+    use crate::{Effect, WallEnd};
+    let length = wall.length();
+    house
+        .data()
+        .modifiers
+        .iter()
+        .filter(|m| m.wall == wall.data().id)
+        .map(|m| {
+            let reflect = |p: Point| match m.from {
+                WallEnd::Start => p,
+                WallEnd::End => Point {
+                    x: length - p.x,
+                    y: p.y,
+                },
+            };
+            let mut previous = m.profile.start.point();
+            let mut edges = Vec::new();
+            for segment in &m.profile.segments {
+                let (to, arc) = match *segment {
+                    Segment::Line { to } => (to, None),
+                    Segment::Arc { through, to } => {
+                        let mut arc = Arc::new(previous, through.point(), to.point())?;
+                        if m.from == WallEnd::End {
+                            arc.center = reflect(arc.center);
+                            arc.start = std::f64::consts::PI - arc.start;
+                            arc.sweep = -arc.sweep;
+                        }
+                        (to, Some(arc))
+                    }
+                };
+                edges.push(Edge {
+                    a: reflect(previous),
+                    b: reflect(to.point()),
+                    arc,
+                });
+                previous = to.point();
+            }
+            Some(WallProfile {
+                cut: matches!(m.effect, Effect::Cut {}),
+                edges,
+            })
+        })
+        .collect()
+}
+
+fn event_heights(profiles: &[WallProfile], height: f64) -> Vec<f64> {
+    let mut ys = vec![0., height];
+    for (i, profile) in profiles.iter().enumerate() {
+        for edge in &profile.edges {
+            ys.push(edge.b.y);
+            if let Some(arc) = edge.arc {
+                for k in 0..4 {
+                    let theta = f64::from(k) * FRAC_PI_2;
+                    if arc.contains_angle(theta) {
+                        ys.push(arc.at(theta).y);
+                    }
+                }
+            }
+            for other in &profiles[..i] {
+                for &e in &other.edges {
+                    edge.crossing_heights(e, &mut ys);
+                }
+            }
+        }
+    }
+    ys.retain(|&y| y >= 0. && y <= height);
+    ys.sort_by(f64::total_cmp);
+    ys.dedup();
+    ys
+}
+
+// A passage needs the same horizontal start throughout the band. Tolerance can
+// merge or erase a thin track partway up, changing the pairing of its endpoints.
+fn constrain_starts(
+    feasible: &mut Vec<(f64, f64)>,
+    profiles: &[WallProfile],
+    low: f64,
+    high: f64,
+    width: f64,
+) {
+    if feasible.is_empty() || high - low <= TOL {
+        return;
+    }
+    let bottom = clear_intervals(profiles, low + TOL / 2.);
+    let top = clear_intervals(profiles, high - TOL / 2.);
+    if bottom.len() != top.len() {
+        let mid = low.midpoint(high);
+        constrain_starts(feasible, profiles, low, mid, width);
+        constrain_starts(feasible, profiles, mid, high, width);
+        return;
+    }
+    let starts: Vec<_> = bottom
+        .into_iter()
+        .zip(top)
+        .map(|((l, r), (s, t))| (l.max(s), r.min(t) - width + TOL))
+        .filter(|(a, b)| a <= b)
+        .collect();
+    *feasible = intersect(feasible, &starts);
+}
+
+fn intersect(a: &[(f64, f64)], b: &[(f64, f64)]) -> Vec<(f64, f64)> {
+    a.iter()
+        .flat_map(|&(p, q)| b.iter().map(move |&(r, s)| (p.max(r), q.min(s))))
+        .filter(|(start, end)| start <= end)
+        .collect()
+}
+
+pub(crate) fn cut_passage(
+    wall: crate::BoundaryView<'_>,
+    house: &crate::House,
+    width: f64,
+    height: f64,
+) -> bool {
+    let Some(profiles) = wall_profiles(wall, house) else {
+        return false;
+    };
+    if !profiles.iter().any(|p| p.cut) {
+        return false;
+    }
+    let mut feasible = vec![(0.0_f64, wall.length() - width + TOL)];
+    for band in event_heights(&profiles, height).windows(2) {
+        constrain_starts(&mut feasible, &profiles, band[0], band[1], width);
+        if feasible.is_empty() {
+            return false;
+        }
+    }
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

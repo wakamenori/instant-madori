@@ -106,6 +106,7 @@ void test("each mode clears previous results before the first step and records e
         assert(args.includes("--test-reporter-destination=" + join(resultsDir, suite + ".jsonl")));
       }
     }
+    assert.deepEqual(commands.get("GitHub workflows"), ["exec", "--", "actionlint"]);
     const rust = commands.get("Rust tests");
     if (mode === "--fast") assert.equal(rust, undefined);
     else {

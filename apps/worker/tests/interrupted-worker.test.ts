@@ -9,6 +9,7 @@ import { createInterface } from "node:readline";
 import { test, type TestContext } from "node:test";
 import { setTimeout } from "node:timers/promises";
 import { promisify } from "node:util";
+import { groupHasLiveMember, killGroup } from "../../../scripts/shared/processes.ts";
 
 const fixtureSource = `
   import { startLocalWorker } from ${JSON.stringify(new URL("./support/local-worker.ts", import.meta.url).href)};
@@ -52,18 +53,13 @@ void test("a test process killed while its Worker runs leaves no Wrangler behind
     await exited;
 
     const deadline = performance.now() + 15_000;
-    for (;;) {
-      try {
-        process.kill(-leader, 0);
-      } catch (error) {
-        if (error instanceof Error && "code" in error && error.code === "ESRCH") return;
-        throw error;
+    while (groupHasLiveMember(leader)) {
+      if (performance.now() >= deadline) {
+        killGroup(leader);
+        assert.fail("the Wrangler group outlived its killed test process");
       }
-      if (performance.now() >= deadline) break;
       await setTimeout(100);
     }
-    process.kill(-leader, "SIGKILL");
-    assert.fail("the Wrangler group outlived its killed test process");
   } finally {
     fixture.kill("SIGKILL");
     await exited;

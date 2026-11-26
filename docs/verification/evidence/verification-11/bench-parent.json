@@ -1,0 +1,16 @@
+{
+  "commit": "7e8a02037; proto and all variants built from it by build.sh",
+  "machine": "Apple M4 Pro, 12 logical CPUs, 24 GiB, macOS 27.2.1, T3 Code Chromium 152 (WebGPU)",
+  "settings": { "size": [1920, 1200], "grid": 8, "length": 3640, "glass": false, "camera": "south", "mips": "gpu", "anisotropy": 16, "sampling": "grad" },
+  "method": "One page per build, measured one after the other. window.__proto.measure(mode, 8, false, 200) after one 50-frame warm-up; 6 runs per mode, alternating plain and b-planar inside one call for the all build. The first run of each mode is dropped: the first measurement after switching pages was about 0.1 ms high in every mode. ms per frame.",
+  "proto": { "plain": [0.2715000000596046, 0.22850000023841857, 0.19950000017881395, 0.18949999988079072, 0.1889999997615814, 0.19199999988079072] },
+  "all": {
+    "plain": [0.38349999994039535, 0.385, 0.3820000001788139, 0.3830000001192093, 0.38400000005960466, 0.3825],
+    "b-planar": [0.42, 0.4205000001192093, 0.42099999994039533, 0.42, 0.42, 0.42]
+  },
+  "median_and_range_of_last_5": {
+    "proto plain": [0.192, 0.189, 0.2285],
+    "all plain": [0.383, 0.382, 0.385],
+    "all b-planar": [0.42, 0.42, 0.421]
+  }
+}

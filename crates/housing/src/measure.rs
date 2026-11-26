@@ -208,6 +208,18 @@ fn contour(corners: &[Corner]) -> Option<Interior> {
     if outline.first() == outline.last() {
         outline.pop();
     }
+    while outline.len() >= 3 {
+        let n = outline.len();
+        let Some(i) = (0..n).find(|&i| {
+            let (a, b, c) = (outline[(i + n - 1) % n], outline[i], outline[(i + 1) % n]);
+            a == b
+                || (crate::planform::exact_orientation(a, b, c).is_eq()
+                    && !crate::planform::between(a, c, b))
+        }) else {
+            break;
+        };
+        outline.remove(i);
+    }
     let origin = *outline.first()?;
     let mut twice = 0.0;
     let mut perimeter = 0.0;
