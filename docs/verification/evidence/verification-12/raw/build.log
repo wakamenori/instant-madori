@@ -1,0 +1,122 @@
+#0 building with "desktop-linux" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 3.71kB done
+#1 DONE 0.0s
+
+#2 resolve image config for docker-image://docker.io/docker/dockerfile:1
+#2 DONE 1.3s
+
+#3 docker-image://docker.io/docker/dockerfile:1@sha256:572cebbc2b15e6f84c077742952674889cb63cd5e9b80abdffcbe587b6f19183
+#3 resolve docker.io/docker/dockerfile:1@sha256:572cebbc2b15e6f84c077742952674889cb63cd5e9b80abdffcbe587b6f19183 done
+#3 CACHED
+
+#4 [internal] load metadata for docker.io/library/rust:1.99.1-bookworm
+#4 ...
+
+#5 [internal] load metadata for docker.io/library/debian:bookworm-slim
+#5 DONE 1.0s
+
+#4 [internal] load metadata for docker.io/library/rust:1.99.1-bookworm
+#4 DONE 1.4s
+
+#6 [internal] load .dockerignore
+#6 transferring context: 923B done
+#6 DONE 0.0s
+
+#7 [stage-1 1/2] FROM docker.io/library/debian:bookworm-slim@sha256:e67eeead736ff7bbe258ef088bff683635c561b1fcfefad0806c1df4ab49ce0e
+#7 resolve docker.io/library/debian:bookworm-slim@sha256:e67eeead736ff7bbe258ef088bff683635c561b1fcfefad0806c1df4ab49ce0e 0.0s done
+#7 CACHED
+
+#8 [build  1/11] FROM docker.io/library/rust:1.99.1-bookworm@sha256:e6f2cff35d0f309acf8433b4f05878ed77092602c5065cc81801177da0bb3a9c
+#8 resolve docker.io/library/rust:1.99.1-bookworm@sha256:e6f2cff35d0f309acf8433b4f05878ed77092602c5065cc81801177da0bb3a9c 0.0s done
+#8 DONE 0.0s
+
+#9 [internal] load build context
+#9 transferring context: 127.99MB 2.8s done
+#9 DONE 2.8s
+
+#10 [build  2/11] WORKDIR /src
+#10 CACHED
+
+#11 [build  3/11] COPY rust-toolchain.toml ./
+#11 CACHED
+
+#12 [build  4/11] RUN if [ "linux/amd64" != "linux/amd64" ]; then echo "Unsupported target: linux/amd64 (expected linux/amd64)" >&2; exit 1; fi     && if [ "linux/arm64" != "linux/amd64" ]; then         apt-get update         && apt-get install -y --no-install-recommends gcc-x86-64-linux-gnu libc6-dev-amd64-cross         && rm -rf /var/lib/apt/lists/*; fi     && rustup target add x86_64-unknown-linux-gnu
+#12 CACHED
+
+#13 [build  5/11] COPY Cargo.toml Cargo.lock ./
+#13 CACHED
+
+#14 [build  6/11] COPY .cargo .cargo
+#14 CACHED
+
+#15 [build  7/11] COPY apps/geometry apps/geometry
+#15 CACHED
+
+#16 [build  8/11] COPY crates crates
+#16 DONE 0.6s
+
+#17 [build  9/11] COPY third_party/solidcraft third_party/solidcraft
+#17 DONE 0.9s
+
+#18 [build 10/11] WORKDIR /app
+#18 DONE 0.0s
+
+#19 [build 11/11] RUN --mount=type=cache,target=/usr/local/cargo/registry     --mount=type=cache,target=/usr/local/cargo/git     --mount=type=cache,id=instant-madori-geometry-build-v2,target=/app,sharing=locked     <<'EOF' (export LC_ALL=C...)
+#19 1.843 Source copy: removed 1, wrote 12 entries
+#19 1.843 crates/modeling/src/model/sun_probe
+#19 1.843 crates/modeling/src/model/sun_probe/bench
+#19 1.843 crates/modeling/src/model/sun_probe/bench/summary.py
+#19 1.843 crates/modeling/src/model/sun_probe/run.rs
+#19 1.843 crates/modeling/src/model/sun_probe/bench/Dockerfile
+#19 1.843 crates/modeling/src/model/sun_probe/grid.rs
+#19 1.843 crates/modeling/src/model/sun_probe/bench/dev.sh
+#19 1.843 crates/modeling/src/model.rs
+#19 1.843 crates/modeling/src/model/sun_probe/bench/linux.sh
+#19 1.843 crates/modeling/src/model/sun_probe/exact.rs
+#19 1.843 crates/modeling/src/model/sun_probe/scene.rs
+#19 1.843 crates/modeling/src/model/sun_probe.rs
+#19 2.853    Compiling serde_core v1.0.229
+#19 3.974    Compiling serde v1.0.229
+#19 3.974    Compiling serde_json v1.0.154
+#19 3.974    Compiling toml_datetime v1.1.3+spec-1.1.0
+#19 4.028    Compiling serde_spanned v1.1.3
+#19 4.066    Compiling serde_bytes v0.11.19
+#19 4.112    Compiling toml v1.2.1+spec-1.1.0
+#19 4.131    Compiling toml_edit v0.25.19+spec-1.1.0
+#19 4.255    Compiling solidcore v1.0.1 (/app/third_party/solidcraft/solidcore/crates/solidcore)
+#19 4.963    Compiling schemars v1.2.3
+#19 5.087    Compiling solidcore-record v0.1.0 (/app/third_party/solidcraft/solidcore/crates/solidcore-record)
+#19 5.105    Compiling serdect v0.2.0
+#19 5.153    Compiling sec1 v0.7.3
+#19 5.414    Compiling serde-value v0.7.0
+#19 5.659    Compiling cadmpeg-core v0.6.12
+#19 6.221    Compiling elliptic-curve v0.13.8
+#19 6.768    Compiling cadmpeg-ir v0.6.12
+#19 7.563    Compiling cadmpeg-container v0.6.12
+#19 10.01    Compiling ecdsa v0.16.9
+#19 10.41    Compiling primeorder v0.13.6
+#19 10.67    Compiling solidcraft-profile v0.45.0-rc.4 (/app/third_party/solidcraft/crates/profile)
+#19 11.10    Compiling num-bigint-dig v0.8.6
+#19 12.82    Compiling serdect v0.3.0
+#19 12.91    Compiling cx448 v0.1.1
+#19 14.67    Compiling rsa v0.9.10
+#19 14.85    Compiling dsa v0.6.3
+#19 15.41    Compiling p256 v0.13.2
+#19 15.55    Compiling p384 v0.13.1
+#19 15.64    Compiling p521 v0.13.3
+#19 16.31    Compiling k256 v0.13.4
+#19 16.94    Compiling gltf-json v1.4.1
+#19 17.15    Compiling solidcraft-format v0.45.0-rc.4 (/app/third_party/solidcraft/crates/format)
+#19 18.84    Compiling ciborium v0.2.2
+#19 19.29    Compiling coset v0.4.2
+#19 20.31    Compiling gltf v1.4.1
+#19 22.51    Compiling pgp v0.21.1
+#19 22.82    Compiling craft-plugin v0.45.0-rc.4 (/app/third_party/solidcraft/crates/craft-plugin)
+#19 24.82    Compiling solidcraft-control v0.45.0-rc.4 (/app/third_party/solidcraft/crates/control)
+#19 26.79    Compiling solidcraft-ui-text v0.45.0-rc.4 (/app/third_party/solidcraft/crates/ui-text)
+#19 29.49    Compiling serde_path_to_error v0.1.20
+#19 29.96    Compiling madori-housing v0.1.0 (/app/crates/housing)
+#19 CANCELED
+ERROR: failed to build: failed to solve: Canceled: context canceled

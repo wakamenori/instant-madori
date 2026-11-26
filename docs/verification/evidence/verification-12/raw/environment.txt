@@ -1,0 +1,7 @@
+arm64
+Docker aarch64
+Host Apple M4 Pro. Docker Desktop settings-store.json has no explicit Rosetta key.
+df -h / available: 22 GiB before dev, 20 GiB at link, 17 GiB after dev and before Docker, 16 then 15 GiB during Docker.
+df -k / showed 13834104 KiB (13.19 GiB) still falling. Interrupted docker build; df -h / then showed 12 GiB.
+Docker released development-1 after 44 s. 41 Cargo Compiling lines before cancellation. No release binary or runtime measurements.
+Linux runs must be repeated from the repository root after disk headroom is restored.
