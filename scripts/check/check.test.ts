@@ -107,6 +107,15 @@ void test("each mode clears previous results before the first step and records e
       }
     }
     assert.deepEqual(commands.get("GitHub workflows"), ["exec", "--", "actionlint"]);
+    const labels = [...commands.keys()];
+    if (mode === "--full") {
+      const contents = labels.indexOf("Viewer Wasm contents");
+      assert(contents >= 0);
+      assert.equal(labels[contents + 1], "Viewer Wasm size");
+      assert.deepEqual(commands.get("Viewer Wasm size"), [
+        "scripts/check/check-viewer-wasm-size.ts",
+      ]);
+    } else assert(!commands.has("Viewer Wasm size"));
     const rust = commands.get("Rust tests");
     if (mode === "--fast") assert.equal(rust, undefined);
     else {
