@@ -1,4 +1,5 @@
 import type { Asset } from "@madori/contracts";
+import type { AssetContent } from "../storage/assets.ts";
 import { limits } from "../limits.ts";
 import type { OwnerId } from "../owner.ts";
 import type { ServiceDeps, StoreDeps } from "./deps.ts";
@@ -58,4 +59,12 @@ export async function createAsset(
   if (once.kind === "request_id_reused") return once;
   if (once.kind === "not_applied") throw new Error("Unconditional asset insert did not apply");
   return { kind: "created", asset: once.result };
+}
+
+export async function readAsset(
+  { store }: StoreDeps<"assets", "open">,
+  scope: { ownerId: OwnerId; assetId: string },
+): Promise<{ kind: "found"; content: AssetContent } | { kind: "not_found" }> {
+  const content = await store.assets.open(scope);
+  return content === null ? { kind: "not_found" } : { kind: "found", content };
 }

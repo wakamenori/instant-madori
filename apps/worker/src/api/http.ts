@@ -40,6 +40,7 @@ export function parseHttpMethod(method: string): HttpMethod | undefined {
 
 export type RoutePath =
   | "/api/assets"
+  | "/api/assets/:assetId"
   | "/api/me"
   | "/api/jobs/:jobId/stop"
   | "/api/projects"

@@ -1,3 +1,7 @@
+function hex(digest: ArrayBuffer): string {
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
 export function r2(bucket: R2Bucket) {
   return {
     async putNew(
@@ -19,11 +23,19 @@ export function r2(bucket: R2Bucket) {
       const sha256 = object.checksums.sha256;
       return {
         customMetadata: object.customMetadata ?? {},
-        sha256:
-          sha256 === undefined
-            ? null
-            : Array.from(new Uint8Array(sha256), (b) => b.toString(16).padStart(2, "0")).join(""),
+        sha256: sha256 === undefined ? null : hex(sha256),
       };
+    },
+    async digest(key: string) {
+      const object = await bucket.get(key);
+      if (object === null) return null;
+      const hash = new crypto.DigestStream("SHA-256");
+      await object.body.pipeTo(hash);
+      return { sha256: hex(await hash.digest), etag: object.etag };
+    },
+    async stream(key: string, etag: string) {
+      const object = await bucket.get(key, { onlyIf: { etagMatches: etag } });
+      return object !== null && "body" in object ? object.body : null;
     },
     async read(key: string) {
       const object = await bucket.get(key);

@@ -465,6 +465,14 @@ await test("Job execution through services on real D1 and R2", async (t) => {
     };
     const realR2 = r2(db.bucket);
     const observedR2: R2 = {
+      async digest(...args) {
+        calls++;
+        return realR2.digest(...args);
+      },
+      async stream(...args) {
+        calls++;
+        return realR2.stream(...args);
+      },
       async head(...args) {
         calls++;
         return realR2.head(...args);

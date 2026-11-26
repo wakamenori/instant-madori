@@ -88,7 +88,7 @@ await test("reference images are validated and stored once per owner request", a
       const { stdout } = await promisify(execFile)(process.execPath, [
         fileURLToPath(new URL("./rpc/assets-fixture.ts", import.meta.url)),
         state,
-        ownerId,
+        JSON.stringify({ kind: "inspect", ownerId }),
       ]);
       return savedSchema.parse(JSON.parse(stdout.trim().split("\n").at(-1) ?? ""));
     });
@@ -185,4 +185,58 @@ await test("reference images are validated and stored once per owner request", a
   const final = await saved();
   assert.equal(final.rows.length, 3);
   assert(final.objects.length >= 3 && final.objects.length <= 4);
+});
+
+await test("owners can read their original image bytes and receive JSON errors for damaged assets", async (t) => {
+  const worker = await startLocalWorker();
+  t.after(() => worker.stop());
+  const owner = newUser("reader");
+  const other = newUser("other-reader");
+  const token = await signAccessToken(worker.key, owner);
+  const image = png(4, 2);
+  async function upload(body: Uint8Array<ArrayBuffer>, type: string) {
+    const response = await fetch(`${worker.origin}/api/assets?requestId=${crypto.randomUUID()}`, {
+      method: "POST",
+      headers: { origin: testAppOrigin, "content-type": type, [accessAssertionHeader]: token },
+      body,
+    });
+    assert.equal(response.status, 201);
+    return createAssetResponseSchema.parse(await response.json()).asset.id;
+  }
+  async function notFound(assetId: string, user: typeof owner) {
+    const response = await worker.call(`/api/assets/${assetId}`, { as: user });
+    assert.equal(response.status, 404);
+    assert.equal(await response.text(), '{"error":"not_found"}');
+  }
+  for (const [bytes, type] of [
+    [image, "image/png"],
+    [jpeg, "image/jpeg"],
+  ] as const) {
+    const id = await upload(bytes, type);
+    const response = await worker.call(`/api/assets/${id}`, { as: owner });
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("content-type"), type);
+    assert.equal(response.headers.get("x-content-type-options"), "nosniff");
+    assert.equal(response.headers.get("cache-control"), "no-store");
+    assert.deepEqual(Buffer.from(await response.arrayBuffer()), bytes);
+    await notFound(id, other);
+  }
+  await notFound(crypto.randomUUID(), owner);
+  for (const how of ["rewrite", "missing", "media_type"]) {
+    await t.test(how, async () => {
+      const assetId = await upload(image, "image/png");
+      await worker.withPausedWorker((state) =>
+        promisify(execFile)(process.execPath, [
+          fileURLToPath(new URL("./rpc/assets-fixture.ts", import.meta.url)),
+          state,
+          JSON.stringify({ kind: "damage", assetId, how }),
+        ]),
+      );
+      const response = await worker.call(`/api/assets/${assetId}`, { as: owner });
+      assert.equal(response.status, 500);
+      assert.match(response.headers.get("content-type") ?? "", /^application\/json\b/);
+      assert.equal(await response.text(), '{"error":"internal_error"}');
+      await notFound(assetId, other);
+    });
+  }
 });

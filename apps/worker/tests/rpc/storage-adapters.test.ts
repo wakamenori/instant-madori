@@ -90,6 +90,17 @@ void test("storage adapters validate real D1 results and reject R2 overwrites", 
       /already exists/,
     );
     assert.deepEqual(await bucket.read(key), { bytes: new Uint8Array([1, 2]) });
+    const current = await proxy.env.BLOBS.head(key);
+    assert(current);
+    const body = await bucket.stream(key, current.etag);
+    assert(body);
+    assert.deepEqual(
+      new Uint8Array(await new Response(body).arrayBuffer()),
+      new Uint8Array([1, 2]),
+    );
+    await proxy.env.BLOBS.put(key, new Uint8Array([3, 4]));
+    assert.equal(await bucket.stream(key, current.etag), null, "stale ETag");
+    assert.equal(await bucket.stream("missing", current.etag), null);
   } finally {
     await proxy.dispose();
   }

@@ -7,7 +7,7 @@ import { resolveUser } from "../services/users.ts";
 import { verifyAccessToken } from "./access.ts";
 import { loadConfig } from "./config.ts";
 import { ApiFailure, errorResponse, parseHttpMethod } from "./http.ts";
-import { assetRoute } from "./assets.ts";
+import { assetRoutes } from "./assets.ts";
 import { conversationRoutes } from "./conversation.ts";
 import { queueRoutes } from "./queue.ts";
 import { jobRoutes } from "./jobs.ts";
@@ -20,7 +20,7 @@ import { matchRoute } from "./router.ts";
 import { revisionRoutes } from "./revisions.ts";
 
 const routes = [
-  assetRoute,
+  ...assetRoutes,
   ...meRoutes,
   ...queueRoutes,
   ...jobRoutes,
