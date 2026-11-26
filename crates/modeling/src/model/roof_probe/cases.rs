@@ -204,6 +204,8 @@ pub(super) enum Case {
     Single(Form),
     L(Form, Form, bool),
     WideWing,
+    WideHipWing,
+    WideHipBranch,
     Lower,
     WideLower,
     SteeperBranch,
@@ -233,7 +235,7 @@ impl Case {
                 vec![[100., 100., 9900., 4450.], [100., 4450., 4450., 9900.]],
                 2400.,
             ),
-            Self::WideWing => (
+            Self::WideWing | Self::WideHipWing | Self::WideHipBranch => (
                 vec![[100., 100., 9900., 4450.], [100., 4450., 5900., 9900.]],
                 2400.,
             ),
@@ -274,26 +276,36 @@ impl Case {
             )],
             Self::L(a, b, different) => l_roofs(a, b, p, if different { p - 0.1 } else { p }, e),
             Self::SteeperBranch => l_roofs(Form::Gable(0), Form::Gable(1), p, p + 0.1, e),
-            Self::WideWing => vec![
-                rectangle(
-                    "A",
-                    [0., 0., 6000., 10000.],
-                    Form::Gable(1),
-                    2400.,
-                    p,
-                    e,
-                    None,
-                ),
+            Self::WideHipBranch => vec![
+                rectangle("A", [0., 0., 10000., 4550.], Form::Hip, 2400., p, e, None),
                 rectangle(
                     "B",
-                    [6000., 0., 10000., 4550.],
-                    Form::Gable(0),
+                    [0., 4450., 6000., 10000.],
+                    Form::Hip,
                     2400.,
                     p,
                     e,
-                    Some(Edge::Extension(Side::West, 3000.)),
+                    Some(Edge::Extension(Side::South, -e)),
                 ),
             ],
+            Self::WideWing | Self::WideHipWing => {
+                let (main, branch, extension) = match self {
+                    Self::WideHipWing => (Form::Hip, Form::Hip, -e),
+                    _ => (Form::Gable(1), Form::Gable(0), 3000.),
+                };
+                vec![
+                    rectangle("A", [0., 0., 6000., 10000.], main, 2400., p, e, None),
+                    rectangle(
+                        "B",
+                        [6000., 0., 10000., 4550.],
+                        branch,
+                        2400.,
+                        p,
+                        e,
+                        Some(Edge::Extension(Side::West, extension)),
+                    ),
+                ]
+            }
             Self::Lower | Self::WideLower => {
                 let width = if matches!(self, Self::WideLower) {
                     4000.

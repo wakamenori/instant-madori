@@ -12,7 +12,7 @@ use measure::*;
 const METHODS: [Method; 2] = [Method::PlaneCut, Method::Section];
 macro_rules! positive_cases {
     ($($test:ident => $case:expr),+ $(,)?) => {
-        const CASES: [Case; 10] = [$($case),+];
+        const CASES: [Case; 11] = [$($case),+];
 
         $(
             #[test]
@@ -35,15 +35,19 @@ positive_cases! {
     roof_probe_l_hip_hip => Case::L(Form::Hip, Form::Hip, false),
     roof_probe_lower => Case::Lower,
     roof_probe_wide_wing => Case::WideWing,
+    roof_probe_wide_hip_wing => Case::WideHipWing,
     roof_probe_l_gable_hip => Case::L(Form::Gable(0), Form::Hip, false),
     roof_probe_l_gable_gable_different_pitch => Case::L(Form::Gable(0), Form::Gable(1), true),
 }
 
-fn run(case: Case, method: Method, join: Join, table: bool) {
+const SETTINGS: [(f64, f64); 2] = [(0.4, 300.), (0.6, 600.)];
+
+fn run(case: Case, method: Method, join: Join, table: bool) -> [f64; SETTINGS.len()] {
+    let mut volumes = [f64::NAN; SETTINGS.len()];
     let h = case.house();
     let mut prev = None;
     let mut previous_bbox = None;
-    for (pitch, eave) in [(0.4, 300.), (0.6, 600.)] {
+    for ((pitch, eave), volume) in SETTINGS.into_iter().zip(&mut volumes) {
         let label = format!("{case:?} {method:?} {join:?}");
         let mut m = Model::build(&h, prev.as_ref()).unwrap();
         let roofs = case.roofs(pitch, eave);
@@ -100,6 +104,7 @@ fn run(case: Case, method: Method, join: Join, table: bool) {
         let exposure =
             (join == Join::Trimmed).then(|| branch_exposure(c.session, &roofs[0], &roofs[1]));
         let exposure_cell = exposure.map_or_else(|| "—".into(), |(n, dz)| format!("{n} / {dz:.3}"));
+        *volume = row.volume;
         let err = row.volume - row.expected;
         let negative = matches!(join, Join::ConvexCuts | Join::PlatesThenUnion);
         let wall = if let Some(report) = &c.taper_volume {
@@ -138,8 +143,8 @@ fn run(case: Case, method: Method, join: Join, table: bool) {
             );
         }
         if let Some((count, excess)) = exposure {
-            if matches!(case, Case::SteeperBranch) {
-                assert!(count > 0, "{label}: steeper branch must protrude");
+            if matches!(case, Case::SteeperBranch | Case::WideHipBranch) {
+                assert!(count > 0, "{label}: branch must protrude");
             } else {
                 assert_eq!(
                     count, 0,
@@ -213,9 +218,17 @@ fn run(case: Case, method: Method, join: Join, table: bool) {
         }
         prev = Some(m);
     }
+    volumes
 }
 fn default_join(case: Case) -> Join {
-    if matches!(case, Case::L(..) | Case::WideWing | Case::SteeperBranch) {
+    if matches!(
+        case,
+        Case::L(..)
+            | Case::WideWing
+            | Case::WideHipWing
+            | Case::WideHipBranch
+            | Case::SteeperBranch
+    ) {
         Join::Trimmed
     } else {
         Join::Separate
@@ -284,6 +297,11 @@ fn roof_probe_control_steeper_branch() {
 }
 
 #[test]
+fn roof_probe_control_wide_hip_branch() {
+    run(Case::WideHipBranch, Method::PlaneCut, Join::Trimmed, false);
+}
+
+#[test]
 fn roof_probe_control_convex_cuts() {
     run(CASES[5], Method::PlaneCut, Join::ConvexCuts, false);
 }
@@ -302,9 +320,19 @@ fn roof_probe_table() {
     wide_lower(true);
     eave_steps();
     run(Case::SteeperBranch, Method::PlaneCut, Join::Trimmed, true);
+    let branch_volumes = run(Case::WideHipBranch, Method::PlaneCut, Join::Trimmed, true);
     for case in CASES {
         for m in METHODS {
-            run(case, m, default_join(case), true);
+            let volumes = run(case, m, default_join(case), true);
+            if matches!((case, m), (Case::WideHipWing, Method::PlaneCut)) {
+                for (((pitch, eave), wing), branch) in
+                    SETTINGS.into_iter().zip(volumes).zip(branch_volumes)
+                {
+                    println!(
+                        "| PlaneCut Trimmed plate volume mm³ (WideHipWing / WideHipBranch) | {pitch}/{eave} | {wing:.2} | {branch:.2} |"
+                    );
+                }
+            }
             if default_join(case) == Join::Trimmed {
                 run(case, m, Join::Union, true);
                 run(case, m, Join::PlatesThenUnion, true);
