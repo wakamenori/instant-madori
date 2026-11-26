@@ -16,7 +16,7 @@ import type { Runtime } from "../../src/services/deps.ts";
 import { createStore } from "../../src/storage/store.ts";
 import { d1 } from "../../src/storage/d1.ts";
 import { r2 } from "../../src/storage/r2.ts";
-import { accessAssertionHeader } from "@madori/contracts";
+import { accessAssertionHeader, elementIdSchema } from "@madori/contracts";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { verifyAccessToken } from "../../src/api/access.ts";
 import { resolveUser } from "../../src/services/users.ts";
@@ -84,10 +84,16 @@ try {
         patternId: z.uuid(),
       }),
       z.object({
+        kind: z.literal("view"),
+        ownerId: signedInOwner,
+        patternId: z.uuid(),
+        floorPlans: z.array(z.object({ storey: elementIdSchema, svg: z.string() })),
+      }),
+      z.object({
         kind: z.literal("damage"),
         ownerId: signedInOwner,
         revisionId: z.uuid(),
-        target: z.enum(["display", "manifest"]),
+        target: z.enum(["display", "manifest", "floor-plan"]),
         missing: z.boolean(),
       }),
       z.object({ kind: z.literal("once"), ownerId: signedInOwner }),
@@ -96,10 +102,12 @@ try {
   if (input.kind === "damage") {
     const snapshot = await store.revisions.snapshot(input);
     assert(snapshot);
-    const key =
-      input.target === "manifest"
-        ? snapshot.manifestKey
-        : snapshot.manifestKey.replace(/manifest\.json$/, "display.mdsp");
+    const file = {
+      manifest: "manifest.json",
+      display: "display.mdsp",
+      "floor-plan": "floor-plans/0.svg",
+    }[input.target];
+    const key = snapshot.manifestKey.replace(/manifest\.json$/, file);
     if (input.missing) await bucket.delete(key);
     else {
       const object = await bucket.get(key);
@@ -121,7 +129,11 @@ try {
     }
     if (input.target === "manifest")
       await assert.rejects(store.snapshots.open(snapshot), StorageCorruption);
-    else
+    else if (input.target === "floor-plan") {
+      const plan = (await store.snapshots.open(snapshot)).house?.floorPlans[0];
+      assert(plan);
+      await assert.rejects(plan.read(), StorageCorruption);
+    } else
       await assert.rejects(
         (await store.snapshots.open(snapshot)).display.read(),
         StorageCorruption,
@@ -191,7 +203,11 @@ try {
       newTraceId: () => crypto.randomUUID(),
     };
     const deps = { store, runtime, wakePattern: async () => {} };
-    const commit = async (bytes = display, name = "案", withHouse = false) => {
+    const commit = async (
+      bytes = display,
+      name = "案",
+      floorPlans?: readonly { storey: string; svg: string }[],
+    ) => {
       const accepted = await acceptInstruction(deps, {
         ownerId: input.ownerId,
         requestId: crypto.randomUUID(),
@@ -203,7 +219,7 @@ try {
       assert.equal(claimed.kind, "claimed");
       if (claimed.kind !== "claimed") throw new Error("No execution right");
       const writeSnapshot = async () => {
-        if (withHouse) {
+        if (floorPlans) {
           const encoder = new TextEncoder();
           return store.snapshots.write(claimed.right, {
             id: runtime.newId(),
@@ -219,12 +235,10 @@ try {
                 ),
               ),
               checks: encoder.encode('{"violations":[]}').slice(),
-              floorPlans: [
-                {
-                  storey: "s1",
-                  svg: encoder.encode('<svg xmlns="http://www.w3.org/2000/svg"/>').slice(),
-                },
-              ],
+              floorPlans: floorPlans.map(({ storey, svg }) => ({
+                storey,
+                svg: encoder.encode(svg).slice(),
+              })),
             },
           });
         }
@@ -242,8 +256,12 @@ try {
       return { revision: result.revision, right: claimed.right };
     };
     const first = await commit(firstDisplay, "初案");
-    if (input.kind === "pick") {
-      const current = await commit(display, "住宅", true);
+    if (input.kind === "pick" || input.kind === "view") {
+      const floorPlans =
+        input.kind === "view"
+          ? input.floorPlans
+          : [{ storey: "s1", svg: '<svg xmlns="http://www.w3.org/2000/svg"/>' }];
+      const current = await commit(display, "住宅", floorPlans);
       console.log(JSON.stringify({ legacy: first.revision.id, current: current.revision.id }));
     } else {
       assert.equal(first.revision.number, 1);

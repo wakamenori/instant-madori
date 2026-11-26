@@ -298,6 +298,26 @@ export const revisionListResponseSchema = z.object({
 export type RevisionListResponse = z.infer<typeof revisionListResponseSchema>;
 
 export const elementIdSchema = z.string().regex(/^[A-Za-z0-9._:-]{1,64}$/);
+export const floorPlanContentType = "image/svg+xml";
+export const floorPlanStoreysHeader = "x-floor-plan-storeys";
+export const floorPlanQuerySchema = z.strictObject({ storey: elementIdSchema });
+
+export function formatFloorPlanStoreys(storeys: readonly string[]): string {
+  return storeys.join(",");
+}
+
+export function parseFloorPlanStoreys(value: string | null): string[] | null {
+  if (value === null) return null;
+  if (value === "") return [];
+  const storeys = value.split(",");
+  if (
+    new Set(storeys).size !== storeys.length ||
+    !storeys.every((storey) => elementIdSchema.safeParse(storey).success)
+  )
+    return null;
+  return storeys;
+}
+
 export const faceRoleSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("room"), room: elementIdSchema }),
   z.strictObject({ kind: z.literal("exterior") }),

@@ -24,9 +24,10 @@ export async function listRevisions(
   return page === null ? { kind: "not_found" } : { kind: "listed", page };
 }
 
+type Artifact = { bytes: Uint8Array<ArrayBuffer>; contentType: string };
+
 export type RevisionViewOutcome =
-  | { kind: "found"; artifact: { bytes: Uint8Array<ArrayBuffer>; contentType: string } }
-  | { kind: "not_found" };
+  { kind: "found"; display: Artifact; storeys: readonly string[] } | { kind: "not_found" };
 
 export async function getRevisionView(
   { store }: StoreDeps<"revisions", "snapshot"> & StoreDeps<"snapshots", "open">,
@@ -37,6 +38,19 @@ export async function getRevisionView(
   const opened = await store.snapshots.open(snapshot);
   return {
     kind: "found",
-    artifact: { bytes: await opened.display.read(), contentType: opened.display.contentType },
+    storeys: opened.house?.floorPlans.map((plan) => plan.storey) ?? [],
+    display: { bytes: await opened.display.read(), contentType: opened.display.contentType },
   };
+}
+
+export async function getFloorPlan(
+  { store }: StoreDeps<"revisions", "snapshot"> & StoreDeps<"snapshots", "open">,
+  { ownerId, revisionId, storey }: { ownerId: OwnerId; revisionId: string; storey: string },
+): Promise<{ kind: "found"; artifact: Artifact } | { kind: "not_found" }> {
+  const snapshot = await store.revisions.snapshot({ ownerId, revisionId });
+  if (snapshot === null || snapshot.formatVersion === 1) return { kind: "not_found" };
+  const opened = await store.snapshots.open(snapshot);
+  const plan = opened.house?.floorPlans.find((plan) => plan.storey === storey);
+  if (!plan) return { kind: "not_found" };
+  return { kind: "found", artifact: { bytes: await plan.read(), contentType: plan.contentType } };
 }

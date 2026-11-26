@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { z } from "zod";
 import { test } from "node:test";
 import {
   apiErrorSchema,
@@ -84,6 +85,7 @@ await test("Immutable revisions through local D1, R2 and public HTTP", async (t)
         assert.equal(view.headers.get("content-type"), displayContentType);
         assert.equal(view.headers.get("cache-control"), "no-store");
         assert.equal(view.headers.get("x-revision-id"), revision.id);
+        assert.equal(view.headers.get("x-floor-plan-storeys"), "");
         assert.deepEqual(
           Buffer.from(await view.arrayBuffer()),
           await readFile(
@@ -148,6 +150,111 @@ await test("Immutable revisions through local D1, R2 and public HTTP", async (t)
     const forbiddenWrite = await worker.call(listPath, { method: "POST", as: owner, body: {} });
     assert.equal(forbiddenWrite.status, 405);
   });
+  const project = await worker.call("/api/projects", {
+    method: "POST",
+    as: owner,
+    body: { requestId: crypto.randomUUID() },
+  });
+  assert.equal(project.status, 201);
+  const viewPattern = createProjectResponseSchema.parse(await project.json()).pattern;
+  const floorPlans = [
+    { storey: "s1", svg: '<svg xmlns="http://www.w3.org/2000/svg"><title>Ground</title></svg>' },
+    { storey: "s2", svg: '<svg xmlns="http://www.w3.org/2000/svg"><title>Upper</title></svg>' },
+  ];
+  const { current, legacy } = z.object({ current: z.uuid(), legacy: z.uuid() }).parse(
+    await revisionFixture(worker, {
+      kind: "view",
+      ownerId,
+      patternId: viewPattern.id,
+      floorPlans,
+    }),
+  );
+  const planPath = `/api/revisions/${current}/floor-plan`;
+  await t.test("the 3D view lists the same revision's SVGs in manifest order", async () => {
+    for (const [revision, header, display] of [
+      [current, "s1,s2", "../../../crates/display/tests/two-bodies.mdsp"],
+      [legacy, "", "../../../crates/display/tests/fixtures/v1-two-bodies.mdsp"],
+    ] as const) {
+      const view = await worker.call(`/api/revisions/${revision}/view`, { as: owner });
+      assert.equal(view.status, 200);
+      assert.equal(view.headers.get("content-type"), displayContentType);
+      assert.equal(view.headers.get("x-revision-id"), revision);
+      assert.equal(view.headers.get("x-floor-plan-storeys"), header);
+      assert.deepEqual(
+        Buffer.from(await view.arrayBuffer()),
+        await readFile(new URL(display, import.meta.url)),
+      );
+    }
+    for (const { storey, svg } of floorPlans) {
+      const plan = await worker.call(`${planPath}?storey=${storey}`, { as: owner });
+      assert.equal(plan.status, 200);
+      assert.equal(plan.headers.get("content-type"), "image/svg+xml");
+      assert.equal(
+        plan.headers.get("content-security-policy"),
+        "default-src 'none'; frame-ancestors 'self'",
+      );
+      assert.equal(plan.headers.get("x-content-type-options"), "nosniff");
+      assert.equal(plan.headers.get("cache-control"), "no-store");
+      assert.equal(plan.headers.get("x-revision-id"), current);
+      assert.equal(await plan.text(), svg);
+    }
+  });
+  await t.test(
+    "only the owner can retrieve artifacts present in the requested revision",
+    async () => {
+      for (const [path, as] of [
+        [`/api/revisions/${legacy}/floor-plan?storey=s1`, owner],
+        [`${planPath}?storey=s3`, owner],
+        [`/api/revisions/${current}/view`, other],
+        [`${planPath}?storey=s1`, other],
+        [`/api/revisions/${crypto.randomUUID()}/floor-plan?storey=s1`, owner],
+      ] as const) {
+        const result = await worker.call(path, { as });
+        assert.equal(result.status, 404, path);
+        assert.deepEqual(await result.json(), { error: "not_found" });
+      }
+    },
+  );
+  await t.test("floor-plan reads require exactly one valid storey", async () => {
+    for (const query of [
+      "",
+      "storey=",
+      "storey=s1&storey=s2",
+      "storey=s1&extra=1",
+      "storey=a,b",
+      `storey=${"a".repeat(65)}`,
+    ]) {
+      const result = await worker.call(`${planPath}?${query}`, { as: owner });
+      assert.equal(result.status, 400, query);
+      assert.deepEqual(await result.json(), { error: "invalid_request" });
+    }
+    const write = await worker.call(`${planPath}?storey=s1`, {
+      as: owner,
+      method: "POST",
+      body: {},
+    });
+    assert.equal(write.status, 405);
+  });
+  await t.test(
+    "altered and missing SVG objects fail integrity checks for their owner",
+    async () => {
+      for (const missing of [false, true]) {
+        await revisionFixture(worker, {
+          kind: "damage",
+          ownerId,
+          revisionId: current,
+          target: "floor-plan",
+          missing,
+        });
+        const result = await worker.call(`${planPath}?storey=s1`, { as: owner });
+        assert.equal(result.status, 500);
+        assert.deepEqual(await result.json(), { error: "internal_error" });
+        const hidden = await worker.call(`${planPath}?storey=s1`, { as: other });
+        assert.equal(hidden.status, 404);
+        assert.deepEqual(await hidden.json(), { error: "not_found" });
+      }
+    },
+  );
   await t.test("missing and corrupted manifest or display objects fail with 500", async () => {
     for (const [index, target, missing] of [
       [0, "display", false],

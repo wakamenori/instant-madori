@@ -4,6 +4,9 @@ import {
   apiErrorSchema,
   createProjectResponseSchema,
   displayContentType,
+  floorPlanContentType,
+  floorPlanStoreysHeader,
+  parseFloorPlanStoreys,
   patternStateResponseSchema,
 } from "@madori/contracts";
 import type { ApiErrorCode, CreateProjectRequest } from "@madori/contracts";
@@ -98,6 +101,27 @@ export function fetchRevisionView(revisionId: string, signal: AbortSignal) {
       response.headers.get("x-revision-id") !== revisionId
     )
       throw new ApiError("unexpected_response");
-    return new Uint8Array(await response.arrayBuffer());
+    const storeys = parseFloorPlanStoreys(response.headers.get(floorPlanStoreysHeader));
+    if (storeys === null) throw new ApiError("unexpected_response");
+    return { display: new Uint8Array(await response.arrayBuffer()), storeys };
   });
+}
+
+export function fetchFloorPlan(
+  revisionId: string,
+  storey: string,
+  signal: AbortSignal,
+): Promise<string> {
+  return request(
+    `/api/revisions/${revisionId}/floor-plan?${new URLSearchParams({ storey })}`,
+    signal,
+    async (response) => {
+      if (
+        response.headers.get("content-type") !== floorPlanContentType ||
+        response.headers.get("x-revision-id") !== revisionId
+      )
+        throw new ApiError("unexpected_response");
+      return response.text();
+    },
+  );
 }
