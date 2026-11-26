@@ -35,7 +35,7 @@
       "project": ["src/**/*.{ts,tsx}"]
     },
     "apps/worker": {
-      "entry": ["tests/**/*.test.ts", "tests/**/*.e2e.ts"],
+      "entry": ["tests/**/*.test.ts", "tests/**/*.e2e.ts", "tests/rpc/geometry-probe.ts"],
       "project": ["src/**/*.ts", "tests/**/*.ts"],
       "ignoreDependencies": ["cloudflare"]
     },

@@ -1,10 +1,16 @@
+import type { ApplyOperationsRequest } from "@madori/contracts/geometry-internal";
 import type { GeometryApi } from "./geometry-client.ts";
 import { DurableObject } from "cloudflare:workers";
 import { z } from "zod";
 import { geometryInternal as protocol } from "@madori/contracts/geometry-internal";
 import { logEvent } from "../log.ts";
 import { ContainerGateway, containerInactivityMarginMs } from "./container-gateway.ts";
-import { acceptReadinessResponse, readSampleDisplay, routeTimeouts } from "./geometry-protocol.ts";
+import {
+  callGeometry,
+  acceptReadinessResponse,
+  readSampleDisplay,
+  routeTimeouts,
+} from "./geometry-protocol.ts";
 import type { GeometryCall } from "./geometry-protocol.ts";
 const configSchema = z.object({
   GEOMETRY_INSTANCE_TYPE: z.enum(["lite", "standard-1", "standard-2", "standard-3", "standard-4"]),
@@ -96,6 +102,9 @@ export class GeometryContainer extends DurableObject<Env> implements GeometryApi
   }
   override alarm() {
     return this.#gateway.alarm();
+  }
+  applyOperations(call: GeometryCall, body: ApplyOperationsRequest) {
+    return this.#gateway.run((send) => callGeometry(send, "applyOperations", { ...call, body }));
   }
   sampleDisplay(call: GeometryCall) {
     return this.#gateway.run((send) => readSampleDisplay(send, call));

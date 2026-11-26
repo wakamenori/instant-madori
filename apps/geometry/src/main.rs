@@ -1,5 +1,9 @@
 mod app;
 mod auth;
+mod inspection;
+mod operations;
+#[cfg(test)]
+mod operations_tests;
 use std::net::SocketAddr;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

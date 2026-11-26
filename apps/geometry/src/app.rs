@@ -35,6 +35,9 @@ impl IntoResponse for ServiceError {
         let status = match self.0 {
             ErrorCode::Unauthorized => StatusCode::UNAUTHORIZED,
             ErrorCode::InvalidRequest => StatusCode::BAD_REQUEST,
+            ErrorCode::InvalidBody => StatusCode::UNPROCESSABLE_ENTITY,
+            ErrorCode::UnsupportedMediaType => StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            ErrorCode::PayloadTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
             ErrorCode::NotFound => StatusCode::NOT_FOUND,
             ErrorCode::MethodNotAllowed => StatusCode::METHOD_NOT_ALLOWED,
             ErrorCode::BuildFailed | ErrorCode::Internal => StatusCode::INTERNAL_SERVER_ERROR,
@@ -50,13 +53,83 @@ impl IntoResponse for ServiceError {
 fn method_filter(method: Method) -> MethodFilter {
     match method {
         Method::Get => MethodFilter::GET,
+        Method::Post => MethodFilter::POST,
     }
+}
+fn register<H, T: 'static>(
+    route: madori_geometry_api::Route,
+    handler: H,
+) -> axum::routing::MethodRouter<AppState>
+where
+    H: axum::handler::Handler<T, AppState>,
+{
+    on(method_filter(route.method), handler).layer(axum::extract::DefaultBodyLimit::max(
+        route.request.max_bytes() as usize,
+    ))
+}
+struct JsonRequest<T>(T);
+impl<T, S: Send + Sync> axum::extract::FromRequest<S> for JsonRequest<T>
+where
+    Json<T>: axum::extract::FromRequest<S, Rejection = axum::extract::rejection::JsonRejection>,
+{
+    type Rejection = ServiceError;
+    async fn from_request(req: Request, state: &S) -> Result<Self, ServiceError> {
+        Json::<T>::from_request(req, state)
+            .await
+            .map(|Json(value)| Self(value))
+            .map_err(|e| {
+                ServiceError(match e.status() {
+                    StatusCode::PAYLOAD_TOO_LARGE => ErrorCode::PayloadTooLarge,
+                    StatusCode::UNSUPPORTED_MEDIA_TYPE => ErrorCode::UnsupportedMediaType,
+                    StatusCode::UNPROCESSABLE_ENTITY => ErrorCode::InvalidBody,
+                    _ => ErrorCode::InvalidRequest,
+                })
+            })
+    }
+}
+async fn apply_operations(
+    State(state): State<AppState>,
+    trace: Option<Extension<TraceId>>,
+    JsonRequest(request): JsonRequest<madori_geometry_api::apply::ApplyOperationsRequest>,
+) -> Result<Response, ServiceError> {
+    use crate::operations::ApplyError;
+    let route = routes::APPLY_OPERATIONS;
+    let trace_id = trace.as_ref().map(|trace| trace.0.0.as_str());
+    eprintln!(
+        "{}",
+        serde_json::json!({"level":"info","event":"geometry.operations","traceId":trace_id,
+        "jobId":request.job_id.as_str(),"operationId":request.operation_id.as_str(),"generation":request.generation})
+    );
+    let encoded = run_blocking(&state, trace_id, move || {
+        match route.handle(request, crate::operations::apply) {
+            Ok(outcome) => outcome.encode(route.route.response.max_bytes()).map(Ok),
+            Err(ApplyError::InvalidBody(error)) => Ok(Err(error)),
+            Err(ApplyError::Build(error)) => Err(error),
+        }
+    })
+    .await?;
+    let bytes = encoded.map_err(|error| {
+        eprintln!(
+            "{}",
+            serde_json::json!({"level":"warn","event":"geometry.invalid_body","traceId":trace_id,"error":error})
+        );
+        ServiceError(ErrorCode::InvalidBody)
+    })?;
+    Ok((
+        [("content-type", madori_geometry_api::bundle::CONTENT_TYPE)],
+        bytes,
+    )
+        .into_response())
 }
 pub fn router(state: AppState) -> Router {
     let protected = Router::new()
         .route(
             routes::SAMPLE_DISPLAY.path,
-            on(method_filter(routes::SAMPLE_DISPLAY.method), sample_display),
+            register(routes::SAMPLE_DISPLAY, sample_display),
+        )
+        .route(
+            routes::APPLY_OPERATIONS.route.path,
+            register(routes::APPLY_OPERATIONS.route, apply_operations),
         )
         .fallback(|| async { ServiceError(ErrorCode::NotFound) })
         .method_not_allowed_fallback(|| async { ServiceError(ErrorCode::MethodNotAllowed) })
@@ -65,9 +138,7 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .route(
             routes::HEALTH.path,
-            on(method_filter(routes::HEALTH.method), || async {
-                Json(Health::default())
-            }),
+            register(routes::HEALTH, || async { Json(Health::default()) }),
         )
         .method_not_allowed_fallback(|| async { ServiceError(ErrorCode::MethodNotAllowed) })
         .layer(middleware::from_fn(validate_trace))
@@ -401,15 +472,26 @@ mod tests {
         let h: Health = serde_json::from_slice(&to_bytes(health.into_body(), 4096).await?)?;
         assert_eq!(h.protocol, 1);
         for route in routes::ALL.iter().filter(|r| r.authenticated) {
+            let method = match route.method {
+                Method::Get => "GET",
+                Method::Post => "POST",
+            };
+            let body = match route.request {
+                madori_geometry_api::BodyKind::None => Body::empty(),
+                _ if route.path == routes::APPLY_OPERATIONS.route.path => Body::from(serde_json::json!({
+                    "job_id":"job","operation_id":"op","generation":1,"snapshot":{"kind":"empty"},
+                    "operations":[{"kind":"remove_opening","id":"missing"}]
+                }).to_string()),
+                _ => return Err(format!("Missing request fixture for {}", route.path).into()),
+            };
             let res = app()?
                 .oneshot(
                     Request::builder()
-                        .method(match route.method {
-                            Method::Get => "GET",
-                        })
+                        .method(method)
                         .uri(route.path)
                         .header("authorization", "Bearer test-token")
-                        .body(Body::empty())?,
+                        .header("content-type", "application/json")
+                        .body(body)?,
                 )
                 .await?;
             assert_eq!(res.status(), 200, "{}", route.path);
@@ -422,9 +504,7 @@ mod tests {
                 let res = app()?
                     .oneshot(
                         Request::builder()
-                            .method(match route.method {
-                                Method::Get => "GET",
-                            })
+                            .method(method)
                             .uri(route.path)
                             .header("authorization", token)
                             .body(Body::empty())?,

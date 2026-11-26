@@ -46,7 +46,7 @@ void test(
         failed.kind === "failed" && failed.reason,
         code === "unknown" ? "protocol_violation" : code,
       );
-      assert.equal(failed.kind === "failed" && failed.status, 500);
+      assert.equal("status" in failed && failed.status, 500);
     }
     let cancelled = false;
     const large = new ReadableStream({
@@ -512,3 +512,58 @@ void test(
     assert.equal(cancelled, true);
   },
 );
+
+void test("bundle directories account for every payload byte", async () => {
+  const { acceptBundle } = await import("../src/geometry/geometry-protocol.ts");
+  const policy = acceptBundle({
+    schema: geometryBodySchemas.applyOperationsOutcomeSchema,
+    maxBytes: 4096,
+  });
+  function frame(head: unknown, tail: number[]) {
+    const json = new TextEncoder().encode(JSON.stringify(head));
+    const bytes = new Uint8Array(16 + json.length + tail.length);
+    const view = new DataView(bytes.buffer);
+    bytes.set(new TextEncoder().encode("MDBN"));
+    view.setUint16(4, 1, true);
+    view.setUint32(8, bytes.length, true);
+    view.setUint32(12, json.length, true);
+    bytes.set(json, 16);
+    bytes.set(tail, 16 + json.length);
+    return bytes.buffer;
+  }
+  const rejected = { kind: "rejected", index: 1, reason: { kind: "no_house" } };
+  assert.deepEqual(policy.decode(frame(rejected, [])), rejected);
+  const head = {
+    kind: "applied",
+    operations: [],
+    inspection: { housing: [], model: [] },
+    parts: [{ artifact: { kind: "house" }, byte_length: 2 }],
+  };
+  assert.deepEqual(policy.decode(frame(head, [1, 2])), {
+    ...head,
+    parts: [{ ...head.parts[0], bytes: Uint8Array.of(1, 2) }],
+  });
+  assert.throws(() => policy.decode(frame(rejected, [1])), /bundle/);
+  assert.throws(() => policy.decode(frame(head, [1])), /bundle/);
+  assert.throws(() => policy.decode(new ArrayBuffer(4)), /bundle/);
+});
+void test("oversize JSON is refused before send", async () => {
+  const limit = geometryInternal.routes.applyOperations.request.max_bytes;
+  const body = {
+    job_id: "job",
+    operation_id: "op",
+    generation: 0,
+    snapshot: { kind: "house" as const, json: "間".repeat(Math.ceil(limit / 3)) },
+    operations: [],
+  };
+  const result = await callGeometry(() => assert.fail("unexpected send"), "applyOperations", {
+    ...call,
+    body,
+  });
+  assert.deepEqual(result, {
+    kind: "failed",
+    reason: "request_too_large",
+    limit,
+    bytes: new TextEncoder().encode(JSON.stringify(body)).byteLength,
+  });
+});

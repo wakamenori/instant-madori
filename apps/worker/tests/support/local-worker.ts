@@ -250,10 +250,12 @@ export async function migratedDatabase() {
 }
 
 export async function startLocalWorker({
+  entry,
   containers = false,
   readyTimeoutMs = 30_000,
   vars = {},
 }: {
+  entry?: string;
   containers?: boolean;
   readyTimeoutMs?: number;
   vars?: Record<string, string>;
@@ -302,6 +304,7 @@ export async function startLocalWorker({
       const started = startWrangler(
         [
           "dev",
+          ...(entry ? [entry] : []),
           "--local",
           `--enable-containers=${containers}`,
           "--ip",

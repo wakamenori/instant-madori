@@ -16,9 +16,10 @@ export interface BinaryBody {
 }
 export type DisplayArtifact = BinaryBody;
 type Violation =
-  "content_type" | "too_large" | "invalid_json" | "schema" | "status" | "stream_chunk";
+  "content_type" | "too_large" | "invalid_json" | "schema" | "status" | "stream_chunk" | "bundle";
 export type GeometryResult<T> =
   | { kind: "ok"; value: T; start: "cold" | "warm"; ms: number }
+  | { kind: "failed"; reason: "request_too_large"; bytes: number; limit: number }
   | { kind: "unavailable"; reason: UnavailableReason }
   | { kind: "failed"; reason: GeometryErrorCode; status: number }
   | { kind: "failed"; reason: "protocol_violation"; status: number; violation: Violation };
@@ -96,6 +97,52 @@ export function acceptJson<T>(options: {
     },
   };
 }
+export type WithPartBytes<H> = H extends { parts: (infer P)[] }
+  ? Omit<H, "parts"> & { parts: (P & { bytes: Uint8Array<ArrayBuffer> })[] }
+  : H;
+export function acceptBundle<H>(options: {
+  schema: z.ZodType<H>;
+  maxBytes: number;
+}): GeometryAccept<WithPartBytes<H>> {
+  const frame = geometryInternal.bundle;
+  return {
+    contentType: frame.contentType,
+    maxBytes: options.maxBytes,
+    decode(buffer) {
+      const view = new DataView(buffer);
+      if (
+        buffer.byteLength < frame.headerBytes ||
+        new TextDecoder().decode(buffer.slice(0, 4)) !== frame.magic ||
+        view.getUint16(4, true) !== frame.version ||
+        view.getUint16(6, true) !== 0 ||
+        view.getUint32(8, true) !== buffer.byteLength
+      )
+        throw new ProtocolViolation("bundle");
+      let offset = frame.headerBytes + view.getUint32(12, true);
+      if (offset > buffer.byteLength) throw new ProtocolViolation("bundle");
+      const parsed = options.schema.safeParse(parseJson(buffer.slice(frame.headerBytes, offset)));
+      if (!parsed.success) throw new ProtocolViolation("schema");
+      const head = parsed.data;
+      let value: unknown = head;
+      if (typeof head === "object" && head !== null && "parts" in head) {
+        const directory = z
+          .array(z.looseObject({ byte_length: z.number().int().nonnegative() }))
+          .safeParse(head.parts);
+        if (!directory.success) throw new ProtocolViolation("bundle");
+        const parts = directory.data.map((part) => {
+          const end = offset + part.byte_length;
+          if (end > buffer.byteLength) throw new ProtocolViolation("bundle");
+          const bytes = new Uint8Array(buffer.slice(offset, end));
+          offset = end;
+          return { ...part, bytes };
+        });
+        value = { ...head, parts };
+      }
+      if (offset !== buffer.byteLength) throw new ProtocolViolation("bundle");
+      return value as WithPartBytes<H>;
+    },
+  };
+}
 function parseJson(bytes: ArrayBuffer): unknown {
   try {
     return JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(bytes));
@@ -106,6 +153,7 @@ function parseJson(bytes: ArrayBuffer): unknown {
 type BodyDescriptor<K extends string = string> =
   | { kind: "none" }
   | { kind: "json"; schema: K; max_bytes: number }
+  | { kind: "bundle"; head: K; max_bytes: number }
   | { kind: "binary"; content_type: string; max_bytes: number };
 type SchemaRegistry = Record<string, z.ZodType>;
 type ResponseValue<R, S extends SchemaRegistry> = R extends {
@@ -113,9 +161,11 @@ type ResponseValue<R, S extends SchemaRegistry> = R extends {
   schema: infer K extends keyof S;
 }
   ? z.output<S[K]>
-  : R extends { kind: "binary" }
-    ? BinaryBody
-    : void;
+  : R extends { kind: "bundle"; head: infer K extends keyof S }
+    ? WithPartBytes<z.output<S[K]>>
+    : R extends { kind: "binary" }
+      ? BinaryBody
+      : void;
 type RequestOptions<R, S extends SchemaRegistry> = GeometryCall &
   (R extends {
     kind: "json";
@@ -128,7 +178,7 @@ type RequestOptions<R, S extends SchemaRegistry> = GeometryCall &
 type RouteDescriptor<K extends string = string> = {
   path: string;
   method: GatewayRequest["method"];
-  request: BodyDescriptor<K>;
+  request: Exclude<BodyDescriptor<K>, { kind: "bundle" }>;
   response: BodyDescriptor<K>;
 };
 function responsePolicy(body: BodyDescriptor, schemas: SchemaRegistry): GeometryAccept<unknown> {
@@ -137,6 +187,11 @@ function responsePolicy(body: BodyDescriptor, schemas: SchemaRegistry): Geometry
       const schema = schemas[body.schema];
       if (!schema) throw new Error(`Unknown geometry schema: ${body.schema}`);
       return acceptJson({ schema, maxBytes: body.max_bytes });
+    }
+    case "bundle": {
+      const schema = schemas[body.head];
+      if (!schema) throw new Error(`Unknown geometry schema: ${body.head}`);
+      return acceptBundle({ schema, maxBytes: body.max_bytes });
     }
     case "binary":
       return acceptBytes({ contentType: body.content_type, maxBytes: body.max_bytes });
@@ -195,6 +250,14 @@ export function createGeometryCaller<
         };
         break;
     }
+    if (route.request.kind !== "none" && payload.body !== undefined) {
+      const bytes =
+        typeof payload.body === "string"
+          ? new TextEncoder().encode(payload.body).byteLength
+          : payload.body.byteLength;
+      const limit = route.request.max_bytes;
+      if (bytes > limit) return { kind: "failed", reason: "request_too_large", bytes, limit };
+    }
     const result = await send({
       traceId: options.traceId,
       ...payload,
@@ -228,10 +291,11 @@ export function createGeometryCaller<
   }
   return call;
 }
-export const routeTimeouts = { health: 2_000, sampleDisplay: 30_000 } satisfies Record<
-  keyof typeof geometryInternal.routes,
-  number
->;
+export const routeTimeouts = {
+  applyOperations: 60_000,
+  health: 2_000,
+  sampleDisplay: 30_000,
+} satisfies Record<keyof typeof geometryInternal.routes, number>;
 export const callGeometry = createGeometryCaller(
   geometryInternal.routes,
   geometryBodySchemas,
