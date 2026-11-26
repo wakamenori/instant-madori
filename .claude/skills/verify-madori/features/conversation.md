@@ -9,7 +9,8 @@
 
 ## How to get to it (user POV)
 
-会話を読む入口は `GET /api/patterns/<id>/messages`。続きがあれば、応答の `nextCursor` を次の要求の `cursor` に渡す。
+- 案件画面の会話の欄が、最新の 50 行を番号の順に出す（[案件画面で指示を送り、会話を読む](./project-chat.md)）。それより古い行は、画面からはまだ読めない（#218）。
+- API の入口は `GET /api/patterns/<id>/messages`。続きがあれば、応答の `nextCursor` を次の要求の `cursor` に渡す。
 
 ## Driving it with curl
 

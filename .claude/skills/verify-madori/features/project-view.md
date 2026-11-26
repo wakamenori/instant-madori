@@ -1,12 +1,12 @@
 # 案件画面で案を見る
 
-案件画面（`/projects/<案件の ID>`）は、案件の最初のパターンを開き、現在の案の表示データを WebGPU で描く。見出しはパターン名で、その下にパターンを作った日時（`<日時> 作成`）、表示中の案、指示の状態が並ぶ。指示が実行中か待機中なら、状態を 1 秒ごとに読み直し、確定した案に描き替える。何も動いていないときと、待機列が保留のときは読み直さない。案件は URL で開くので、再読込しても、`pnpm dev` を起動し直して画面のポートが変わっても、同じパスで同じ案件が開く。画面からはまだ指示を送れない。利用者はドラッグで回転し、右ドラッグか、Shift か Ctrl を押したままのドラッグで視点を平行に動かし、ホイールで拡大・縮小する。ビューアの右上の `視点を戻す` を押すと、案の全体が入る最初の視点に戻る。ビューアの下に、この操作の案内が一行出る。案の表示データの応答には、その案の平面図がある階の一覧が付く。画面はまだ平面図を出さない（#115）。
+案件画面（`/projects/<案件の ID>`）は、案件の最初のパターンを開き、現在の案の表示データを WebGPU で描く。見出しはパターン名で、その下にパターンを作った日時（`<日時> 作成`）、表示中の案、指示の状態が並ぶ。画面の右（幅が 60rem より狭いと下）には会話と指示欄が並ぶ（[案件画面で指示を送り、会話を読む](./project-chat.md)）。指示が実行中か待機中なら、状態を 1 秒ごとに読み直し、確定した案に描き替える。何も動いていないときと、待機列が保留のときは読み直さず、画面から指示を送ると読み直しを始める。読み直しに失敗すると、理由と `再試行` を出したまま、間を空けて自分で読み直す。案件は URL で開くので、再読込しても、`pnpm dev` を起動し直して画面のポートが変わっても、同じパスで同じ案件が開く。利用者はドラッグで回転し、右ドラッグか、Shift か Ctrl を押したままのドラッグで視点を平行に動かし、ホイールで拡大・縮小する。ビューアの右上の `視点を戻す` を押すと、案の全体が入る最初の視点に戻る。ビューアの下に、この操作の案内が一行出る。案の表示データの応答には、その案の平面図がある階の一覧が付く。画面はまだ平面図を出さない（#115）。
 
 ## Sub-features
 
-- `view-open`：案件を開くと、パターン名、`<日時> 作成`、`まだ案がありません。` か `案N「名前」を表示しています。` が出て、案があれば描かれる。
+- `view-open`：案件を開くと、パターン名、`<日時> 作成`、`まだ案がありません。` か `確定済みの案N「名前」を表示しています。` が出て、案があれば描かれる。仕事が動いている間は、案の行の後ろに `AIが編集中です。` が付き、案がまだ無ければ `AIが最初の案を編集中です。` が出る。
 - `view-progress`：指示が実行中なら `指示を実行しています…`、後ろに待機中の指示があれば続けて `待機中の指示がN件あります。`、実行中が無く待機中だけなら `順番を待っています（N件）…` が出る。仕事が確定すると、再読込しなくても新しい案に描き替わり、状態の行が消える。
-- `view-held`：待機列が保留になると `待機中の指示（N件）が保留されています。` が出て、状態の読み直しが止まる。
+- `view-held`：待機列が保留になると `待機中の指示（N件）が保留されています。` が出て、待機中の指示の行に `保留中` が付き、状態の読み直しが止まる。
 - `view-reopen`：再読込しても、起動し直した後に同じパスを開いても、同じ案件、同じ案、同じ状態が出る。
 - `view-rotate`：ドラッグでモデルが回る。
 - `view-zoom`：ホイールで拡大・縮小する。
@@ -20,7 +20,7 @@
 - 案件一覧（`/`）の行を押す。`新しい案件を作る` を押すと、作った案件の画面へ移る（[案件](./projects.md)）。
 - ブラウザで `/projects/<案件の ID>` を直接開く。Access のログインの後は、この URL へ戻る。
 - 画面の上の `案件一覧` のリンクで一覧へ戻る。ブラウザの戻る・進むも使える。
-- 指示は、画面からはまだ送れない。`POST /api/patterns/<id>/messages` で送り、画面を開いておくか開き直す。
+- 指示は画面の指示欄から送る（[案件画面で指示を送り、会話を読む](./project-chat.md)）。下の手順のように `POST /api/patterns/<id>/messages` で送ったときは、画面を開き直す。
 - 平面図は、画面からはまだ見られない。`GET /api/revisions/<案の ID>/view` の応答の見出しで階の一覧を、`GET /api/revisions/<案の ID>/floor-plan?storey=<階の ID>` で平面図を読む。
 
 ## Driving it with T3 preview
@@ -34,9 +34,9 @@ Preconditions:
 
 - **案件を作って開く。** `preview_open` に `target: { kind: "environment-port", port: <WEB_PORT> }`、`open: false`、`reuseExistingTab: false` を渡し、返った `tabId` を以後のすべての呼び出しに渡す。`preview_act` の `click` で `locator: 'role=button[name="新しい案件を作る"]'` を押す。`preview_wait_for` で `text: "まだ案がありません。"` と `urlIncludes: "/projects/"` を待つ。見出しが `パターン1` で、`<日時> 作成` の日時が一覧のその行と同じ。`preview_evaluate` の `location.pathname` から ID を取り、`PID=<ID>` と `PAT=$(curl -sS "$API/projects/$PID/patterns" | jq -r '.patterns[0].id')` を設定する。
 - **指示を送り、開き直す。** `curl -sS -o "$D/accept-1.json" -w '%{http_code}\n' -X POST "$API/patterns/$PAT/messages" -H "$J" -H "$O" -d "{\"requestId\":\"$(uuidgen)\",\"body\":\"小さな平屋を作ってください。\"}"`。`202`。`st` の `running` が `1`。`preview_navigate` で同じタブを `target: { kind: "environment-port", port: <WEB_PORT>, path: "/projects/<PID>" }` に開き直し、`preview_wait_for` で `text: "指示を実行しています…"` を待つ。`preview_snapshot` に `save: true` を付けて撮り、`screenshotPath` を `$D/running.png` に写す。
-- **確定を待つ。** 再読込せずに、`preview_wait_for` で `text: "案1「台本の案」を表示しています。"` を `timeoutMs: 60000` で待つ。届かなければ、もう一度待つ。状態の行が消え、モデルが描かれる。撮って `$D/drawn.png` に写し、Read で開いて、一部屋の 4 枚の壁と、床まで届くドアの開口と、窓の開口が見えることを確かめる。台本が色を塗るのは部屋の側の面なので、最初の視点からは見えないことがある。`preview_evaluate` で `performance.getEntriesByType('resource').filter((e) => e.name.includes('/state')).length` を 5 秒おいて二度読む。二つは同じで、読み直しが止まっている。
+- **確定を待つ。** 再読込せずに、`preview_wait_for` で `text: "確定済みの案1「台本の案」を表示しています。"` を `timeoutMs: 60000` で待つ。届かなければ、もう一度待つ。状態の行が消え、モデルが描かれる。撮って `$D/drawn.png` に写し、Read で開いて、一部屋の 4 枚の壁と、床まで届くドアの開口と、窓の開口が見えることを確かめる。台本が色を塗るのは部屋の側の面なので、最初の視点からは見えないことがある。`preview_evaluate` で `performance.getEntriesByType('resource').filter((e) => e.name.includes('/state')).length` を 5 秒おいて二度読む。二つは同じで、読み直しが止まっている。
 - **平面図の階を読む。** 確定を待った後に、`REV=$(curl -sS "$API/patterns/$PAT/state" | jq -r .currentRevision.id)` を設定する。`curl -sS -o "$D/view.bin" -D "$D/view.headers" -w '%{http_code} %{content_type}\n' "$API/revisions/$REV/view"`。`200 application/vnd.madori.display; version=1`。`STOREY=$(tr -d '\r' < "$D/view.headers" | sed -nE 's/^x-floor-plan-storeys: *//Ip')` が空でない一つの階の ID になり、`tr -d '\r' < "$D/view.headers" | grep -i '^x-revision-id:'` が `$REV` を出す。`curl -sS -o "$D/floor-plan.svg" -D "$D/floor-plan.headers" -w '%{http_code} %{content_type}\n' "$API/revisions/$REV/floor-plan?storey=$STOREY"`。`200 image/svg+xml` で、見出しに `x-revision-id: $REV`、`content-security-policy: default-src 'none'; frame-ancestors 'self'`、`x-content-type-options: nosniff` がある。`storey=s1` に変え、出力先を `"$D/floor-plan-other.json"` にして送ると、`404` で本文が `{"error":"not_found"}`。`storey` を外し、出力先を `"$D/floor-plan-no-storey.json"` にして送ると、`400` で本文が `{"error":"invalid_request"}`。
-- **保留を見る。** 二つ送る。上の「指示を送り、開き直す」の `curl` を、本文を `保留の確認1` と `保留の確認2`、出力先を `"$D/accept-a.json"` と `"$D/accept-b.json"` にして続けて送る。どちらも `202`。`st` が `running` に一件、`queued` に一件を返すまで待つ。開き直して、`preview_wait_for` で `text: "待機中の指示が1件あります。"` を待つ。`A=$(jq -r .job.jobId "$D/accept-a.json")` で `curl -sS -o "$D/stop-a.json" -w '%{http_code}\n' -X POST "$API/jobs/$A/stop" -H "$J" -H "$O" -d "{\"requestId\":\"$(uuidgen)\"}"`。`200` で、`outcome` が `stopped`。再読込せずに、`preview_wait_for` で `text: "待機中の指示（1件）が保留されています。"` を待ち、撮って `$D/held.png` に写す。開き直しても同じ行が出て、`/state` の読み出しは 4 秒おいても 1 回のまま。
+- **保留を見る。** 二つ送る。上の「指示を送り、開き直す」の `curl` を、本文を `保留の確認1` と `保留の確認2`、出力先を `"$D/accept-a.json"` と `"$D/accept-b.json"` にして続けて送る。どちらも `202`。`st` が `running` に一件、`queued` に一件を返すまで待つ。開き直して、`preview_wait_for` で `text: "待機中の指示が1件あります。"` を待つ。`A=$(jq -r .job.jobId "$D/accept-a.json")` で `curl -sS -o "$D/stop-a.json" -w '%{http_code}\n' -X POST "$API/jobs/$A/stop" -H "$J" -H "$O" -d "{\"requestId\":\"$(uuidgen)\"}"`。`200` で、`outcome` が `stopped`。再読込せずに、`preview_wait_for` で `text: "待機中の指示（1件）が保留されています。"` を待つ。会話の欄では、`保留の確認2` の行に `保留中` が付き、`保留の確認1` の行には何も付かない。撮って `$D/held.png` に写す。開き直しても同じ行が出て、`/state` の読み出しの回数は 4 秒おいても増えない。開いたときは会話を読んだ後に state をもう一度読むので、回数は 2 になる。
 - **保留を解く。** `curl -sS -o "$D/cancel.json" -w '%{http_code}\n' -X POST "$API/patterns/$PAT/queue/cancel" -H "$J" -H "$O" -d "{\"requestId\":\"$(uuidgen)\",\"heldBy\":\"$A\"}"`。`200`。`st` の `running` が `null`、`queued` が `[]`、`hold` が `null`。片付けの前に、必ずこの状態にする。
 - **起動し直して開く。** 片付けてから起動し直し、起動の確認で新しい `WEB_PORT` を得る。`preview_navigate` で同じタブを `target: { kind: "environment-port", port: <新しい WEB_PORT>, path: "/projects/<PID>" }` に開く。前と同じパターン名、日時、案が出る。`preview_evaluate` で `Object.keys(localStorage)` が `[]` で、画面がブラウザに保存した値を使っていないことも確かめる。
 - **戻る・進む。** `preview_act` の `click` で `locator: 'role=link[name="案件一覧"]'` を押すと、見出しが `案件一覧` になる。`preview_evaluate` で `history.back()` と `history.forward()` を順に実行し、それぞれ見出しが `パターン1` と `案件一覧` に戻ることを確かめる。
@@ -81,7 +81,7 @@ Preconditions:
 ## Gotchas
 
 - 画面は、どの仕事が最後に終わったか（`lastFinishedJob`）をまだ表示しない。表示は #113 で加える。終わり方は `stop` の応答や state で確かめる。
-- 何も動いていない画面は、状態を読み直さない。画面を開いたまま curl で指示を送っても、開き直すまで表示は変わらない。送ってから開くか、送った後に開き直す。
+- 何も動いていない画面は、状態を読み直さない。画面を開いたまま curl で指示を送っても、開き直すまで表示は変わらない。送ってから開くか、送った後に開き直す。画面の指示欄から送れば、その場で読み直しを始める。
 - 仕事が速く終わると、開き直したときにはもう確定していて、実行中の行は見えない。実行中の表示を確かめるときは `MADORI_DEV_JOB_TEST_HOLD=first_answer:60` で起動する。
 - ビューアは、状態の行の下にあり、高さが画面の 65% ほどある。案の名前と状態の行はビューアの上なので、スクロールせずに読める。
 - `preview_act` の `scroll` は、キャンバスに `wheel` を送らない。拡大は `preview_evaluate` で合成した `WheelEvent` で確かめ、報告にもそう書く。実際のホイールやトラックパッドの操作感は確かめていない。
