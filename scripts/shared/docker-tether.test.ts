@@ -14,6 +14,9 @@ const standIn = `
     detached: true, stdio: ["pipe", "inherit", "inherit"],
   });
   require("node:fs").writeFileSync(process.env.TETHER_PID, String(child.pid));
+  child.stdin.on("error", (error) => {
+    if (error.code !== "EPIPE") throw error;
+  });
   child.stdin.end("Dockerfile contents\\n");
   child.on("exit", (code) => process.exit(code ?? 1));
 `;
