@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { delimiter, join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
+import { z } from "zod";
 import {
   parseImages,
   parseSessionsSince,
@@ -134,4 +140,121 @@ void test("only Docker delete conflicts and vanished objects are tolerated", () 
   for (const other of ["", missing + "\nconnection lost", "failed: No such image: repo:tag"])
     assert.throws(() => parseToleratedErrors(other, removal));
   assert.throws(() => parseToleratedErrors(conflict, inventory));
+});
+
+function runPrune(docker: string, ps: string, ...args: string[]) {
+  const dir = mkdtempSync(join(tmpdir(), "prune-images-"));
+  try {
+    for (const [name, script] of [
+      ["docker", docker],
+      ["ps", ps],
+    ] as const) {
+      writeFileSync(join(dir, name), `#!/bin/sh\n${script}\n`, { mode: 0o700 });
+    }
+    return spawnSync(
+      process.execPath,
+      [fileURLToPath(new URL("./prune-images.ts", import.meta.url)), ...args],
+      {
+        encoding: "utf8",
+        env: { ...process.env, PATH: dir + delimiter + (process.env.PATH ?? "") },
+      },
+    );
+  } finally {
+    rmSync(dir, { recursive: true });
+  }
+}
+
+void test("carried ps durations protect Wrangler sessions at hour and day boundaries", () => {
+  const now = Date.UTC(2026, 0);
+  assert.equal(parseSessionsSince("      60:00 node x/wrangler-dist/cli.js", now), now - 3900_000);
+  assert.equal(parseSessionsSince("   24:00:00 node x/wrangler-dist/cli.js", now), now - 86700_000);
+});
+
+void test("pruning reports the Wrangler cutoff when macOS ps prints 60:00", () => {
+  const start = Date.now();
+  const run = runPrune(
+    "exit 0",
+    "echo '      60:00 /usr/libexec/coreduetd'\necho '      60:00 node x/wrangler-dist/cli.js'",
+    "--dry-run",
+  );
+  const end = Date.now();
+  assert.equal(run.status, 0, run.stderr);
+  const plan = z
+    .object({ event: z.literal("docker.images.prune.plan"), sessionsSince: z.iso.datetime() })
+    .parse(JSON.parse(run.stdout));
+  const sessionNow = Date.parse(plan.sessionsSince) + 3900_000;
+  assert.ok(start <= sessionNow && sessionNow <= end);
+});
+
+void test("pruning finishes when a listed image and container vanish during inspection", () => {
+  const kept = image(1, 1);
+  const gone = image(2, 1).id;
+  const container = "a".repeat(64);
+  const inspect = (tags: string[]) =>
+    JSON.stringify([
+      {
+        Id: kept.id,
+        RepoTags: tags,
+        Metadata: { LastTagTime: "2026-01-01T00:00:00Z" },
+      },
+    ]);
+  const run = runPrune(
+    `case "$*" in
+      "image ls -q --no-trunc")
+        echo '${kept.id}'
+        if [ ! -e "$0.removed" ]; then echo '${gone}'; fi ;;
+      "image inspect ${kept.id} ${gone}")
+        echo '${inspect(kept.references)}'
+        echo 'Error response from daemon: No such image: ${gone}' >&2
+        exit 1 ;;
+      "container ls -a -q --no-trunc") echo '${container}' ;;
+      "container inspect --format {{json .Image}} ${container}")
+        echo 'Error response from daemon: No such container: ${container}' >&2
+        exit 1 ;;
+      "image rm ${dev}:b1")
+        touch "$0.removed"
+        echo 'Untagged: ${dev}:b1' ;;
+      "image inspect ${kept.id}") echo '${inspect([`${dev}:a1`])}' ;;
+      *) exit 2 ;;
+    esac`,
+    "echo '00:02 node'",
+  );
+  assert.equal(run.status, 0, run.stderr);
+  const events: unknown[] = run.stdout
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line) as unknown);
+  assert.deepEqual(events, [
+    {
+      event: "docker.images.prune.plan",
+      dryRun: false,
+      keep: 3,
+      sessionsSince: null,
+      before: { images: 1, references: 2 },
+      decisions: [{ id: kept.id, kind: "retained", kept: [`${dev}:a1`], untagged: [`${dev}:b1`] }],
+    },
+    { event: "docker.images.prune.result", conflicts: [], after: { images: 1, references: 1 } },
+  ]);
+});
+
+void test("unexpected Docker inspect stderr identifies the command and rejected line", () => {
+  const run = runPrune(
+    `case "$1 $2" in
+      "image ls") echo '${image(1, 1).id}' ;;
+      "image inspect") echo 'Error response from daemon: something else' >&2; exit 1 ;;
+      *) exit 2 ;;
+    esac`,
+    "exit 2",
+  );
+  assert.equal(run.status, 1);
+  assert.match(
+    run.stderr,
+    /docker image inspect stderr.*"Error response from daemon: something else"/u,
+  );
+});
+
+void test("malformed ps output identifies the line number and value", () => {
+  const run = runPrune("exit 0", "echo '00:01 node'\necho 'bad wrangler-dist/cli.js'");
+  assert.equal(run.status, 1);
+  assert.match(run.stderr, /ps output line 2: "bad wrangler-dist\/cli\.js"/u);
 });

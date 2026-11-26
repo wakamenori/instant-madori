@@ -28,13 +28,37 @@ type Decision = { id: string; kept: string[]; untagged: string[] } & (
   | { kind: "removed" }
 );
 
-export function parseImages(output: string): Image[] {
-  const rows = z.array(imageSchema).parse(JSON.parse(output));
-  if (new Set(rows.map((row) => row.Id)).size !== rows.length) {
-    throw new Error("Inconsistent Docker image inventory");
+function unexpected(source: string, value: unknown) {
+  const text = JSON.stringify(value) ?? "undefined";
+  return new Error(
+    `Unexpected ${source}: ${text.length > 300 ? text.slice(0, 297) + "..." : text}`,
+  );
+}
+
+function parseInput<T>(source: string, schema: z.ZodType<T>, value: unknown): T {
+  const result = schema.safeParse(value, { reportInput: true });
+  if (result.success) return result.data;
+  const issue = result.error.issues[0];
+  const path = issue?.path.map(String).join(".");
+  throw unexpected(path ? `${source} at ${path}` : source, path ? issue?.input : value);
+}
+
+const json = z.string().transform((text, ctx): unknown => {
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    ctx.addIssue({ code: "custom", message: "Malformed JSON", input: text });
+    return z.NEVER;
   }
+});
+
+export function parseImages(output: string): Image[] {
+  const rows = parseInput("docker image inspect JSON", json.pipe(z.array(imageSchema)), output);
+  const ids = new Set<string>();
   const images: Image[] = [];
   for (const row of rows) {
+    if (ids.has(row.Id)) throw unexpected("docker image inspect duplicate ID", row.Id);
+    ids.add(row.Id);
     const references = (row.RepoTags ?? [])
       .filter((ref) => {
         const repo = ref.slice(0, ref.lastIndexOf(":"));
@@ -50,7 +74,11 @@ export function parseImages(output: string): Image[] {
     });
   }
   const refs = images.flatMap((image) => image.references);
-  if (new Set(refs).size !== refs.length) throw new Error("Duplicate Docker image reference");
+  const seen = new Set<string>();
+  for (const ref of refs) {
+    if (seen.has(ref)) throw unexpected("docker image inspect duplicate reference", ref);
+    seen.add(ref);
+  }
   return images;
 }
 
@@ -90,13 +118,13 @@ function lines(output: string) {
   return trimmed ? trimmed.split(/\r?\n/u) : [];
 }
 
-const processLine = /^\s*(?:(?:(\d+)-)?([01]\d|2[0-3]):)?([0-5]\d):([0-5]\d)\s+(.+)$/u;
+const processLine = /^\s*(?:(?:(\d+)-)?(\d{2}):)?(\d{2}):(\d{2})\s+(.+)$/u;
 export function parseSessionsSince(output: string, now: number) {
   let oldest: number | undefined;
-  const processes = z.array(z.string().regex(processLine)).min(1).parse(lines(output));
-  for (const line of processes) {
+  for (const [index, line] of output.trimEnd().split(/\r?\n/u).entries()) {
     const match = processLine.exec(line);
-    if (!match?.[5]?.includes("wrangler-dist/cli.js")) continue;
+    if (!match) throw unexpected(`ps output line ${index + 1}`, line);
+    if (!match[5]?.includes("wrangler-dist/cli.js")) continue;
     const elapsed =
       ((Number(match[1] ?? 0) * 24 + Number(match[2] ?? 0)) * 60 + Number(match[3])) * 60 +
       Number(match[4]);
@@ -115,7 +143,11 @@ const vanished = /^Error response from daemon: No such (?:image|container): /u;
 const refused = /^Error response from daemon: (?:conflict: unable to delete\b|No such image: )/u;
 
 export function parseToleratedErrors(stderr: string, tolerated: RegExp) {
-  return z.array(z.string().regex(tolerated)).min(1).parse(lines(stderr));
+  return parseStderr("Docker stderr", tolerated, stderr);
+}
+
+function parseStderr(source: string, tolerated: RegExp, stderr: string) {
+  return parseInput(source, z.array(z.string().regex(tolerated)).min(1), lines(stderr));
 }
 
 // Other sessions add and remove images and containers between our calls; Docker still
@@ -130,24 +162,34 @@ async function dockerTolerating(tolerated: RegExp, ...args: string[]) {
     if (!failure.success) throw error;
     return {
       stdout: failure.data.stdout,
-      errors: parseToleratedErrors(failure.data.stderr, tolerated),
+      errors: parseStderr(
+        `docker ${args.slice(0, 2).join(" ")} stderr`,
+        tolerated,
+        failure.data.stderr,
+      ),
     };
   }
 }
 
 async function inventory() {
-  const ids = [
-    ...new Set(z.array(imageId).parse(lines(await docker("image", "ls", "-q", "--no-trunc")))),
-  ];
-  return ids.length
+  const ids = new Set(
+    parseInput(
+      "docker image ls IDs",
+      z.array(imageId),
+      lines(await docker("image", "ls", "-q", "--no-trunc")),
+    ),
+  );
+  return ids.size
     ? parseImages((await dockerTolerating(vanished, "image", "inspect", ...ids)).stdout)
     : [];
 }
 
 async function containerImages() {
-  const ids = z
-    .array(containerId)
-    .parse(lines(await docker("container", "ls", "-a", "-q", "--no-trunc")));
+  const ids = parseInput(
+    "docker container ls IDs",
+    z.array(containerId),
+    lines(await docker("container", "ls", "-a", "-q", "--no-trunc")),
+  );
   if (!ids.length) return new Set<string>();
   const { stdout } = await dockerTolerating(
     vanished,
@@ -157,7 +199,9 @@ async function containerImages() {
     "{{json .Image}}",
     ...ids,
   );
-  return new Set(z.array(imageId).parse(lines(stdout).map((line) => JSON.parse(line) as unknown)));
+  return new Set(
+    parseInput("docker container inspect image IDs", z.array(json.pipe(imageId)), lines(stdout)),
+  );
 }
 
 function summary(images: readonly Image[]) {
@@ -181,12 +225,11 @@ async function main() {
     );
     return;
   }
-  const keep = z
-    .string()
-    .regex(/^\d+$/u)
-    .transform(Number)
-    .pipe(z.int().positive())
-    .parse(values.keep);
+  const keep = parseInput(
+    "--keep argument",
+    z.string().regex(/^\d+$/u).transform(Number).pipe(z.int().positive()),
+    values.keep,
+  );
   const images = await inventory();
   const containerImageIds = await containerImages();
   const now = Date.now();
@@ -223,13 +266,7 @@ if (import.meta.main) {
   try {
     await main();
   } catch (error) {
-    console.error(
-      error instanceof z.ZodError
-        ? "Invalid image pruning input or Docker output"
-        : error instanceof Error
-          ? error.message
-          : "Docker image pruning failed",
-    );
+    console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;
   }
 }
