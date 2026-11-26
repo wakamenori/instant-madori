@@ -10,6 +10,7 @@ const statusByCode = {
   invalid_request: 400,
   unsupported_media_type: 415,
   invalid_image: 422,
+  attachment_unavailable: 422,
   image_dimensions_too_large: 422,
   payload_too_large: 413,
   version_conflict: 409,

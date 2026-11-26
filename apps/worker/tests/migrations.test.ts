@@ -87,6 +87,27 @@ await test("Schema constraints", async (t) => {
     },
   );
 
+  await t.test("attachments require common ownership and protect referenced assets", async () => {
+    await db.execute(`
+      INSERT INTO projects VALUES ('p-other', 'u2', 'P', 1, 2, '${now}', '${now}');
+      INSERT INTO patterns VALUES ('t-other', 'p-other', 'u2', 1, 'T', 1, '${now}', '${now}');
+      INSERT INTO assets VALUES
+        ('a1','u1','one','image/png',1,1,1,'${"a".repeat(64)}','${now}'),
+        ('a2','u2','two','image/png',1,1,1,'${"b".repeat(64)}','${now}');
+    `);
+    const attach = (position: number, pattern: string, owner: string, asset: string) =>
+      db.execute(`INSERT INTO message_attachments (message_id, position, pattern_id, owner_id, asset_id)
+        VALUES ('m', ${position}, '${pattern}', '${owner}', '${asset}')`);
+    await assert.rejects(attach(0, "t2", "u1", "a2"), /FOREIGN KEY constraint failed/);
+    await assert.rejects(attach(0, "t-other", "u2", "a2"), /FOREIGN KEY constraint failed/);
+    await attach(0, "t2", "u1", "a1");
+    await assert.rejects(attach(1, "t2", "u1", "a1"), /UNIQUE constraint failed/);
+    await assert.rejects(
+      db.execute("DELETE FROM assets WHERE id = 'a1'"),
+      /FOREIGN KEY constraint failed/,
+    );
+  });
+
   await t.test("pattern numbers are unique within a project", async () => {
     await assert.rejects(
       db.execute(

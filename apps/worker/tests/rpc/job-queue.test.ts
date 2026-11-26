@@ -152,6 +152,17 @@ await test("Queue holds on real D1", async (t) => {
           .prepare("UPDATE jobs SET state = ?, generation = 1 WHERE id = ?")
           .bind(previousState, b.jobId)
           .run();
+        assert.deepEqual(
+          await acceptInstruction(deps, {
+            patternId,
+            ownerId,
+            body: "指示",
+            requestId: crypto.randomUUID(),
+            attachmentIds: [crypto.randomUUID()],
+          }),
+          { kind: "attachment_unavailable" },
+        );
+        assert.deepEqual(await holder(), { heldBy: a.jobId });
         const fresh = await accept(patternId);
         assert.equal(await holder(), null);
         if (previousState === "running")

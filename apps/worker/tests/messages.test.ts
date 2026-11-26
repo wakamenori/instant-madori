@@ -94,6 +94,7 @@ await test("Conversation pages retain their boundary when another instruction ar
       body: kind,
       createdAt: fixture.now,
       jobId: linked ? fixture.jobId : kind === "answer" ? fixture.answerJobId : null,
+      attachmentIds: [],
       revision: linked ? revision : null,
       ...(kind === "question" ? { choices: ["東", "南"] } : {}),
     };

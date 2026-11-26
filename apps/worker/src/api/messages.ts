@@ -29,6 +29,7 @@ export const messageRoutes: Route[] = [
           });
         case "invalid_message":
           throw new ApiFailure("invalid_request");
+        case "attachment_unavailable":
         case "not_found":
         case "request_id_reused":
           throw new ApiFailure(outcome.kind);

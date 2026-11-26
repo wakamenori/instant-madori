@@ -104,7 +104,7 @@ await test("Instruction acceptance on real D1", async (t) => {
     });
   });
   await t.test(
-    "twenty concurrent identical requests create one message and one queued job",
+    "concurrent accepts create one job and the legacy attachment-free fingerprint replays",
     async () => {
       const target = await pattern();
       const request = input("同時再送", target);
@@ -117,6 +117,7 @@ await test("Instruction acceptance on real D1", async (t) => {
         Array.from({ length: 20 }, () =>
           db.store.jobs.acceptOnce(key, {
             id: crypto.randomUUID(),
+            attachmentIds: [],
             messageId: crypto.randomUUID(),
             patternId: target,
             body: request.body,
