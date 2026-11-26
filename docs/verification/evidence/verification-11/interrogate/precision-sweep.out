@@ -1,0 +1,16 @@
+x=100000: wall at x0=100000, y0=100000, house centre x=101820, snapped o.x=101700
+  max |uv error| in texels       { snap: 0.013, foot: 0.037, vert: 0.001 }
+  max jump between samples 0.01 mm apart (texels; exact = 0.034) { snap: 0.053, foot: 0.063, vert: 0.035 }
+  distinct uv values over a 10 mm span (1001 samples) { snap: 1001, foot: 895, vert: 1001 }
+x=1000000: wall at x0=1000000, y0=1000000, house centre x=1001820, snapped o.x=1001700
+  max |uv error| in texels       { snap: 0.103, foot: 0.309, vert: 0.001 }
+  max jump between samples 0.01 mm apart (texels; exact = 0.034) { snap: 0.213, foot: 0.25, vert: 0.035 }
+  distinct uv values over a 10 mm span (1001 samples) { snap: 161, foot: 138, vert: 1001 }
+x=2100000: wall at x0=2100000, y0=2100000, house centre x=2101820, snapped o.x=2101800
+  max |uv error| in texels       { snap: 0.41, foot: 0.83, vert: 0.001 }
+  max jump between samples 0.01 mm apart (texels; exact = 0.034) { snap: 0.854, foot: 1, vert: 0.035 }
+  distinct uv values over a 10 mm span (1001 samples) { snap: 41, foot: 41, vert: 1001 }
+x=4200000: wall at x0=4200000, y0=4200000, house centre x=4201820, snapped o.x=4201800
+  max |uv error| in texels       { snap: 0.853, foot: 1.693, vert: 0.001 }
+  max jump between samples 0.01 mm apart (texels; exact = 0.034) { snap: 1.707, foot: 2, vert: 0.035 }
+  distinct uv values over a 10 mm span (1001 samples) { snap: 21, foot: 21, vert: 1001 }

@@ -1,0 +1,3398 @@
+diff --git a/crates/viewer/Cargo.toml b/crates/viewer/Cargo.toml
+index ab6091979..ee6c5674f 100644
+--- a/crates/viewer/Cargo.toml
++++ b/crates/viewer/Cargo.toml
+@@ -26,3 +26,8 @@ wasm-bindgen-futures.workspace = true
+ [package.metadata.cargo-machete]
+ # Enables the WebGPU backend on SolidCraft's shared wgpu dependency.
+ ignored = ["wgpu"]
++
++[features]
++pattern-proto = []
++pattern-a = ["pattern-proto"]
++pattern-b = ["pattern-proto", "solidcraft-viewport-gpu/pattern-maps"]
+diff --git a/crates/viewer/proto/build.sh b/crates/viewer/proto/build.sh
+new file mode 100755
+index 000000000..4ae03ffde
+--- /dev/null
++++ b/crates/viewer/proto/build.sh
+@@ -0,0 +1,21 @@
++#!/usr/bin/env bash
++set -euo pipefail
++cd "$(dirname "$0")/../../.."
++variant=${1:?expected base, proto, a, b or all}
++features=()
++case "$variant" in
++  base) ;;
++  proto) features=(--features pattern-proto);;
++  a) features=(--features pattern-a);;
++  b) features=(--features pattern-b);;
++  all) features=(--features pattern-a,pattern-b);;
++  *) exit 2;;
++esac
++root=target/pattern-proto
++out="$root/$variant"
++mkdir -p "$out"
++mise exec -- cargo build --locked -p madori-viewer --target wasm32-unknown-unknown --profile release --target-dir "$root/cargo" ${features[@]+"${features[@]}"}
++input="$root/cargo/wasm32-unknown-unknown/release/madori_viewer.wasm"
++.tools/bin/wasm-bindgen --target web --out-dir "$out" "$input"
++file="$out/madori_viewer_bg.wasm"
++echo "$variant pre-bindgen $(wc -c < "$input") bytes, bindings wasm $(wc -c < "$file") bytes, gzip -9 $(gzip -9cn < "$file" | wc -c) bytes, brotli -q 11 $(brotli -q 11 -c "$file" | wc -c) bytes"
+diff --git a/crates/viewer/proto/index.html b/crates/viewer/proto/index.html
+new file mode 100644
+index 000000000..dc3f3d0bd
+--- /dev/null
++++ b/crates/viewer/proto/index.html
+@@ -0,0 +1,36 @@
++<!doctype html>
++<html lang="en">
++  <meta charset="utf-8" /><title>Room pattern comparison</title>
++  <style>
++    body {
++      font: 15px system-ui;
++      margin: 1rem;
++      background: #faf9f6;
++      color: #252525;
++    }
++    fieldset {
++      border: 0;
++      padding: 0;
++      display: flex;
++      flex-wrap: wrap;
++      gap: 0.4rem;
++    }
++    button {
++      padding: 0.4rem;
++    }
++    canvas {
++      width: min(100%, 1200px);
++      height: auto;
++      display: block;
++      margin: 0.75rem 0;
++    }
++    pre {
++      white-space: pre-wrap;
++    }
++  </style>
++  <h1>Room pattern comparison</h1>
++  <fieldset id="controls" disabled></fieldset>
++  <canvas id="view" width="1200" height="750"></canvas>
++  <pre id="status">Loading WebGPU…</pre>
++  <script type="module" src="page.js"></script>
++</html>
+diff --git a/crates/viewer/proto/page.js b/crates/viewer/proto/page.js
+new file mode 100644
+index 000000000..ea0ded838
+--- /dev/null
++++ b/crates/viewer/proto/page.js
+@@ -0,0 +1,240 @@
++const pkg = new URLSearchParams(location.search).get("pkg") || "all";
++const modes = [
++  "plain",
++  ...(["a", "all"].includes(pkg) ? ["planar", "vertex-uv"] : []),
++  ...(["b", "all"].includes(pkg) ? ["b-planar", "b-triplanar-column"] : []),
++];
++const state = {
++  pkg,
++  mode: modes.includes("b-planar") ? "b-planar" : modes[1] || "plain",
++  mips: "gpu",
++  sampling: "grad",
++  anisotropy: 16,
++  anchor: "world",
++  length: 3640,
++  glass: false,
++  grid: 1,
++  camera: "south",
++  ready: false,
++  bench: null,
++};
++Object.defineProperty(window, "__proto", { value: state, configurable: true });
++const controls = document.querySelector("#controls"),
++  canvas = document.querySelector("#view");
++const status = document.querySelector("#status");
++const cameras = ["south", "north window", "grazing", "through window", "north-west", "column east"];
++const refreshButtons = [];
++let viewer;
++function report() {
++  status.textContent = JSON.stringify(state, null, 2);
++  for (const refresh of refreshButtons) refresh();
++}
++function fail(error) {
++  state.error = error?.detail || String(error);
++  report();
++}
++async function draw() {
++  state.bytes = viewer.pattern_scene(
++    state.mode,
++    state.mips,
++    state.anisotropy,
++    state.anchor === "start",
++    state.length,
++    state.glass,
++    state.grid,
++    cameras.indexOf(state.camera),
++    state.sampling === "always-3",
++  );
++  if (state.mode.startsWith("b-")) state.uploadSubmitMs = viewer.pattern_upload_ms();
++  while (!viewer.draw()) await new Promise(requestAnimationFrame);
++  report();
++}
++function button(label, action) {
++  const b = document.createElement("button");
++  controls.append(b);
++  refreshButtons.push(() => {
++    b.textContent = label();
++  });
++  b.textContent = label();
++  b.onclick = async () => {
++    controls.disabled = true;
++    try {
++      await action();
++    } catch (err) {
++      fail(err);
++    } finally {
++      b.textContent = label();
++      controls.disabled = false;
++    }
++  };
++}
++async function measurementPages() {
++  const frames = [];
++  const pages = {};
++  try {
++    for (const variant of ["proto", "b"]) {
++      const frame = document.createElement("iframe");
++      frames.push(frame);
++      frame.style.cssText = "position:absolute;left:-1400px;width:1200px;height:750px";
++      frame.src = "?pkg=" + variant;
++      const loaded = new Promise((resolve) => (frame.onload = resolve));
++      document.body.append(frame);
++      await loaded;
++      const page = frame.contentWindow.__proto;
++      while (!page.ready) {
++        if (page.error) throw Error(page.error);
++        await new Promise((resolve) => setTimeout(resolve, 50));
++      }
++      pages[variant] = page;
++    }
++    return { pages, close: () => frames.forEach((frame) => frame.remove()) };
++  } catch (error) {
++    frames.forEach((frame) => frame.remove());
++    throw error;
++  }
++}
++async function bench() {
++  const cases = ["all", "b"].includes(pkg)
++    ? ["plain", "b-planar", "b-planar-always-3", "b-triplanar-column"]
++    : modes;
++  const original = state.mode,
++    originalSampling = state.sampling,
++    samples = Object.fromEntries(cases.map((m) => [m, []]));
++  state.bench = { settings: { ...state, bench: undefined }, samples, msPerFrame: {} };
++  const isolated = pkg === "all" ? await measurementPages() : null;
++  async function measure(label, frames) {
++    const mode = label.replace("-always-3", "");
++    const sampling = label.endsWith("-always-3") ? "always-3" : "grad";
++    if (isolated) {
++      const variant = mode === "plain" ? "proto" : "b";
++      const page = isolated.pages[variant];
++      for (const key of ["camera", "length", "anchor", "mips", "anisotropy"])
++        page[key] = state[key];
++      page.sampling = sampling;
++      const time = await page.measure(mode, state.grid, state.glass, frames);
++      if (page.error) throw Error(page.error);
++      return time;
++    }
++    state.sampling = sampling;
++    state.mode = mode;
++    await draw();
++    return viewer.bench(frames);
++  }
++  try {
++    for (const mode of cases) {
++      await measure(mode, 50);
++    }
++    for (let round = 0; round < 5; round++) {
++      for (const mode of round % 2 ? [...cases].reverse() : cases) {
++        samples[mode].push(await measure(mode, 200));
++        const sorted = [...samples[mode]].sort((a, b) => a - b);
++        state.bench.msPerFrame[mode] = {
++          median: sorted[Math.floor(sorted.length / 2)],
++          min: sorted[0],
++          max: sorted.at(-1),
++        };
++        report();
++      }
++    }
++  } finally {
++    isolated?.close();
++    state.sampling = originalSampling;
++    state.mode = original;
++    await draw();
++  }
++}
++async function main() {
++  if (!["proto", "a", "b", "all"].includes(pkg))
++    throw Error("Select a prototype package with ?pkg=.");
++  const wasm = await import("/target/pattern-proto/" + pkg + "/madori_viewer.js");
++  await wasm.default();
++  viewer = await wasm.Viewer.create(canvas);
++  viewer.pattern_watch_errors((message) => {
++    console.error(message);
++    fail(message);
++  });
++  viewer.device_lost().catch(fail);
++  viewer.resize(1200, 750, 1);
++  const tile = document.createElement("canvas");
++  tile.width = tile.height = 512;
++  const ctx = tile.getContext("2d", { willReadFrequently: true });
++  const response = await fetch(
++    "/third_party/solidcraft/assets/render/starter/materials/exports/SURF-027/base_color.png",
++  );
++  if (!response.ok) throw Error("Oak texture HTTP " + response.status);
++  const wood = await createImageBitmap(await response.blob());
++  ctx.drawImage(wood, 0, 0);
++  wood.close();
++  const upload = (slot) =>
++    viewer.pattern_image(
++      slot,
++      512,
++      512,
++      new Uint8Array(ctx.getImageData(0, 0, 512, 512).data.buffer),
++    );
++  upload(0);
++  ctx.fillStyle = "#99968d";
++  ctx.fillRect(0, 0, 512, 512);
++  // Four 300 mm tiles share one 600 mm image repeat.
++  ["#d8d4c9", "#cfcbc0", "#d4cfc4", "#dcd8cc"].forEach((color, i) => {
++    ctx.fillStyle = color;
++    ctx.fillRect(256 * (i % 2) + 3, 256 * Math.floor(i / 2) + 3, 250, 250);
++  });
++  upload(1);
++  if (viewer.pattern_mip_ms)
++    state.mipMedianMs = Object.fromEntries([512, 1024].map((n) => [n, viewer.pattern_mip_ms(n)]));
++  for (const [key, choices] of Object.entries({
++    mode: modes,
++    mips: ["gpu", "cpu", "off"],
++    sampling: ["grad", "always-3"],
++    anisotropy: [1, 16],
++    anchor: ["world", "start"],
++    length: [3640, 3790, 5460],
++    glass: [false, true],
++    grid: [1, 8],
++    camera: cameras,
++  })) {
++    button(
++      () => {
++        if (key === "mips" && state.mips === "gpu" && ["planar", "vertex-uv"].includes(state.mode))
++          return "mips · cpu (A)";
++        return (key === "sampling" ? "B sampling" : key) + " · " + state[key];
++      },
++      async () => {
++        state[key] = choices[(choices.indexOf(state[key]) + 1) % choices.length];
++        await draw();
++      },
++    );
++  }
++  if (viewer.pattern_gpu_probe) {
++    state.probe = async () => {
++      state.gpuMip = {};
++      for (const n of [512, 1024]) {
++        const [encodeMs, wallMs, level4MaxDiff] = await viewer.pattern_gpu_probe(n);
++        state.gpuMip[n] = { encodeMs, wallMs, level4MaxDiff };
++      }
++      report();
++      return state.gpuMip;
++    };
++    button(() => "Measure GPU mips", state.probe);
++  }
++  state.runBench = bench;
++  button(() => "Benchmark · 5 × 200 frames", bench);
++  await draw();
++  state.ready = true;
++  report();
++  controls.disabled = false;
++}
++main().catch(fail);
++
++// A comparison run loads each renderer's own Wasm so A and plain do not
++// pay B's unconditional texture samples when measuring their frame times.
++state.renderScene = async (options) => {
++  Object.assign(state, options);
++  await draw();
++};
++state.measure = async (mode, grid, glass, frames) => {
++  Object.assign(state, { mode, grid, glass });
++  await draw();
++  return viewer.bench(frames);
++};
+diff --git a/crates/viewer/src/gpu.rs b/crates/viewer/src/gpu.rs
+index 363de613c..51321aef3 100644
+--- a/crates/viewer/src/gpu.rs
++++ b/crates/viewer/src/gpu.rs
+@@ -1,3 +1,9 @@
++#[cfg(feature = "pattern-a")]
++mod pattern_a;
++#[cfg(feature = "pattern-proto")]
++mod proto;
++#[cfg(feature = "pattern-proto")]
++mod room;
+ use crate::{
+     DisplaySummary, ViewerErrorCode as Code, ViewerFailure as Failure, camera, decoded,
+     scene::{self, ShownScene},
+@@ -30,6 +36,8 @@ pub struct Viewer {
+     fitted: bool,
+     key: u64,
+     dirty: bool,
++    #[cfg(feature = "pattern-proto")]
++    proto: proto::Prototype,
+ }
+ #[wasm_bindgen]
+ impl Viewer {
+@@ -108,6 +116,8 @@ impl Viewer {
+             fitted: false,
+             key: 0,
+             dirty: true,
++            #[cfg(feature = "pattern-proto")]
++            proto: Default::default(),
+         })
+     }
+     pub fn device_lost(&self) -> js_sys::Promise {
+@@ -205,15 +215,23 @@ impl Viewer {
+             scene,
+         );
+         let view = output.texture.create_view(&Default::default());
++        self.render(&frame, &view, &self.depth.clone());
++        self.queue.present(output);
++        self.dirty = false;
++        Ok(true)
++    }
++}
++impl Viewer {
++    fn render(&mut self, frame: &Frame, view: &wgpu::TextureView, depth: &wgpu::TextureView) {
+         let mut encoder = self.device.create_command_encoder(&Default::default());
+         self.renderer
+-            .prepare(&self.device, &self.queue, &mut encoder, &frame);
++            .prepare(&self.device, &self.queue, &mut encoder, frame);
+         {
+             let mut pass = encoder
+                 .begin_render_pass(&wgpu::RenderPassDescriptor {
+                     label: Some("madori display"),
+                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+-                        view: &view,
++                        view,
+                         depth_slice: None,
+                         resolve_target: None,
+                         ops: wgpu::Operations {
+@@ -227,7 +245,7 @@ impl Viewer {
+                         },
+                     })],
+                     depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+-                        view: &self.depth,
++                        view: depth,
+                         depth_ops: Some(wgpu::Operations {
+                             load: wgpu::LoadOp::Clear(far_depth(reversed_depth(Some(
+                                 self.depth_format,
+@@ -242,18 +260,17 @@ impl Viewer {
+                 })
+                 .forget_lifetime();
+             self.renderer.paint(
+-                &frame,
++                frame,
+                 &mut pass,
+-                [0., 0., self.config.width as f32, self.config.height as f32],
++                [0., 0., frame.size_px[0], frame.size_px[1]],
+             );
++            #[cfg(feature = "pattern-proto")]
++            if let Some(active) = &self.proto.active {
++                active.paint(&self.queue, frame, &mut pass);
++            }
+         }
+         self.queue.submit([encoder.finish()]);
+-        self.queue.present(output);
+-        self.dirty = false;
+-        Ok(true)
+     }
+-}
+-impl Viewer {
+     fn aspect(&self) -> f64 {
+         f64::from(self.config.width) / f64::from(self.config.height)
+     }
+diff --git a/crates/viewer/src/gpu/pattern.wgsl b/crates/viewer/src/gpu/pattern.wgsl
+new file mode 100644
+index 000000000..cc68eeb3c
+--- /dev/null
++++ b/crates/viewer/src/gpu/pattern.wgsl
+@@ -0,0 +1,28 @@
++struct Camera { vp:mat4x4f, eye:vec4f, back:vec4f }
++struct Frame { origin:vec4f, u:vec4f, v:vec4f }
++@group(0) @binding(0) var<uniform> camera:Camera;
++@group(1) @binding(0) var image:texture_2d<f32>;
++@group(1) @binding(1) var filtering:sampler;
++@group(2) @binding(0) var<uniform> frame:Frame;
++struct Out { @builtin(position) clip:vec4f, @location(0) p:vec3f, @location(1) n:vec3f, @location(2) uv:vec2f }
++@vertex fn planar(@location(0) p:vec3f,@location(1) n:vec3f)->Out{
++    return Out(camera.vp*vec4f(p,1),p,n,vec2f(0));
++}
++@vertex fn vertex_uv(@location(0) p:vec3f,@location(1) n:vec3f,@location(2) uv:vec2f)->Out{
++    return Out(camera.vp*vec4f(p,1),p,n,uv);
++}
++fn lit(n0:vec3f,uv:vec2f)->vec4f{
++    let rgb=textureSample(image, filtering, uv).rgb;
++    let base=select(rgb*12.92,1.055*pow(rgb,vec3f(1./2.4))-0.055,rgb>vec3f(0.0031308));
++    let v=normalize(camera.back.xyz);
++    let n=select(normalize(n0),-normalize(n0),dot(n0,v)<0.);
++    let key=normalize(v*0.8+vec3f(-0.3,0.2,0.6));
++    let k=0.42+0.38*max(dot(n,key),0.)+0.25*max(dot(n,v),0.);
++    let spec=0.25*pow(max(dot(n,normalize(key+v)),0.),40.);
++    return vec4f(min(base*k+spec,vec3f(1)),1);
++}
++@fragment fn project(i:Out)->@location(0) vec4f {
++    let d=i.p-frame.origin.xyz;
++    return lit(i.n,vec2f(dot(d,frame.u.xyz),dot(d,frame.v.xyz)));
++}
++@fragment fn interpolated(i:Out)->@location(0) vec4f{return lit(i.n,i.uv);}
+diff --git a/crates/viewer/src/gpu/pattern_a.rs b/crates/viewer/src/gpu/pattern_a.rs
+new file mode 100644
+index 000000000..988b40858
+--- /dev/null
++++ b/crates/viewer/src/gpu/pattern_a.rs
+@@ -0,0 +1,299 @@
++use super::{
++    proto::PatternRenderer,
++    room::{PatternImage, Room},
++};
++use solidcraft_viewport_gpu::view::{Frame, depth_compare, gpu_view_proj};
++use std::collections::HashMap;
++use wgpu::{
++    self as g,
++    util::{BufferInitDescriptor, DeviceExt},
++};
++
++fn bytes(values: impl IntoIterator<Item = f32>) -> Vec<u8> {
++    values.into_iter().flat_map(f32::to_le_bytes).collect()
++}
++fn buffer(d: &g::Device, usage: g::BufferUsages, contents: &[u8]) -> g::Buffer {
++    d.create_buffer_init(&BufferInitDescriptor {
++        label: None,
++        usage,
++        contents,
++    })
++}
++fn group(
++    d: &g::Device,
++    p: &g::RenderPipeline,
++    index: u32,
++    r: &[g::BindingResource],
++) -> g::BindGroup {
++    let entries = r
++        .iter()
++        .cloned()
++        .enumerate()
++        .map(|(i, resource)| g::BindGroupEntry {
++            binding: i as u32,
++            resource,
++        })
++        .collect::<Vec<_>>();
++    d.create_bind_group(&g::BindGroupDescriptor {
++        label: None,
++        layout: &p.get_bind_group_layout(index),
++        entries: &entries,
++    })
++}
++fn texture(d: &g::Device, q: &g::Queue, img: &PatternImage, mips: bool) -> g::TextureView {
++    let (mut w, mut h) = (img.width, img.height);
++    let levels = if mips { 1 + w.max(h).ilog2() } else { 1 };
++    let extent = |width, height| g::Extent3d {
++        width,
++        height,
++        depth_or_array_layers: 1,
++    };
++    let t = d.create_texture(&g::TextureDescriptor {
++        label: None,
++        size: extent(w, h),
++        mip_level_count: levels,
++        sample_count: 1,
++        dimension: g::TextureDimension::D2,
++        format: g::TextureFormat::Rgba8UnormSrgb,
++        usage: g::TextureUsages::COPY_DST | g::TextureUsages::TEXTURE_BINDING,
++        view_formats: &[],
++    });
++    let mut data = img.rgba.clone();
++    let linear: [f32; 256] = std::array::from_fn(|i| {
++        let s = i as f32 / 255.;
++        if s <= 0.04045 {
++            s / 12.92
++        } else {
++            ((s + 0.055) / 1.055).powf(2.4)
++        }
++    });
++    for level in 0..levels {
++        q.write_texture(
++            g::TexelCopyTextureInfo {
++                texture: &t,
++                mip_level: level,
++                origin: g::Origin3d::ZERO,
++                aspect: g::TextureAspect::All,
++            },
++            &data,
++            g::TexelCopyBufferLayout {
++                offset: 0,
++                bytes_per_row: Some(w * 4),
++                rows_per_image: Some(h),
++            },
++            extent(w, h),
++        );
++        if level + 1 == levels {
++            break;
++        }
++        let (nw, nh) = ((w / 2).max(1), (h / 2).max(1));
++        let mut next = Vec::with_capacity((nw * nh * 4) as usize);
++        for y in 0..nh {
++            for x in 0..nw {
++                let mut sum = [0.; 3];
++                let mut count = 0.;
++                for j in y * h / nh..(y + 1) * h / nh {
++                    for i in x * w / nw..(x + 1) * w / nw {
++                        for c in 0..3 {
++                            sum[c] += linear[data[((j * w + i) * 4) as usize + c] as usize];
++                        }
++                        count += 1.;
++                    }
++                }
++                next.extend(sum.map(|v| {
++                    let v = v / count;
++                    let s = if v <= 0.0031308 {
++                        12.92 * v
++                    } else {
++                        1.055 * v.powf(1. / 2.4) - 0.055
++                    };
++                    (s * 255.).round() as u8
++                }));
++                next.push(255);
++            }
++        }
++        data = next;
++        w = nw;
++        h = nh;
++    }
++    t.create_view(&Default::default())
++}
++struct Draw {
++    slot: u32,
++    frame: Option<g::BindGroup>,
++    vertices: std::ops::Range<u32>,
++}
++pub struct Candidate {
++    pipeline: g::RenderPipeline,
++    vertices: g::Buffer,
++    camera: g::Buffer,
++    view: g::BindGroup,
++    images: HashMap<u32, g::BindGroup>,
++    draws: Vec<Draw>,
++}
++impl Candidate {
++    #[allow(clippy::too_many_arguments)]
++    pub fn new(
++        d: &g::Device,
++        q: &g::Queue,
++        format: g::TextureFormat,
++        depth: g::TextureFormat,
++        room: &Room,
++        images: &[PatternImage],
++        vertex: bool,
++        mips: bool,
++        aniso: u16,
++    ) -> Result<Self, String> {
++        let module = d.create_shader_module(g::ShaderModuleDescriptor {
++            label: Some("A"),
++            source: g::ShaderSource::Wgsl(include_str!("pattern.wgsl").into()),
++        });
++        let attrs = g::vertex_attr_array![0=>Float32x3,1=>Float32x3,2=>Float32x2];
++        let stride = if vertex { 32 } else { 24 };
++        let p = d.create_render_pipeline(&g::RenderPipelineDescriptor {
++            label: Some("A"),
++            layout: None,
++            vertex: g::VertexState {
++                module: &module,
++                entry_point: Some(if vertex { "vertex_uv" } else { "planar" }),
++                buffers: &[Some(g::VertexBufferLayout {
++                    array_stride: stride,
++                    step_mode: g::VertexStepMode::Vertex,
++                    attributes: &attrs[..if vertex { 3 } else { 2 }],
++                })],
++                compilation_options: Default::default(),
++            },
++            primitive: Default::default(),
++            depth_stencil: Some(g::DepthStencilState {
++                format: depth,
++                depth_compare: Some(depth_compare(true, g::CompareFunction::LessEqual)),
++                depth_write_enabled: Some(false),
++                stencil: Default::default(),
++                bias: Default::default(),
++            }),
++            multisample: Default::default(),
++            fragment: Some(g::FragmentState {
++                module: &module,
++                entry_point: Some(if vertex { "interpolated" } else { "project" }),
++                targets: &[Some(format.into())],
++                compilation_options: Default::default(),
++            }),
++            multiview_mask: None,
++            cache: None,
++        });
++        let camera = buffer(
++            d,
++            g::BufferUsages::UNIFORM | g::BufferUsages::COPY_DST,
++            &[0; 96],
++        );
++        let view = group(d, &p, 0, &[camera.as_entire_binding()]);
++        let sampler = d.create_sampler(&g::SamplerDescriptor {
++            address_mode_u: g::AddressMode::Repeat,
++            address_mode_v: g::AddressMode::Repeat,
++            mag_filter: g::FilterMode::Linear,
++            min_filter: g::FilterMode::Linear,
++            mipmap_filter: g::MipmapFilterMode::Linear,
++            anisotropy_clamp: aniso,
++            ..Default::default()
++        });
++        let images: HashMap<_, _> = images
++            .iter()
++            .map(|img| {
++                let t = texture(d, q, img, mips);
++                (
++                    img.slot,
++                    group(
++                        d,
++                        &p,
++                        1,
++                        &[
++                            g::BindingResource::TextureView(&t),
++                            g::BindingResource::Sampler(&sampler),
++                        ],
++                    ),
++                )
++            })
++            .collect();
++        let mut data = Vec::new();
++        let mut draws = Vec::new();
++        for f in &room.faces {
++            if !images.contains_key(&f.slot) {
++                return Err(format!("missing image {}", f.slot));
++            }
++            let frame = f.frame;
++            let inverse = |a: [f32; 3]| {
++                let length = a.iter().map(|v| v * v).sum::<f32>();
++                a.map(|v| v / length)
++            };
++            let u = inverse(frame.u);
++            let v = inverse(frame.v);
++            let bind = (!vertex).then(|| {
++                let b = buffer(
++                    d,
++                    g::BufferUsages::UNIFORM,
++                    &bytes(
++                        [frame.origin, u, v]
++                            .into_iter()
++                            .flat_map(|a| a.into_iter().chain([0.])),
++                    ),
++                );
++                group(d, &p, 2, &[b.as_entire_binding()])
++            });
++            let mesh = &room.scene.meshes[f.body].mesh;
++            let begin = data.len() as u32 / stride as u32;
++            for (tri, _) in mesh
++                .triangles
++                .iter()
++                .zip(&mesh.tri_face)
++                .filter(|(_, id)| **id == f.face)
++            {
++                for &i in tri {
++                    let pos = mesh.positions[i as usize].to_f32();
++                    let n = mesh.normals[i as usize].to_f32();
++                    data.extend(bytes(pos.into_iter().chain(n)));
++                    if vertex {
++                        data.extend(bytes([u, v].map(|axis| {
++                            (0..3).map(|k| (pos[k] - frame.origin[k]) * axis[k]).sum()
++                        })));
++                    }
++                }
++            }
++            draws.push(Draw {
++                slot: f.slot,
++                frame: bind,
++                vertices: begin..data.len() as u32 / stride as u32,
++            });
++        }
++        Ok(Self {
++            pipeline: p,
++            vertices: buffer(d, g::BufferUsages::VERTEX, &data),
++            camera,
++            view,
++            images,
++            draws,
++        })
++    }
++}
++impl PatternRenderer for Candidate {
++    fn paint(&self, q: &g::Queue, f: &Frame, pass: &mut g::RenderPass) {
++        let uniform = bytes(
++            gpu_view_proj(f.view_proj, true)
++                .into_iter()
++                .flatten()
++                .chain(f.eye)
++                .chain(f.back)
++                .chain([0.]),
++        );
++        q.write_buffer(&self.camera, 0, &uniform);
++        pass.set_pipeline(&self.pipeline);
++        pass.set_vertex_buffer(0, self.vertices.slice(..));
++        pass.set_bind_group(0, &self.view, &[]);
++        for draw in &self.draws {
++            pass.set_bind_group(1, &self.images[&draw.slot], &[]);
++            if let Some(bind) = &draw.frame {
++                pass.set_bind_group(2, bind, &[]);
++            }
++            pass.draw(draw.vertices.clone(), 0..1);
++        }
++    }
++}
+diff --git a/crates/viewer/src/gpu/proto.rs b/crates/viewer/src/gpu/proto.rs
+new file mode 100644
+index 000000000..c7ee5dd6c
+--- /dev/null
++++ b/crates/viewer/src/gpu/proto.rs
+@@ -0,0 +1,414 @@
++use super::{
++    Viewer, depth_texture, frame,
++    room::{self, PatternImage},
++};
++use crate::scene::ShownScene;
++use solidcraft_viewport_gpu::{capture::scene_geometry, view::Frame};
++use std::sync::{Arc, Mutex};
++use wasm_bindgen::prelude::*;
++use wasm_bindgen_futures::JsFuture;
++
++pub(super) trait PatternRenderer {
++    fn paint(&self, q: &wgpu::Queue, f: &Frame, pass: &mut wgpu::RenderPass);
++}
++#[derive(Default)]
++pub(super) struct Prototype {
++    images: Vec<PatternImage>,
++    #[cfg(feature = "pattern-b")]
++    upload_ms: f64,
++    #[cfg(feature = "pattern-b")]
++    mip_generator: Option<solidcraft_viewport_gpu::maps::MipGenerator>,
++    pub active: Option<Box<dyn PatternRenderer>>,
++}
++#[wasm_bindgen(
++    inline_js = "export function proto_now(){return performance.now()} export function watch_gpu(d, report){d.addEventListener('uncapturederror', e=>report(e.error.message))}"
++)]
++extern "C" {
++    fn proto_now() -> f64;
++    fn watch_gpu(device: &JsValue, report: &js_sys::Function);
++}
++#[wasm_bindgen]
++impl Viewer {
++    pub fn pattern_watch_errors(&self, report: &js_sys::Function) -> Result<(), String> {
++        watch_gpu(
++            self.device.as_webgpu().ok_or("WebGPU required")?.as_ref(),
++            report,
++        );
++        Ok(())
++    }
++    pub fn pattern_image(
++        &mut self,
++        slot: u32,
++        width: u32,
++        height: u32,
++        rgba: &[u8],
++    ) -> Result<(), String> {
++        if width == 0
++            || height == 0
++            || width > 4096
++            || height > 4096
++            || rgba.len() != (width * height * 4) as usize
++        {
++            return Err("invalid pattern dimensions or byte length".into());
++        }
++        self.proto.images.retain(|i| i.slot != slot);
++        self.proto.images.push(PatternImage {
++            slot,
++            width,
++            height,
++            rgba: rgba.to_vec(),
++        });
++        Ok(())
++    }
++    #[allow(clippy::too_many_arguments)]
++    pub fn pattern_scene(
++        &mut self,
++        mode: &str,
++        mips: &str,
++        anisotropy: u16,
++        start: bool,
++        length_mm: f64,
++        glass: bool,
++        grid: u32,
++        camera: u32,
++        always_three: bool,
++    ) -> Result<String, String> {
++        if !matches!(grid, 1 | 8) || !matches!(anisotropy, 1 | 16) {
++            return Err("invalid grid or anisotropy".into());
++        }
++        if !matches!(length_mm, 3640. | 3790. | 5460.) {
++            return Err("invalid room length".into());
++        }
++        let room = room::build(length_mm, grid, start, glass);
++        let _ = (mips, always_three);
++        self.proto.active = match mode {
++            "plain" => None,
++            #[cfg(feature = "pattern-b")]
++            "b-planar" | "b-triplanar-column" => None,
++            #[cfg(feature = "pattern-a")]
++            "planar" | "vertex-uv" => Some(Box::new(super::pattern_a::Candidate::new(
++                &self.device,
++                &self.queue,
++                self.config.format,
++                self.depth_format,
++                &room,
++                &self.proto.images,
++                mode == "vertex-uv",
++                mips != "off",
++                anisotropy,
++            )?)),
++            _ => return Err(format!("mode unavailable: {mode}")),
++        };
++        let faces = room.faces.len();
++        let vertices: usize = room
++            .faces
++            .iter()
++            .map(|f| {
++                room.scene.meshes[f.body]
++                    .mesh
++                    .tri_face
++                    .iter()
++                    .filter(|&&id| id == f.face)
++                    .count()
++                    * 3
++            })
++            .sum();
++        self.key += 1;
++        self.camera = room::camera(camera, length_mm);
++        #[cfg(feature = "pattern-b")]
++        let geometry = if mode.starts_with("b-") {
++            let (maps, ms) = mapped_room(
++                &self.device,
++                &self.queue,
++                &room,
++                &self.proto.images,
++                mips,
++                anisotropy,
++                mode == "b-triplanar-column",
++                always_three,
++                (mips == "gpu").then(|| {
++                    &*self.proto.mip_generator.get_or_insert_with(|| {
++                        solidcraft_viewport_gpu::maps::MipGenerator::new(&self.device)
++                    })
++                }),
++            )?;
++            self.proto.upload_ms = ms;
++            solidcraft_viewport_gpu::capture::scene_geometry_mapped(&room.scene, &maps)
++        } else {
++            scene_geometry(&room.scene)
++        };
++        #[cfg(not(feature = "pattern-b"))]
++        let geometry = scene_geometry(&room.scene);
++        self.scene = Some(ShownScene {
++            key: self.key,
++            bounds: room.bounds,
++            slot: Arc::new(Mutex::new(Some(geometry))),
++        });
++        self.dirty = true;
++        Ok(format!(
++            "{faces} patterned faces, {vertices} triangle vertices. Frames: {} bytes ({} uniform bytes padded). Vertex UV: {} bytes.",
++            faces * 36,
++            faces * 48,
++            vertices * 8
++        ))
++    }
++    pub async fn bench(&mut self, frames: u32) -> Result<f64, JsValue> {
++        if frames == 0 || frames > 1000 {
++            return Err("expected 1..1000 frames".into());
++        }
++        let mut config = self.config.clone();
++        config.width = 1920;
++        config.height = 1200;
++        let color = depth_texture(&self.device, &config, config.format);
++        let depth = depth_texture(&self.device, &config, self.depth_format);
++        let queue = self.queue.as_webgpu().ok_or("WebGPU required")?.clone();
++        JsFuture::from(queue.on_submitted_work_done()).await?;
++        let start = proto_now();
++        for i in 0..frames {
++            let mut cam = self.camera;
++            cam.yaw += if i % 2 == 0 { 0.0001 } else { -0.0001 };
++            let f = frame(
++                &cam,
++                1.6,
++                [1920, 1200],
++                self.scene.as_ref().ok_or("no scene")?,
++            );
++            self.render(&f, &color, &depth);
++        }
++        JsFuture::from(queue.on_submitted_work_done()).await?;
++        Ok((proto_now() - start) / f64::from(frames))
++    }
++}
++
++#[cfg(feature = "pattern-b")]
++fn mapped_room(
++    device: &wgpu::Device,
++    queue: &wgpu::Queue,
++    room: &room::Room,
++    images: &[PatternImage],
++    mips: &str,
++    aniso: u16,
++    tri: bool,
++    always_three: bool,
++    generator: Option<&solidcraft_viewport_gpu::maps::MipGenerator>,
++) -> Result<(solidcraft_viewport_gpu::maps::FaceMaps, f64), String> {
++    use solidcraft_viewport_gpu::maps::{FaceMaps, MapGpu, Mip, mip_chain};
++    let width = images.iter().map(|i| i.width).max().ok_or("no images")?;
++    let height = images.iter().map(|i| i.height).max().ok_or("no images")?;
++    let mut layers = Vec::new();
++    for image in images {
++        let bytes = if (width, height) == (image.width, image.height) {
++            image.rgba.clone()
++        } else {
++            let mut bytes = Vec::with_capacity((width * height * 4) as usize);
++            for y in 0..height {
++                for x in 0..width {
++                    let i = ((y * image.height / height * image.width + x * image.width / width)
++                        * 4) as usize;
++                    bytes.extend_from_slice(&image.rgba[i..i + 4]);
++                }
++            }
++            bytes
++        };
++        layers.push(mip_chain(
++            Mip {
++                width,
++                height,
++                bytes,
++            },
++            mips == "cpu",
++        ));
++    }
++    let mut frames = Vec::new();
++    let mut faces = Vec::new();
++    for f in &room.faces {
++        let layer = images
++            .iter()
++            .position(|i| i.slot == f.slot)
++            .ok_or("missing image")?;
++        let axis = |a: [f32; 3]| {
++            let len2 = a.iter().map(|x| x * x).sum::<f32>();
++            a.map(|x| x / len2)
++        };
++        let [ox, oy, oz] = f.frame.origin;
++        let [ux, uy, uz] = axis(f.frame.u);
++        let [vx, vy, vz] = axis(f.frame.v);
++        let kind = if tri && f.curved { 2. } else { 1. };
++        frames.push([
++            [ox, oy, oz, layer as f32],
++            [ux, uy, uz, kind],
++            [vx, vy, vz, 0.],
++        ]);
++        faces.push((f.body, f.face));
++    }
++    let start = proto_now();
++    let gpu = Arc::new(MapGpu::upload(
++        device,
++        queue,
++        &frames,
++        &layers,
++        aniso,
++        generator,
++        always_three,
++    ));
++    Ok((FaceMaps { faces, gpu }, proto_now() - start))
++}
++#[cfg(feature = "pattern-b")]
++#[wasm_bindgen]
++impl Viewer {
++    pub fn pattern_upload_ms(&self) -> f64 {
++        self.proto.upload_ms
++    }
++    pub fn pattern_mip_ms(&self, size: u32) -> Result<f64, String> {
++        use solidcraft_viewport_gpu::maps::{Mip, mip_chain};
++        if !matches!(size, 512 | 1024) {
++            return Err("expected 512 or 1024".into());
++        }
++        let mut samples = [0.; 5];
++        for t in &mut samples {
++            let bytes = (0..size * size * 4)
++                .map(|i| i.wrapping_mul(71) as u8)
++                .collect();
++            let start = proto_now();
++            let levels = mip_chain(
++                Mip {
++                    width: size,
++                    height: size,
++                    bytes,
++                },
++                true,
++            );
++            std::hint::black_box(&levels);
++            *t = proto_now() - start;
++        }
++        samples.sort_by(f64::total_cmp);
++        Ok(samples[2])
++    }
++}
++
++#[cfg(feature = "pattern-b")]
++#[wasm_bindgen(
++    inline_js = "export async function mip_bytes(b){await b.mapAsync(GPUMapMode.READ); const a=new Uint8Array(b.getMappedRange()).slice(); b.unmap(); return a}"
++)]
++extern "C" {
++    #[wasm_bindgen(catch)]
++    async fn mip_bytes(buffer: &JsValue) -> Result<JsValue, JsValue>;
++}
++
++#[cfg(feature = "pattern-b")]
++#[wasm_bindgen]
++impl Viewer {
++    pub async fn pattern_gpu_probe(&self, size: u32) -> Result<Vec<f64>, JsValue> {
++        use solidcraft_viewport_gpu::maps::{Mip, MipGenerator, mip_chain};
++        use wgpu as g;
++        if !matches!(size, 512 | 1024) {
++            return Err("expected 512 or 1024".into());
++        }
++        let tile = self
++            .proto
++            .images
++            .iter()
++            .find(|i| i.slot == 1)
++            .ok_or("missing tile")?;
++        let mut bytes = Vec::with_capacity((size * size * 4) as usize);
++        for y in 0..size {
++            for x in 0..size {
++                let k =
++                    (4 * ((y * tile.height / size) * tile.width + x * tile.width / size)) as usize;
++                bytes.extend_from_slice(&tile.rgba[k..k + 4]);
++            }
++        }
++        let levels = mip_chain(
++            Mip {
++                width: size,
++                height: size,
++                bytes,
++            },
++            true,
++        );
++        let d = &self.device;
++        let q = &self.queue;
++        let extent = |side| g::Extent3d {
++            width: side,
++            height: side,
++            depth_or_array_layers: 1,
++        };
++        let texture = d.create_texture(&g::TextureDescriptor {
++            label: Some("mip probe"),
++            size: extent(size),
++            mip_level_count: levels.len() as u32,
++            sample_count: 1,
++            dimension: g::TextureDimension::D2,
++            format: g::TextureFormat::Rgba8UnormSrgb,
++            usage: g::TextureUsages::COPY_DST
++                | g::TextureUsages::COPY_SRC
++                | g::TextureUsages::TEXTURE_BINDING
++                | g::TextureUsages::RENDER_ATTACHMENT,
++            view_formats: &[],
++        });
++        let image = |level| g::TexelCopyTextureInfo {
++            texture: &texture,
++            mip_level: level,
++            origin: g::Origin3d::ZERO,
++            aspect: g::TextureAspect::All,
++        };
++        let layout = |pitch| g::TexelCopyBufferLayout {
++            offset: 0,
++            bytes_per_row: Some(pitch),
++            rows_per_image: None,
++        };
++        q.write_texture(image(0), &levels[0].bytes, layout(size * 4), extent(size));
++        let generator = MipGenerator::new(d);
++        let queue = q.as_webgpu().ok_or("WebGPU required")?;
++        q.submit([]);
++        JsFuture::from(queue.on_submitted_work_done()).await?;
++        let mut encodes = Vec::new();
++        let mut walls = Vec::new();
++        for round in 0..6 {
++            let start = proto_now();
++            let commands = generator.encode(d, &texture);
++            let encode = proto_now() - start;
++            q.submit([commands]);
++            JsFuture::from(queue.on_submitted_work_done()).await?;
++            if round > 0 {
++                encodes.push(encode);
++                walls.push(proto_now() - start);
++            }
++        }
++        let side = size / 16;
++        let pitch = (side * 4).next_multiple_of(256);
++        let buffer = d.create_buffer(&g::BufferDescriptor {
++            label: Some("mip probe readback"),
++            size: u64::from(pitch * side),
++            usage: g::BufferUsages::COPY_DST | g::BufferUsages::MAP_READ,
++            mapped_at_creation: false,
++        });
++        let mut copies = Vec::new();
++        for cpu in [false, true] {
++            if cpu {
++                q.write_texture(image(4), &levels[4].bytes, layout(side * 4), extent(side));
++            }
++            let mut encoder = d.create_command_encoder(&Default::default());
++            encoder.copy_texture_to_buffer(
++                image(4),
++                g::TexelCopyBufferInfo {
++                    buffer: &buffer,
++                    layout: layout(pitch),
++                },
++                extent(side),
++            );
++            q.submit([encoder.finish()]);
++            let result =
++                mip_bytes(buffer.as_webgpu().ok_or("WebGPU buffer required")?.as_ref()).await?;
++            copies.push(js_sys::Uint8Array::new(&result).to_vec());
++        }
++        let diff = (0..side)
++            .flat_map(|y| (0..side * 4).map(move |x| (y * pitch + x) as usize))
++            .map(|i| copies[0][i].abs_diff(copies[1][i]))
++            .max()
++            .unwrap_or(0);
++        encodes.sort_by(f64::total_cmp);
++        walls.sort_by(f64::total_cmp);
++        Ok(vec![encodes[2], walls[2], f64::from(diff)])
++    }
++}
+diff --git a/crates/viewer/src/gpu/room.rs b/crates/viewer/src/gpu/room.rs
+new file mode 100644
+index 000000000..53aeb01dc
+--- /dev/null
++++ b/crates/viewer/src/gpu/room.rs
+@@ -0,0 +1,270 @@
++use solidcraft_geom::{Aabb3, Mesh, MeshGeom};
++use solidcraft_viewport::{Camera, Rgb, Scene, SceneMesh};
++use std::sync::Arc;
++
++pub struct PatternImage {
++    pub slot: u32,
++    pub width: u32,
++    pub height: u32,
++    pub rgba: Vec<u8>,
++}
++#[derive(Clone, Copy)]
++pub struct PatternFrame {
++    pub origin: [f32; 3],
++    pub u: [f32; 3],
++    pub v: [f32; 3],
++}
++pub struct FacePattern {
++    #[cfg(feature = "pattern-b")]
++    pub curved: bool,
++    pub body: usize,
++    pub face: u32,
++    pub slot: u32,
++    pub frame: PatternFrame,
++}
++pub struct Room {
++    pub scene: Scene,
++    pub faces: Vec<FacePattern>,
++    pub bounds: Aabb3,
++}
++
++fn quad(mesh: &mut Mesh, p: [[f64; 3]; 4], n: [[f64; 3]; 4], face: u32) {
++    let i = mesh.positions.len() as u32;
++    for point in p {
++        mesh.positions.push(point.into());
++    }
++    for normal in n {
++        mesh.normals.push(normal.into());
++    }
++    mesh.triangles
++        .extend([[i, i + 1, i + 2], [i, i + 2, i + 3]]);
++    mesh.tri_face.extend([face; 2]);
++}
++fn cuboid(lo: [f64; 3], hi: [f64; 3]) -> Mesh {
++    let mut m = Mesh::default();
++    for axis in 0..3 {
++        let b = (axis + 1) % 3;
++        let c = (axis + 2) % 3;
++        for upper in [false, true] {
++            let mut n = [0.; 3];
++            n[axis] = if upper { 1. } else { -1. };
++            let mut p = [[0.; 3]; 4];
++            for (i, (s, t)) in [(false, false), (true, false), (true, true), (false, true)]
++                .into_iter()
++                .enumerate()
++            {
++                p[i][axis] = if upper { hi[axis] } else { lo[axis] };
++                p[i][b] = if s == upper { hi[b] } else { lo[b] };
++                p[i][c] = if t { hi[c] } else { lo[c] };
++            }
++            quad(&mut m, p, [n; 4], axis as u32 * 2 + u32::from(upper));
++        }
++    }
++    m
++}
++fn column(x: f64, y: f64) -> Mesh {
++    let mut m = Mesh::default();
++    for i in 0..48 {
++        let ring = |j: u32| {
++            let a = f64::from(j % 48) * std::f64::consts::TAU / 48.;
++            [a.cos(), a.sin(), 0.]
++        };
++        let a = ring(i);
++        let b = ring(i + 1);
++        let point = |n: [f64; 3], z| [x + 150. * n[0], y + 150. * n[1], z];
++        quad(
++            &mut m,
++            [point(a, 0.), point(b, 0.), point(b, 2400.), point(a, 2400.)],
++            [a, b, b, a],
++            0,
++        );
++        for (z, sign, face) in [(0., -1., 1), (2400., 1., 2)] {
++            let k = m.positions.len() as u32;
++            for vertex in [[x, y, z], point(a, z), point(b, z)] {
++                m.positions.push(vertex.into());
++            }
++            for _ in 0..3 {
++                m.normals.push([0., 0., sign].into());
++            }
++            m.triangles.push(if sign > 0. {
++                [k, k + 1, k + 2]
++            } else {
++                [k, k + 2, k + 1]
++            });
++            m.tri_face.push(face);
++        }
++    }
++    m
++}
++impl Room {
++    fn add(
++        &mut self,
++        mesh: Mesh,
++        color: Rgb,
++        opacity: f32,
++        pattern: Option<(u32, u32, PatternFrame)>,
++    ) {
++        if let Some((face, slot, frame)) = pattern {
++            self.faces.push(FacePattern {
++                #[cfg(feature = "pattern-b")]
++                curved: false,
++                body: self.scene.meshes.len(),
++                face,
++                slot,
++                frame,
++            });
++        }
++        self.bounds = self.bounds.union(&mesh.bounds());
++        self.scene.meshes.push(SceneMesh {
++            mesh: Arc::new(mesh),
++            color,
++            face_colors: vec![],
++            opacity,
++            closed: true,
++            hatch: Default::default(),
++            values: None,
++        });
++    }
++}
++pub fn build(length: f64, grid: u32, start: bool, glass: bool) -> Room {
++    let mut room = Room {
++        scene: Scene::default(),
++        bounds: Aabb3::EMPTY,
++        faces: vec![],
++    };
++    for row in 0..grid {
++        for col in 0..grid {
++            let x = f64::from(col) * (length + 700.);
++            let y = f64::from(row) * 3430.;
++            let slab = |lo: [f64; 3], hi: [f64; 3]| {
++                cuboid([lo[0] + x, lo[1] + y, lo[2]], [hi[0] + x, hi[1] + y, hi[2]])
++            };
++            room.add(
++                slab([-120., -120., -150.], [length + 120., 2850., 0.]),
++                Rgb(151, 113, 67),
++                1.,
++                Some((
++                    5,
++                    0,
++                    PatternFrame {
++                        origin: [0.; 3],
++                        u: [0., 240., 0.],
++                        v: [480., 0., 0.],
++                    },
++                )),
++            );
++            let tile = Rgb(210, 205, 195);
++            let mut wall = |lo: [f64; 3], hi: [f64; 3], face: u32| {
++                #[cfg(not(any(feature = "pattern-a", feature = "pattern-b")))]
++                let (origin, u) = {
++                    let along_x = face >= 2;
++                    let (origin, u) = if along_x {
++                        (
++                            [
++                                if start { x + lo[0] } else { 0. },
++                                y + if face == 3 { hi[1] } else { lo[1] },
++                                0.,
++                            ],
++                            [600., 0., 0.],
++                        )
++                    } else {
++                        (
++                            [
++                                x + if face == 1 { hi[0] } else { lo[0] },
++                                if start { y + lo[1] } else { 0. },
++                                0.,
++                            ],
++                            [0., 600., 0.],
++                        )
++                    };
++                    (origin, u)
++                };
++                #[cfg(any(feature = "pattern-a", feature = "pattern-b"))]
++                let (origin, u) = match face {
++                    3 => ([if start { x } else { 0. }, y, 0.], [600., 0., 0.]),
++                    0 => ([x + length, if start { y } else { 0. }, 0.], [0., 600., 0.]),
++                    2 => (
++                        [if start { x + length } else { 0. }, y + 2730., 0.],
++                        [-600., 0., 0.],
++                    ),
++                    _ => ([x, if start { y + 2730. } else { 0. }, 0.], [0., -600., 0.]),
++                };
++                room.add(
++                    slab(lo, hi),
++                    tile,
++                    1.,
++                    Some((
++                        face,
++                        1,
++                        PatternFrame {
++                            origin: origin.map(|n| n as f32),
++                            u,
++                            v: [0., 0., 600.],
++                        },
++                    )),
++                );
++            };
++            let mid = length / 2.;
++            for (a, b) in [(0., mid), (mid, length)] {
++                wall([a, -120., 0.], [b, 0., 2400.], 3);
++            }
++            for (a, b, h, t) in [
++                (0., mid - 845., 0., 2400.),
++                (mid + 845., length, 0., 2400.),
++                (mid - 845., mid + 845., 0., 900.),
++                (mid - 845., mid + 845., 2000., 2400.),
++            ] {
++                wall([a, 2730., h], [b, 2850., t], 2);
++            }
++            wall([-120., 0., 0.], [0., 2730., 2400.], 1);
++            wall([length, 0., 0.], [length + 120., 2730., 2400.], 0);
++            if glass {
++                room.add(
++                    slab([mid - 845., 2787., 900.], [mid + 845., 2793., 2000.]),
++                    Rgb(155, 203, 221),
++                    0.35,
++                    None,
++                );
++            }
++            room.add(
++                column(x + 1450., y + 810.),
++                tile,
++                1.,
++                Some((
++                    0,
++                    1,
++                    PatternFrame {
++                        origin: [0.; 3],
++                        u: [600., 0., 0.],
++                        v: [0., 0., 600.],
++                    },
++                )),
++            );
++            #[cfg(feature = "pattern-b")]
++            if let Some(column) = room.faces.last_mut() {
++                column.curved = true;
++            }
++        }
++    }
++    room.scene.radius = room.bounds.diagonal();
++    room
++}
++pub fn camera(preset: u32, length: f64) -> Camera {
++    let (eye, target) = match preset {
++        1 => ([length * 0.51, 230., 1450.], [length * 0.5, 2730., 1280.]),
++        3 => ([length * 0.5, 3350., 1980.], [length * 0.5, 1510., 0.]),
++        2 => ([180., 430., 140.], [length, 460., 100.]),
++        4 => ([450., 2070., 1300.], [450., 2730., 1300.]),
++        5 => ([2020., 810., 1300.], [1450., 810., 1300.]),
++        _ => ([2260., 2450., 1480.], [1760., 0., 940.]),
++    };
++    let [dx, dy, dz] = std::array::from_fn(|i| target[i] - eye[i]);
++    Camera {
++        target: target.into(),
++        yaw: dx.atan2(dy),
++        pitch: (-dz).atan2(dx.hypot(dy)),
++        distance: dx.hypot(dy).hypot(dz),
++        fov: 65_f64.to_radians(),
++        ..Default::default()
++    }
++}
+diff --git a/third_party/solidcraft/crates/viewport-gpu/Cargo.toml b/third_party/solidcraft/crates/viewport-gpu/Cargo.toml
+index 8c64cdfb8..8dd4cf829 100644
+--- a/third_party/solidcraft/crates/viewport-gpu/Cargo.toml
++++ b/third_party/solidcraft/crates/viewport-gpu/Cargo.toml
+@@ -8,6 +8,9 @@ license.workspace = true
+ [lints]
+ workspace = true
+ 
++[features]
++pattern-maps = []
++
+ [dependencies]
+ log = { workspace = true }
+ serde = { workspace = true }
+diff --git a/third_party/solidcraft/crates/viewport-gpu/shaders/viewport-maps.wgsl b/third_party/solidcraft/crates/viewport-gpu/shaders/viewport-maps.wgsl
+new file mode 100644
+index 000000000..bfc0c5c5c
+--- /dev/null
++++ b/third_party/solidcraft/crates/viewport-gpu/shaders/viewport-maps.wgsl
+@@ -0,0 +1,1449 @@
++
++struct U {
++    vp: mat4x4<f32>,
++    back: vec4<f32>,   // xyz = toward the eye, w = 1 for linear output
++    screen: vec4<f32>, // viewport width, height (px), unused, silhouettes on (1)
++    clip: array<vec4<f32>, 6>, // section planes: normal, d each, the first ones (zero normal: unused)
++    cap: vec4<f32>,    // colour of the inside of cut bodies
++    ana: vec4<f32>,    // surface analysis: mode (1 zebra, 2 draft, 3 curvature, 6 values), parameter
++    pull: vec4<f32>,   // draft pull direction
++    acc_u: vec4<f32>,  // accessibility map axes (xyz, offset)
++    acc_v: vec4<f32>,
++    eye: vec4<f32>,    // eye position, w = 1 for perspective (0: orthographic, looking along -back)
++    ao: vec4<f32>,     // x: radius in world units (zero: disabled), y: samples per pixel
++    // analysis colours (`theme::AnalysisColors`): draft positive, between, negative; reachable,
++    // blocked; curvature flat, middle, tight
++    ana_c: array<vec4<f32>, 8>,
++    ana_f: vec4<f32>,  // x = 1: stripe the negative draft and blocked faces
++    depth: vec4<f32>,  // x = 1: reversed depth (1 near, 0 far); y, z: the faces' push (`FACE_BIAS`)
++    // Where the drawn geometry is moved in the world: identity, or a dragged component's move
++    // from where its scene was built (`MovingLayer`)
++    model: mat4x4<f32>,
++    tint: vec4<f32>,   // xyz added to a whole hovered body's colour before lighting
++    sel: vec4<f32>,    // xyz a whole selected body's colour before lighting
++    // the section hatch colours by part (`crate::hatch`), the first the cap's own
++    hatch: array<vec4<f32>, 3>,
++    product_lights_meta: vec4<f32>, // explicit preview flag and bounded count
++    product_lights: array<vec4<f32>,84>, // position/kind, radiance, axis/cone, attenuation
++    inv_vp: mat4x4<f32>, // the inverse of `vp`: a pixel's point in the world from its depth
++    plane_hatch: array<vec4<f32>, 6>, // each section plane's hatch: stripe phase pixel · xy (`section_hatch`)
++    sky: vec4<f32>,    // xyz = world up; w = 1: shade in linear light with a sky fill (#7974)
++};
++
++/// A scene's point in the world (see `U.model`).
++fn placed(p: vec3<f32>) -> vec3<f32> {
++    return (u.model * vec4<f32>(p, 1.0)).xyz;
++}
++
++/// A scene's direction in the world (see `placed`).
++fn turned(n: vec3<f32>) -> vec3<f32> {
++    return (u.model * vec4<f32>(n, 0.0)).xyz;
++}
++
++fn reversed() -> bool {
++    return u.depth.x > 0.5;
++}
++
++/// Clip-space depth measured the usual way (0 at the near plane, w at the far one), whichever
++/// way the depth buffer runs.
++fn near_z(c: vec4<f32>) -> f32 {
++    return select(c.z, c.w - c.z, reversed());
++}
++
++@group(1) @binding(2) var acc_t: texture_2d<f32>;
++@group(2) @binding(0) var ao_depth: texture_2d<u32>;
++@group(2) @binding(1) var ao_map: texture_2d<f32>;
++@group(2) @binding(2) var ao_normal: texture_2d<f32>;
++
++/// How far past a plane `p` may lie and still be kept: the f32 rounding of positions, so a face
++/// lying on a plane stays whole.
++fn clip_slack(p: vec3<f32>, c: vec4<f32>) -> f32 {
++    return 1e-5 * (1.0 + abs(c.w) + length(p));
++}
++
++/// Whether the section hides `p`: it lies on the positive side of any plane.
++fn clipped(p: vec3<f32>) -> bool {
++    if (!sectioned()) { return false; }
++    for (var k = 0u; k < 6u; k++) {
++        let c = u.clip[k];
++        if (length(c.xyz) > 0.5 && dot(c.xyz, p) > c.w + clip_slack(p, c)) { return true; }
++    }
++    return false;
++}
++
++fn sectioned() -> bool {
++    return length(u.clip[0].xyz) > 0.5;
++}
++@group(0) @binding(0) var<uniform> u: U;
++// The scene's colours, 2048 entries to a row: an Rg32Uint texture rather than a storage buffer,
++// so the viewport draws on WebGL2 (which has no storage buffers) as well. Each entry is the
++// colour's bytes, then 1 + the section hatch of the body it colours (0: the cap's own).
++@group(0) @binding(1) var pal: texture_2d<u32>;
++
++fn palette_entry(i: u32) -> vec2<u32> {
++    return textureLoad(pal, vec2<i32>(i32(i & 2047u), i32(i >> 11u)), 0).xy;
++}
++
++// The palette's PBR materials (`Material` in view.rs): for palette row r, texel row 2r holds each
++// entry's linear base colour and a PBR flag, row 2r + 1 its metallic fraction, roughness and IOR.
++@group(0) @binding(2) var pbr_materials: texture_2d<f32>;
++
++/// Palette entry `i`'s hatch word (`hatch`, under 256) with the entry's PBR finish packed above
++/// it: metallic in bits 8-15, roughness in 16-23, bit 24 set when the entry has one. An entry
++/// past the material texture has none (a load out of range is not defined).
++fn finish_h(i: u32, hatch: u32) -> u32 {
++    let at = vec2<u32>(i & 2047u, (i >> 11u) * 2u);
++    if (at.y + 1u >= textureDimensions(pbr_materials).y || textureLoad(pbr_materials, at, 0).w < 0.5) { return hatch; }
++    let p = clamp(textureLoad(pbr_materials, at + vec2<u32>(0u, 1u), 0).xy, vec2<f32>(0.0), vec2<f32>(1.0));
++    let q = vec2<u32>(round(p * 255.0));
++    return hatch | (q.x << 8u) | (q.y << 16u) | (1u << 24u);
++}
++
++/// A palette entry's colour bytes as byte/255 (the old Unorm8x4 conversion, bit for bit).
++fn unpack_color(v: u32) -> vec4<f32> {
++    return vec4<f32>(f32(v & 255u), f32((v >> 8u) & 255u), f32((v >> 16u) & 255u), f32((v >> 24u) & 255u)) / 255.0;
++}
++
++/// The colour at palette entry `i`.
++fn palette(i: u32) -> vec4<f32> {
++    return unpack_color(palette_entry(i).x);
++}
++
++fn to_linear(c: vec3<f32>) -> vec3<f32> {
++    return select(c, pow((c + vec3<f32>(0.055)) / vec3<f32>(1.055), vec3<f32>(2.4)), c > vec3<f32>(0.04045));
++}
++
++fn out_color(c: vec4<f32>) -> vec4<f32> {
++    if (u.back.w > 0.5) {
++        return vec4<f32>(to_linear(c.rgb), c.a);
++    }
++    return c;
++}
++
++struct TOut {
++    @location(6) @interpolate(flat) entry: u32,
++    @invariant @builtin(position) pos: vec4<f32>,
++    @location(0) n: vec3<f32>,
++    @location(1) c: vec4<f32>,
++    @location(2) wp: vec3<f32>,
++    // Low byte: 1 + the section hatch of the body (0: the cap's own), from the palette; above
++    // it the entry's PBR finish (`finish_h`).
++    @location(3) @interpolate(flat) h: u32,
++    // The vertex's value (`AnalysisMode::Values`), and 1 where the triangle has values (0 for
++    // every vertex shader that gives none: a struct's fields start at zero).
++    @location(4) v: f32,
++    @location(5) @interpolate(flat) hv: u32,
++};
++
++/// A built triangle's vertex: its value word is an f32's bits, or all ones for none
++/// (`NO_VALUE`).
++@vertex
++fn vs_tri(@location(0) local: vec3<f32>, @location(1) n: vec3<f32>, @location(2) c: u32, @location(3) value: u32) -> TOut {
++    var o = tri_vertex(local, n, c);
++    let none = value == 0xffffffffu;
++    o.v = select(bitcast<f32>(value), 0.0, none);
++    o.hv = select(1u, 0u, none);
++    return o;
++}
++
++/// A vertex evaluated from a display plan on the GPU (no value).
++@vertex
++fn vs_tri_planned(@location(0) local: vec3<f32>, @location(1) n: vec3<f32>, @location(2) c: u32) -> TOut {
++    return tri_vertex(local, n, c);
++}
++
++/// A triangle vertex at `local` with normal `n` in palette entry `c`, without a value.
++fn tri_vertex(local: vec3<f32>, n: vec3<f32>, c: u32) -> TOut {
++    var o: TOut;
++    let p = placed(local);
++    o.pos = u.vp * vec4<f32>(p, 1.0);
++    o.n = turned(n);
++    let e = palette_entry(c);
++    o.c = unpack_color(e.x);
++    o.h = finish_h(c, e.y);
++    o.entry = c;
++    o.wp = p;
++    return o;
++}
++
++/// Shared triangles (in their part's own frame) drawn at one placement: the rows of its rigid
++/// move (`r0`..`r2`, a point's coordinates are their dot products with (p, 1)) and its colour,
++/// then moved like the rest of its scene (`placed`: a dragged component's layer).
++/// The vertex colour (location 2) is not read.
++@vertex
++fn vs_tri_inst(
++    @location(0) p: vec3<f32>,
++    @location(1) n: vec3<f32>,
++    @location(3) r0: vec4<f32>,
++    @location(4) r1: vec4<f32>,
++    @location(5) r2: vec4<f32>,
++    @location(6) c: u32,
++) -> TOut {
++    let q = vec4<f32>(p, 1.0);
++    let wp = placed(vec3<f32>(dot(r0, q), dot(r1, q), dot(r2, q)));
++    let pn = vec3<f32>(dot(r0.xyz, n), dot(r1.xyz, n), dot(r2.xyz, n));
++    var o: TOut;
++    o.pos = u.vp * vec4<f32>(wp, 1.0);
++    o.n = turned(pn);
++    let e = palette_entry(c);
++    o.c = unpack_color(e.x);
++    o.h = finish_h(c, e.y);
++    o.entry = c;
++    o.wp = wp;
++    return o;
++}
++
++/// A flat-shaded placement (`vs_tri_inst_flat`): its vertices are shared between triangles, so
++/// the face's normal is the triangle's own plane, worked out per fragment. The fragment gets its
++/// position from the eye (`rp`): small near what is looked at, so the plane comes out exact at
++/// any zoom however far from the origin the part stands, and few values per vertex (a tiled GPU
++/// stores every vertex's outputs: more of them cost more than the triangles' shared vertices
++/// save).
++struct FOut {
++    @location(6) @interpolate(flat) entry: u32,
++    @invariant @builtin(position) pos: vec4<f32>,
++    @location(0) rp: vec3<f32>,
++    @location(1) c: vec4<f32>,
++    @location(2) @interpolate(flat) h: u32,
++};
++
++@vertex
++fn vs_tri_inst_flat(
++    @location(0) p: vec3<f32>,
++    @location(3) r0: vec4<f32>,
++    @location(4) r1: vec4<f32>,
++    @location(5) r2: vec4<f32>,
++    @location(6) c: u32,
++) -> FOut {
++    let q = vec4<f32>(p, 1.0);
++    let wp = placed(vec3<f32>(dot(r0, q), dot(r1, q), dot(r2, q)));
++    var o: FOut;
++    o.pos = u.vp * vec4<f32>(wp, 1.0);
++    o.rp = wp - u.eye.xyz;
++    let e = palette_entry(c);
++    o.c = unpack_color(e.x);
++    o.h = finish_h(c, e.y);
++    o.entry = c;
++    return o;
++}
++
++/// The fragment of a flat-shaded placement as the other triangles' fragments are: its normal
++/// the outward normal of its triangle (toward the eye on a front face, away on a back face, as
++/// the triangles are wound outward).
++fn flat_fragment(i: FOut, front: bool) -> TOut {
++    var n = cross(dpdx(i.rp), dpdy(i.rp));
++    let toward = select(u.back.xyz, -i.rp, u.eye.w > 0.5);
++    n = n * inverseSqrt(max(dot(n, n), 1e-30));
++    if ((dot(n, toward) < 0.0) == front) { n = -n; }
++    var o: TOut;
++    o.pos = i.pos;
++    o.n = n;
++    o.c = i.c;
++    o.h = i.h;
++    o.entry = i.entry;
++    o.wp = i.rp + u.eye.xyz;
++    return o;
++}
++
++@fragment
++fn fs_solid_flat(i: FOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
++    let t = flat_fragment(i, front);
++    let c = solid(t, front);
++    return c;
++}
++
++@fragment
++fn fs_solid_cut_flat(i: FOut, @builtin(front_facing) front: bool) -> CutOut {
++    let t = flat_fragment(i, front);
++    var o: CutOut;
++    o.depth = pushed(cap_depth(t.wp, t.pos.z));
++    if (!past_entry(kept_span(t.wp))) { discard; }
++    o.c = vec4<f32>(0.0);
++    return o;
++}
++
++/// Weighted blended order-independent transparency (`view/oit.rs`): a see-through fragment's
++/// colour, premultiplied and weighted by its alpha and nearness, into the accumulation target,
++/// and its alpha into the revealage target (which keeps what is behind it by 1 - alpha).
++struct Oit {
++    @location(0) accum: vec4<f32>,
++    @location(1) reveal: vec4<f32>,
++};
++
++fn oit(c: vec4<f32>, z: f32) -> Oit {
++    let a = clamp(c.a, 0.0, 1.0);
++    // Depth 0 near and 1 far, whichever way the buffer runs.
++    let d = select(z, 1.0 - z, reversed());
++    let w = clamp(a * max(1e-2, 3e3 * pow(1.0 - d, 3.0)), 1e-2, 3e3);
++    var o: Oit;
++    o.accum = vec4<f32>(c.rgb * a, a) * w;
++    o.reveal = vec4<f32>(a);
++    return o;
++}
++
++@fragment
++fn fs_oit(i: TOut) -> Oit {
++    if (clipped(i.wp)) { discard; }
++    return oit(shade(i), i.pos.z);
++}
++
++@fragment
++fn fs_oit_flat(i: FOut, @builtin(front_facing) front: bool) -> Oit {
++    let t = flat_fragment(i, front);
++    let o = oit(shade(t), t.pos.z);
++    if (clipped(t.wp)) { discard; }
++    return o;
++}
++
++/// A see-through flat-shaded placement (faded or glass), shaded like `fs_tri`.
++@fragment
++fn fs_tri_flat(i: FOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
++    let t = flat_fragment(i, front);
++    let c = shade(t);
++    if (clipped(t.wp)) { discard; }
++    return c;
++}
++
++@fragment
++fn fs_ao_depth_flat(i: FOut, @builtin(front_facing) front: bool) -> AoDepth {
++    let t = flat_fragment(i, front);
++    return opaque_depth(t, front);
++}
++
++
++/// Opaque model surfaces: cut by the section, the inside shows as a hatched cap.
++@fragment
++fn fs_solid(i: TOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
++    let c = solid(i, front);
++    return c;
++}
++
++/// Faces where the section plane is outside every closed body (`Cut::rest`): a back face seen
++/// there is the inside of an open body (a surface body, a solid with faces left out), lit as it
++/// is without a section rather than hatched, since there is no cut face to show.
++@fragment
++fn fs_solid_open(i: TOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
++    let c = solid(i, true);
++    return c;
++}
++
++@fragment
++fn fs_solid_open_flat(i: FOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
++    let t = flat_fragment(i, front);
++    let c = solid(t, true);
++    return c;
++}
++
++struct CutOut {
++    @location(0) c: vec4<f32>,
++    @builtin(frag_depth) depth: f32,
++};
++
++/// The section cap's depth (`Cut::cap`; the inside seen through the cut, drawn on the far walls'
++/// back faces where the stencil marks it) at the section plane rather than at the far wall, so
++/// the cut face hides what lies inside the body instead of showing it like a pane of glass.
++@fragment
++fn fs_solid_cut(i: TOut, @builtin(front_facing) front: bool) -> CutOut {
++    var o: CutOut;
++    // Derivatives (in `pushed`) first, before the discard.
++    o.depth = pushed(cap_depth(i.wp, i.pos.z));
++    if (!past_entry(kept_span(i.wp))) { discard; }
++    o.c = vec4<f32>(0.0);
++    return o;
++}
++
++/// A depth the shader writes itself, pushed back like the faces the GPU pushes (`FACE_BIAS`,
++/// which does not apply then): its own slope over `depth.z` pixels and `depth.y` depth steps.
++fn pushed(z: f32) -> f32 {
++    let slope = max(abs(dpdx(z)), abs(dpdy(z)));
++    // One step: 2⁻²⁴ in a 24-bit buffer; a float buffer's steps follow the value (2⁻²³ of it).
++    let step = select(1.0 / 16777216.0, abs(z) * 1.1920929e-7, reversed());
++    let push = slope * u.depth.z + step * u.depth.y;
++    return clamp(z - select(-push, push, reversed()), 0.0, 1.0);
++}
++
++fn view_ray(wp: vec3<f32>) -> vec3<f32> {
++    if (u.eye.w > 0.5) { return wp - u.eye.xyz; }
++    return -u.back.xyz;
++}
++
++/// The stretch `lo < t < hi` of the view ray `wp + view_ray(wp) * t` the section keeps (inside
++/// every plane), and the plane `k` it comes in through (6: none).
++struct Span {
++    lo: f32,
++    hi: f32,
++    k: u32,
++};
++
++fn kept_span(wp: vec3<f32>) -> Span {
++    let dir = view_ray(wp);
++    var s = Span(-1e30, 1e30, 6u);
++    for (var k = 0u; k < 6u; k++) {
++        let c = u.clip[k];
++        if (length(c.xyz) < 0.5) { continue; }
++        // Kept: n·(wp + dir·t) <= d + slack, t·dn <= r.
++        let dn = dot(c.xyz, dir);
++        let r = c.w + clip_slack(wp, c) - dot(c.xyz, wp);
++        if (abs(dn) < 1e-9) {
++            if (r < 0.0) { return Span(1e30, -1e30, 6u); }
++        } else if (dn > 0.0) {
++            s.hi = min(s.hi, r / dn);
++        } else if (r / dn > s.lo) {
++            s.lo = r / dn;
++            s.k = k;
++        }
++    }
++    return s;
++}
++
++/// Whether the fragment lies past where its view ray comes into what the section keeps, that
++/// point in front of the eye: the surfaces that say whether the point is inside a body (the cap).
++fn past_entry(s: Span) -> bool {
++    return s.k < 6u && s.lo < 0.0 && s.lo < s.hi && (u.eye.w < 0.5 || s.lo > -1.0);
++}
++
++/// Depth of the cut on the view ray through `wp` (a far wall seen through the cut), never
++/// behind the wall itself (`z`): where the ray comes into what the section keeps.
++fn cap_depth(wp: vec3<f32>, z: f32) -> f32 {
++    let s = kept_span(wp);
++    if (!past_entry(s)) { return z; }
++    let c = u.vp * vec4<f32>(wp + view_ray(wp) * s.lo, 1.0);
++    if (c.w <= 0.0) { return z; }
++    if (reversed()) { return clamp(c.z / c.w, z, 1.0); }
++    return clamp(c.z / c.w, 0.0, z);
++}
++
++/// The cut face in its body's colour ("from component" colouring), tinted toward the cap colour
++/// so it reads as a cut, hatched at the angle of the plane it lies on; by part, toward the body's
++/// own hatch colour, a turned part's stripes a quarter turn round. With the hatch off (`u.cap.a`
++/// 0), plain in the body's own colour.
++fn cap_color(i: TOut) -> vec4<f32> {
++    if (u.cap.a < 0.5) { return out_color(vec4<f32>(i.c.rgb, 1.0)); }
++    var tint = u.cap.rgb;
++    var s = u.plane_hatch[min(kept_span(i.wp).k, 5u)].xy;
++    if ((i.h & 255u) > 0u) {
++        let k = (i.h & 255u) - 1u;
++        tint = u.hatch[min(k >> 1u, 2u)].rgb;
++        if ((k & 1u) == 1u) { s = vec2<f32>(-s.y, s.x); }
++    }
++    let base = mix(i.c.rgb, tint, 0.35);
++    let h = fract(dot(i.pos.xy, s));
++    return out_color(vec4<f32>(select(base, base * 0.6, h < 0.22), 1.0));
++}
++
++/// The section's crossing count (`Cut::count` in `view.rs`): each surface past where its view ray
++/// comes into what the section keeps steps the stencil, back faces up and front faces down,
++/// leaving whether that point (the cap) is inside a body. The colour is not written.
++@fragment
++fn fs_section_count(i: TOut) -> @location(0) vec4<f32> {
++    if (!past_entry(kept_span(i.wp))) { discard; }
++    return vec4<f32>(0.0);
++}
++
++@fragment
++fn fs_section_count_flat(i: FOut) -> @location(0) vec4<f32> {
++    if (!past_entry(kept_span(i.rp + u.eye.xyz))) { discard; }
++    return vec4<f32>(0.0);
++}
++
++/// The cap where the count says the cut lies inside a body (`Cut::fill`): the nearest back face
++/// past where the view ray comes into what the section keeps, in its cut colour. That face may be
++/// hidden itself, where the material behind the cut reaches past another plane before its far
++/// wall.
++@fragment
++fn fs_section_fill(i: TOut) -> @location(0) vec4<f32> {
++    if (!past_entry(kept_span(i.wp))) { discard; }
++    return cap_color(i);
++}
++
++@fragment
++fn fs_section_fill_flat(i: FOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
++    let t = flat_fragment(i, front);
++    if (!past_entry(kept_span(t.wp))) { discard; }
++    return cap_color(t);
++}
++
++@group(0) @binding(7) var frames: texture_2d<f32>;
++@group(0) @binding(8) var patterns: texture_2d_array<f32>;
++@group(0) @binding(9) var repeat_sampler: sampler;
++
++fn pattern_base(i: TOut) -> vec4<f32> {
++    let x = i32(i.entry % 2048u);
++    let y = i32(i.entry / 2048u) * 3;
++    let origin = textureLoad(frames, vec2i(x,y), 0);
++    let u_axis = textureLoad(frames, vec2i(x,y+1), 0);
++    let v_axis = textureLoad(frames, vec2i(x,y+2), 0);
++    let p = i.wp - origin.xyz;
++    let layer = i32(origin.w);
++    let scaled = p * length(u_axis.xyz);
++    let uv = vec2f(dot(p,u_axis.xyz),dot(p,v_axis.xyz));
++    let tri = u_axis.w == 2.0;
++    let dx = dpdx(scaled);
++    let dy = dpdy(scaled);
++    let ux = dpdx(uv);
++    let uy = dpdy(uv);
++    // The comparison table has one extra row when the always-three control is enabled.
++    let always_three = textureDimensions(frames).y % 3u == 1u;
++    if !always_three && u_axis.w == 0.0 { return i.c; }
++    let xy = textureSampleGrad(patterns, repeat_sampler, select(uv, scaled.xy, tri), layer,
++                               select(ux, dx.xy, tri), select(uy, dy.xy, tri)).rgb;
++    if !always_three && !tri { return vec4f(srgb_encode(xy), i.c.a); }
++    let yz = textureSampleGrad(patterns, repeat_sampler, scaled.yz, layer, dx.yz, dy.yz).rgb;
++    let xz = textureSampleGrad(patterns, repeat_sampler, scaled.xz, layer, dx.xz, dy.xz).rgb;
++    let w = abs(i.n);
++    let rgb = select(xy, (yz*w.x + xz*w.y + xy*w.z) / max(w.x+w.y+w.z, 0.000001), tri);
++    return vec4f(select(i.c.rgb, srgb_encode(rgb), u_axis.w > 0.0), i.c.a);
++}
++
++fn solid(i: TOut, front: bool) -> vec4<f32> {
++    // Derivatives first, in uniform control flow (browsers' WGSL compilers reject them after
++    // a branch that returns; the whole shader module then fails and nothing is drawn).
++    let base = pattern_base(i);
++    let k = curvature(i);
++    let ndv = dot(normalize(i.n), normalize(u.back.xyz));
++    let fw = fwidth(ndv);
++    if (clipped(i.wp)) { discard; }
++    if (!front && sectioned()) { return cap_color(i); }
++    if (u.ana.x > 0.5 && length(i.n) > 0.5) {
++        return analysis(i, k);
++    }
++    let c = lit_color(i, occlusion(i), base, true);
++    // Silhouettes (styles with edges): where a curved surface turns away from the eye, a line
++    // about 1.5 px wide, on the visible surface only (depth-correct).
++    if (u.screen.w > 0.5 && length(i.n) > 0.5 && fw > 1e-6) {
++        let a = 1.0 - smoothstep(fw * 0.8, fw * 2.0, abs(ndv));
++        return vec4<f32>(mix(c.rgb, out_color(vec4<f32>(0.07, 0.08, 0.10, 1.0)).rgb, a), c.a);
++    }
++    return c;
++}
++
++// A single-sample opaque depth map, independent of the window's MSAA and its UI offsets.
++// Preserve the depth's bits in R32Uint: GLSL cannot textureLoad a depth texture,
++// and float colour attachments are not available on every GL adapter.
++struct AoDepth {
++    @builtin(frag_depth) depth: f32,
++    @location(0) value: u32,
++    // The surface's normal (0..1 per axis), alpha 1 where the surface takes occlusion: not on a
++    // section's cut face (a back face of a sectioned body), nor where nothing is drawn (cleared).
++    @location(1) normal: vec4<f32>,
++};
++
++@fragment
++fn fs_ao_depth(i: TOut, @builtin(front_facing) front: bool) -> AoDepth {
++    return opaque_depth(i, front);
++}
++
++// The virtual ground preserves the viewport background; only contact occlusion is blended.
++@fragment
++fn fs_ground_ao(i: TOut) -> @location(0) vec4<f32> {
++    if (clipped(i.wp)) { discard; }
++    return vec4<f32>(0.0, 0.0, 0.0, 1.0 - occlusion(i));
++}
++
++/// The AO prepass's depth of an opaque surface's fragment, at its own depth: a section's caps
++/// neither cast nor take occlusion (a cap's depth on a back face behind a kept face would be a
++/// wall in mid-air, darkening the faces beside the cut).
++fn opaque_depth(i: TOut, front: bool) -> AoDepth {
++    if (clipped(i.wp) || length(i.n) < 0.5) { discard; }
++    let takes = select(0.0, 1.0, front || !sectioned());
++    return AoDepth(i.pos.z, bitcast<u32>(i.pos.z), vec4<f32>(normalize(i.n) * 0.5 + 0.5, takes));
++}
++
++/// The term of the surface the prepass left at this pixel of the maps: its point in the world from
++/// its depth, its normal from the normal map. A pixel with no surface, or a section's cut face,
++/// has none. Worked out once per pixel over the maps, without drawing the triangles again.
++@fragment
++fn fs_ao_term_screen(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
++    let c = vec2<i32>(pos.xy);
++    let normal = textureLoad(ao_normal, c, 0);
++    if (normal.a < 0.5) { return vec4<f32>(1.0); }
++    let z = bitcast<f32>(textureLoad(ao_depth, c, 0).x);
++    let uv = pos.xy / vec2<f32>(textureDimensions(ao_depth));
++    let h = u.inv_vp * vec4<f32>(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, z, 1.0);
++    if (abs(h.w) < 1e-30) { return vec4<f32>(1.0); }
++    var t: TOut;
++    t.pos = vec4<f32>(pos.xy, z, 1.0);
++    t.n = normal.xyz * 2.0 - 1.0;
++    t.wp = h.xyz / h.w;
++    return vec4<f32>(occlusion_term(t));
++}
++
++@vertex
++fn vs_ao_blur(@builtin(vertex_index) v: u32) -> @builtin(position) vec4<f32> {
++    let p = vec2<f32>(f32((v << 1u) & 2u), f32(v & 2u));
++    return vec4<f32>(p * 2.0 - 1.0, 0.0, 1.0);
++}
++
++/// The depth map at `p`, reading 0 near and 1 far whichever way the buffer runs.
++fn map_depth(p: vec2<i32>) -> f32 {
++    let at = clamp(p, vec2<i32>(0), vec2<i32>(textureDimensions(ao_depth)) - vec2<i32>(1));
++    let d = bitcast<f32>(textureLoad(ao_depth, at, 0).x);
++    return select(d, 1.0 - d, reversed());
++}
++
++/// The raw term (`ao_map` in this pass) averaged over a 4 x 4 window, which holds every turn of
++/// [`ao_turn`]'s pattern once. A neighbour counts when it lies on this pixel's plane, the slope
++/// taken from the nearer side across each axis, so no surface's shade crosses an edge.
++@fragment
++fn fs_ao_blur(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
++    let c = vec2<i32>(pos.xy);
++    let d = map_depth(c);
++    if (d >= 1.0) { return vec4<f32>(1.0); }
++    let left = d - map_depth(c + vec2<i32>(-1, 0));
++    let right = map_depth(c + vec2<i32>(1, 0)) - d;
++    let above = d - map_depth(c + vec2<i32>(0, -1));
++    let below = map_depth(c + vec2<i32>(0, 1)) - d;
++    let dx = select(right, left, abs(left) < abs(right));
++    let dy = select(below, above, abs(above) < abs(below));
++    let tolerance = 1.5 * (abs(dx) + abs(dy)) + 1e-6;
++    let last = vec2<i32>(textureDimensions(ao_map)) - vec2<i32>(1);
++    var sum = 0.0;
++    var weight = 0.0;
++    for (var y = -2; y < 2; y = y + 1) {
++        for (var x = -2; x < 2; x = x + 1) {
++            let p = c + vec2<i32>(x, y);
++            let s = map_depth(p);
++            if (s < 1.0 && abs(s - (d + dx * f32(x) + dy * f32(y))) <= tolerance) {
++                sum = sum + textureLoad(ao_map, clamp(p, vec2<i32>(0), last), 0).x;
++                weight = weight + 1.0;
++            }
++        }
++    }
++    return vec4<f32>(sum / max(weight, 1.0));
++}
++
++/// A pixel's turn of the sample pattern: every 4 x 4 window holds each of 16 turns once.
++fn ao_turn(pos: vec2<f32>) -> f32 {
++    let x = u32(pos.x) & 3u;
++    let y = u32(pos.y) & 3u;
++    // WGSL won't mix shifts and `|` without parentheses; naga takes it, browsers refuse it (#11080).
++    let v = (((x ^ y) & 1u) << 3u) | ((y & 1u) << 2u) | (((x ^ y) >> 1u) << 1u) | (y >> 1u);
++    return (f32(v) + 0.5) / 16.0;
++}
++
++/// The lit pass's occlusion: the blurred term where this point falls in the map, whatever the
++/// window's viewport offset and supersampling.
++fn occlusion(i: TOut) -> f32 {
++    let size = vec2<i32>(textureDimensions(ao_map));
++    // The maps are 1 × 1 stand-ins until a frame draws into them (the product preview draws no
++    // prepass, and AO off releases them): they tell nothing, so leave the surface unoccluded.
++    if (u.ao.x <= 0.0 || length(i.n) < 0.5 || size.x < 2 || size.y < 2) { return 1.0; }
++    let q = u.vp * vec4<f32>(i.wp, 1.0);
++    if (q.w <= 0.0) { return 1.0; }
++    let uv = vec2<f32>(q.x / q.w * 0.5 + 0.5, 0.5 - q.y / q.w * 0.5);
++    return textureLoad(ao_map, clamp(vec2<i32>(uv * vec2<f32>(size)), vec2<i32>(0), size - vec2<i32>(1)), 0).x;
++}
++
++// Cosine-weighted hemisphere samples, the pattern turned by a different angle at each pixel.
++// Projecting the sample and a point one radius toward the eye supplies a depth range in both
++// orthographic and perspective views; distant foreground geometry cannot cast a dark halo onto
++// a background surface.
++fn occlusion_term(i: TOut) -> f32 {
++    let radius = u.ao.x;
++    if (radius <= 0.0 || length(i.n) < 0.5) { return 1.0; }
++    var n = normalize(i.n);
++    if (dot(n, u.back.xyz) < 0.0) { n = -n; }
++    let axis = select(vec3<f32>(0.0, 0.0, 1.0), vec3<f32>(0.0, 1.0, 0.0), abs(n.z) > 0.9);
++    let tangent = normalize(cross(axis, n));
++    let bitangent = cross(n, tangent);
++    let size = vec2<i32>(textureDimensions(ao_depth));
++    // The map is a 1 × 1 stand-in until a frame draws into it (the product preview draws no
++    // prepass): sampling it tells nothing, so leave the surface unoccluded.
++    if (size.x < 2 || size.y < 2) { return 1.0; }
++    // The same offsets at every pixel made each sample darken its own shifted copy of a nearby
++    // part's outline: faint ghosts of the part where the radius is large on screen (#4167),
++    // stepped bands along contacts where it is small (#3407). Turned, neighbouring pixels sample
++    // different points, the copies break up into grain, and the blur takes the grain out (#9327).
++    let turn = ao_turn(i.pos.xy);
++    let t = tangent * cos(turn * 6.28318531) + bitangent * sin(turn * 6.28318531);
++    let b = cross(n, t);
++    // One comparison for both depth directions: depths read as 0 near / 1 far (mirrored when
++    // the buffer runs reversed). The map is cleared to its far plane either way, so a texel
++    // with nothing in it reads as 1 and the `d < 1.0` test below skips it.
++    let flip = reversed();
++    // Fewer samples while the view moves (#7165), spread over the same hemisphere. 32 is the
++    // still picture's count, `AO_SAMPLES` in view.rs.
++    let count = u32(clamp(u.ao.y, 1.0, 32.0));
++    var blocked = 0.0;
++    for (var j = 0u; j < count; j = j + 1u) {
++        let f = (f32(j) + 0.5) / f32(count);
++        let angle = f32(j) * 2.39996323;
++        let direction = t * (cos(angle) * sqrt(f)) + b * (sin(angle) * sqrt(f)) + n * sqrt(1.0 - f);
++        let reach = radius * (0.2 + 0.8 * fract(f32(j) * 0.61803399 + 0.5));
++        let sample = i.wp + n * (radius * 0.025) + direction * reach;
++        let q = u.vp * vec4<f32>(sample, 1.0);
++        let near = u.vp * vec4<f32>(sample + u.back.xyz * radius, 1.0);
++        if (q.w <= 0.0 || near.w <= 0.0) { continue; }
++        let ndc = q.xyz / q.w;
++        let uv = vec2<f32>(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
++        if (any(uv < vec2<f32>(0.0)) || any(uv >= vec2<f32>(1.0)) || ndc.z < 0.0 || ndc.z > 1.0) { continue; }
++        let d0 = bitcast<f32>(textureLoad(ao_depth, vec2<i32>(uv * vec2<f32>(size)), 0).x);
++        let zs = select(ndc.z, 1.0 - ndc.z, flip);
++        let zn = select(near.z / near.w, 1.0 - near.z / near.w, flip);
++        let d = select(d0, 1.0 - d0, flip);
++        let span = max(zs - zn, 1e-7);
++        let delta = (zs - d) / span;
++        if (d < 1.0 && delta > 0.005 && delta < 1.0) {
++            blocked = blocked + smoothstep(0.005, 0.15, delta) * (1.0 - smoothstep(0.5, 1.0, delta));
++        }
++    }
++    return 1.0 - 0.85 * blocked / f32(count);
++}
++
++/// How fast the normal turns across the pixel (per mm).
++fn curvature(i: TOut) -> f32 {
++    let nn = normalize(i.n);
++    let kx = length(dpdx(nn)) / max(length(dpdx(i.wp)), 1e-6);
++    let ky = length(dpdy(nn)) / max(length(dpdy(i.wp)), 1e-6);
++    return max(kx, ky);
++}
++
++/// Surface analysis colours: zebra stripes, draft angle bands, curvature map (`k`: the
++/// surface's curvature here, worked out by the caller).
++fn analysis(i: TOut, k: f32) -> vec4<f32> {
++    let v = normalize(u.back.xyz);
++    var n = normalize(i.n);
++    if (dot(n, v) < 0.0) { n = -n; }
++    let lit = 0.55 + 0.45 * max(dot(n, v), 0.0);
++    if (u.ana.x < 1.5) {
++        // Reflections of light bars along `pull` (upright, +Z, standing around the viewer by
++        // default): the stripe follows the reflected ray's direction across the bars.
++        let r = reflect(-v, n);
++        var side = cross(v, u.pull.xyz);
++        if (length(side) < 1e-3) { side = vec3<f32>(1.0, 0.0, 0.0); }
++        let x = dot(r, normalize(side));
++        // White for `ana.z` of each period (half: as `sin(x * stripes * pi) > 0` always drew it).
++        let s = fract(x * u.ana.y * 0.5);
++        // A face whose normal lies in the plane of the bars through the view (every horizontal
++        // face, under upright bars) reflects straight ahead: its sideways part is zero, on the
++        // edge between a black and a white stripe, and rounding picked one or the other from
++        // frame to frame while the view turned (#2153). Straight ahead is white.
++        let c = select(0.08, 0.95, s < u.ana.z || abs(x) < 1e-4);
++        return out_color(vec4<f32>(vec3<f32>(c), 1.0));
++    }
++    if (u.ana.x > 5.5) {
++        // By the vertices' values, `ana.y` (flat) to `ana.z` (tight); a face without values by
++        // how fast its normal turns, as the curvature map at a radius of 1 mm.
++        var t = clamp(k, 0.0, 1.0);
++        if (i.hv == 1u) { t = clamp((i.v - u.ana.y) / max(u.ana.z - u.ana.y, 1e-12), 0.0, 1.0); }
++        return out_color(vec4<f32>(ramp(t) * lit, 1.0));
++    }
++    if (u.ana.x > 4.5) {
++        // Reachable from the access direction: facing it and nothing above.
++        let d = normalize(u.pull.xyz);
++        let size = i32(u.ana.w);
++        let px = vec2<i32>(floor(vec2<f32>(dot(i.wp, u.acc_u.xyz) + u.acc_u.w, dot(i.wp, u.acc_v.xyz) + u.acc_v.w) * u.ana.z));
++        var top = -1e30;
++        if (px.x >= 0 && px.y >= 0 && px.x < size && px.y < size) {
++            top = textureLoad(acc_t, px, 0).x;
++        }
++        let cn = dot(normalize(i.n), d);
++        let facing = cn > 0.02;
++        // Slack of a pixel and a half, more on slopes (the map holds the pixel's highest point).
++        let slack = u.ana.y * (1.0 + sqrt(max(1.0 - cn * cn, 0.0)) / max(cn, 0.05));
++        let clear = dot(i.wp, d) >= top - slack;
++        var c = u.ana_c[4].rgb;
++        if (facing && clear) { c = u.ana_c[3].rgb; } else { c = stripe(i, c); }
++        return out_color(vec4<f32>(c * lit, 1.0));
++    }
++    if (u.ana.x > 3.5) {
++        // A studio around the model: sky above, a dark floor below, a bright horizon band and
++        // two soft light panels, seen in a mirror.
++        let r = reflect(-v, n);
++        var c = mix(vec3<f32>(0.32, 0.34, 0.38), vec3<f32>(0.80, 0.86, 0.95), smoothstep(-0.05, 0.6, r.z));
++        c = c + vec3<f32>(0.6) * exp(-abs(r.z) * 40.0);
++        let side = atan2(r.y, r.x);
++        c = c + vec3<f32>(0.9) * smoothstep(0.92, 0.98, cos(side * 2.0)) * smoothstep(0.1, 0.3, r.z) * smoothstep(0.8, 0.6, r.z);
++        if (r.z < -0.02) {
++            // The floor: lighter toward the horizon, with light-panel streaks along it.
++            c = mix(vec3<f32>(0.55, 0.56, 0.60), vec3<f32>(0.20, 0.20, 0.22), clamp(-r.z * 1.6, 0.0, 1.0));
++            c = c + vec3<f32>(0.35) * smoothstep(0.95, 0.99, cos(side * 3.0));
++        }
++        return out_color(vec4<f32>(min(c, vec3<f32>(1.0)), 1.0));
++    }
++    if (u.ana.x < 2.5) {
++        let a = degrees(asin(clamp(dot(normalize(i.n), normalize(u.pull.xyz)), -1.0, 1.0)));
++        var c = u.ana_c[1].rgb;
++        if (a >= u.ana.y) { c = u.ana_c[0].rgb; }
++        if (a <= -u.ana.y) { c = stripe(i, u.ana_c[2].rgb); }
++        return out_color(vec4<f32>(c * lit, 1.0));
++    }
++    // Curvature from how fast the normal turns across the pixel.
++    let t = clamp(k * u.ana.y, 0.0, 1.0);
++    return out_color(vec4<f32>(ramp(t) * lit, 1.0));
++}
++
++/// The curvature colours' ramp at `t` (0 to 1): flat, through the middle colour, to tight.
++fn ramp(t: f32) -> vec3<f32> {
++    return select(mix(u.ana_c[6].rgb, u.ana_c[7].rgb, t * 2.0 - 1.0), mix(u.ana_c[5].rgb, u.ana_c[6].rgb, t * 2.0), t < 0.5);
++}
++
++/// A "bad" analysis face (negative draft, blocked): with the stripes on (colour vision modes), the
++/// section cap's 45 degree hatch over it, so colour is not the only cue.
++fn stripe(i: TOut, c: vec3<f32>) -> vec3<f32> {
++    if (u.ana_f.x < 0.5) { return c; }
++    let h = fract((i.pos.x + i.pos.y) / 9.0);
++    return select(c, c * 0.6, h < 0.22);
++}
++
++@fragment
++fn fs_tri(i: TOut) -> @location(0) vec4<f32> {
++    if (clipped(i.wp)) { discard; }
++    return shade(i);
++}
++
++/// A whole hovered body, lit over the model from its own plan triangles in a lifted colour.
++@fragment
++fn fs_hl_hover(i: TOut) -> @location(0) vec4<f32> {
++    if (clipped(i.wp)) { discard; }
++    // An opaque body keeps its finish under the hover; a faded or see-through one stays plain.
++    return lit_color(i, 1.0, vec4<f32>(i.c.rgb + u.tint.rgb, i.c.a), i.c.a > 0.99);
++}
++
++/// A whole selected body, lit over the model from its own plan triangles in the selection colour.
++@fragment
++fn fs_hl_selected(i: TOut) -> @location(0) vec4<f32> {
++    if (clipped(i.wp)) { discard; }
++    // The selection colour stays flat and plain, so it reads the same on every finish.
++    return lit_color(i, 1.0, vec4<f32>(u.sel.rgb, i.c.a), false);
++}
++
++/// Reference planes: shaded like `fs_tri`, but never cut by the section plane.
++@fragment
++fn fs_tri_all(i: TOut) -> @location(0) vec4<f32> {
++    return shade(i);
++}
++
++/// See-through, faded and reference faces: lit as before, without a material finish.
++fn shade(i: TOut) -> vec4<f32> {
++    return lit_color(i, 1.0, i.c, false);
++}
++
++fn product_light_unit(v: vec3<f32>) -> vec3<f32> {
++    let scale=max(max(abs(v.x),abs(v.y)),abs(v.z));
++    if scale == 0.0 { return vec3<f32>(0.0,0.0,1.0); }
++    return normalize(v/scale);
++}
++
++// Direction and incident radiance for an unshadowed analytic preview sample.
++fn product_light_sample(k: u32, p: vec3<f32>) -> mat2x3<f32> {
++    let source=u.product_lights[k*4u];
++    let colour=u.product_lights[k*4u+1u];
++    let axis=u.product_lights[k*4u+2u];
++    let falloff=u.product_lights[k*4u+3u];
++    var direction=product_light_unit(source.xyz);
++    var weight=1.0;
++    if source.w > 0.5 {
++        let delta=source.xyz-p;
++        let distance=max(length(delta),falloff.y);
++        direction=product_light_unit(delta);
++        weight=falloff.x/max(distance*distance,0.000001);
++        if source.w == 2.0 {
++            let cosine=dot(product_light_unit(axis.xyz),-direction);
++            var cone=select(0.0,1.0,cosine>=colour.w);
++            if axis.w-colour.w>0.000001 {cone=smoothstep(colour.w,axis.w,cosine);}
++            weight *= cone;
++        }
++        if source.w == 3.0 {weight *= max(dot(product_light_unit(axis.xyz),-direction),0.0);}
++    }
++    return mat2x3<f32>(direction,colour.xyz*weight);
++}
++
++/// An opaque face, with its material finish where the viewport shows them.
++fn lit(i: TOut, visibility: f32) -> vec4<f32> {
++    return lit_color(i, visibility, i.c, true);
++}
++
++/// sRGB to linear light, exact (the straight segment too, which `to_linear` leaves out).
++fn srgb_decode(c: vec3<f32>) -> vec3<f32> {
++    return select(c / 12.92, pow((c + vec3<f32>(0.055)) / vec3<f32>(1.055), vec3<f32>(2.4)), c > vec3<f32>(0.04045));
++}
++
++fn srgb_encode(c: vec3<f32>) -> vec3<f32> {
++    let l = clamp(c, vec3<f32>(0.0), vec3<f32>(1.0));
++    return select(l * 12.92, 1.055 * pow(l, vec3<f32>(1.0 / 2.4)) - vec3<f32>(0.055), l > vec3<f32>(0.0031308));
++}
++
++/// The studio light summed in linear light, encoded once (#7974): the key and the eye fill as in
++/// [`lit_color`], over a sky fill that grows as the face turns up, and the 4% every dielectric
++/// reflects of that sky (a little more toward grazing), so a near-black face keeps a gradient. The sky
++/// and the fill are what ambient occlusion (`visibility`) takes away. sRGB out.
++fn sky_lit(base: vec3<f32>, n: vec3<f32>, diff: f32, fill: f32, visibility: f32) -> vec3<f32> {
++    let up = dot(n, normalize(u.sky.xyz)) * 0.5 + 0.5;
++    let sky = mix(0.18, 0.42, up);
++    // Schlick's rise toward grazing, tempered so mid-tones only gain a soft rim.
++    let fresnel = 0.04 + 0.2 * pow(1.0 - fill, 5.0);
++    let albedo = srgb_decode(base);
++    // Scaled so light and mid-grey faces land near where the sRGB shading puts them.
++    let light = albedo * (0.41 * diff + (0.66 * sky + 0.2 * fill) * visibility) + vec3<f32>(fresnel * sky * visibility);
++    return srgb_encode(light);
++}
++
++/// Whether opaque faces get a material finish (`finished`): the modeling viewport sends the
++/// world's up with bit 1 of `sky.w` set (Preferences › Graphics); the product preview and
++/// captures send none.
++fn finishes() -> bool {
++    return (u32(u.sky.w) & 2u) != 0u && dot(u.sky.xyz, u.sky.xyz) > 0.25;
++}
++
++// The studio finished faces are lit by (`Environment` in environment.rs): model-viewer's neutral
++// room, as is, at model-viewer's exposure for it (`STUDIO_EXPOSURE`), prefiltered for image-based
++// lighting (split-sum). Mip k of the specular map
++// is the studio through a GGX lobe of perceptual roughness k / (mips - 1); the diffuse map is its
++// cosine-weighted irradiance / π; the DFG table is the GGX environment BRDF's scale and bias.
++@group(0) @binding(3) var studio_specular: texture_2d<f32>;
++@group(0) @binding(4) var studio_diffuse: texture_2d<f32>;
++@group(0) @binding(5) var studio_s: sampler;
++@group(0) @binding(6) var studio_dfg: texture_2d<f32>;
++/// The specular map's mips (`SPECULAR_LEVELS`; WebGL2 cannot ask a texture for its count).
++const STUDIO_MIPS: f32 = 6.0;
++/// model-viewer's exposure for its neutral room under Khronos PBR Neutral (`COMMERCE_EXPOSURE`).
++const STUDIO_EXPOSURE: f32 = 1.3;
++
++/// Where the direction `d` (in the studio's frame, y up) lands on its equirectangular maps.
++fn studio_uv(d: vec3<f32>) -> vec2<f32> {
++    return vec2<f32>(0.5 + atan2(d.x, -d.z) / 6.283185307179586, acos(clamp(d.y, -1.0, 1.0)) / 3.141592653589793);
++}
++
++/// Khronos PBR Neutral tone mapping (KhronosGroup/ToneMapping, PBR_Neutral): base colours come
++/// out as assigned under unit white light, highlights roll off toward white.
++fn pbr_neutral(light: vec3<f32>) -> vec3<f32> {
++    let start_compression = 0.8 - 0.04;
++    let desaturation = 0.15;
++    let x = min(light.r, min(light.g, light.b));
++    let offset = select(0.04, x - 6.25 * x * x, x < 0.08);
++    var c = light - offset;
++    let peak = max(c.r, max(c.g, c.b));
++    if (peak < start_compression) { return c; }
++    let d = 1.0 - start_compression;
++    let new_peak = 1.0 - d * d / (peak + d - start_compression);
++    c *= new_peak / peak;
++    let g = 1.0 - 1.0 / (desaturation * (peak - new_peak) + 1.0);
++    return mix(c, vec3<f32>(new_peak), g);
++}
++
++/// Khronos glTF Sample Renderer, getIBLGGXFresnel (Fdez-Agüera 2019): the split-sum's
++/// environment BRDF with roughness-dependent Fresnel and multiple scattering.
++fn ibl_ggx_fresnel(nv: f32, roughness: f32, f0: vec3<f32>) -> vec3<f32> {
++    // The table holds texel centres; clamping to them keeps the sampler's repeat from wrapping.
++    let half_texel = 0.5 / vec2<f32>(textureDimensions(studio_dfg));
++    let f_ab = textureSampleLevel(studio_dfg, studio_s, clamp(vec2<f32>(nv, roughness), half_texel, 1.0 - half_texel), 0.0).rg;
++    let fr = max(vec3<f32>(1.0 - roughness), f0) - f0;
++    let k_s = f0 + fr * pow(1.0 - nv, 5.0);
++    let fss_ess = k_s * f_ab.x + f_ab.y;
++    let ems = 1.0 - (f_ab.x + f_ab.y);
++    let f_avg = f0 + (1.0 - f0) / 21.0;
++    let fms_ems = ems * fss_ess * f_avg / (1.0 - f_avg * ems);
++    return fss_ess + fms_ems;
++}
++
++/// An opaque face with a material finish, lit by the studio (image-based, split-sum, as the
++/// Khronos glTF Sample Renderer): the PBR appearance's metallic and roughness (`finish_h`), else
++/// a plain dielectric of roughness 0.5 (a product choice: satin). The studio turns with
++/// the viewer (its frame is the view's, kept level: `front` toward the eye), so whatever faces the
++/// eye is lit the same from any orbit angle. Ambient occlusion (`visibility`) shades the diffuse
++/// light and, by Lagarde's approximation, the specular (Filament). Khronos PBR Neutral, then
++/// encoded as `lit_color` does.
++fn finished(i: TOut, n: vec3<f32>, visibility: f32, base: vec4<f32>) -> vec4<f32> {
++    let pbr = (i.h >> 24u) != 0u;
++    let metallic = select(0.0, f32((i.h >> 8u) & 255u) / 255.0, pbr);
++    let roughness = select(0.5, f32((i.h >> 16u) & 255u) / 255.0, pbr);
++    let a = roughness * roughness;
++    // The view per pixel in perspective: a flat face then reflects a gradient, not one colour.
++    let back = normalize(u.back.xyz);
++    var v = back;
++    if (u.eye.w > 0.5) { v = normalize(u.eye.xyz - i.wp); }
++    let nv = clamp(dot(n, v), 0.0, 1.0);
++    let up = normalize(u.sky.xyz);
++    var front = back - up * dot(back, up);
++    if (dot(front, front) < 1e-6) { front = select(vec3<f32>(1.0, 0.0, 0.0), vec3<f32>(0.0, 1.0, 0.0), abs(up.x) > 0.9); }
++    front = normalize(front);
++    let side = cross(up, front);
++    // Filament getSpecularDominantDirection, whose roughness is a (perceptual squared).
++    let r = normalize(mix(reflect(-v, n), n, a * a));
++    let rl = vec3<f32>(dot(r, side), dot(r, up), dot(r, front));
++    let nl = vec3<f32>(dot(n, side), dot(n, up), dot(n, front));
++    // Khronos getIBLRadianceGGX: lod = perceptual roughness × (mips - 1).
++    let lod = roughness * (STUDIO_MIPS - 1.0);
++    // Filament SpecularAO_Lagarde, whose roughness is a.
++    let specular_ao = clamp(pow(nv + visibility, exp2(-16.0 * a - 1.0)) - 1.0 + visibility, 0.0, 1.0);
++    let specular = textureSampleLevel(studio_specular, studio_s, studio_uv(rl), lod).rgb * specular_ao;
++    let albedo = srgb_decode(base.rgb);
++    let diffuse = textureSampleLevel(studio_diffuse, studio_s, studio_uv(nl), 0.0).rgb * albedo * visibility;
++    // Khronos pbr.frag: a dielectric (F0 0.04, glTF's IOR 1.5) and a metal, mixed by metallic.
++    let dielectric = mix(diffuse, specular, ibl_ggx_fresnel(nv, roughness, vec3<f32>(0.04)));
++    let metal = specular * ibl_ggx_fresnel(nv, roughness, albedo);
++    let mapped = pbr_neutral(mix(dielectric, metal, metallic) * STUDIO_EXPOSURE);
++    if (u.back.w > 0.5) { return vec4<f32>(mapped, base.a); }
++    return vec4<f32>(srgb_encode(mapped), base.a);
++}
++
++/// [`lit`] in a colour of its own: a whole highlighted body is lit in its colour lifted by the
++/// hover amount, or in the selection colour, from the model's own plan triangles. `finish`: an
++/// opaque face, which takes its material finish (`finished`) where the viewport shows them.
++fn lit_color(i: TOut, visibility: f32, base: vec4<f32>, finish: bool) -> vec4<f32> {
++    // A zero normal marks flat colour (selection fills, translucent planes).
++    if (length(i.n) < 0.5) {
++        return out_color(base);
++    }
++    let v = normalize(u.back.xyz);
++    var n = normalize(i.n);
++    if (dot(n, v) < 0.0) { n = -n; }
++    if u.product_lights_meta.x>0.0 {
++        var radiance=vec3<f32>(0.0);
++        let albedo=srgb_decode(base.rgb);
++        for (var k=0u;k<min(u32(u.product_lights_meta.y),21u);k+=1u) {
++            if u.product_lights[k*4u].w == 4.0 {radiance+=albedo*u.product_lights[k*4u+1u].xyz/3.141592653589793;continue;}
++            let sample=product_light_sample(k,i.wp);
++            radiance+=albedo*sample[1]*(max(dot(n,sample[0]),0.0)/3.141592653589793);
++        }
++        let mapped=radiance/(vec3<f32>(1.0)+radiance);
++        // A linear attachment takes linear light as it is; any other is encoded once, as the CPU
++        // image is (decoding the encoded value again through `out_color` would flatten the dark end).
++        if (u.back.w > 0.5) {
++            return vec4<f32>(mapped,base.a);
++        }
++        let encoded=select(mapped*12.92,1.055*pow(mapped,vec3<f32>(1.0/2.4))-vec3<f32>(0.055),mapped>vec3<f32>(0.0031308));
++        return vec4<f32>(encoded,base.a);
++    }
++    if (finish && finishes()) {
++        return finished(i, n, visibility, base);
++    }
++    let key = normalize(v * 0.8 + vec3<f32>(-0.3, 0.2, 0.6));
++    let diff = max(dot(n, key), 0.0);
++    let fill = max(dot(n, v), 0.0);
++    let h = normalize(key + v);
++    let spec = pow(max(dot(n, h), 0.0), 40.0) * 0.25;
++    if (u32(u.sky.w) & 1u) != 0u {
++        return out_color(vec4<f32>(min(sky_lit(base.rgb, n, diff, fill, visibility) + vec3<f32>(spec), vec3<f32>(1.0)), base.a));
++    }
++    let k = 0.42 + 0.38 * diff + 0.25 * fill - (0.42 + 0.25 * fill) * (1.0 - visibility);
++    return out_color(vec4<f32>(min(base.rgb * k + vec3<f32>(spec), vec3<f32>(1.0)), base.a));
++}
++
++// Lines, decals and ghosts are drawn at their own depth: opaque faces are pushed back by their
++// slope instead (`FACE_BIAS`, #1434), so what lies on a face draws over it at any angle.
++
++struct LOut {
++    @builtin(position) pos: vec4<f32>,
++    @location(0) c: vec4<f32>,
++    @location(1) wp: vec3<f32>,
++};
++
++/// A normal from its 12-bit octahedral form (`octahedral6` in view.rs); 0 is unknown (zero).
++fn octahedral(q: u32) -> vec3<f32> {
++    let qx = q & 63u;
++    let qy = (q >> 6u) & 63u;
++    if (qx == 0u || qy == 0u) { return vec3<f32>(0.0); }
++    var x = f32(qx - 1u) / 31.0 - 1.0;
++    var y = f32(qy - 1u) / 31.0 - 1.0;
++    let z = 1.0 - abs(x) - abs(y);
++    if (z < 0.0) {
++        let ox = x;
++        let oy = y;
++        x = (1.0 - abs(oy)) * select(-1.0, 1.0, ox >= 0.0);
++        y = (1.0 - abs(ox)) * select(-1.0, 1.0, oy >= 0.0);
++    }
++    return normalize(vec3<f32>(x, y, z));
++}
++
++/// How steeply the faces beside an edge are seen at `p`: the depth a face gains per pixel across
++/// the edge, in pixels (tan of the angle between its normal and the view), the larger of the two;
++/// 1 when neither is known. Capped, so a face seen exactly edge on does not lift the band far.
++fn grazing(p: vec3<f32>, na: vec3<f32>, nb: vec3<f32>) -> f32 {
++    var toward = normalize(u.back.xyz);
++    if (u.eye.w > 0.5) { toward = normalize(u.eye.xyz - p); }
++    var g = 1.0;
++    for (var i = 0; i < 2; i++) {
++        let n = select(nb, na, i == 0);
++        if (dot(n, n) < 0.25) { continue; }
++        let d = abs(dot(n, toward));
++        g = max(g, sqrt(max(1.0 - d * d, 0.0)) / max(d, 0.02));
++    }
++    return min(g, 50.0);
++}
++
++/// Clip z of the world point `p` (clip position `c`) moved `px` pixels toward the eye: the front
++/// of a thin cylinder around an edge, so the band drawn along it is not buried by a face next to
++/// the edge seen at a grazing angle. Measured on the screen, it is the same at every zoom.
++fn lifted_z(p: vec3<f32>, c: vec4<f32>, px: f32, half: vec2<f32>) -> f32 {
++    let b = normalize(u.back.xyz);
++    var a = vec3<f32>(0.0, 0.0, 1.0);
++    if (abs(b.z) > 0.9) { a = vec3<f32>(1.0, 0.0, 0.0); }
++    let side = normalize(cross(b, a));
++    let cs = u.vp * vec4<f32>(p + side, 1.0);
++    if (cs.w <= 1e-6) { return c.z; }
++    // Pixels per millimetre across the view at the point's depth.
++    let ppm = length((cs.xy / cs.w - c.xy / c.w) * half);
++    if (ppm < 1e-9) { return c.z; }
++    var toward = b;
++    if (u.eye.w > 0.5) { toward = normalize(u.eye.xyz - p); }
++    let q = u.vp * vec4<f32>(p + toward * (px / ppm), 1.0);
++    if (q.w <= 1e-6) { return c.z; }
++    // The same depth at the original w, so the band stays where it was on the screen.
++    return q.z / q.w * c.w;
++}
++
++@vertex
++fn vs_line(@builtin(vertex_index) vi: u32, @location(0) local_a: vec3<f32>, @location(1) local_b: vec3<f32>, @location(2) c: u32, @location(3) wbits: u32) -> LOut {
++    return line_vertex(vi, local_a, local_b, c, wbits);
++}
++
++/// A scene's own lines drawn again in another colour and width (a whole hovered body's edges,
++/// `LitEdges`): the draw's first vertex carries them, as `6 * style + corner`, so the lines are
++/// drawn from the buffer they are already in. `style`: the palette index from bit 8, a raised
++/// line (`lifted_width`, no normals) at bit 7, and the width in eighths of a pixel below it.
++@vertex
++fn vs_line_lit(@builtin(vertex_index) vi: u32, @location(0) local_a: vec3<f32>, @location(1) local_b: vec3<f32>, @location(2) c: u32, @location(3) wbits: u32) -> LOut {
++    let style = vi / 6u;
++    let eighths = style & 127u;
++    var w = bitcast<u32>(f32(eighths) / 8.0);
++    if ((style & 128u) != 0u) { w = 0x80000000u | (eighths << 24u); }
++    return line_vertex(vi % 6u, local_a, local_b, style >> 8u, w);
++}
++
++fn line_vertex(vi: u32, local_a: vec3<f32>, local_b: vec3<f32>, c: u32, wbits: u32) -> LOut {
++    let a = placed(local_a);
++    let b = placed(local_b);
++    var pa = a;
++    var pb = b;
++    var ca = u.vp * vec4<f32>(a, 1.0);
++    var cb = u.vp * vec4<f32>(b, 1.0);
++    // An end behind the near plane (clip z < 0) has no screen point: its divide flips the
++    // line or drops it whole (ground grid lines running past the eye at a low angle). Cut
++    // the segment at the plane instead; clip space is linear in the world point.
++    let za = near_z(ca);
++    let zb = near_z(cb);
++    if (za < 0.0 && zb > 0.0) {
++        let k = za / (za - zb);
++        ca = mix(ca, cb, k);
++        pa = mix(a, b, k);
++    } else if (zb < 0.0 && za > 0.0) {
++        let k = zb / (zb - za);
++        cb = mix(cb, ca, k);
++        pb = mix(b, a, k);
++    }
++    let half = u.screen.xy * 0.5;
++    let sa = ca.xy / max(ca.w, 1e-6) * half;
++    let sb = cb.xy / max(cb.w, 1e-6) * half;
++    var dir = sb - sa;
++    let len = length(dir);
++    // Intel OpenGL can miscompile vector/scalar division here (#8053). Scalar
++    // quotients keep the same direction and the fallback for a point.
++    if (len < 1e-6) { dir = vec2<f32>(1.0, 0.0); } else { dir = vec2<f32>(dir.x / len, dir.y / len); }
++    let nrm = vec2<f32>(-dir.y, dir.x);
++    // Two triangles: corners (t, side).
++    var ts = array<f32, 6>(0.0, 1.0, 1.0, 0.0, 1.0, 0.0);
++    var ss = array<f32, 6>(-1.0, -1.0, 1.0, -1.0, 1.0, 1.0);
++    let t = ts[vi];
++    let s = ss[vi];
++    let base = select(ca, cb, t > 0.5);
++    // A line thinner than a pixel is drawn a pixel wide, faded by the width it lacks: a narrower
++    // quad covers no pixel centre when it falls between two rows, so without multisampling thin
++    // lines (the grid's) came and went as the view zoomed (#2823).
++    // The top bit marks a lifted highlight (`GpuScene::lifted_line`, `lifted_width`); a plain
++    // line's slot is its width as an f32.
++    let lifted = (wbits & 0x80000000u) != 0u;
++    var wa = bitcast<f32>(wbits);
++    if (lifted) { wa = f32((wbits >> 24u) & 127u) / 8.0; }
++    let wd = max(wa, 1.0);
++    let off = nrm * s * wd * 0.5 + dir * (t * 2.0 - 1.0) * wd * 0.5;
++    var z = base.z;
++    if (lifted && base.w > 1e-6) {
++        let p = select(pa, pb, t > 0.5);
++        let g = grazing(p, turned(octahedral(wbits & 4095u)), turned(octahedral((wbits >> 12u) & 4095u)));
++        z = lifted_z(p, base, wd * 0.5 * g + 1.0, half);
++    }
++    var o: LOut;
++    o.pos = vec4<f32>(base.xy + off / half * base.w, z, base.w);
++    let col = palette(c);
++    o.c = vec4<f32>(col.rgb, col.a * (wa / wd));
++    o.wp = select(pa, pb, t > 0.5);
++    return o;
++}
++
++@fragment
++fn fs_line(i: LOut) -> @location(0) vec4<f32> {
++    if (clipped(i.wp)) { discard; }
++    return out_color(i.c);
++}
++
++struct IOut {
++    @builtin(position) pos: vec4<f32>,
++    @location(0) uv: vec2<f32>,
++    @location(1) a: f32,
++    @location(2) wp: vec3<f32>,
++};
++
++@group(1) @binding(0) var img_t: texture_2d<f32>;
++@group(1) @binding(1) var img_s: sampler;
++
++@vertex
++fn vs_img(@location(0) p: vec3<f32>, @location(1) uv: vec2<f32>, @location(2) a: f32) -> IOut {
++    var o: IOut;
++    // On a face it shows over it: the face is pushed back (`FACE_BIAS`).
++    o.pos = u.vp * vec4<f32>(p, 1.0);
++    o.uv = uv;
++    o.a = a;
++    o.wp = p;
++    return o;
++}
++
++@fragment
++fn fs_img(i: IOut) -> @location(0) vec4<f32> {
++    let c = textureSample(img_t, img_s, i.uv);
++    if (clipped(i.wp)) { discard; }
++    return out_color(vec4<f32>(c.rgb, c.a * i.a));
++}
++
++/// The model's edges' depth alone (`line_depth`): where an edge covers the whole pixel, cut by a
++/// section as it is. A line thinner than a pixel (faded by the width it lacks) or a see-through one
++/// leaves the rest of the pixel to the faces behind it, so it writes none.
++@fragment
++fn fs_line_depth(i: LOut) -> @location(0) vec4<f32> {
++    if (clipped(i.wp) || i.c.a < 0.999) { discard; }
++    return vec4<f32>(0.0);
++}
++
++/// Lines the section never cuts (the grid, highlights drawn on top).
++@fragment
++fn fs_line_all(i: LOut) -> @location(0) vec4<f32> {
++    return out_color(i.c);
++}
++
++// Point clouds and their cells (`view/clouds.rs`): dots, segments as beads (or lines when they
++// have no size) and triangles, from one record per element. The cloud's style colours them by
++// their own colour, a ramp or a palette, and shows only those whose filtered values lie in its
++// ranges or sets; values vary across an element, so a range cuts it where its value crosses an end.
++
++struct Cloud {
++    style: vec4<f32>,               // x: colour (0 own, 1 ramp, 2 palette), y: dot size (px), z, w: ramp range
++    filters: array<vec4<f32>, 4>,   // x: kind (0 off, 1 range y…z, 2 whole values y + i for the bits i of w)
++};
++@group(1) @binding(3) var<uniform> cloud: Cloud;
++
++struct CIn {
++    @location(0) a: vec3<f32>,
++    @location(1) b: vec3<f32>,
++    @location(2) c: vec3<f32>,
++    @location(8) before: vec3<f32>,
++    @location(9) after: vec3<f32>,
++    @location(3) v: vec3<f32>,
++    @location(4) f0: vec3<f32>,
++    @location(5) f1: vec3<f32>,
++    @location(10) f2: vec3<f32>,
++    @location(11) f3: vec3<f32>,
++    @location(6) size: vec2<f32>,
++    @location(7) rgb: vec4<f32>,
++};
++
++struct COut {
++    @builtin(position) pos: vec4<f32>,
++    @location(0) wp: vec3<f32>,
++    @location(1) n: vec3<f32>,     // zero: not lit
++    @location(2) v: f32,
++    @location(3) f: vec4<f32>,
++    @location(4) rgb: vec3<f32>,
++    @location(5) at: vec2<f32>,    // a dot's place on its disc
++    @location(6) @interpolate(flat) has: u32,
++};
++
++fn cloud_out(i: CIn, w: vec3<f32>, wp: vec3<f32>, pos: vec4<f32>, n: vec3<f32>) -> COut {
++    var o: COut;
++    o.pos = pos;
++    o.wp = wp;
++    o.n = n;
++    o.v = dot(w, i.v);
++    o.f = vec4<f32>(dot(w, i.f0), dot(w, i.f1), dot(w, i.f2), dot(w, i.f3));
++    o.rgb = i.rgb.rgb;
++    o.at = vec2<f32>(0.0);
++    o.has = u32(round(i.rgb.a * 255.0));
++    return o;
++}
++
++fn behind(c: vec4<f32>) -> bool {
++    return near_z(c) < 0.0;
++}
++
++@vertex
++fn vs_cloud_dot(@builtin(vertex_index) vi: u32, i: CIn) -> COut {
++    var xs = array<f32, 6>(-1.0, 1.0, 1.0, -1.0, 1.0, -1.0);
++    var ys = array<f32, 6>(-1.0, -1.0, 1.0, -1.0, 1.0, 1.0);
++    let at = vec2<f32>(xs[vi], ys[vi]);
++    let size = max(cloud.style.y, 1.0);
++    let centre = u.vp * vec4<f32>(i.a, 1.0);
++    var pos = vec4<f32>(centre.xy + at * size / u.screen.xy * centre.w, centre.z, centre.w);
++    if (behind(centre)) { pos = vec4<f32>(0.0, 0.0, 0.0, -1.0); }
++    var o = cloud_out(i, vec3<f32>(1.0, 0.0, 0.0), i.a, pos, vec3<f32>(0.0));
++    // Dots under two pixels are squares: a disc that small loses its centre pixel.
++    o.at = at * select(1.0, 0.0, size < 2.0);
++    return o;
++}
++
++/// The least half-width of a segment on screen, in pixels.
++const MIN_HALF_PX: f32 = 0.75;
++
++/// The frame of a bead along `d`: along it, across it level, and up, its height axis.
++fn bead_frame(d: vec3<f32>) -> mat3x3<f32> {
++    var t = vec3<f32>(1.0, 0.0, 0.0);
++    if (length(d) > 1e-9) { t = d / length(d); }
++    var side = cross(vec3<f32>(0.0, 0.0, 1.0), t);
++    if (length(side) < 1e-6) { side = vec3<f32>(1.0, 0.0, 0.0); }
++    side = normalize(side);
++    return mat3x3<f32>(t, side, cross(t, side));
++}
++
++/// Corner `j` (0…9) of a bead's cross-section, a stadium: its place across and up, and its
++/// normal. Corners 0…4 go up the right half-disc, 5…9 down the left one, so 4–5 is the flat top
++/// and 9–0 the flat bottom.
++fn stadium(j: u32, size: vec2<f32>) -> vec4<f32> {
++    let k = j % 10u;
++    let right = k < 5u;
++    let a = -1.5707963 + 0.7853982 * f32(k % 5u) + select(3.1415927, 0.0, right);
++    let r = 0.5 * size.y;
++    let flat_half = 0.5 * max(size.x - size.y, 0.0);
++    return vec4<f32>(select(-flat_half, flat_half, right) + r * cos(a), r * sin(a), cos(a), sin(a));
++}
++
++/// Whether filter `f` keeps the value `v`.
++fn cloud_keeps(f: vec4<f32>, v: f32) -> bool {
++    if (f.x < 0.5) { return true; }
++    if (f.x < 1.5) { return v >= f.y && v <= f.z; }
++    let k = i32(round(v)) - i32(round(f.y));
++    return k >= 0 && k < 32 && ((bitcast<u32>(f.w) >> u32(k)) & 1u) != 0u;
++}
++
++/// Whether filter `f` leaves out a whole element with values `v` at its corners: all on one
++/// side of a range, or one value at every corner, not kept. A set of values with corners that
++/// differ may keep part of the element: its fragments decide.
++fn cloud_drops(f: vec4<f32>, v: vec3<f32>) -> bool {
++    if (f.x > 1.5) { return all(v == vec3<f32>(v.x)) && !cloud_keeps(f, v.x); }
++    return f.x > 0.5 && (all(v < vec3<f32>(f.y)) || all(v > vec3<f32>(f.z)));
++}
++
++/// Whether a filter leaves out the whole element.
++fn filtered_out(i: CIn) -> bool {
++    let has = u32(round(i.rgb.a * 255.0));
++    let values = array<vec3<f32>, 4>(i.f0, i.f1, i.f2, i.f3);
++    for (var k = 0u; k < 4u; k++) {
++        if (((has >> k) & 1u) != 0u && cloud_drops(cloud.filters[k], values[k])) { return true; }
++    }
++    return false;
++}
++
++/// The part in front of the near plane of the segment between clip-space `a` and `b`, as
++/// fractions of it from `a`; empty (first above second) when all of it is behind. Clip-space
++/// coordinates are affine along a line, so the crossing is exact.
++fn in_front(a: vec4<f32>, b: vec4<f32>) -> vec2<f32> {
++    let za = near_z(a);
++    let zb = near_z(b);
++    if (za < 0.0 && zb < 0.0) { return vec2<f32>(1.0, 0.0); }
++    let t = za / (za - zb);
++    return vec2<f32>(select(0.0, t, za < 0.0), select(1.0, t, zb < 0.0));
++}
++
++@vertex
++fn vs_cloud_segment(@builtin(vertex_index) vi: u32, i: CIn) -> COut {
++    // Corner `vi % 10` of the cross-section at the start (`vi < 10`) or the end; the index
++    // buffer joins them into the bead's sides.
++    let pa = u.vp * vec4<f32>(i.a, 1.0);
++    let pb = u.vp * vec4<f32>(i.b, 1.0);
++    let part = in_front(pa, pb);
++    if (filtered_out(i) || part.x > part.y) {
++        return cloud_out(i, vec3<f32>(1.0, 0.0, 0.0), i.a, vec4<f32>(0.0, 0.0, 0.0, -1.0), vec3<f32>(0.0));
++    }
++    // Where the near plane cuts it, the bead ends there, square; its numbers are exact at `e`.
++    let at_end = vi >= 10u;
++    let e = select(part.x, part.y, at_end);
++    let cut = e != select(0.0, 1.0, at_end);
++    let f = bead_frame(i.b - i.a);
++    let c = stadium(vi % 10u, i.size);
++    let axis = mix(i.a, i.b, e);
++    // Where it meets the next or the previous bead, the cross-section lies in the plane halfway
++    // between their directions, stretched across to keep its width: both beads end on the same
++    // section. A turn sharper than 120° ends square instead.
++    let other = select(i.a - i.before, i.after - i.b, at_end);
++    var across_dir = f[1];
++    var stretch = 1.0;
++    if (!cut && length(other) > 1e-9) {
++        let g = bead_frame(other);
++        let mid = f[1] + g[1];
++        if (length(mid) > 1e-6 && dot(normalize(mid), f[1]) > 0.5) {
++            across_dir = normalize(mid);
++            stretch = 1.0 / dot(across_dir, f[1]);
++        }
++    }
++    let wp = axis + across_dir * (c.x * stretch) + f[2] * c.y;
++    let ca = u.vp * vec4<f32>(axis, 1.0);
++    let cw = u.vp * vec4<f32>(wp, 1.0);
++    let half = u.screen.xy * 0.5;
++    var pos = cw;
++    // At least a pixel and a half across: a bead seen from afar, or a line without size. A corner
++    // behind the eye has no place on the screen and needs no widening: the rasteriser clips it.
++    if (cw.w > 0.0) {
++        let c0 = mix(pa, pb, part.x);
++        let c1 = mix(pa, pb, part.y);
++        let along = (c1.xy / c1.w - c0.xy / c0.w) * half;
++        var across = vec2<f32>(-along.y, along.x);
++        if (length(across) < 1e-6) { across = vec2<f32>(1.0, 0.0); }
++        across = normalize(across);
++        var px = (cw.xy / cw.w - ca.xy / ca.w) * half;
++        if (length(px) < MIN_HALF_PX * abs(c.z)) {
++            px = across * c.z * MIN_HALF_PX;
++            pos = vec4<f32>((ca.xy / ca.w + px / half) * cw.w, cw.z, cw.w);
++        }
++    }
++    let n = select(f[1] * c.z + f[2] * c.w, vec3<f32>(0.0), i.size.y <= 0.0);
++    return cloud_out(i, vec3<f32>(1.0 - e, e, 0.0), wp, pos, n);
++}
++
++@vertex
++fn vs_cloud_triangle(@builtin(vertex_index) vi: u32, i: CIn) -> COut {
++    // Not `w[vi] = 1.0`: the Windows D3D12 shader compiler cannot write through a dynamic vector index.
++    let w = vec3<f32>(f32(vi == 0u), f32(vi == 1u), f32(vi == 2u));
++    let wp = i.a * w.x + i.b * w.y + i.c * w.z;
++    var n = cross(i.b - i.a, i.c - i.a);
++    if (length(n) > 0.0) { n = normalize(n); }
++    // The true clip-space corner, even behind the eye: the rasteriser clips a triangle exactly.
++    return cloud_out(i, w, wp, u.vp * vec4<f32>(wp, 1.0), n);
++}
++
++fn cloud_ramp(t: f32) -> vec3<f32> {
++    var stops = array<vec3<f32>, 5>(
++        vec3<f32>(40.0, 70.0, 200.0), vec3<f32>(30.0, 170.0, 230.0), vec3<f32>(60.0, 200.0, 90.0),
++        vec3<f32>(240.0, 220.0, 60.0), vec3<f32>(230.0, 70.0, 50.0));
++    let k = clamp(t, 0.0, 1.0) * 4.0;
++    let j = min(u32(k), 3u);
++    return mix(stops[j], stops[j + 1u], k - f32(j)) / 255.0;
++}
++
++fn cloud_palette(v: f32) -> vec3<f32> {
++    var colours = array<vec3<f32>, 10>(
++        vec3<f32>(240.0, 140.0, 40.0), vec3<f32>(245.0, 205.0, 65.0), vec3<f32>(230.0, 65.0, 65.0),
++        vec3<f32>(165.0, 75.0, 190.0), vec3<f32>(65.0, 190.0, 115.0), vec3<f32>(75.0, 150.0, 220.0),
++        vec3<f32>(240.0, 120.0, 180.0), vec3<f32>(140.0, 105.0, 75.0), vec3<f32>(120.0, 215.0, 215.0),
++        vec3<f32>(190.0, 190.0, 80.0));
++    if (v < -0.5) { return vec3<f32>(150.0, 160.0, 176.0) / 255.0; }
++    return colours[u32(round(v)) % 10u] / 255.0;
++}
++
++
++@fragment
++fn fs_cloud(o: COut) -> @location(0) vec4<f32> {
++    var out = clipped(o.wp) || dot(o.at, o.at) > 1.0;
++    for (var k = 0u; k < 4u; k++) {
++        out = out || (((o.has >> k) & 1u) != 0u && !cloud_keeps(cloud.filters[k], o.f[k]));
++    }
++    if (out) { discard; }
++    var c = o.rgb;
++    let mode = cloud.style.x;
++    if ((o.has & 16u) != 0u && mode > 1.5) {
++        c = cloud_palette(o.v);
++    } else if ((o.has & 16u) != 0u && mode > 0.5) {
++        c = cloud_ramp((o.v - cloud.style.z) / max(cloud.style.w - cloud.style.z, 1e-12));
++    }
++    if (length(o.n) > 0.5) {
++        c = c * (0.45 + 0.55 * abs(dot(normalize(o.n), normalize(u.back.xyz))));
++    }
++    return out_color(vec4<f32>(c, 1.0));
++}
+diff --git a/third_party/solidcraft/crates/viewport-gpu/src/capture.rs b/third_party/solidcraft/crates/viewport-gpu/src/capture.rs
+index 286be1080..30653092f 100644
+--- a/third_party/solidcraft/crates/viewport-gpu/src/capture.rs
++++ b/third_party/solidcraft/crates/viewport-gpu/src/capture.rs
+@@ -490,12 +490,36 @@ fn frame(scene: &Scene, cam: &Camera, [width, height]: [u32; 2], key: u64, acces
+ /// scene hatches its cut by part ([`Scene::part_hatch`]), each body's colours are palette entries
+ /// of its own, carrying its hatch.
+ pub fn scene_geometry(scene: &Scene) -> GpuScene {
++    capture_geometry(
++        scene,
++        #[cfg(feature = "pattern-maps")]
++        None,
++    )
++}
++
++#[cfg(feature = "pattern-maps")]
++pub fn scene_geometry_mapped(scene: &Scene, maps: &crate::maps::FaceMaps) -> GpuScene {
++    capture_geometry(scene, Some(maps))
++}
++
++fn capture_geometry(scene: &Scene, #[cfg(feature = "pattern-maps")] maps: Option<&crate::maps::FaceMaps>) -> GpuScene {
+     let by_part = scene.part_hatch.is_some() && !scene.clip.is_empty();
+     // Per body, its colours' stable entries (by part), and the stable palette they make.
+     let mut own: Vec<HashMap<[u8; 4], PaletteIndex>> = Vec::new();
+     let mut stable: Vec<[u8; 4]> = Vec::new();
+     let mut hatches: Vec<(PaletteIndex, Hatch)> = Vec::new();
+     let c4 = |m: &SceneMesh, c: Rgb| [c.0, c.1, c.2, (m.alpha() * 255.0).round().clamp(0.0, 255.0) as u8];
++    #[cfg(feature = "pattern-maps")]
++    let mut indices = HashMap::new();
++    #[cfg(feature = "pattern-maps")]
++    if let Some(maps) = maps {
++        for &(mi, fi) in &maps.faces {
++            let m = &scene.meshes[mi];
++            let color = m.face_colors.iter().find(|(f, _)| *f == fi).map_or(m.color, |(_, c)| *c);
++            indices.insert((mi, fi), PaletteIndex(stable.len() as u32));
++            stable.push(c4(m, color));
++        }
++    }
+     if by_part {
+         for m in &scene.meshes {
+             let mut map = HashMap::new();
+@@ -511,6 +535,10 @@ pub fn scene_geometry(scene: &Scene) -> GpuScene {
+         }
+     }
+     let mut palette = Palette::with_stable(stable);
++    #[cfg(feature = "pattern-maps")]
++    if let Some(maps) = maps {
++        palette.maps = Some(maps.gpu.clone());
++    }
+     for (i, h) in hatches {
+         palette.set_hatch(i, h);
+     }
+@@ -524,6 +552,8 @@ pub fn scene_geometry(scene: &Scene) -> GpuScene {
+                 Some(i) => *i,
+                 None => sc.color(rgba),
+             };
++            #[cfg(feature = "pattern-maps")]
++            let col = mesh.tri_face.get(ti).and_then(|fi| indices.get(&(mi, *fi))).copied().unwrap_or(col);
+             let [Some(a), Some(b), Some(c)] = t.map(|k| mesh.positions.get(k as usize).copied()) else { continue };
+             let flat = (b - a).cross(c - a).normalized().unwrap_or(Vec3::Z);
+             for (k, p) in t.iter().zip([a, b, c]) {
+diff --git a/third_party/solidcraft/crates/viewport-gpu/src/lib.rs b/third_party/solidcraft/crates/viewport-gpu/src/lib.rs
+index fddb59516..2c53b0b49 100644
+--- a/third_party/solidcraft/crates/viewport-gpu/src/lib.rs
++++ b/third_party/solidcraft/crates/viewport-gpu/src/lib.rs
+@@ -717,3 +717,6 @@ fn pack(plans: &[&TessPlan]) -> Result<PackedPlans> {
+ 
+ #[cfg(test)]
+ mod tests;
++
++#[cfg(feature = "pattern-maps")]
++pub mod maps;
+diff --git a/third_party/solidcraft/crates/viewport-gpu/src/maps.rs b/third_party/solidcraft/crates/viewport-gpu/src/maps.rs
+new file mode 100644
+index 000000000..1e07d2e4d
+--- /dev/null
++++ b/third_party/solidcraft/crates/viewport-gpu/src/maps.rs
+@@ -0,0 +1,266 @@
++//! Prototype colour maps. Face order is also the stable palette order.
++use crate::view::PALETTE_WIDTH;
++use std::sync::Arc;
++use wgpu as g;
++
++pub struct FaceMaps {
++    pub faces: Vec<(usize, u32)>,
++    pub gpu: Arc<MapGpu>,
++}
++#[derive(Debug)]
++pub struct MapGpu {
++    frames: g::TextureView,
++    images: g::TextureView,
++    sampler: g::Sampler,
++}
++
++pub type FrameRecord = [[f32; 4]; 3];
++pub struct Mip {
++    pub width: u32,
++    pub height: u32,
++    pub bytes: Vec<u8>,
++}
++
++pub fn mip_chain(base: Mip, enabled: bool) -> Vec<Mip> {
++    let linear: [f32; 256] = std::array::from_fn(|i| {
++        let s = i as f32 / 255.;
++        if s <= 0.04045 { s / 12.92 } else { ((s + 0.055) / 1.055).powf(2.4) }
++    });
++    let mut chain = vec![base];
++    while let Some(prev) = chain.last() {
++        if !enabled || prev.width.max(prev.height) == 1 {
++            break;
++        }
++        let width = (prev.width / 2).max(1);
++        let height = (prev.height / 2).max(1);
++        let mut bytes = Vec::with_capacity((width * height * 4) as usize);
++        for y in 0..height {
++            for x in 0..width {
++                let mut sum = [0.; 4];
++                let mut count = 0.;
++                for j in y * prev.height / height..(y + 1) * prev.height / height {
++                    for i in x * prev.width / width..(x + 1) * prev.width / width {
++                        let k = ((j * prev.width + i) * 4) as usize;
++                        for (c, s) in sum[..3].iter_mut().enumerate() {
++                            *s += linear[prev.bytes[k + c] as usize];
++                        }
++                        sum[3] += f32::from(prev.bytes[k + 3]);
++                        count += 1.;
++                    }
++                }
++                for s in &sum[..3] {
++                    let l = s / count;
++                    let v = if l <= 0.0031308 { 12.92 * l } else { 1.055 * l.powf(1. / 2.4) - 0.055 };
++                    bytes.push((255. * v).round() as u8);
++                }
++                bytes.push((sum[3] / count).round() as u8);
++            }
++        }
++        chain.push(Mip { width, height, bytes });
++    }
++    chain
++}
++pub(crate) fn layout() -> [g::BindGroupLayoutEntry; 3] {
++    let texture = |filterable, view_dimension| g::BindingType::Texture {
++        sample_type: g::TextureSampleType::Float { filterable },
++        view_dimension,
++        multisampled: false,
++    };
++    let types = [
++        texture(false, g::TextureViewDimension::D2),
++        texture(true, g::TextureViewDimension::D2Array),
++        g::BindingType::Sampler(g::SamplerBindingType::Filtering),
++    ];
++    std::array::from_fn(|i| g::BindGroupLayoutEntry { binding: 7 + i as u32, visibility: g::ShaderStages::FRAGMENT, ty: types[i], count: None })
++}
++impl MapGpu {
++    fn allocate(d: &g::Device, table_height: u32, images: g::Extent3d, levels: u32, aniso: u16) -> (Self, g::Texture, g::Texture) {
++        let texture = |format, size, mip_level_count| {
++            d.create_texture(&g::TextureDescriptor {
++                label: Some("pattern maps"),
++                size,
++                mip_level_count,
++                sample_count: 1,
++                dimension: g::TextureDimension::D2,
++                format,
++                usage: g::TextureUsages::COPY_DST
++                    | g::TextureUsages::TEXTURE_BINDING
++                    | if format == g::TextureFormat::Rgba8UnormSrgb {
++                        g::TextureUsages::RENDER_ATTACHMENT | g::TextureUsages::COPY_SRC
++                    } else {
++                        g::TextureUsages::empty()
++                    },
++                view_formats: &[],
++            })
++        };
++        let table = texture(g::TextureFormat::Rgba32Float, g::Extent3d { width: PALETTE_WIDTH, height: table_height, depth_or_array_layers: 1 }, 1);
++        let array = texture(g::TextureFormat::Rgba8UnormSrgb, images, levels);
++        let sampler = d.create_sampler(&g::SamplerDescriptor {
++            address_mode_u: g::AddressMode::Repeat,
++            address_mode_v: g::AddressMode::Repeat,
++            mag_filter: g::FilterMode::Linear,
++            min_filter: g::FilterMode::Linear,
++            mipmap_filter: g::MipmapFilterMode::Linear,
++            anisotropy_clamp: aniso,
++            ..Default::default()
++        });
++        (
++            Self {
++                frames: table.create_view(&Default::default()),
++                images: array.create_view(&g::TextureViewDescriptor { dimension: Some(g::TextureViewDimension::D2Array), ..Default::default() }),
++                sampler,
++            },
++            table,
++            array,
++        )
++    }
++    pub(crate) fn empty(d: &g::Device) -> Self {
++        Self::allocate(d, 3, g::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 }, 1, 1).0
++    }
++    pub fn upload(
++        d: &g::Device,
++        q: &g::Queue,
++        records: &[FrameRecord],
++        layers: &[Vec<Mip>],
++        aniso: u16,
++        generator: Option<&MipGenerator>,
++        always_three: bool,
++    ) -> Self {
++        let base = &layers[0][0];
++        let rows = (records.len() as u32).div_ceil(PALETTE_WIDTH).max(1);
++        let (gpu, table, array) = Self::allocate(
++            d,
++            rows * 3 + u32::from(always_three),
++            g::Extent3d { width: base.width, height: base.height, depth_or_array_layers: layers.len() as u32 },
++            if generator.is_some() { base.width.max(base.height).ilog2() + 1 } else { layers[0].len() as u32 },
++            aniso,
++        );
++        let mut data = vec![0; (rows * 3 * PALETTE_WIDTH * 16) as usize];
++        for (i, record) in records.iter().enumerate() {
++            let w = PALETTE_WIDTH as usize;
++            for (r, values) in record.iter().enumerate() {
++                let start = ((i / w * 3 + r) * w + i % w) * 16;
++                for (dst, value) in data[start..start + 16].chunks_exact_mut(4).zip(values) {
++                    dst.copy_from_slice(&value.to_le_bytes());
++                }
++            }
++        }
++        let write = |texture: &g::Texture, level, layer, width, height, bpp, bytes: &[u8]| {
++            q.write_texture(
++                g::TexelCopyTextureInfo { texture, mip_level: level, origin: g::Origin3d { x: 0, y: 0, z: layer }, aspect: g::TextureAspect::All },
++                bytes,
++                g::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(width * bpp), rows_per_image: Some(height) },
++                g::Extent3d { width, height, depth_or_array_layers: 1 },
++            )
++        };
++        write(&table, 0, 0, PALETTE_WIDTH, rows * 3, 16, &data);
++        for (layer, chain) in layers.iter().enumerate() {
++            for (level, m) in chain.iter().enumerate() {
++                write(&array, level as u32, layer as u32, m.width, m.height, 4, &m.bytes);
++            }
++        }
++        if let Some(generator) = generator {
++            q.submit([generator.encode(d, &array)]);
++        }
++        gpu
++    }
++    pub(crate) fn entries(&self) -> [g::BindGroupEntry<'_>; 3] {
++        let resources = [
++            g::BindingResource::TextureView(&self.frames),
++            g::BindingResource::TextureView(&self.images),
++            g::BindingResource::Sampler(&self.sampler),
++        ];
++        std::array::from_fn(|i| g::BindGroupEntry { binding: 7 + i as u32, resource: resources[i].clone() })
++    }
++}
++
++pub struct MipGenerator {
++    pipeline: g::RenderPipeline,
++    sampler: g::Sampler,
++}
++
++impl MipGenerator {
++    pub fn new(d: &g::Device) -> Self {
++        let shader = d.create_shader_module(g::ShaderModuleDescriptor {
++            label: Some("sRGB mip reduction"),
++            source: g::ShaderSource::Wgsl(
++                r#"
++struct Vertex { @builtin(position) pos: vec4f, @location(0) uv: vec2f }
++@vertex fn vertex(@builtin(vertex_index) i: u32) -> Vertex {
++    let uv = vec2f(f32((i << 1u) & 2u), f32(i & 2u));
++    return Vertex(vec4f(uv * vec2f(2., -2.) + vec2f(-1., 1.), 0., 1.), uv);
++}
++@group(0) @binding(0) var source: texture_2d<f32>;
++@group(0) @binding(1) var linear_sampler: sampler;
++@fragment fn fragment(v: Vertex) -> @location(0) vec4f {
++    return textureSampleLevel(source, linear_sampler, v.uv, 0.);
++}
++"#
++                .into(),
++            ),
++        });
++        let pipeline = d.create_render_pipeline(&g::RenderPipelineDescriptor {
++            label: Some("sRGB mip reduction"),
++            layout: None,
++            vertex: g::VertexState { module: &shader, entry_point: Some("vertex"), buffers: &[], compilation_options: Default::default() },
++            fragment: Some(g::FragmentState {
++                module: &shader,
++                entry_point: Some("fragment"),
++                targets: &[Some(g::TextureFormat::Rgba8UnormSrgb.into())],
++                compilation_options: Default::default(),
++            }),
++            primitive: Default::default(),
++            depth_stencil: None,
++            multisample: Default::default(),
++            multiview_mask: None,
++            cache: None,
++        });
++        let sampler =
++            d.create_sampler(&g::SamplerDescriptor { min_filter: g::FilterMode::Linear, mag_filter: g::FilterMode::Linear, ..Default::default() });
++        Self { pipeline, sampler }
++    }
++
++    pub fn encode(&self, d: &g::Device, texture: &g::Texture) -> g::CommandBuffer {
++        let layout = self.pipeline.get_bind_group_layout(0);
++        let mut encoder = d.create_command_encoder(&Default::default());
++        for layer in 0..texture.depth_or_array_layers() {
++            let view = |level| {
++                texture.create_view(&g::TextureViewDescriptor {
++                    dimension: Some(g::TextureViewDimension::D2),
++                    base_array_layer: layer,
++                    array_layer_count: Some(1),
++                    base_mip_level: level,
++                    mip_level_count: Some(1),
++                    ..Default::default()
++                })
++            };
++            let mut source = view(0);
++            for level in 1..texture.mip_level_count() {
++                let target = view(level);
++                let group = d.create_bind_group(&g::BindGroupDescriptor {
++                    label: None,
++                    layout: &layout,
++                    entries: &[
++                        g::BindGroupEntry { binding: 0, resource: g::BindingResource::TextureView(&source) },
++                        g::BindGroupEntry { binding: 1, resource: g::BindingResource::Sampler(&self.sampler) },
++                    ],
++                });
++                let mut pass = encoder.begin_render_pass(&g::RenderPassDescriptor {
++                    color_attachments: &[Some(g::RenderPassColorAttachment {
++                        view: &target,
++                        resolve_target: None,
++                        depth_slice: None,
++                        ops: g::Operations { load: g::LoadOp::Clear(g::Color::TRANSPARENT), store: g::StoreOp::Store },
++                    })],
++                    ..Default::default()
++                });
++                pass.set_pipeline(&self.pipeline);
++                pass.set_bind_group(0, &group, &[]);
++                pass.draw(0..3, 0..1);
++                drop(pass);
++                source = target;
++            }
++        }
++        encoder.finish()
++    }
++}
+diff --git a/third_party/solidcraft/crates/viewport-gpu/src/view.rs b/third_party/solidcraft/crates/viewport-gpu/src/view.rs
+index a907f842a..439e67763 100644
+--- a/third_party/solidcraft/crates/viewport-gpu/src/view.rs
++++ b/third_party/solidcraft/crates/viewport-gpu/src/view.rs
+@@ -78,6 +78,8 @@ pub const MAX_PALETTE: usize = 1 << 20;
+ /// (`solidcraft_viewport::hatch`): none, the cap's own hatch, unless the scene hatches by part.
+ #[derive(Clone, Debug, Default)]
+ pub struct Palette {
++    #[cfg(feature = "pattern-maps")]
++    pub(crate) maps: Option<std::sync::Arc<crate::maps::MapGpu>>,
+     entries: Vec<[u8; 4]>,
+     lookup: std::collections::HashMap<[u8; 4], u32>,
+     stable_len: usize,
+@@ -121,7 +123,15 @@ impl Material {
+ impl Palette {
+     /// A palette whose entries are all stable (the model scene's body/face slots).
+     pub fn with_stable(entries: Vec<[u8; 4]>) -> Palette {
+-        Palette { stable_len: entries.len(), entries, lookup: std::collections::HashMap::new(), hatches: Vec::new(), materials: Vec::new() }
++        Palette {
++            #[cfg(feature = "pattern-maps")]
++            maps: None,
++            stable_len: entries.len(),
++            entries,
++            lookup: std::collections::HashMap::new(),
++            hatches: Vec::new(),
++            materials: Vec::new(),
++        }
+     }
+ 
+     /// This palette with PBR `materials` by index.
+@@ -2087,6 +2097,16 @@ impl PaletteGpu {
+         let materials = material_texture(device, material_rows);
+         write_materials(queue, &materials, palette.materials(), 0, material_rows, written);
+         let material_view = materials.create_view(&Default::default());
++        #[cfg(feature = "pattern-maps")]
++        let fallback;
++        #[cfg(feature = "pattern-maps")]
++        let maps = match palette.maps.as_deref() {
++            Some(m) => m,
++            None => {
++                fallback = crate::maps::MapGpu::empty(device);
++                &fallback
++            }
++        };
+         let [e3, e4, e5, e6] = bgl.environment.entries();
+         let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+             label: Some("sc_palette"),
+@@ -2099,6 +2119,12 @@ impl PaletteGpu {
+                 e4,
+                 e5,
+                 e6,
++                #[cfg(feature = "pattern-maps")]
++                maps.entries()[0].clone(),
++                #[cfg(feature = "pattern-maps")]
++                maps.entries()[1].clone(),
++                #[cfg(feature = "pattern-maps")]
++                maps.entries()[2].clone(),
+             ],
+         });
+         PaletteGpu { palette, _texture: texture, materials, material_rows, bind, rows }
+@@ -2111,6 +2137,11 @@ impl PaletteGpu {
+             return;
+         }
+         let rows = palette_rows(&palette);
++        #[cfg(feature = "pattern-maps")]
++        if self.palette.maps.is_some() || palette.maps.is_some() {
++            *self = PaletteGpu::new(device, queue, uniform, bgl, palette, written);
++            return;
++        }
+         if rows != self.rows || material_rows(palette.materials()) != self.material_rows {
+             *self = PaletteGpu::new(device, queue, uniform, bgl, palette, written);
+             return;
+@@ -3159,6 +3190,9 @@ fn access_texture(device: &wgpu::Device, queue: Option<&wgpu::Queue>, bgl: &wgpu
+     })
+ }
+ 
++#[cfg(feature = "pattern-maps")]
++pub const SHADER: &str = include_str!("../shaders/viewport-maps.wgsl");
++#[cfg(not(feature = "pattern-maps"))]
+ pub const SHADER: &str = include_str!("../shaders/viewport.wgsl");
+ 
+ /// The layout of group 0 (the uniform, a palette and its materials, the studio) with the studio
+@@ -3375,6 +3409,12 @@ impl Renderer {
+                 studio_layout[1],
+                 studio_layout[2],
+                 studio_layout[3],
++                #[cfg(feature = "pattern-maps")]
++                crate::maps::layout()[0],
++                #[cfg(feature = "pattern-maps")]
++                crate::maps::layout()[1],
++                #[cfg(feature = "pattern-maps")]
++                crate::maps::layout()[2],
+             ],
+         });
+         let environment = Environment::new(device);
+@@ -3393,6 +3433,8 @@ impl Renderer {
+         let dummy_view = dummy_palette.create_view(&Default::default());
+         let dummy_materials = material_texture(device, 1);
+         let dummy_material_view = dummy_materials.create_view(&Default::default());
++        #[cfg(feature = "pattern-maps")]
++        let maps = crate::maps::MapGpu::empty(device);
+         let [e3, e4, e5, e6] = environment.entries();
+         let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+             label: Some("sc_viewport"),
+@@ -3405,6 +3447,12 @@ impl Renderer {
+                 e4,
+                 e5,
+                 e6,
++                #[cfg(feature = "pattern-maps")]
++                maps.entries()[0].clone(),
++                #[cfg(feature = "pattern-maps")]
++                maps.entries()[1].clone(),
++                #[cfg(feature = "pattern-maps")]
++                maps.entries()[2].clone(),
+             ],
+         });
+         let moving_uniform = device.create_buffer(&wgpu::BufferDescriptor {
+@@ -3427,6 +3475,12 @@ impl Renderer {
+                 e4,
+                 e5,
+                 e6,
++                #[cfg(feature = "pattern-maps")]
++                maps.entries()[0].clone(),
++                #[cfg(feature = "pattern-maps")]
++                maps.entries()[1].clone(),
++                #[cfg(feature = "pattern-maps")]
++                maps.entries()[2].clone(),
+             ],
+         });
+         let reversed = t.reversed_depth();
