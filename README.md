@@ -27,7 +27,15 @@ Rustは、rustupのcargoで動かします。`rust-toolchain.toml` の版とWasm
 
 新しいworktreeで `pnpm setup` を実行すると、メインのチェックアウトから `.tools/` をcopy-on-writeで複製します。Rustの `target/` は各worktreeで空から始めます。手元のRustの検査とreleaseのWasmビルドは、miseで固定したmbxを通して、別のworktreeでコンパイルした同じ入力の成果物を再利用します。mbxは初めて使うときにmiseがインストールします。
 
-共有ストアは `$XDG_CACHE_HOME/instant-madori/mbx`（未設定なら `~/.cache/instant-madori/mbx`）です。mbxの自動回収に8 GiBの予算と、ディスクに残す空き容量20 GiBを設定しています。回収は定期的に行われ、ビルド中は予算を超えることがあります。worktreeの `target/` はこの予算とは別です。
+共有ストアは `$XDG_CACHE_HOME/instant-madori/mbx`（未設定なら `~/.cache/instant-madori/mbx`）です。mbxの自動回収は、1時間ごとにストアを8 GiBの予算まで減らします。回収と回収の間のビルドで、ストアは予算を超えることがあります。worktreeの `target/` はこの予算とは別です。
+
+mbxは、ディスクの空きが少なくてもストアを回収しません（`MBX_GC_MIN_FREE_SIZE=none`）。ストアの成果物は、各worktreeの `target/` のファイルとAPFSのクローン（reflink）で同じブロックを共有します。そのため、その `target/` が残っている間にストアを回収しても空きは戻らず、次に準備するworktreeが外部のクレートを作り直して空きを減らすだけです。2026-11-26に専用のボリュームで確かめたときは、空き19 GiBで以前の設定（空き20 GiBを残す）のまま回収させると、0.78 GiBのストアが空になり、空きは0.00 GiB増えました。5分後に同じ `Cargo.lock` で準備したworktreeは、108のコンパイルをすべて作り直しました。mbxは空きが下限を切っている間は5分ごとに回収するので、空きが20 GiBの前後を行き来するこのマシンでは、ストアが何度も空になっていました。この変数を書かないと、mbxはディスクの10%（このマシンでは約46 GiB）を下限にします。
+
+空きが減ったときは、次の順に働きます。
+
+- 空きが20 GiBを切ると、指揮役の見回りが、終わったworktreeとDockerのイメージ、メインのチェックアウトとrunnerの `target/` を片付けます。空きを戻すのは、成果物のブロックを持つものを消すこの片付けです。
+- 空きが12 GiBを切ると、Rustの段階とDockerの枠が始まらずに止まります（下の段落）。`pnpm setup` と `pnpm dev` のWasmのビルドは空きを確かめないので、12 GiBを切っていても動きます。
+- mbxは空きを理由にストアを回収しません。
 
 `MADORI_MBX=0 mise exec -- pnpm setup` で通常のCargoを使えます。検査も同じ環境変数を付けて実行してください。mbxが使えないときも、新しいworktreeでは従来どおり `target/` を複製し、自作クレートのソースの更新時刻を進めます。複製はファイルの更新時刻を保ち、ソースの更新時刻は複製を終えてから進めます。進めないと、Cargoは自作クレートの一部を、別のチェックアウトがコンパイルした成果物のまま使います。2026-11-20に `target/` を共有して確かめたときは、11のクレートのうち3つを再利用し、8つを作り直しました。複製元と別のファイルシステムにあるworktreeでは、全体のコピーになるので複製せずに止まります。既存の `target/` ディレクトリは保持し、共有先へのシンボリックリンクだけを外します。複製にはmacOSのAPFSまたはLinuxのreflinkが必要です。Gitフックはメインのチェックアウトでだけ登録します。GitHub Actionsはrunnerに保存したtargetと通常のCargoを使います。
 
