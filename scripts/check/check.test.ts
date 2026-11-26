@@ -140,16 +140,22 @@ function runTestStages(
   );
 }
 
-void test("a TypeScript test failure lets the remaining checks run", async () => {
+void test("a TypeScript test failure lets the remaining checks run", async (t) => {
+  const notices = t.mock.method(console, "error", () => {});
   const passed: string[] = [];
   await runTestStages("--full", passed);
   for (const mode of ["default", "--full"] as const) {
+    notices.mock.resetCalls();
     const steps: string[] = [];
     await assert.rejects(
       runTestStages(mode, steps, {
         "TypeScript tests": new StepFailed("TypeScript tests", "1"),
       }),
       { message: "TypeScript tests failed (1)" },
+    );
+    assert.deepEqual(
+      notices.mock.calls.map((call) => call.arguments),
+      [["[check] TypeScript tests failed (1). The remaining steps still run, then check fails."]],
     );
     assert(steps.includes("Rust tests"));
     if (mode === "--full") {
@@ -161,7 +167,8 @@ void test("a TypeScript test failure lets the remaining checks run", async () =>
   }
 });
 
-void test("full checks report all failed test stages in order after pruning and audits", async () => {
+void test("full checks report all failed test stages in order after pruning and audits", async (t) => {
+  t.mock.method(console, "error", () => {});
   const steps: string[] = [];
   await assert.rejects(
     runTestStages("--full", steps, {
@@ -183,7 +190,8 @@ void test("full checks report all failed test stages in order after pruning and 
   ]);
 });
 
-void test("a build failure stops full checks after a failed test stage", async () => {
+void test("a build failure stops full checks after a failed test stage", async (t) => {
+  t.mock.method(console, "error", () => {});
   const steps: string[] = [];
   const failure = new StepFailed("Build web", "1");
   await assert.rejects(
@@ -196,7 +204,8 @@ void test("a build failure stops full checks after a failed test stage", async (
   assert(!steps.includes("Container integration"));
 });
 
-void test("a fatal test-stage error stops checks before Rust tests run", async () => {
+void test("a fatal test-stage error stops checks before Rust tests run", async (t) => {
+  t.mock.method(console, "error", () => {});
   const spawnError = new Error("could not start tests");
   const diskError = new Error("low disk");
   for (const [tsFailure, gates, expected] of [
