@@ -244,14 +244,21 @@ fn hidden_vertical_faces() {
 
 #[test]
 fn hidden_step_of_a_thickening_wall() {
-    let house = layout_with_walls(
+    let house = lettered_house(
         &[
-            (5800, 0, 8000, 3000),
-            (0, 3000, 5900, 6000),
-            (5900, 3000, 8000, 6000),
+            (5800, 0),
+            (8000, 0),
+            (8000, 3000),
+            (5900, 3000),
+            (5800, 3000),
+            (0, 3000),
+            (0, 6000),
+            (5900, 6000),
+            (8000, 6000),
         ],
-        150.,
-        300.,
+        &["abcde", "fedhg", "dcih"],
+        (75, 75),
+        &[("cd", 150, 150), ("de", 150, 150), ("dh", 150, 150)],
     );
     let hidden = &interiors(&house)[1];
     assert_eq!(hidden.outline().len(), 4);

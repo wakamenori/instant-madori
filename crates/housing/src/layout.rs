@@ -12,7 +12,8 @@ use std::fmt;
 /// Rectangular rooms on wall centre lines, in millimetres. Repeat the exact coordinate for a shared wall.
 /// Each room must be wider than the thickest wall on both axes. Rooms must not overlap or touch only at a
 /// corner, and walls must not overlap: facing perimeter walls need at least one exterior wall thickness
-/// between their centre lines.
+/// between their centre lines. Where a wall ends on another wall, the piece of that wall beside the joint
+/// must be at least half the ending wall's thickness long when a thinner wall continues past it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RoomLayout {
