@@ -8,6 +8,7 @@ import {
 } from "../../src/services/jobs.ts";
 import {
   openJobDatabase,
+  applyAttachmentMigrations,
   jobMigration,
   queueHoldMigration,
   conversationMigration,
@@ -104,6 +105,7 @@ try {
   assert.deepEqual((await db.raw.prepare("PRAGMA foreign_key_check").all()).results, []);
   await db.apply(await readFile(queueHoldMigration, "utf8"));
   await db.apply(await readFile(conversationMigration, "utf8"));
+  await applyAttachmentMigrations(db);
   const deps = { store: db.store, runtime: db.runtime, wakePattern: async () => {} };
   const accepted = await acceptInstruction(deps, {
     ownerId,

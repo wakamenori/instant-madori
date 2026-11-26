@@ -1,3 +1,4 @@
+import { ownsAllAttachments, insertAttachments } from "./attachments.ts";
 import { activeJobStates, stoppableJobStates, finishedJobStates } from "./job-states.ts";
 import { holdsQueueOnEnd, releaseWhenLastQueuedJobStops, releaseEmptyQueue } from "./job-queue.ts";
 import { z } from "zod";
@@ -37,10 +38,12 @@ export interface NewInstruction {
   messageId: string;
   patternId: string;
   body: string;
+  attachmentIds: readonly string[];
   now: string;
 }
 
 export async function acceptInstructionOnce(db: D1, key: RequestKey, input: NewInstruction) {
+  const owned = ownsAllAttachments(input.attachmentIds);
   const batch = createOnceStatements(key, input.now, {
     table: "jobs",
     id: input.id,
@@ -49,10 +52,23 @@ export async function acceptInstructionOnce(db: D1, key: RequestKey, input: NewI
         sql: `INSERT INTO messages (id, pattern_id, owner_id, number, body, created_at)
           SELECT ?, p.id, p.owner_id,
             (SELECT coalesce(max(m.number), 0) + 1 FROM messages m WHERE m.pattern_id = p.id),
-            ?, ? FROM patterns p WHERE p.id = ? AND p.owner_id = ?`,
-        bindings: [input.messageId, input.body, input.now, input.patternId, key.ownerId],
+            ?, ? FROM patterns p WHERE p.id = ? AND p.owner_id = ? AND ${owned.sql}`,
+        bindings: [
+          input.messageId,
+          input.body,
+          input.now,
+          input.patternId,
+          key.ownerId,
+          ...owned.bindings,
+        ],
       },
-      releaseEmptyQueue(input.patternId, key.ownerId),
+      insertAttachments({
+        messageId: input.messageId,
+        patternId: input.patternId,
+        ownerId: key.ownerId,
+        attachmentIds: input.attachmentIds,
+      }),
+      releaseEmptyQueue(input.patternId, key.ownerId, input.messageId),
       {
         sql: `INSERT INTO jobs
           (id, pattern_id, owner_id, message_id, state, generation, base_revision_id, created_at, updated_at)

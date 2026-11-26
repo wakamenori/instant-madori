@@ -209,7 +209,14 @@ await test("Stop orders against commit on real D1 and R2", async (t) => {
     assert.deepEqual(await stop(job.jobId, requestId), { ...stopped, kind: "replayed" });
     const reused = await db.store.jobs.acceptOnce(
       await requestKey(ownerId, requestId, "instruction.accept", { patternId, body: "other" }),
-      { id: crypto.randomUUID(), messageId: crypto.randomUUID(), patternId, body: "other", now },
+      {
+        id: crypto.randomUUID(),
+        messageId: crypto.randomUUID(),
+        patternId,
+        body: "other",
+        attachmentIds: [],
+        now,
+      },
     );
     assert.equal(reused.kind, "request_id_reused");
     assert.deepEqual(await completeJob(deps, { right, snapshot, name: "案" }), done);

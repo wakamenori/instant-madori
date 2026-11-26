@@ -4,6 +4,7 @@ import { z } from "zod";
 import { conversationMessageSchema } from "@madori/contracts";
 import {
   openJobDatabase,
+  applyAttachmentMigrations,
   jobMigration,
   queueHoldMigration,
   conversationMigration,
@@ -301,6 +302,7 @@ try {
   );
   assert.deepEqual((await schema()).results, original.results);
   await db.apply(migration);
+  await applyAttachmentMigrations(db);
   assert.deepEqual((await jobStates()).results, originalStates.results);
   async function instructionsOnly() {
     assert.deepEqual(
@@ -311,6 +313,7 @@ try {
   await instructionsOnly();
   const replay = await db.store.jobs.acceptOnce(committed.request, {
     id: crypto.randomUUID(),
+    attachmentIds: [],
     messageId: crypto.randomUUID(),
     patternId: committedPattern,
     body: "fixture",

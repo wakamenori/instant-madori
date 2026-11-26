@@ -3,11 +3,12 @@ import type { ConversationMessage } from "@madori/contracts";
 import type { OwnerId } from "../owner.ts";
 import { foundSchema, rows, jsonRows } from "./d1.ts";
 import type { D1 } from "./d1.ts";
+import { attachmentIdsJson } from "./attachments.ts";
 import { revisionJson } from "./revisions.ts";
 
 export const messagePageSql = `SELECT json_object('id', m.id, 'kind', m.kind, 'number', m.number, 'body', m.body,
     'createdAt', m.created_at, 'jobId', coalesce(m.job_id, j.id),
-    'choices', json(m.choices),
+    'attachmentIds', ${attachmentIdsJson("m")}, 'choices', json(m.choices),
     'revision', CASE WHEN r.id IS NULL THEN NULL ELSE ${revisionJson("r")} END) AS json
   FROM messages m
   LEFT JOIN jobs j ON j.message_id = m.id AND j.pattern_id = m.pattern_id

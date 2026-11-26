@@ -49,10 +49,15 @@ export const limits = {
   assets: {
     // The largest size whose base64 (4 * ceil(n / 3) bytes) stays strictly below the limit.
     maxBytes: 3 * Math.floor((aiImage.maxBase64Bytes - 1) / 4),
+    // A Worker isolate has 128 MB. An inline-base64 AI request holds each image's raw bytes,
+    // its base64 and its share of the encoded body (about 27.5 MB at the size limit), so three
+    // fit. Raising this is safe; lowering it strands instructions already accepted.
+    // https://developers.cloudflare.com/workers/platform/limits/
+    maxPerInstruction: 3,
     maxEdgePx: aiImage.downscaleEdgePx,
   },
 } as const satisfies {
   aiCost: { monthly: MicroUsd; perInstruction: MicroUsd };
   ai: { model: AiModelId };
-  assets: { maxBytes: number; maxEdgePx: number };
+  assets: { maxBytes: number; maxEdgePx: number; maxPerInstruction: number };
 };

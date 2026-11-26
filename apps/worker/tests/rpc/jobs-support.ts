@@ -26,6 +26,11 @@ export const snapshotMigration = new URL(
   "../../migrations/0007_snapshot_format_2.sql",
   import.meta.url,
 );
+export async function applyAttachmentMigrations(db: Awaited<ReturnType<typeof openJobDatabase>>) {
+  for (const name of ["0008_assets.sql", "0009_message_attachments.sql"])
+    await db.apply(await readFile(new URL(`../../migrations/${name}`, import.meta.url), "utf8"));
+}
+
 export async function applyJobMigrations(db: Awaited<ReturnType<typeof openJobDatabase>>) {
   for (const migration of [
     jobMigration,
@@ -35,6 +40,7 @@ export async function applyJobMigrations(db: Awaited<ReturnType<typeof openJobDa
     snapshotMigration,
   ])
     await db.apply(await readFile(migration, "utf8"));
+  await applyAttachmentMigrations(db);
 }
 export const now = "2026-11-15T00:00:00.000Z";
 

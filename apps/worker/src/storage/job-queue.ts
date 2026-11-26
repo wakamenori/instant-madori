@@ -31,11 +31,12 @@ export function releaseWhenLastQueuedJobStops(jobId: string, ownerId: OwnerId): 
   };
 }
 
-export function releaseEmptyQueue(patternId: string, ownerId: OwnerId) {
+export function releaseEmptyQueue(patternId: string, ownerId: OwnerId, messageId: string) {
   return {
     sql: `UPDATE jobs SET holds_queue = 0 WHERE pattern_id = ? AND owner_id = ? AND holds_queue = 1
+    AND EXISTS (SELECT 1 FROM messages m WHERE m.id = ? AND m.pattern_id = jobs.pattern_id AND m.owner_id = jobs.owner_id)
     AND NOT EXISTS (SELECT 1 FROM jobs q WHERE q.pattern_id = jobs.pattern_id AND q.state = 'queued')`,
-    bindings: [patternId, ownerId],
+    bindings: [patternId, ownerId, messageId],
   };
 }
 

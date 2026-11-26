@@ -1,3 +1,4 @@
+import { z } from "zod";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -6,6 +7,8 @@ import { test } from "node:test";
 import {
   acceptInstructionResponseSchema,
   accessAssertionHeader,
+  createAssetResponseSchema,
+  messageListResponseSchema,
   apiErrorSchema,
   createProjectResponseSchema,
   patternStateResponseSchema,
@@ -309,6 +312,108 @@ await test("Instruction acceptance through workerd and local D1", async (t) => {
     assert.equal(settled.runningJob, null);
     assert.deepEqual(settled.queuedJobs, []);
   });
+
+  await t.test(
+    "attachment ownership, order and replay survive reopening the conversation",
+    async () => {
+      async function upload(user: typeof owner) {
+        const response = await fetch(
+          `${worker.origin}/api/assets?requestId=${crypto.randomUUID()}`,
+          {
+            method: "POST",
+            headers: {
+              origin: testAppOrigin,
+              "content-type": "image/png",
+              [accessAssertionHeader]: await signAccessToken(worker.key, user),
+            },
+            body: Buffer.from(
+              "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGAAAAAEAAH2FzhVAAAAAElFTkSuQmCC",
+              "base64",
+            ),
+          },
+        );
+        assert.equal(response.status, 201);
+        return createAssetResponseSchema.parse(await response.json()).asset.id;
+      }
+      const counts = () =>
+        worker.withPausedWorker(async (persisted) => {
+          const { stdout } = await execFileAsync(process.execPath, [
+            fileURLToPath(new URL("./rpc/jobs-http-fixture.ts", import.meta.url)),
+            persisted,
+            "counts",
+          ]);
+          return z
+            .object({ messages: z.int(), jobs: z.int(), requests: z.int(), attachments: z.int() })
+            .parse(JSON.parse(stdout.trim().split("\n").at(-1) ?? ""));
+        });
+      const firstId = await upload(owner);
+      const secondId = await upload(owner);
+      const foreign = await upload(other);
+      const overLimit = [firstId, secondId, await upload(owner), await upload(owner)];
+      const instruction = {
+        requestId: crypto.randomUUID(),
+        body: "参考画像",
+        attachmentIds: [secondId.toUpperCase(), firstId.toUpperCase()],
+      };
+      const accepted = await send(instruction);
+      assert.equal(accepted.status, 202);
+      const receipt = await accepted.text();
+      const { job } = acceptInstructionResponseSchema.parse(JSON.parse(receipt));
+      await settleJobs(worker, owner, pattern.id, [job.jobId]);
+      const before = await counts();
+      assert.equal(before.attachments, 2);
+      const replay = await send(instruction);
+      assert.equal(replay.status, 202);
+      assert.equal(await replay.text(), receipt);
+      assert.deepEqual(await counts(), before);
+      const page = await worker.call(path, { as: owner });
+      const { messages } = messageListResponseSchema.parse(await page.json());
+      assert.deepEqual(messages.find((m) => m.id === job.messageId)?.attachmentIds, [
+        secondId,
+        firstId,
+      ]);
+      await error(
+        await send({ ...instruction, attachmentIds: [firstId, secondId] }),
+        422,
+        "request_id_reused",
+      );
+      const emptyReplay = await send({ ...body, attachmentIds: [] });
+      assert.equal(emptyReplay.status, 202);
+      assert.equal(await emptyReplay.text(), firstText);
+
+      const retryIds = [];
+      for (const [ids, status, code] of [
+        [[foreign], 422, "attachment_unavailable"],
+        [[firstId, foreign], 422, "attachment_unavailable"],
+        [[crypto.randomUUID()], 422, "attachment_unavailable"],
+        [overLimit, 400, "invalid_request"],
+        [[firstId, firstId.toUpperCase()], 400, "invalid_request"],
+      ] as const) {
+        const requestId = crypto.randomUUID();
+        const rejected = await send({ ...instruction, requestId, attachmentIds: [...ids] });
+        assert.equal(rejected.status, status);
+        assert.equal(await rejected.text(), JSON.stringify({ error: code }));
+        assert.deepEqual(await counts(), before);
+        retryIds.push(requestId);
+      }
+      const correctedJobs: string[] = [];
+      for (const requestId of retryIds) {
+        const corrected = await send({ ...instruction, requestId });
+        assert.equal(corrected.status, 202);
+        correctedJobs.push(acceptInstructionResponseSchema.parse(await corrected.json()).job.jobId);
+      }
+      await settleJobs(worker, owner, pattern.id, correctedJobs, undefined, { resumeHolds: true });
+      await error(
+        await worker.call(path, {
+          method: "POST",
+          as: other,
+          body: { ...instruction, requestId: crypto.randomUUID(), attachmentIds: [firstId] },
+        }),
+        404,
+        "not_found",
+      );
+    },
+  );
 
   await t.test("no structured log contains the instruction marker", async () => {
     const response = await send();

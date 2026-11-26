@@ -1,3 +1,4 @@
+import { limits } from "../limits.ts";
 import { verifierSubject } from "../identity.ts";
 import type { JobTestHold, TestHoldPoint } from "./job-test-hold.ts";
 import { z } from "zod";
@@ -22,6 +23,7 @@ import type { Snapshot } from "../storage/snapshots.ts";
 
 export type AcceptInstructionOutcome =
   | { kind: "accepted"; acceptance: "applied" | "replayed"; job: AcceptedJob }
+  | { kind: "attachment_unavailable" }
   | { kind: "invalid_message" }
   | { kind: "not_found" }
   | { kind: "request_id_reused" };
@@ -31,19 +33,38 @@ export async function acceptInstruction(
     store,
     runtime,
     wakePattern,
-  }: StoreDeps<"jobs", "acceptOnce"> & Pick<ServiceDeps, "runtime" | "wakePattern">,
-  input: { ownerId: OwnerId; requestId: string; patternId: string; body: string },
+  }: StoreDeps<"jobs", "acceptOnce"> &
+    StoreDeps<"patterns", "get"> &
+    Pick<ServiceDeps, "runtime" | "wakePattern">,
+  input: {
+    ownerId: OwnerId;
+    requestId: string;
+    patternId: string;
+    body: string;
+    attachmentIds?: string[];
+  },
 ): Promise<AcceptInstructionOutcome> {
-  const { ownerId, requestId, patternId, body } = input;
-  if (!instructionBodySchema.safeParse(body).success) {
+  const { ownerId, requestId, patternId, body, attachmentIds = [] } = input;
+  if (
+    attachmentIds.length > limits.assets.maxPerInstruction ||
+    !instructionBodySchema.safeParse(body).success
+  ) {
     return { kind: "invalid_message" };
   }
-  const key = await requestKey(ownerId, requestId, "instruction.accept", { patternId, body });
+  const key = await requestKey(
+    ownerId,
+    requestId,
+    "instruction.accept",
+    attachmentIds.length
+      ? { patternId, body, attachmentIds: attachmentIds.join(",") }
+      : { patternId, body },
+  );
   const once = await store.jobs.acceptOnce(key, {
     id: runtime.newId(),
     messageId: runtime.newId(),
     patternId,
     body,
+    attachmentIds,
     now: runtime.now(),
   });
   switch (once.kind) {
@@ -52,6 +73,8 @@ export async function acceptInstruction(
       await wakePattern(patternId);
       return { kind: "accepted", acceptance: once.kind, job: once.result };
     case "not_applied":
+      if (attachmentIds.length && (await store.patterns.get({ patternId, ownerId })))
+        return { kind: "attachment_unavailable" };
       return { kind: "not_found" };
     case "request_id_reused":
       return once;

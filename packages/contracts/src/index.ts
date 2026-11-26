@@ -32,6 +32,7 @@ export const apiErrorCodeSchema = z.enum([
   "payload_too_large",
   "unsupported_media_type",
   "invalid_image",
+  "attachment_unavailable",
   "image_dimensions_too_large",
   "version_conflict",
   "request_id_reused",
@@ -169,6 +170,8 @@ const conversationFields = {
   id: idSchema,
   number: z.int().positive(),
   body: z.string(),
+  /** Asset IDs in attach order, [] when none. */
+  attachmentIds: z.array(idSchema),
   createdAt: timestampSchema,
   revision: revisionSchema.nullable(),
 };
@@ -216,9 +219,13 @@ export const instructionBodySchema = z
 export const acceptInstructionRequestSchema = z.strictObject({
   requestId: requestIdSchema,
   body: instructionBodySchema,
+  attachmentIds: z
+    .array(idSchema.transform((id) => id.toLowerCase()))
+    .refine((ids) => new Set(ids).size === ids.length, "attachment IDs must be distinct")
+    .default([]),
 });
 
-export type AcceptInstructionRequest = z.infer<typeof acceptInstructionRequestSchema>;
+export type AcceptInstructionRequest = z.input<typeof acceptInstructionRequestSchema>;
 
 /** Facts fixed at acceptance. Current job state is read from the pattern's state. */
 export const acceptedJobSchema = z.object({
