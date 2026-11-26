@@ -81,3 +81,72 @@ void test("discovery comments use the parent Issue label and share one lookup", 
       { type: "製品の不具合", found_at: "マージの後", found_by: "担当", cause: "不明" },
     ]);
 });
+
+void test("verify statuses across PR commits survive checkpoint replay", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "metrics-status-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const at = new Date().toISOString();
+  const headers = { "x-ratelimit-remaining": "1800", etag: "snapshot" };
+  let replay = false;
+  const request: typeof fetch = (input, options) => {
+    assert.ok(typeof input === "string");
+    if (input.endsWith("/rate_limit"))
+      return Promise.resolve(Response.json({ resources: { core: { remaining: 2000 } } }));
+    if (input.includes("/issues?")) {
+      if (!replay) assert.ok(input.endsWith("since=2026-11-22T00:00:00Z"));
+      return Promise.resolve(
+        Response.json(
+          [
+            { number: 12, updated_at: at, pull_request: {} },
+            { number: 13, updated_at: at },
+          ],
+          { headers },
+        ),
+      );
+    }
+    if (replay) {
+      assert.equal(new Headers(options?.headers).get("if-none-match"), "snapshot");
+      return Promise.resolve(new Response(null, { status: 304, headers }));
+    }
+    if (input.endsWith("/pulls/12/commits?per_page=100"))
+      return Promise.resolve(Response.json([{ sha: "old" }, { sha: "new" }], { headers }));
+    const pass = input.endsWith("/commits/old/statuses?per_page=100");
+    assert.ok(pass || input.endsWith("/commits/new/statuses?per_page=100"));
+    const status = {
+      id: pass ? 20 : 21,
+      context: "verify",
+      state: pass ? "success" : "failure",
+      description: pass ? "attempt 1: PASS" : "attempt 2: FAIL 検査, 差分",
+      created_at: at,
+    };
+    return Promise.resolve(
+      Response.json([status, { ...status, id: 22, context: "check" }], { headers }),
+    );
+  };
+  function load() {
+    const poller = githubPollers(root, () => Promise.resolve("fixture"), request).find(
+      (p) => p.name === "github.commit_status",
+    );
+    assert.ok(poller);
+    return poller;
+  }
+  const poller = load();
+  const signal = new AbortController().signal;
+  const records = await poller.poll(signal);
+  assert.deepEqual(
+    records.map(({ naturalKey, payload: p }) => [
+      naturalKey,
+      p.sha,
+      p.attempt,
+      p.verdict,
+      p.failed_checks,
+    ]),
+    [
+      ["12/20", "old", 1, "PASS", []],
+      ["12/21", "new", 2, "FAIL", ["検査", "差分"]],
+    ],
+  );
+  poller.committed?.();
+  replay = true;
+  assert.deepEqual(await load().poll(signal), records);
+});
