@@ -9,7 +9,7 @@ import { test } from "node:test";
 import type { TestContext } from "node:test";
 import { setTimeout } from "node:timers/promises";
 import { z } from "zod";
-import { start, startTethered, stop } from "./processes.ts";
+import { killGroup, start, startTethered, stop } from "./processes.ts";
 
 const zombieGroup = String.raw`
 import json, os, select, signal, subprocess, sys, time
@@ -131,6 +131,31 @@ await test(
     await waitForState(live, true);
   },
 );
+
+for (const code of ["EPERM", "EINVAL"]) {
+  await test(`killGroup rethrows ${code} for a live group`, async (t) => {
+    const run = start(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+      stdio: "ignore",
+    });
+    t.after(async () => {
+      run.child.kill("SIGKILL");
+      await run.finished;
+    });
+    await once(run.child, "spawn");
+    const group = run.child.pid;
+    assert.ok(group);
+    const error = Object.assign(new Error(`kill ${code}`), { code });
+    t.mock.method(process, "kill", (pid: number, signal: NodeJS.Signals) => {
+      assert.equal(pid, -group);
+      assert.equal(signal, "SIGKILL");
+      throw error;
+    });
+    assert.throws(
+      () => killGroup(group),
+      (actual: unknown) => actual === error,
+    );
+  });
+}
 
 for (const termination of ["exit", "signal"] as const) {
   await test(`stop permits EPERM after the child finishes by ${termination}`, async (t) => {
