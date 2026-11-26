@@ -87,12 +87,11 @@ void test("reporter records load crashes and successful files", async (t) => {
     },
   );
 });
-void test("cargo records same-named library, binary and integration tests separately", async (t) => {
+async function cargoFixture(t: TestContext) {
   const cwd = await temporary(t);
   const dir = join(cwd, "results");
   await mkdir(dir);
   await mkdir(join(cwd, "src"));
-  await mkdir(join(cwd, "tests"));
   await copyFile(
     new URL("../../rust-toolchain.toml", import.meta.url),
     join(cwd, "rust-toolchain.toml"),
@@ -105,13 +104,23 @@ void test("cargo records same-named library, binary and integration tests separa
     join(cwd, "Cargo.lock"),
     'version = 4\n[[package]]\nname = "same-name"\nversion = "0.1.0"\n',
   );
-  await writeFile(join(cwd, "src/lib.rs"), "#[test] fn library() {}");
-  await writeFile(join(cwd, "src/main.rs"), "fn main() {}\n#[test] fn binary() {}");
-  await writeFile(join(cwd, "tests/same_name.rs"), "#[test] fn integration() {}");
   const env = { ...process.env };
   delete env.NODE_TEST_CONTEXT;
   env.CARGO_TARGET_DIR = join(cwd, "target");
-  const run = spawnSync("cargo", cargoTestFlags(dir, cwd), { cwd, env, encoding: "utf8" });
+  return {
+    cwd,
+    dir,
+    runCargo: () => spawnSync("cargo", cargoTestFlags(dir, cwd), { cwd, env, encoding: "utf8" }),
+  };
+}
+
+void test("cargo records same-named library, binary and integration tests separately", async (t) => {
+  const { cwd, dir, runCargo } = await cargoFixture(t);
+  await mkdir(join(cwd, "tests"));
+  await writeFile(join(cwd, "src/lib.rs"), "#[test] fn library() {}");
+  await writeFile(join(cwd, "src/main.rs"), "fn main() {}\n#[test] fn binary() {}");
+  await writeFile(join(cwd, "tests/same_name.rs"), "#[test] fn integration() {}");
+  const run = runCargo();
   assert.equal(run.status, 0, run.stderr + run.stdout);
   assert.deepEqual(Object.fromEntries((await readArtifact(dir)).map((r) => [r.id, r.outcome])), {
     "same-name/src/lib.rs": "pass",
@@ -121,6 +130,25 @@ void test("cargo records same-named library, binary and integration tests separa
     "same-name/tests/same_name.rs": "pass",
     "same-name/tests/same_name.rs::integration": "pass",
   });
+});
+void test("cargo refuses runnable doc-tests and preserves unit test results", async (t) => {
+  const { cwd, dir, runCargo } = await cargoFixture(t);
+  await writeFile(
+    join(cwd, "src/lib.rs"),
+    `/// \`\`\`
+/// same_name::example();
+/// \`\`\`
+pub fn example() {}
+#[test] fn unit() { example(); }
+`,
+  );
+  const run = runCargo();
+  assert.notEqual(run.status, 0);
+  assert.match(run.stderr + run.stdout, /is not recorded/u);
+  assert.deepEqual(await readArtifact(dir), [
+    { suite: "rust", id: "same-name/src/lib.rs::unit", outcome: "pass" },
+    { suite: "rust", id: "same-name/src/lib.rs", outcome: "pass" },
+  ]);
 });
 void test("Rust binary ids use the executable rule's first prerequisite with spaces", () => {
   const exe = "/ws/build dir/test";
