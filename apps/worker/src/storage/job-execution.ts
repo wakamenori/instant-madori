@@ -47,7 +47,7 @@ class JobExecutionRight {
         base_revision_id = (SELECT r.id FROM revisions r
           WHERE r.pattern_id = jobs.pattern_id ORDER BY r.number DESC LIMIT 1), updated_at = ?
         WHERE pattern_id = ? AND state = 'queued'
-          AND id = (SELECT q.id FROM jobs q JOIN messages m
+          AND id = (SELECT q.id FROM jobs q CROSS JOIN messages m
             ON m.id = q.message_id AND m.pattern_id = q.pattern_id
             WHERE q.pattern_id = ? AND q.state = 'queued' ORDER BY m.number LIMIT 1)
           AND NOT EXISTS (SELECT 1 FROM jobs a WHERE a.pattern_id = ?

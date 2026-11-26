@@ -9,11 +9,13 @@ import * as revisions from "./revisions.ts";
 import * as snapshots from "./snapshots.ts";
 import * as jobs from "./jobs.ts";
 import * as queue from "./job-queue.ts";
+import { jobWork } from "./job-work.ts";
 import * as execution from "./job-execution.ts";
 import { upsertAccessUser } from "./users.ts";
 
 export function createStore(db: D1, bucket: R2) {
   return {
+    work: jobWork(bucket),
     aiCost: {
       reserve: (
         right: Parameters<typeof reserveAiAttempt>[1],

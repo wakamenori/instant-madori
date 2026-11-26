@@ -44,6 +44,7 @@ const manifestSchema = z.discriminatedUnion("formatVersion", [
     display: displayFile,
     floorPlans: z
       .array(floorPlan)
+      .min(1)
       .refine(
         (plans) => new Set(plans.map((p) => p.storey)).size === plans.length,
         "duplicate storey",
@@ -121,7 +122,7 @@ export type OpenedSnapshot = {
   house: (HouseFiles<SnapshotFile> & { readHouse(): Promise<StoredHouse> }) | null;
 };
 
-async function sha256(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
+export async function sha256(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", bytes);
   return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
 }
