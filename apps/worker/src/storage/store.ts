@@ -25,6 +25,8 @@ export function createStore(db: D1, bucket: R2) {
       ) => settleAiAttempt(db, job, input),
     },
     assets: {
+      open: (scope: Parameters<typeof assets.openOwnedAsset>[2]) =>
+        assets.openOwnedAsset(db, bucket, scope),
       createOnce: (key: Parameters<typeof assets.createAssetOnce>[2], asset: assets.NewAsset) =>
         assets.createAssetOnce(db, bucket, key, asset),
     },

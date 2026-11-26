@@ -1,6 +1,13 @@
 import { z } from "zod";
-import { assetSchema, type Asset } from "@madori/contracts";
-import type { D1 } from "./d1.ts";
+import {
+  assetMediaTypeSchema,
+  assetSchema,
+  type AssetMediaType,
+  type Asset,
+} from "@madori/contracts";
+import type { OwnerId } from "../owner.ts";
+import { StorageCorruption } from "./rows.ts";
+import { jsonRows, type D1 } from "./d1.ts";
 import type { R2 } from "./r2.ts";
 import {
   createOnceStatements,
@@ -10,6 +17,21 @@ import {
   type Once,
   type RequestKey,
 } from "./requests.ts";
+
+const storedAssetSchema = z.object({
+  objectKey: z.string().min(1),
+  mediaType: assetMediaTypeSchema,
+  sha256: z.string().regex(/^[0-9a-f]{64}$/),
+});
+
+export interface AssetContent {
+  mediaType: AssetMediaType;
+  body: ReadableStream;
+}
+
+function assetObjectKey(ownerId: OwnerId, assetId: string) {
+  return `owners/${ownerId}/assets/${assetId}`;
+}
 
 const createdAssetSchema = z.object({ asset: assetSchema });
 
@@ -32,7 +54,7 @@ export async function createAssetOnce(
   // R2 is outside the D1 batch: answer a recorded request before writing a second object.
   const stored = await findOnce(db, key, createdAssetSchema);
   if (stored) return mapOnce(stored, (result) => result.asset);
-  const objectKey = `owners/${key.ownerId}/assets/${asset.id}`;
+  const objectKey = assetObjectKey(key.ownerId, asset.id);
   await bucket.putNew(objectKey, asset.bytes, asset.mediaType, {
     customMetadata: {},
     sha256: asset.sha256,
@@ -63,4 +85,29 @@ export async function createAssetOnce(
     },
   });
   return mapOnce(await runOnce(db, createdAssetSchema, batch), (result) => result.asset);
+}
+
+export async function openOwnedAsset(
+  db: D1,
+  bucket: R2,
+  { ownerId, assetId }: { ownerId: OwnerId; assetId: string },
+): Promise<AssetContent | null> {
+  const row = await db.first(
+    jsonRows(
+      {
+        sql: `SELECT json_object('objectKey', a.object_key, 'mediaType', a.media_type, 'sha256', a.sha256)
+      AS json FROM assets a WHERE a.id = ? AND a.owner_id = ?`,
+        bindings: [assetId, ownerId],
+      },
+      storedAssetSchema,
+      "asset",
+    ),
+  );
+  if (row === null) return null;
+  const hashed = await bucket.digest(row.objectKey);
+  if (hashed === null) throw new StorageCorruption("asset object");
+  if (hashed.sha256 !== row.sha256) throw new StorageCorruption("asset hash");
+  const body = await bucket.stream(row.objectKey, hashed.etag);
+  if (body === null) throw new StorageCorruption("asset object");
+  return { mediaType: row.mediaType, body };
 }
