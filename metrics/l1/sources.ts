@@ -10,6 +10,7 @@ export const registry = {
   "codex.hook": { ...event, sanitize: codexHookPrivacy },
   "claude.hook": { ...event, sanitize: hookPrivacy },
   "docker.slot": event,
+  "run.span": event,
   otlp: event,
   "github.commit": event,
   "github.commit_status": event,

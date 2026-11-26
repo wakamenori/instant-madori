@@ -11,16 +11,16 @@
     "measure:summary": "node scripts/measure/measure.ts summary",
     "measure:deploy": "node scripts/measure/measure.ts deploy",
     "measure:cold": "node scripts/measure/measure.ts cold",
-    "check": "node scripts/check/check.ts",
+    "check": "node metrics/hook/run-span.ts check -- node scripts/check/check.ts",
     "images:upload": "node scripts/dev/upload-images.ts",
     "docker:prune-images": "node scripts/dev/prune-images.ts",
     "docker:prune-build-cache": "node scripts/dev/prune-build-cache.ts",
     "generate:geometry": "cargo run --locked -q -p madori-geometry-api --bin emit-typescript -- packages/contracts/src/generated && node scripts/generate/generate-geometry.ts",
-    "build": "node scripts/build/build-wasm.ts && pnpm --filter @madori/web build && pnpm --filter @madori/worker build && cargo build --locked -p madori-geometry",
+    "build": "node metrics/hook/run-span.ts build -- sh -c 'node scripts/build/build-wasm.ts && pnpm --filter @madori/web build && pnpm --filter @madori/worker build && cargo build --locked -p madori-geometry \"$@\"' build",
     "dev": "node scripts/build/build-wasm.ts && pnpm --filter @madori/web build && node scripts/dev/dev.ts",
     "upstream:check": "node scripts/upstream/upstream.ts check",
     "upstream:update": "node scripts/upstream/upstream.ts update",
-    "setup": "node scripts/shared/rustup-cargo.ts && mise install && node scripts/dev/prepare-checkout.ts && cargo install wasm-bindgen-cli --version 0.2.129 --locked --root .tools -j 4 && node scripts/build/build-wasm.ts && pnpm --filter @madori/worker types"
+    "setup": "node metrics/hook/run-span.ts setup -- sh -c 'node scripts/shared/rustup-cargo.ts && mise install && node scripts/dev/prepare-checkout.ts && cargo install wasm-bindgen-cli --version 0.2.129 --locked --root .tools -j 4 && node scripts/build/build-wasm.ts && pnpm --filter @madori/worker types \"$@\"' setup"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
