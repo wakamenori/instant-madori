@@ -17,7 +17,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { after, test } from "node:test";
 import { minimumFreeBytes, requireFreeDisk, withDockerSlot } from "../shared/docker-slots.ts";
-import { runChecks, type CheckGates } from "./check.ts";
+import { assertStepSucceeded, runChecks, StepFailed, type CheckGates } from "./check.ts";
 import { nodeTestFlags } from "./test-results.ts";
 
 const ungated: CheckGates = { dockerStage: (stage) => stage(), rustStage: () => {} };
@@ -44,7 +44,7 @@ after(() => {
 void test("import boundaries read TypeScript after ESLint fixes and formatting, before type checks", async () => {
   for (const mode of modes) {
     const commands: Command[] = [];
-    const failure = new Error("step failed");
+    const failure = new StepFailed("TypeScript types: packages/contracts", "1");
     await assert.rejects(
       runChecks(
         mode,
@@ -117,6 +117,137 @@ void test("each mode clears previous results before the first step and records e
   }
 });
 
+function runTestStages(
+  mode: "default" | "--full",
+  steps: string[],
+  failures: Record<string, Error> = {},
+  gates = ungated,
+) {
+  mkdirSync("apps/worker/tests", { recursive: true });
+  writeFileSync("apps/worker/tests/container.e2e.ts", "");
+  writeFileSync("apps/worker/tests/example.test.ts", "");
+  return runChecks(
+    mode,
+    [],
+    (label) => {
+      steps.push(label);
+      const failure = failures[label];
+      return failure ? Promise.reject(failure) : Promise.resolve();
+    },
+    gates,
+    resultsDir,
+    true,
+  );
+}
+
+void test("a TypeScript test failure lets the remaining checks run", async (t) => {
+  const notices = t.mock.method(console, "error", () => {});
+  const passed: string[] = [];
+  await runTestStages("--full", passed);
+  for (const mode of ["default", "--full"] as const) {
+    notices.mock.resetCalls();
+    const steps: string[] = [];
+    await assert.rejects(
+      runTestStages(mode, steps, {
+        "TypeScript tests": new StepFailed("TypeScript tests", "1"),
+      }),
+      { message: "TypeScript tests failed (1)" },
+    );
+    assert.deepEqual(
+      notices.mock.calls.map((call) => call.arguments),
+      [["[check] TypeScript tests failed (1). The remaining steps still run, then check fails."]],
+    );
+    assert(steps.includes("Rust tests"));
+    if (mode === "--full") {
+      assert.deepEqual(
+        steps.slice(steps.indexOf("TypeScript tests") + 1),
+        passed.slice(passed.indexOf("TypeScript tests") + 1),
+      );
+    }
+  }
+});
+
+void test("full checks report all failed test stages in order after pruning and audits", async (t) => {
+  t.mock.method(console, "error", () => {});
+  const steps: string[] = [];
+  await assert.rejects(
+    runTestStages("--full", steps, {
+      "TypeScript tests": new StepFailed("TypeScript tests", "1"),
+      "Rust tests": new StepFailed("Rust tests", "101"),
+      "Container integration": new StepFailed("Container integration", "1"),
+    }),
+    {
+      message:
+        "TypeScript tests failed (1); Rust tests failed (101); Container integration failed (1)",
+    },
+  );
+  assert.deepEqual(steps.slice(steps.indexOf("Container integration") + 1), [
+    "Prune geometry service images",
+    "Prune Docker build cache",
+    "JavaScript dependency licenses",
+    "JavaScript vulnerability audit",
+    "Rust dependency audit",
+  ]);
+});
+
+void test("a build failure stops full checks after a failed test stage", async (t) => {
+  t.mock.method(console, "error", () => {});
+  const steps: string[] = [];
+  const failure = new StepFailed("Build web", "1");
+  await assert.rejects(
+    runTestStages("--full", steps, {
+      "TypeScript tests": new StepFailed("TypeScript tests", "1"),
+      "Build web": failure,
+    }),
+    (error) => error === failure,
+  );
+  assert(!steps.includes("Container integration"));
+});
+
+void test("a fatal test-stage error stops checks before Rust tests run", async (t) => {
+  t.mock.method(console, "error", () => {});
+  const spawnError = new Error("could not start tests");
+  const diskError = new Error("low disk");
+  for (const [tsFailure, gates, expected] of [
+    [spawnError, ungated, spawnError],
+    [
+      new StepFailed("TypeScript tests", "1"),
+      {
+        ...ungated,
+        rustStage(label: string) {
+          if (label === "Rust tests") throw diskError;
+        },
+      },
+      diskError,
+    ],
+  ] as const) {
+    const steps: string[] = [];
+    await assert.rejects(
+      runTestStages("default", steps, { "TypeScript tests": tsFailure }, gates),
+      (error) => error === expected,
+    );
+    assert(!steps.includes("Rust tests"));
+  }
+});
+
+void test("step outcomes distinguish unsuccessful exits from spawn errors", () => {
+  assertStepSucceeded("stage", { kind: "exit", code: 0, signal: null });
+  for (const [code, signal, message] of [
+    [1, null, "stage failed (1)"],
+    [null, "SIGTERM", "stage failed (SIGTERM)"],
+  ] as const) {
+    assert.throws(
+      () => assertStepSucceeded("stage", { kind: "exit", code, signal }),
+      (error) => error instanceof StepFailed && error.message === message,
+    );
+  }
+  const failure = new Error("spawn failed");
+  assert.throws(
+    () => assertStepSucceeded("stage", { kind: "error", error: failure }),
+    (error) => error === failure,
+  );
+});
+
 void test("full checks hold one Docker slot across container integration and pruning", async () => {
   mkdirSync("apps/worker/tests", { recursive: true });
   writeFileSync("apps/worker/tests/container.e2e.ts", "");
@@ -168,7 +299,7 @@ void test("full checks fail when cargo deny finds a stale advisory ignore or an 
   writeFileSync("apps/worker/tests/container.e2e.ts", "");
   writeFileSync("apps/worker/tests/example.test.ts", "");
   const audits: Command[] = [];
-  const failure = new Error("cargo deny failed");
+  const failure = new StepFailed("Rust dependency audit", "1");
   await assert.rejects(
     runChecks(
       "--full",
@@ -222,10 +353,12 @@ echo '{"packages":[],"workspace_members":[]}'
   writeFileSync(
     join(directory, "pnpm"),
     `#!${process.execPath}
-import { writeFileSync, renameSync } from "node:fs";
+import { existsSync, writeFileSync, renameSync } from "node:fs";
 process.on("SIGTERM", () => {
   writeFileSync(process.env.STEP_PID + ".stopping", "");
-  setTimeout(() => process.exit(0), 100);
+  setInterval(() => {
+    if (existsSync(process.env.STEP_PID + ".release")) process.exit(1);
+  }, 10);
 });
 writeFileSync(process.env.STEP_PID + ".tmp", String(process.pid));
 renameSync(process.env.STEP_PID + ".tmp", process.env.STEP_PID);
@@ -270,6 +403,7 @@ setTimeout(() => process.exit(1), 10000);
       await sleep(1);
     }
     check.kill("SIGINT");
+    writeFileSync(pidFile + ".release", "");
     assert.deepEqual(await closed, [1, null]);
     assert.match(await stderr, /\[check\] Check interrupted/);
     assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
