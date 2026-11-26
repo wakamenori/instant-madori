@@ -81,6 +81,9 @@ await test("Job runs restore D1 execution rights across retries and lost respons
       geometry: (key) => {
         assert.deepEqual(key, { kind: "pattern", patternId });
         return {
+          applyOperations() {
+            throw new Error("Unexpected applyOperations");
+          },
           sampleDisplay(call) {
             assert.equal(call.traceId, accepted.jobId);
             calls.push(call.traceId);
@@ -147,6 +150,9 @@ await test("Job runs restore D1 execution rights across retries and lost respons
       {
         ...f.deps,
         geometry: () => ({
+          applyOperations() {
+            throw new Error("Unexpected applyOperations");
+          },
           async sampleDisplay() {
             await stop(f.job.jobId);
             return ok;

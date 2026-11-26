@@ -7,6 +7,9 @@ function renderWithRejection(error: unknown) {
   const geometry = geometryClient((name) => {
     assert.equal(name, "pattern:pattern-1");
     return {
+      applyOperations() {
+        throw new Error("Unexpected applyOperations");
+      },
       // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- RPC can reject with foreign values.
       sampleDisplay: () => Promise.reject(error),
     };

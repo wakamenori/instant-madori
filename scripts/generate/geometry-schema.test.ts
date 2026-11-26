@@ -46,7 +46,7 @@ void test("renderer rejects unsupported schemas instead of emitting any", () => 
   );
 });
 
-void test("Rust serialized optional responses are accepted by generated zod", async () => {
+void test("Rust serialized optional responses are accepted by generated zod", async (t) => {
   const { execFileSync } = await import("node:child_process");
   const { runInNewContext } = await import("node:vm");
   const { jsonSchemaToZod } = await import("json-schema-to-zod");
@@ -65,11 +65,11 @@ void test("Rust serialized optional responses are accepted by generated zod", as
     ],
     { cwd: repositoryRoot, encoding: "utf8" },
   );
-  const line = output.split("\n").find((line) => line.startsWith("WIRE_FIXTURE="));
+  const line = /WIRE_FIXTURE=(.+)/.exec(output)?.[1];
   assert(line);
   const fixture = z
     .object({ schema: z.record(z.string(), z.unknown()), value: z.unknown() })
-    .parse(JSON.parse(line.slice("WIRE_FIXTURE=".length)));
+    .parse(JSON.parse(line));
   const validator: unknown = runInNewContext(jsonSchemaToZod(fixture.schema), { z });
   assert(validator instanceof z.ZodType);
   assert.deepEqual(validator.parse(fixture.value), {});
@@ -82,4 +82,21 @@ void test("Rust serialized optional responses are accepted by generated zod", as
     }),
     /z.input/,
   );
+  await t.test("Worker decodes a Rust bundle with binary part bytes", async () => {
+    const { acceptBundle } = await import("../../apps/worker/src/geometry/geometry-protocol.ts");
+    const { applyOperationsOutcomeSchema, geometryInternal } =
+      await import("../../packages/contracts/src/generated/geometry-internal.ts");
+    const match = /BUNDLE_FIXTURE=([a-f0-9]+)$/m.exec(output);
+    assert(match?.[1]);
+    const frame = Uint8Array.from(Buffer.from(match[1], "hex"));
+    const outcome = acceptBundle({
+      schema: applyOperationsOutcomeSchema,
+      maxBytes: geometryInternal.routes.applyOperations.response.max_bytes,
+    }).decode(frame.buffer);
+    assert.equal(outcome.kind, "applied");
+    if (outcome.kind === "applied")
+      assert.deepEqual(outcome.parts, [
+        { artifact: { kind: "display" }, byte_length: 2, bytes: Uint8Array.of(0, 255) },
+      ]);
+  });
 });

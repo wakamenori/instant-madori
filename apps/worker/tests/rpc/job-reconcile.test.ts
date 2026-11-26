@@ -67,6 +67,9 @@ await test("Pattern reconciliation on D1", async (t) => {
       testHold: null,
       wakePattern: async () => {},
       geometry: () => ({
+        applyOperations() {
+          throw new Error("Unexpected applyOperations");
+        },
         sampleDisplay: () =>
           Promise.resolve({
             kind: "ok" as const,

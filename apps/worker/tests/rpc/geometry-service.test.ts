@@ -14,6 +14,9 @@ void test("sample service selects the pattern key and forwards the call", async 
   } satisfies GeometryResult<DisplayArtifact>;
   const keys: GeometryInstance[] = [];
   const fake: GeometryApi = {
+    applyOperations() {
+      throw new Error("Unexpected applyOperations");
+    },
     sampleDisplay: (actual) => {
       assert.deepEqual(actual, call);
       return Promise.resolve(result);
