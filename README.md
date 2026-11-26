@@ -49,7 +49,7 @@ Dockerを使う重い作業は、マシン全体で共有する「Dockerの枠�
 
 枠はmacOSでだけ働きます。Linuxでは枠を取らずに実行し、そのことを `[docker-slot]` の行に一行表示します。枠の実体は、`~/.local/state/instant-madori/docker-slots/` のファイルにかけるflockです。枠は取ったプロセスだけが持ち、プロセスが終わると、`kill -9` で止めた場合もOSが外します。子プロセスは枠を持ちません。そのため、`kill -9` で止めると、そのプロセスが起動した `wrangler dev` やDockerのビルドが動き続けていても枠は空きます。止めるときは、Ctrl-Cか `kill`（SIGTERM）を使ってください。
 
-`node scripts/shared/docker-slots.ts status` で各枠を持つプロセスを表示します。`pnpm check --full` と `pnpm dev` の外でDockerの重い作業をするときは、`node scripts/shared/docker-slots.ts run -- <コマンド>` で枠を取ってから実行してください。実Containerの試験を直接動かす場合や、キャッシュなしでイメージをビルドする場合が当たります。`run` の中で `pnpm check --full` や `pnpm dev` を起動すると、二つ目の枠を待たずに失敗します。`pnpm dev` は動いている間ずっと枠を一つ持つので、使い終わったら止めてください。
+`node scripts/shared/docker-slots.ts status` で各枠を持つプロセスを表示します。`pnpm check --full` と `pnpm dev` の外でDockerの重い作業をするときは、`node scripts/shared/docker-slots.ts run -- <コマンド>` で枠を取ってから実行してください。実Containerの試験を直接動かす場合や、形状サービスのイメージをキャッシュなしでビルドする場合が当たります。キャッシュなしのビルドは、共有のcache mountを空にしないよう、後に書く一行のコマンドで行ってください。`run` の中で `pnpm check --full` や `pnpm dev` を起動すると、二つ目の枠を待たずに失敗します。`pnpm dev` は動いている間ずっと枠を一つ持つので、使い終わったら止めてください。
 
 macOSでは、Rustのビルドの前と、Dockerの枠を取る前に、ホームディレクトリのあるディスクの空きを確かめます。Rustのビルドは、`pnpm check` でcargoを使う各段階と、`--full` のWasmのビルド、Rustの段階を省かないときの `TypeScript tests`（中で `cargo test` を実行します）です。Dockerの枠は、`--full` の実Containerの段階と、Containerを有効にした `pnpm dev`、`docker-slots run` が取ります。空きが12 GiBを切っていれば、その段階を始めず、空きの量を `[docker-slot] ... stopped ...` の行に示して終了コード1で止まります。枠を待っている間に空きが12 GiBを切った場合も、待つのをやめて止まります。何も消しません。枠と違って待たないのは、待っても空きが戻らないためです。worktreeの `target/` は消すまで残り、ビルドキャッシュは `--full` が毎回上限まで回収しています。
 
@@ -78,6 +78,16 @@ Cargoは古い成果物を `target/` から消しません。依存、機能、�
 形状サービスのイメージは、どのworktreeとself-hosted runnerから作っても、Cargoの `target/` を一つのcache mount（id `instant-madori-geometry-build-v2`）で共有します。Cargoはpath依存のクレートの新しさをソースの更新時刻で判断しますが、COPYはチェックアウトごとの更新時刻を持ち込みます。そのため、cache mountにはソースの写しを `target/` と並べて置き、ビルドのたびに、内容が違う項目だけを写しへ書き、余分な項目を消します。Cargoはシンボリックリンクについて、コンパイルしたときのリンクの先のファイルの更新時刻を見るので、写しにはリンクを置かず、リンクの先の内容を通常のファイルとディレクトリとして写します。参照先の無いリンクは写しません。Cargoは写しをビルドし、内容が変わったクレートとそれに依存するクレートだけを作り直します。ビルドのログの `Source copy: removed <数>, wrote <数> entries` の行が、消した項目と書いた項目の数を示し、書いた項目が20個以下なら続けてそのパスを示します。内容が違うworktreeが交互にビルドすると、違うクレートとそれに依存するクレートをそのたびに作り直します。このcache mountは一度に一つのビルドだけが使い、同時に始まったビルドは、先のビルドのCargoが終わるまで表示なしで待ちます。
 
 cache mountのidを変えると、新しいcache mountは空から始まり、最初のビルドはすべての依存をコンパイルします。手元の計測（2026-11-22、runnerの検査と重なった状態）では795秒と1265秒かかり、実Containerの試験の起動待ちの期限（800秒）を超えることがあります。idを変えるPRでは、`pnpm check --full` の前に、`node scripts/shared/docker-slots.ts run -- docker build --platform linux/amd64 --output type=cacheonly -f apps/geometry/Dockerfile .` で一度ビルドしてcacheを温めてください。
+
+`--no-cache` や `--no-cache-filter build` を付けたビルドは、cache mountにidがあっても、RUNに空のcache mountを渡し、それまでの記録を消します（2026-11-27に、記録のidが置き換わることを確かめました）。Dockerfileの側では防げないので、形状サービスのイメージをこのオプションだけでビルドすると、共有のtarget・registry・gitのcache mountが空になり、ほかのworktreeとrunnerの次のビルドが冷えた状態から始まります。キャッシュなしのビルドが要るとき（層の再現や、冷えたビルドの時間の計測）は、次の一行を実行してください。
+
+```sh
+node scripts/shared/docker-slots.ts run -- docker build --no-cache --build-arg BUILDKIT_CACHE_MOUNT_NS=madori-nocache --platform linux/amd64 --output type=cacheonly -f apps/geometry/Dockerfile . ; docker buildx prune --force --filter 'description~=madori-nocache/'
+```
+
+ビルド引数 `BUILDKIT_CACHE_MOUNT_NS` は、各cache mountのキーの前に `madori-nocache/` を付けます。そのため、このビルドは依存のダウンロードから空で始まり、共有のcache mountには触れません。後半は、ビルドの成否にかかわらず、この名前空間のcache mountの記録だけを消します。使用中の記録は消さないので、ほかの人のキャッシュなしのビルドが動いていても壊しません。記録を残すと、cache mountの合計が8 GiBを超えたときに、`pnpm check --full` の回収が共有のcache mountを先に消すことがあります。回収は最終使用時刻の古い記録から消し、共有のcache mountの時刻は、RUNがキャッシュに当たらずに実行されたときだけ進むためです。ビルドを止めたときや、シェルごと止まったときに、最後に `Total:` の行が出ていなければ、後半だけを実行してください。
+
+層の記録（aptのRUN、COPY、CargoのRUNなど）は名前空間に入らないので、後半では消えずに残ります。回収の6 GiBの枠では新しい記録として扱われ、ほかのworktreeのビルドの段の記録を先に押し出すことがあります。押し出されたworktreeの次のビルドは、温まったcache mountで、aptのRUNとCargoのRUNを実行し直します。冷えた状態からは始まりません。
 
 `pnpm check --full` は、実Containerの接続検査の直後に、同じDockerの枠を持ったまま、接続先のローカルDocker Engineの未使用ビルドキャッシュを回収します。Cargoのregistry・git・targetを含む `exec.cachemount` は合計8 GiBまで残します。それとは別に、`regular` と `frontend` は合計6 GiBまで残します。形状サービスの一組の層は、Rustの基底層・aptのRUN・COPY・CargoのRUN・実行用の段・frontendを合わせて約3.5 GBです（2026-11-22の計測）。6 GiBは、この一組に更新1回分の余裕を足した大きさとして、2026-11-22に運用者が決めた上限です。Rustの基底イメージを更新すると、各worktreeが新しいmainに追いつくまで新旧の二組（約6.9 GB）が並び、6 GiBには収まりません。そのときは、古いほうの組のビルドの段の鎖が、CargoのRUNとソースのCOPYからaptのRUNまで消えます（約1.0 GB）。古い組の基底層と、最後の段の `COPY --from=build` は残ります。最後の段の記録は、ビルドのたびに最も新しい時刻になるためです。古いmainのworktreeの次のビルドは、aptのRUNとCargoのRUNを実行し直します。この結果は、`scripts/dev/prune-build-cache.test.ts` の試験「after a Rust base bump, 6 GiB removes the older set's build chain through its apt RUN」が、2026-11-22の計測値で確かめています。使用中の記録も枠に数えるので、並行するビルドがあると、さらに多く消えます。時間の範囲ではビルドが集中した際の容量を制限できないため、容量で制限します。
 
