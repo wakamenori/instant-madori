@@ -119,16 +119,10 @@ impl BodyKind {
     }
 }
 pub mod routes {
-    pub const APPLY_OPERATIONS: super::JsonRoute<
-        super::apply::ApplyOperationsRequest,
-        super::apply::ApplyOperationsOutcome,
-    > = super::JsonRoute::new(
-        "applyOperations",
-        "/v1/house/operations",
-        "applyOperationsRequestSchema",
-        "applyOperationsOutcomeSchema",
-    );
-    use super::{BodyKind, DISPLAY_CONTENT_TYPE, JsonBody, MAX_DISPLAY_BYTES, Method, Route};
+    use super::apply::{ApplyOperationsOutcome, ApplyOperationsRequest};
+    use super::{
+        BodyKind, DISPLAY_CONTENT_TYPE, JsonBody, JsonRoute, MAX_DISPLAY_BYTES, Method, Route,
+    };
     pub const HEALTH: Route = Route {
         name: "health",
         method: Method::Get,
@@ -151,6 +145,13 @@ pub mod routes {
             max_bytes: MAX_DISPLAY_BYTES,
         },
     };
+    pub const APPLY_OPERATIONS: JsonRoute<ApplyOperationsRequest, ApplyOperationsOutcome> =
+        JsonRoute::new(
+            "applyOperations",
+            "/v1/house/operations",
+            "applyOperationsRequestSchema",
+            "applyOperationsOutcomeSchema",
+        );
     pub const ALL: &[Route] = &[HEALTH, SAMPLE_DISPLAY, APPLY_OPERATIONS.route];
 }
 /// Transport and protocol failures only. Expected route outcomes are 200 bodies with a
