@@ -56,7 +56,7 @@ interface Round {
   readonly reply: Reply;
 }
 
-/** Claude Opus 5.5 also returns 400 when system, tools or earlier messages change mid-conversation. */
+/** Claude Opus 5.5 may return 400 when system, tools or earlier messages change mid-conversation. */
 export interface Conversation {
   readonly system: string;
   readonly tools: readonly ToolSpec[];
@@ -94,6 +94,7 @@ interface AiFailure {
 export type AiResult = AiResponse | AiFailure;
 
 export interface Ai {
+  readonly model: string;
   roundTrip(request: AiRequest): Promise<AiResult>;
 }
 

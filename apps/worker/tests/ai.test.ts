@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { turnCodec } from "../src/ai/turns.ts";
 import { receivedTurn } from "../src/ai/round-trip.ts";
 import type { AiRequest, AiResponse, AiResult, Conversation, Reply } from "../src/ai/round-trip.ts";
 import { scriptedAi } from "../src/ai/scripted.ts";
@@ -199,5 +200,38 @@ await test("AI selection", async (t) => {
       const result = await selectAi({ ENVIRONMENT }).roundTrip(request(opening));
       assert.equal(result.kind === "failed" && result.reason, "no_provider");
     });
+  }
+});
+
+await test("stored turns preserve thinking, tool input bytes, origin and usage", async () => {
+  const response = ok(await scriptedAi(script).roundTrip(request(opening)));
+  const bytes = turnCodec.encode(response);
+  assert.deepEqual(turnCodec.decode(bytes), response);
+  assert.throws(() => turnCodec.decode(bytes.replace('"format":1', '"format":2')));
+  assert.throws(() =>
+    turnCodec.decode(bytes.replace('"kind":"thinking"', '"extra":1,"kind":"thinking"')),
+  );
+});
+
+await test("script rejects empty opening, altered origin or input, and empty nudge", async () => {
+  const ai = scriptedAi(script);
+  const first = ok(await ai.roundTrip(request(opening)));
+  const secondInput = after(opening, first, roomAdded);
+  const second = ok(await ai.roundTrip(request(secondInput)));
+  const alteredInput = first.assistant.parts.map((part) =>
+    part.kind === "tool_call" ? { ...part, inputJson: "{}" } : part,
+  );
+  for (const conversation of [
+    { ...opening, opening: [] },
+    after(opening, { ...first, assistant: { ...first.assistant, origin: "other" } }, roomAdded),
+    after(
+      opening,
+      { ...first, assistant: receivedTurn("scripted", alteredInput, first.assistant.usage) },
+      roomAdded,
+    ),
+    after(secondInput, second, { kind: "message", parts: [] }),
+  ]) {
+    const response = await ai.roundTrip(request(conversation));
+    assert.equal(response.kind === "failed" && response.reason, "rejected");
   }
 });
