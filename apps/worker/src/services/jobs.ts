@@ -692,7 +692,6 @@ export async function runJob(
         )
       : settled;
   const wake = await steps.do("wake pattern", storageStep, async () => {
-    await current(deps, job);
     await deps.wakePattern(job.patternId);
     return {
       kind: "woken" as const,
