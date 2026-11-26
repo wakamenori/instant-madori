@@ -106,9 +106,16 @@ void test(
         const summary = viewer.describe_display(bytes);
         assert.equal(summary.format_version, 1);
         assert(summary.bodies > 0);
-        assert(
-          summary.elements.length > 0 && summary.elements.every((id) => !id.startsWith("sample:")),
-        );
+        const elements = new Set(summary.elements);
+        assert(elements.size > 0);
+        for (const element of elements) {
+          const picked = await worker.call(`/api/revisions/${revision.id}/pick`, {
+            method: "POST",
+            as: user,
+            body: { element },
+          });
+          assert.equal(picked.status, 200, `display element ${element} is in the revision's house`);
+        }
         assert(response.headers.get("x-floor-plan-storeys"));
         assert.equal(revision.name, "台本の案");
         const lines = worker
@@ -403,30 +410,45 @@ void test(
         return response.json();
       }
       const base = { job_id: "probe", operation_id: "place", generation: 1 };
-      await t.test("a room placement returns display bodies with housing IDs", async () => {
-        const result = await probe(
+      const placement = {
+        ...base,
+        snapshot: { kind: "empty" },
+        operations: [
           {
-            ...base,
-            snapshot: { kind: "empty" },
-            operations: [
-              {
-                kind: "place_rooms",
-                layout: {
-                  walls: { exterior_thickness: 200, interior_thickness: 100, height: 2800 },
-                  rooms: [
-                    {
-                      name: "room",
-                      usage: "living",
-                      min: { x: 0, y: 0 },
-                      max: { x: 4000, y: 3000 },
-                    },
-                  ],
-                },
-              },
-            ],
+            kind: "place_rooms",
+            layout: {
+              walls: { exterior_thickness: 200, interior_thickness: 100, height: 2800 },
+              rooms: [
+                { name: "room", usage: "living", min: { x: 0, y: 0 }, max: { x: 4000, y: 3000 } },
+              ],
+            },
           },
-          crypto.randomUUID(),
+        ],
+      };
+      await t.test("element IDs follow the batch's operation ID", async () => {
+        const trace = crypto.randomUUID();
+        async function roomIds(operationId: string) {
+          const result = await probe({ ...placement, operation_id: operationId }, trace);
+          return z
+            .object({
+              value: z.object({
+                operations: z.array(z.object({ rooms: z.array(z.object({ id: z.string() })) })),
+              }),
+            })
+            .parse(result)
+            .value.operations.flatMap((o) => o.rooms.map((r) => r.id));
+        }
+        const first = await roomIds("place");
+        assert(first.length > 0);
+        assert.deepEqual(await roomIds("place"), first, "the same operation ID gives the same IDs");
+        const other = await roomIds("place-again");
+        assert(
+          other.length === first.length && other.every((id) => !first.includes(id)),
+          "another operation ID gives other IDs",
         );
+      });
+      await t.test("a room placement returns display bodies with housing IDs", async () => {
+        const result = await probe(placement, crypto.randomUUID());
         const { value } = z
           .object({
             kind: z.literal("ok"),
