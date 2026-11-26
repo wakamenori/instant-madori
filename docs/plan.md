@@ -628,6 +628,12 @@ request IDは利用者ごとの範囲で一意とし、固定するのは成功�
 
 案の一覧は50件ずつ返し、カーソルには最後の番号を符号化する。作成時刻ではなく履歴の番号で並べるため、作成時刻が同じ場合や実行元の時計が前後した場合も、現在の案と一覧の先頭は一致する。表示データの応答には、閲覧対象の案IDを `x-revision-id` ヘッダーで付ける。
 
+`GET /api/revisions/:id/view` は、manifestのどの版の案にも3Dの表示データのバイト列を返し、その案の平面図がある階のIDを、manifestの順にコンマで区切って `x-floor-plan-storeys` ヘッダーに付ける。階のIDは住宅要素IDなので、コンマも空白も含まない。manifestの版1の案は平面図を持たないので、このヘッダーを空の値で付けて2Dがないことを示す。画面は、このヘッダーがない応答を2Dがないとは読まず、不正な応答とする。階の一覧を3Dの応答に付けるので、2Dの有無を知るための要求とR2の読取りを足さない。
+
+`GET /api/revisions/:id/floor-plan` は、queryの `storey` で指定した階の平面図を `image/svg+xml` で返す。階のIDはUUIDではないので、パスではなくqueryで受け取る。SVGには利用者とAIが決めた部屋名が入るので、`content-security-policy: default-src 'none'; frame-ancestors 'self'` と `x-content-type-options: nosniff` を付け、スクリプトを実行させない。同じOriginの画面は、SVGを文書として埋め込んでも、要素の属性から住宅要素IDを読める（4.8）。`sandbox` や `frame-ancestors 'none'` を付けると、同じOriginの画面も埋め込んだSVGを読めず、画面はSVGの本文を自分の文書へ挿入するしかなくなる。挿入した本文には、この応答のCSPが効かない。storeyが無い・空・重複している場合、ほかのparameterがある場合、storeyが住宅要素IDの形でない場合は400 `invalid_request` とする。別の所有者の案、存在しない案、版1の案、その案にない階は404 `not_found` とする。版1はD1のsnapshotの行で判定してR2を読まない。
+
+2Dと3Dは、どちらも閲覧対象の案IDを `x-revision-id` で返す。案のmanifestはR2のファイルをハッシュで固定し、書き換えないので、同じ案IDの応答は同じ時点の表示データである。画面は、どちらの応答でも `x-revision-id` が求めた案IDと一致することを確かめる。
+
 `GET /api/patterns/:id/messages` は省略可能な `cursor` だけを受け付け、`{ messages, nextCursor }` を返す。各行は `{ id, number, kind, body, createdAt, jobId, revision }` で、質問だけに `choices` が付く。jobIdは入力を受け付けたジョブか、その行を書いたジョブのIDで、ジョブがなければnullとする。revisionはそのジョブが確定した案（案の一覧と同じ形）で、なければnullとする。1ページは最大50件。続きがあれば最後の行の番号をJSONにしてbase64urlで符号化したカーソルを返し、なければnullを返す。開き直した画面は、カーソルなしで最新のページを読み、nextCursorで古い会話へさかのぼる。新しい行は既存の最大より大きい番号を取るので、最新のページにだけ現れ、手元のカーソルで取得する古い行は変わらない。所有者から見えるパターンの存在確認とページの取得は同じD1 batchで行う。番号の索引でカーソルより古い行から読み始め、ジョブと案は索引で結び付けるため、深いページでも読取り量はページの件数で決まる。
 
 `POST /api/patterns/:id/messages` はJSONの `{ requestId, body }` を受け取る。bodyはUnicodeとして正しく、空白だけではなく、UTF-8で16,384バイト以下とする。本文の空白やUnicodeを正規化しない。JSON全体の上限はこのルートだけ128 KiBとし、ほかのJSON要求の既定は16 KiBとする。
@@ -654,23 +660,23 @@ queueHoldは、待機列が保留中なら `{ job: { jobId, messageId, number, s
 
 ジョブの実行のログは、ジョブIDをtrace IDとして型付きのキーで記録する。パターンDOはアラームごとに `pattern.advanced`（結果、ジョブID、世代、インスタンスを作ったか）を書く。保留中は、結果 `queue_held` と保留の原因 `heldBy` を書く。Workflowは段階の試行ごとに `job.step`（段階名、試行の番号、結果）を、終わりに `job.finished` を書く。`job.finished` の結果はcommitted・cancelled・failed・not_runningで、committedとcancelledはinfo、それ以外はerrorで書く。停止の要求のログには、request ID・job ID・pattern IDと、記録が初回か再送かを表す `stop: applied | replayed`、`outcome: stopped | already_finished`、停止後のジョブの状態 `jobState` を型付きのキーで記録する。待機列の要求のログには、request ID・pattern ID・`heldBy` と、記録が初回か再送かを表す `queue: applied | replayed`、`outcome: resumed | cancelled` を型付きのキーで記録する。形状処理の呼出しにも同じtrace IDを渡すので、接続用DOの `container.started`・`container.ready` も同じIDでたどれる。受付のログとはジョブIDでつながる。
 
-| API                                         | 役割                                                                      |
-| ------------------------------------------- | ------------------------------------------------------------------------- |
-| GET /api/me                                 | 内部ユーザーと利用可能な設定                                              |
-| GET・POST /api/projects                     | 案件一覧・作成                                                            |
-| GET・PATCH /api/projects/:id                | 案件の読取り（名前と版）と、案件名などの管理情報の変更                    |
-| GET・POST /api/projects/:id/patterns        | パターン一覧・作成                                                        |
-| PATCH /api/patterns/:id                     | パターン名などの管理情報                                                  |
-| GET /api/patterns/:id/state                 | 現在の案、会話・履歴の位置、ジョブ、待機・保留状態                        |
-| GET /api/patterns/:id/messages・revisions   | 会話と履歴のページ取得                                                    |
-| POST /api/patterns/:id/messages             | 指示・質問への回答を受け付ける                                            |
-| POST /api/patterns/:id/restore・clone       | 確定案からの復帰・複製                                                    |
-| POST /api/jobs/:id/stop                     | 待機中・実行中の指示の停止                                                |
-| POST /api/patterns/:id/queue/resume・cancel | 保留指示の再開・取り消し                                                  |
-| POST /api/assets                            | 添付画像の登録・検査                                                      |
-| GET /api/revisions/:id/view                 | 2D・3D表示データと取得先。manifestの版1では3Dの表示データのバイト列を返す |
-| POST /api/revisions/:id/pick・sunlight      | 対象選択の確定と日差しの計算                                              |
-| GET /api/patterns/:id/events                | 途中経過と状態変更をSSEで配信                                             |
+| API                                         | 役割                                                      |
+| ------------------------------------------- | --------------------------------------------------------- |
+| GET /api/me                                 | 内部ユーザーと利用可能な設定                              |
+| GET・POST /api/projects                     | 案件一覧・作成                                            |
+| GET・PATCH /api/projects/:id                | 案件の読取り（名前と版）と、案件名などの管理情報の変更    |
+| GET・POST /api/projects/:id/patterns        | パターン一覧・作成                                        |
+| PATCH /api/patterns/:id                     | パターン名などの管理情報                                  |
+| GET /api/patterns/:id/state                 | 現在の案、会話・履歴の位置、ジョブ、待機・保留状態        |
+| GET /api/patterns/:id/messages・revisions   | 会話と履歴のページ取得                                    |
+| POST /api/patterns/:id/messages             | 指示・質問への回答を受け付ける                            |
+| POST /api/patterns/:id/restore・clone       | 確定案からの復帰・複製                                    |
+| POST /api/jobs/:id/stop                     | 待機中・実行中の指示の停止                                |
+| POST /api/patterns/:id/queue/resume・cancel | 保留指示の再開・取り消し                                  |
+| POST /api/assets                            | 添付画像の登録・検査                                      |
+| GET /api/revisions/:id/view・floor-plan     | 3D表示データと平面図のある階の一覧、階ごとの平面図（SVG） |
+| POST /api/revisions/:id/pick・sunlight      | 対象選択の確定と日差しの計算                              |
+| GET /api/patterns/:id/events                | 途中経過と状態変更をSSEで配信                             |
 
 SSEのイベントにはパターン、job ID、案IDまたは作業版、増加するイベント番号を付ける。画像・メッシュの本体は含めず、取得先を通知する。操作中にパターンや条件を変えた場合、遅れて届いた別の版の結果を表示しない。
 
