@@ -13,6 +13,7 @@ import { jobRoutes } from "./jobs.ts";
 import { meRoutes } from "./me.ts";
 import { messageRoutes } from "./messages.ts";
 import { patternRoutes } from "./patterns.ts";
+import { pickRoute } from "./pick.ts";
 import { projectRoutes } from "./projects.ts";
 import { matchRoute } from "./router.ts";
 import { revisionRoutes } from "./revisions.ts";
@@ -26,6 +27,7 @@ const routes = [
   ...projectRoutes,
   ...patternRoutes,
   ...revisionRoutes,
+  pickRoute,
 ];
 
 /** A Cloudflare Ray ID: 16 hex digits and a data-center code, e.g. `230b030023ae2822-SJC`. */
@@ -33,7 +35,7 @@ const rayIdPattern = /^[0-9a-f]{16}-[A-Z]{3}$/;
 
 /**
  * Handles every `/api/*` request. Order of checks: route → configuration → Access JWT →
- * Origin (mutations) → internal user → handler. Every response is uncacheable and carries
+ * Origin (non-GET) → internal user → handler. Every response is uncacheable and carries
  * a trace ID that also appears in the request's single log line.
  */
 export async function handleApi(
@@ -96,7 +98,6 @@ async function dispatch(
 
   const config = loadConfig(env);
   const identity = await verifyAccessToken(request, config.access);
-  // Every route except GET changes state, so it must come from the app (CSRF defense).
   if (request.method !== "GET" && !config.appOrigins.has(request.headers.get("origin") ?? "")) {
     throw new ApiFailure("forbidden");
   }

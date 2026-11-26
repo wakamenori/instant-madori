@@ -79,7 +79,7 @@ try {
   const input = await z
     .discriminatedUnion("kind", [
       z.object({
-        kind: z.literal("commit"),
+        kind: z.literal(["commit", "pick"]),
         ownerId: signedInOwner,
         patternId: z.uuid(),
       }),
@@ -191,7 +191,7 @@ try {
       newTraceId: () => crypto.randomUUID(),
     };
     const deps = { store, runtime, wakePattern: async () => {} };
-    const commit = async (bytes = display, name = "案") => {
+    const commit = async (bytes = display, name = "案", withHouse = false) => {
       const accepted = await acceptInstruction(deps, {
         ownerId: input.ownerId,
         requestId: crypto.randomUUID(),
@@ -202,12 +202,39 @@ try {
       const claimed = await claimNextJob(deps, { patternId: input.patternId });
       assert.equal(claimed.kind, "claimed");
       if (claimed.kind !== "claimed") throw new Error("No execution right");
-      const saved = await saveJobSnapshot(deps, { right: claimed.right, display: bytes });
-      assert.equal(saved.kind, "saved");
-      if (saved.kind !== "saved") throw new Error("No snapshot");
+      const writeSnapshot = async () => {
+        if (withHouse) {
+          const encoder = new TextEncoder();
+          return store.snapshots.write(claimed.right, {
+            id: runtime.newId(),
+            now: runtime.now(),
+            display: bytes,
+            house: {
+              data: new Uint8Array(
+                await readFile(
+                  new URL(
+                    "../../../../crates/housing/tests/fixtures/two-rooms-before-modifiers.json",
+                    import.meta.url,
+                  ),
+                ),
+              ),
+              checks: encoder.encode('{"violations":[]}').slice(),
+              floorPlans: [
+                {
+                  storey: "s1",
+                  svg: encoder.encode('<svg xmlns="http://www.w3.org/2000/svg"/>').slice(),
+                },
+              ],
+            },
+          });
+        }
+        const saved = await saveJobSnapshot(deps, { right: claimed.right, display: bytes });
+        assert.equal(saved.kind, "saved");
+        return saved.snapshot;
+      };
       const result = await completeJob(deps, {
         right: claimed.right,
-        snapshot: saved.snapshot,
+        snapshot: await writeSnapshot(),
         name,
       });
       assert.equal(result.kind, "committed");
@@ -215,45 +242,50 @@ try {
       return { revision: result.revision, right: claimed.right };
     };
     const first = await commit(firstDisplay, "初案");
-    assert.equal(first.revision.number, 1);
-    assert.equal(first.revision.baseRevisionId, null);
-    const second = await commit();
-    assert.equal(second.revision.number, 2);
-    assert.equal(second.revision.baseRevisionId, first.revision.id);
-    const third = await commit();
-    assert.equal(third.revision.baseRevisionId, second.revision.id);
-    const revisions = [first.revision, second.revision, third.revision];
-    let latest = third.revision;
-    while (latest.number < 52) {
-      const name = latest.number === 51 ? ` ${"a".repeat(100)}` : "案";
-      const result = await commit(display, name);
-      if (latest.number === 51) assert.equal(result.revision.name, "a".repeat(100));
-      latest = result.revision;
-      revisions.push(latest);
+    if (input.kind === "pick") {
+      const current = await commit(display, "住宅", true);
+      console.log(JSON.stringify({ legacy: first.revision.id, current: current.revision.id }));
+    } else {
+      assert.equal(first.revision.number, 1);
+      assert.equal(first.revision.baseRevisionId, null);
+      const second = await commit();
+      assert.equal(second.revision.number, 2);
+      assert.equal(second.revision.baseRevisionId, first.revision.id);
+      const third = await commit();
+      assert.equal(third.revision.baseRevisionId, second.revision.id);
+      const revisions = [first.revision, second.revision, third.revision];
+      let latest = third.revision;
+      while (latest.number < 52) {
+        const name = latest.number === 51 ? ` ${"a".repeat(100)}` : "案";
+        const result = await commit(display, name);
+        if (latest.number === 51) assert.equal(result.revision.name, "a".repeat(100));
+        latest = result.revision;
+        revisions.push(latest);
+      }
+      const snapshot = await store.revisions.snapshot({
+        ownerId: input.ownerId,
+        revisionId: first.revision.id,
+      });
+      assert(snapshot);
+      assert.deepEqual(await (await store.snapshots.open(snapshot)).display.read(), firstDisplay);
+      const originalDisplay = await bucket.get(
+        snapshot.manifestKey.replace(/manifest\.json$/, "display.mdsp"),
+      );
+      assert(originalDisplay);
+      const originalBytes = await originalDisplay.arrayBuffer();
+      await assert.rejects(
+        store.snapshots.write(first.right, {
+          id: snapshot.id,
+          now: runtime.now(),
+          display: new Uint8Array([1, 2]),
+        }),
+        /already exists/,
+      );
+      const unchanged = await bucket.get(originalDisplay.key);
+      assert(unchanged);
+      assert.deepEqual(await unchanged.arrayBuffer(), originalBytes);
+      console.log(JSON.stringify({ revisions }));
     }
-    const snapshot = await store.revisions.snapshot({
-      ownerId: input.ownerId,
-      revisionId: first.revision.id,
-    });
-    assert(snapshot);
-    assert.deepEqual(await (await store.snapshots.open(snapshot)).display.read(), firstDisplay);
-    const originalDisplay = await bucket.get(
-      snapshot.manifestKey.replace(/manifest\.json$/, "display.mdsp"),
-    );
-    assert(originalDisplay);
-    const originalBytes = await originalDisplay.arrayBuffer();
-    await assert.rejects(
-      store.snapshots.write(first.right, {
-        id: snapshot.id,
-        now: runtime.now(),
-        display: new Uint8Array([1, 2]),
-      }),
-      /already exists/,
-    );
-    const unchanged = await bucket.get(originalDisplay.key);
-    assert(unchanged);
-    assert.deepEqual(await unchanged.arrayBuffer(), originalBytes);
-    console.log(JSON.stringify({ revisions }));
   }
 } finally {
   await proxy.dispose();
