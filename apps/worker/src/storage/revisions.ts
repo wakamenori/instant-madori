@@ -112,6 +112,10 @@ export async function getPatternState(
   };
 }
 
+export const revisionPageSql = `SELECT ${revisionJson("r")} AS json FROM revisions r
+  WHERE r.pattern_id = ? AND r.owner_id = ? AND r.number < coalesce(?, 9223372036854775807)
+  ORDER BY r.number DESC LIMIT ?`;
+
 export interface RevisionPage {
   revisions: Revision[];
   next: number | null;
@@ -132,19 +136,19 @@ export async function listRevisions(
     ),
     jsonRows(
       {
-        sql: `SELECT ${revisionJson("r")} AS json FROM revisions r
-      WHERE r.pattern_id = ? AND r.owner_id = ? AND (? IS NULL OR r.number < ?)
-      ORDER BY r.number DESC LIMIT ?`,
-        bindings: [query.patternId, query.ownerId, query.after, query.after, query.limit + 1],
+        sql: revisionPageSql,
+        bindings: [query.patternId, query.ownerId, query.after, query.limit + 1],
       },
       revisionSchema,
       "revision",
     ),
   ]);
   if (patterns.length === 0) return null;
-  const all = revisionRows;
-  const revisions = all.slice(0, query.limit);
-  return { revisions, next: all.length > query.limit ? (revisions.at(-1)?.number ?? null) : null };
+  const revisions = revisionRows.slice(0, query.limit);
+  return {
+    revisions,
+    next: revisionRows.length > query.limit ? (revisions.at(-1)?.number ?? null) : null,
+  };
 }
 
 export async function getRevisionSnapshot(
