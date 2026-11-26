@@ -1,6 +1,8 @@
 //! The authenticated Worker-to-container protocol, independent of SolidCraft.
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+pub mod apply;
+pub mod bundle;
 pub mod schema;
 pub const PROTOCOL_VERSION: u32 = 1;
 pub const PORT: u16 = 3001;
@@ -15,6 +17,8 @@ pub mod headers {
 pub enum Method {
     #[serde(rename = "GET")]
     Get,
+    #[serde(rename = "POST")]
+    Post,
 }
 #[derive(Clone, Copy)]
 pub struct JsonBody {
@@ -42,6 +46,10 @@ pub enum BodyKind {
         schema: JsonBody,
         max_bytes: u32,
     },
+    Bundle {
+        head: JsonBody,
+        max_bytes: u32,
+    },
     Binary {
         content_type: &'static str,
         max_bytes: u32,
@@ -67,7 +75,59 @@ pub const ERROR: ErrorContract = ErrorContract {
     content_type: "application/json",
     max_bytes: 4096,
 };
+pub struct JsonRoute<Q, H> {
+    pub route: Route,
+    types: std::marker::PhantomData<fn(Q) -> H>,
+}
+impl<Q: JsonSchema, H: JsonSchema> JsonRoute<Q, H> {
+    pub fn handle<E>(&self, request: Q, handler: impl FnOnce(Q) -> Result<H, E>) -> Result<H, E> {
+        handler(request)
+    }
+    const fn new(
+        name: &'static str,
+        path: &'static str,
+        request: &'static str,
+        head: &'static str,
+    ) -> Self {
+        Self {
+            route: Route {
+                name,
+                path,
+                method: Method::Post,
+                authenticated: true,
+                request: BodyKind::Json {
+                    schema: JsonBody::new::<Q>(request),
+                    max_bytes: bundle::REQUEST_LIMIT,
+                },
+                response: BodyKind::Bundle {
+                    head: JsonBody::new::<H>(head),
+                    max_bytes: bundle::RESPONSE_LIMIT,
+                },
+            },
+            types: std::marker::PhantomData,
+        }
+    }
+}
+impl BodyKind {
+    pub const fn max_bytes(self) -> u32 {
+        match self {
+            Self::None => 0,
+            Self::Json { max_bytes, .. }
+            | Self::Bundle { max_bytes, .. }
+            | Self::Binary { max_bytes, .. } => max_bytes,
+        }
+    }
+}
 pub mod routes {
+    pub const APPLY_OPERATIONS: super::JsonRoute<
+        super::apply::ApplyOperationsRequest,
+        super::apply::ApplyOperationsOutcome,
+    > = super::JsonRoute::new(
+        "applyOperations",
+        "/v1/house/operations",
+        "applyOperationsRequestSchema",
+        "applyOperationsOutcomeSchema",
+    );
     use super::{BodyKind, DISPLAY_CONTENT_TYPE, JsonBody, MAX_DISPLAY_BYTES, Method, Route};
     pub const HEALTH: Route = Route {
         name: "health",
@@ -91,7 +151,7 @@ pub mod routes {
             max_bytes: MAX_DISPLAY_BYTES,
         },
     };
-    pub const ALL: &[Route] = &[HEALTH, SAMPLE_DISPLAY];
+    pub const ALL: &[Route] = &[HEALTH, SAMPLE_DISPLAY, APPLY_OPERATIONS.route];
 }
 /// Transport and protocol failures only. Expected route outcomes are 200 bodies with a
 /// `kind` union. BuildFailed means a deterministic build failed unexpectedly.
@@ -102,6 +162,12 @@ pub enum ErrorCode {
     Unauthorized,
     /// The request is invalid.
     InvalidRequest,
+    /// Request exceeds the route limit.
+    PayloadTooLarge,
+    /// Request media type is unsupported.
+    UnsupportedMediaType,
+    /// Request data violates the contract.
+    InvalidBody,
     /// The route does not exist.
     NotFound,
     /// The route does not support this method.
@@ -144,6 +210,7 @@ impl Default for Health {
 pub fn render_typescript() -> String {
     let contract = serde_json::json!({
         "protocolVersion": PROTOCOL_VERSION, "port": PORT, "tokenEnv": TOKEN_ENV, "error": ERROR,
+        "bundle":{"magic":bundle::MAGIC,"version":bundle::VERSION,"headerBytes":bundle::HEADER_BYTES,"contentType":bundle::CONTENT_TYPE},
         "headers": {"authorization":headers::AUTHORIZATION,"traceId":headers::TRACE_ID},
         "routes":routes::ALL.iter().map(|route| (route.name,route)).collect::<std::collections::BTreeMap<_,_>>(),
         "maxDisplayBytes":MAX_DISPLAY_BYTES,"displayContentType":DISPLAY_CONTENT_TYPE

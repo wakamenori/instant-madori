@@ -1995,6 +1995,7 @@ name = "madori-geometry-api"
 version = "0.1.0"
 dependencies = [
  "madori-display",
+ "madori-housing",
  "schemars",
  "serde",
  "serde_json",

@@ -137,8 +137,15 @@ pub fn route_schemas(routes: &[crate::Route]) -> Result<Value, String> {
             (route.request, Direction::Request),
             (route.response, Direction::Response),
         ] {
-            if let crate::BodyKind::Json { schema, .. } = body {
-                register_body(&mut bodies, schema, direction)?;
+            match body {
+                crate::BodyKind::Json { schema, .. } => {
+                    register_body(&mut bodies, schema, direction)?
+                }
+                crate::BodyKind::Bundle { head, .. } => match direction {
+                    Direction::Request => return Err("request bundle unsupported".into()),
+                    Direction::Response => register_body(&mut bodies, head, direction)?,
+                },
+                crate::BodyKind::None | crate::BodyKind::Binary { .. } => {}
             }
         }
     }
