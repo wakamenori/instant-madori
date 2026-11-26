@@ -15,70 +15,12 @@ pub(super) enum Join {
     ConvexCuts,
 }
 
-pub(super) struct Cad<'a> {
-    pub session: &'a mut Session,
-    pub count: usize,
-    pub elapsed: std::time::Duration,
-    pub taper_volume: Option<String>,
-}
 type Result<T> = std::result::Result<T, String>;
 fn simpson_mean(section_area: impl Fn(f64) -> f64, inset: f64) -> f64 {
     (section_area(0.) + 4. * section_area(inset / 2.) + section_area(inset)) / 6.
 }
 
 impl Cad<'_> {
-    fn cmd(&mut self, cmd: &str, args: Value) -> Result<Value> {
-        self.count += 1;
-        let start = Instant::now();
-        let result = execute_checked(self.session, cmd, &args);
-        self.elapsed += start.elapsed();
-        result.map_err(|e| {
-            format!(
-                "{cmd} {args}: {e} {}",
-                self.taper_volume.as_deref().unwrap_or_default()
-            )
-        })
-    }
-    fn extrude(
-        &mut self,
-        plane: Value,
-        outline: &[XY],
-        height: f64,
-        mut args: Value,
-    ) -> Result<()> {
-        let id = self.cmd("sketch.create", plane)?["sketch"].clone();
-        self.cmd("sketch.line", json!({"points":outline,"closed":true}))?;
-        self.cmd("sketch.finish", json!({}))?;
-        args["sketch"] = id;
-        args["distance"] = json!(height);
-        self.cmd("solid.extrude", args)?;
-        Ok(())
-    }
-    pub fn prism(&mut self, name: &str, outline: &[XY], base: f64, top: f64) -> Result<()> {
-        self.extrude(
-            json!({"plane":"XY","offset":base}),
-            outline,
-            top - base,
-            json!({"body_name":name,"operation":"new"}),
-        )
-    }
-    pub fn combine(&mut self, target: &str, tool: &str, op: &str, keep: bool) -> Result<()> {
-        self.cmd(
-            "solid.combine",
-            json!({"target":target,"tools":[tool],"operation":op,"keep_tools":keep}),
-        )?;
-        Ok(())
-    }
-    fn copy(&mut self, name: &str, dz: f64) -> Result<String> {
-        let reply = self.cmd(
-            "solid.move",
-            json!({"bodies":[name],"copy":true,"translate":[0.,0.,dz]}),
-        )?;
-        reply["created_bodies"][0]
-            .as_str()
-            .map(String::from)
-            .ok_or_else(|| format!("missing copy {reply}"))
-    }
     fn cut_plane(&mut self, name: &str, s: Slope, p: f64, z: f64, reach: f64) -> Result<()> {
         let [nx, ny] = s.left();
         let c = p.atan().cos();
@@ -163,11 +105,12 @@ impl Cad<'_> {
         }
         Ok(())
     }
-    pub fn plates(
+    pub(super) fn plates(
         &mut self,
         roofs: &[TrialRoof],
         m: Method,
         j: Join,
+        taper_volume: &mut Option<String>,
     ) -> Result<(Vec<String>, Vec<String>)> {
         let zb = roofs
             .iter()
@@ -198,7 +141,7 @@ impl Cad<'_> {
             };
             let expected = section_area(0.) * (roof.fascia_top - zb)
                 + inset * roof.pitch * simpson_mean(section_area, inset);
-            self.taper_volume = Some(format!(
+            *taper_volume = Some(format!(
                 "V closed {}, {:.2} / {expected:.2} mm³",
                 raw[0]["closed"],
                 raw[0]["volume_mm3"].as_f64().unwrap_or(f64::NAN)

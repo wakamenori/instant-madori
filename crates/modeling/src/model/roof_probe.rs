@@ -1,6 +1,6 @@
 #![allow(clippy::unwrap_used)]
+use super::probe_kit::*;
 use super::*;
-use std::time::Instant;
 mod cad;
 mod cases;
 mod measure;
@@ -55,7 +55,6 @@ fn run(case: Case, method: Method, join: Join, table: bool) -> [f64; SETTINGS.le
             session: &mut m.session,
             count: 0,
             elapsed: Default::default(),
-            taper_volume: None,
         };
         if matches!(case, Case::Lower) {
             walls::upper_walls(&mut c, roofs[1].bounds()[0]).unwrap();
@@ -70,7 +69,10 @@ fn run(case: Case, method: Method, join: Join, table: bool) -> [f64; SETTINGS.le
             .iter()
             .map(|b| b.name.clone())
             .collect();
-        let built = c.plates(&roofs, method, join);
+        let mut taper_volume = None;
+        let built = c
+            .plates(&roofs, method, join, &mut taper_volume)
+            .map_err(|e| format!("{e} {}", taper_volume.as_deref().unwrap_or_default()));
         let ms = c.elapsed.as_secs_f64() * 1000.;
         let commands = c.count;
         if table && let Err(err) = &built {
@@ -107,7 +109,7 @@ fn run(case: Case, method: Method, join: Join, table: bool) -> [f64; SETTINGS.le
         *volume = row.volume;
         let err = row.volume - row.expected;
         let negative = matches!(join, Join::ConvexCuts | Join::PlatesThenUnion);
-        let wall = if let Some(report) = &c.taper_volume {
+        let wall = if let Some(report) = &taper_volume {
             report.clone()
         } else if matches!(case, Case::Lower) {
             walls::verify_lower(&c).unwrap();
@@ -242,11 +244,11 @@ fn wide_lower(table: bool) {
             session: &mut m.session,
             count: 0,
             elapsed: Default::default(),
-            taper_volume: None,
         };
         let line = roofs[1].bounds()[0];
         walls::upper_walls(&mut c, line).unwrap();
-        c.plates(&roofs, Method::PlaneCut, Join::Separate).unwrap();
+        c.plates(&roofs, Method::PlaneCut, Join::Separate, &mut None)
+            .unwrap();
         let mesh = c.session.model.state().body("B").unwrap().mesh();
         let top = mesh
             .triangles

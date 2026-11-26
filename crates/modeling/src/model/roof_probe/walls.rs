@@ -1,17 +1,6 @@
 use super::*;
 use solidcraft_engine::kernel;
 
-fn intersection(s: &Session, a: &str, b: &str) -> Result<f64, String> {
-    let state = s.model.state();
-    let body = |n| &state.body(n).unwrap().body;
-    kernel::boolean(body(a), body(b), kernel::BoolOp::Intersect)
-        .and_then(|b| {
-            b.map(|b| kernel::measure_mass(&b).map(|m| m.volume))
-                .transpose()
-        })
-        .map(|v| v.unwrap_or(0.))
-        .map_err(|e| e.to_string())
-}
 pub(super) fn upper_walls(c: &mut Cad, width: f64) -> Result<(), String> {
     for (i, rect) in [
         [0., 0., width, 200.],
@@ -28,7 +17,7 @@ pub(super) fn upper_walls(c: &mut Cad, width: f64) -> Result<(), String> {
 }
 pub(super) fn verify_lower(c: &Cad) -> Result<(), String> {
     for name in ["A", "s2~wall~0", "s2~wall~1", "s2~wall~2", "s2~wall~3"] {
-        let v = intersection(c.session, "B", name)?;
+        let v = boolean_volume(c.session, "B", name, kernel::BoolOp::Intersect)?;
         assert!(v <= 0.001, "lower roof overlaps {name} by {v}");
     }
     Ok(())
@@ -129,7 +118,7 @@ pub(super) fn extend(
                     && points.iter().any(|p| p[1] < top)
             }) {
                 c.prism(&ext, &points, base, 15000.)?;
-                if intersection(c.session, &ext, envelope)? > 0.001 {
+                if boolean_volume(c.session, &ext, envelope, kernel::BoolOp::Intersect)? > 0.001 {
                     c.combine(&ext, envelope, "intersect", true)?;
                     let f = figures(c.session, &[name.into(), ext.clone()]);
                     assert!(f.iter().all(|m| m["closed"] == true));
@@ -247,7 +236,7 @@ pub(super) fn extend(
             assert_eq!(f[0]["closed"], true);
         }
         for obstacle in obstacles {
-            let v = intersection(c.session, name, obstacle)?;
+            let v = boolean_volume(c.session, name, obstacle, kernel::BoolOp::Intersect)?;
             assert!(v <= 0.001, "{name} overlaps {obstacle} by {v}");
         }
     }

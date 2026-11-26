@@ -514,4 +514,6 @@ impl Model {
 mod tests;
 
 #[cfg(test)]
+mod probe_kit;
+#[cfg(test)]
 mod roof_probe;
