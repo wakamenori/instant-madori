@@ -1,10 +1,23 @@
-import { patternStateQuerySchema, revisionListQuerySchema } from "@madori/contracts";
+import {
+  floorPlanQuerySchema,
+  floorPlanStoreysHeader,
+  formatFloorPlanStoreys,
+  patternStateQuerySchema,
+  revisionListQuerySchema,
+} from "@madori/contracts";
 import type { PatternStateResponse, RevisionListResponse } from "@madori/contracts";
-import { getPatternState, getRevisionView, listRevisions } from "../services/revisions.ts";
+import {
+  getFloorPlan,
+  getPatternState,
+  getRevisionView,
+  listRevisions,
+} from "../services/revisions.ts";
 import { decodeRevisionCursor, encodeRevisionCursor } from "./cursor.ts";
 import { ApiFailure, readQuery } from "./http.ts";
 import { param } from "./router.ts";
 import type { Route } from "./router.ts";
+
+const floorPlanCsp = "default-src 'none'; frame-ancestors 'self'";
 
 export const revisionRoutes: Route[] = [
   {
@@ -62,15 +75,38 @@ export const revisionRoutes: Route[] = [
       });
       switch (outcome.kind) {
         case "found":
-          return new Response(outcome.artifact.bytes, {
+          return new Response(outcome.display.bytes, {
             headers: {
-              "content-type": outcome.artifact.contentType,
+              "content-type": outcome.display.contentType,
+              [floorPlanStoreysHeader]: formatFloorPlanStoreys(outcome.storeys),
               "x-revision-id": param(context, "revisionId"),
             },
           });
         case "not_found":
           throw new ApiFailure(outcome.kind);
       }
+    },
+  },
+  {
+    method: "GET",
+    path: "/api/revisions/:revisionId/floor-plan",
+    async handle(context) {
+      const { storey } = readQuery(context.url, floorPlanQuerySchema);
+      const revisionId = param(context, "revisionId");
+      const outcome = await getFloorPlan(context.deps, {
+        ownerId: context.user.id,
+        revisionId,
+        storey,
+      });
+      if (outcome.kind === "not_found") throw new ApiFailure(outcome.kind);
+      return new Response(outcome.artifact.bytes, {
+        headers: {
+          "content-type": outcome.artifact.contentType,
+          "x-revision-id": revisionId,
+          "content-security-policy": floorPlanCsp,
+          "x-content-type-options": "nosniff",
+        },
+      });
     },
   },
 ];

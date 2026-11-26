@@ -7,15 +7,20 @@ import {
   listPatterns,
   readPatternState,
   fetchRevisionView,
+  fetchFloorPlan,
   ApiError,
 } from "./api.ts";
 void test("API failures carry codes and no transport messages", async () => {
   const responses = [
     new Response("<html>proxy failure</html>", { status: 502 }),
     Response.json({ error: "unknown_code" }, { status: 503 }),
-    new Response("oops", { headers: { "x-revision-id": "R" } }),
+    new Response("oops", { headers: { "x-revision-id": "R", "x-floor-plan-storeys": "" } }),
     new Response("bytes", {
-      headers: { "content-type": displayContentType, "x-revision-id": "other" },
+      headers: {
+        "content-type": displayContentType,
+        "x-revision-id": "other",
+        "x-floor-plan-storeys": "",
+      },
     }),
   ];
   const mocked = mock.method(globalThis, "fetch", () => Promise.resolve(new Response()));
@@ -61,4 +66,46 @@ void test("JSON endpoints reject off-contract and malformed responses", async (t
     Promise.resolve(Response.json({ error: "request_id_reused" }, { status: 422 })),
   );
   await assert.rejects(createProject({ requestId }, signal), new ApiError("request_id_reused"));
+});
+
+void test("revision views require an ordered list of distinct storeys", async (t) => {
+  const signal = new AbortController().signal;
+  const bytes = new Uint8Array([0, 255]);
+  const mockFetch = t.mock.method(globalThis, "fetch");
+  const fetchView = (header: string | null) => {
+    const headers = new Headers({ "content-type": displayContentType, "x-revision-id": "R" });
+    if (header !== null) headers.set("x-floor-plan-storeys", header);
+    mockFetch.mock.mockImplementationOnce(() => Promise.resolve(new Response(bytes, { headers })));
+    return fetchRevisionView("R", signal);
+  };
+  assert.deepEqual(await fetchView("s1,s2"), { display: bytes, storeys: ["s1", "s2"] });
+  assert.deepEqual(await fetchView(""), { display: bytes, storeys: [] });
+  for (const header of [null, "a,,b", "a,a", "a b"]) {
+    await assert.rejects(fetchView(header), new ApiError("unexpected_response"));
+  }
+});
+
+void test("floor plans request an encoded storey and require a matching revision and SVG type", async (t) => {
+  const svg = "<svg/>";
+  const mockFetch = t.mock.method(globalThis, "fetch", (path: string) => {
+    assert.equal(path, "/api/revisions/R/floor-plan?storey=floor%3A1");
+    return Promise.resolve(
+      new Response(svg, {
+        headers: { "content-type": "image/svg+xml", "x-revision-id": "R" },
+      }),
+    );
+  });
+  const fetchPlan = () => fetchFloorPlan("R", "floor:1", new AbortController().signal);
+  assert.equal(await fetchPlan(), svg);
+  for (const headers of [
+    { "content-type": "image/svg+xml", "x-revision-id": "other" },
+    { "content-type": "text/html", "x-revision-id": "R" },
+  ]) {
+    mockFetch.mock.mockImplementationOnce(() => Promise.resolve(new Response(svg, { headers })));
+    await assert.rejects(fetchPlan(), new ApiError("unexpected_response"));
+  }
+  mockFetch.mock.mockImplementationOnce(() =>
+    Promise.resolve(Response.json({ error: "not_found" }, { status: 404 })),
+  );
+  await assert.rejects(fetchPlan(), new ApiError("not_found"));
 });

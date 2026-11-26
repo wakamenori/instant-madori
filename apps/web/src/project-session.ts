@@ -54,7 +54,7 @@ async function loadRevision(
   const display =
     previous?.revision.id === revision.id
       ? previous.display
-      : await fetchRevisionView(revision.id, signal);
+      : (await fetchRevisionView(revision.id, signal)).display;
   return { revision, display };
 }
 

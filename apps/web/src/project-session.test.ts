@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
-import { displayContentType, type PatternStateResponse } from "@madori/contracts";
+import {
+  displayContentType,
+  floorPlanStoreysHeader,
+  type PatternStateResponse,
+} from "@madori/contracts";
 import { createProject } from "./api.ts";
 import { parseRoute, formatRoute, parseProjectId, projectRoute } from "./route.ts";
 import { watchProject, summarizeActivity, type ProjectView } from "./project-session.ts";
@@ -36,7 +40,11 @@ const state: PatternStateResponse = {
 const signal = new AbortController().signal;
 function display(id: string) {
   return new Response(new Uint8Array([3]), {
-    headers: { "content-type": displayContentType, "x-revision-id": id },
+    headers: {
+      "content-type": displayContentType,
+      "x-revision-id": id,
+      [floorPlanStoreysHeader]: "",
+    },
   });
 }
 function requests(t: TestContext, responses: Response[]) {

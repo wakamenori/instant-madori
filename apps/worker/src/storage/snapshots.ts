@@ -1,7 +1,7 @@
 import { readJobExecutionRight } from "./job-execution.ts";
 import type { JobExecutionRight } from "./job-execution.ts";
 import type { R2 } from "./r2.ts";
-import { displayContentType, elementIdSchema } from "@madori/contracts";
+import { displayContentType, elementIdSchema, floorPlanContentType } from "@madori/contracts";
 import { z } from "zod";
 import { parseJsonColumn, StorageCorruption } from "./rows.ts";
 
@@ -35,7 +35,7 @@ function fileSchema<M extends string>(mediaType: M) {
 
 const displayFile = fileSchema(displayContentType);
 const jsonFile = fileSchema("application/json");
-const floorPlan = fileSchema("image/svg+xml").extend({ storey: z.string().min(1) });
+const floorPlan = fileSchema(floorPlanContentType).extend({ storey: elementIdSchema });
 const manifestSchema = z.discriminatedUnion("formatVersion", [
   z.strictObject({ formatVersion: z.literal(1), display: displayFile }),
   z.strictObject({
@@ -156,7 +156,7 @@ export async function writeSnapshot(
           floorPlans: await Promise.all(
             house.floorPlans.map(async ({ storey, svg }, index) => ({
               storey,
-              ...(await file(fileNames.floorPlan(index), "image/svg+xml", svg)),
+              ...(await file(fileNames.floorPlan(index), floorPlanContentType, svg)),
             })),
           ),
           checks: await file(fileNames.checks, "application/json", house.checks),
