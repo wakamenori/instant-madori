@@ -1,0 +1,34 @@
+[wasm] b.wasm: release build before wasm-bindgen, 2,389,247 B, 334 imported and 3,284 defined functions.
+[wasm] The whole code section contains 1,044,353 B in 3,284 functions (body sizes without length prefixes).
+[wasm] The table leaves out 1,884 wasm-bindgen descriptors (235,516 B) that wasm-bindgen removes.
+| crate                   | functions | code (B) |  share |
+| ----------------------- | --------: | -------: | -----: |
+| solidcraft_viewport_gpu |       114 |  286,739 |  35.5% |
+| core                    |       348 |  153,363 |  19.0% |
+| alloc                   |       215 |   88,981 |  11.0% |
+| js_sys                  |       167 |   57,381 |   7.1% |
+| wgpu                    |       186 |   52,352 |   6.5% |
+| hashbrown               |        56 |   47,657 |   5.9% |
+| madori_viewer           |        52 |   39,795 |   4.9% |
+| compiler_builtins       |        40 |   22,061 |   2.7% |
+| madori_display          |         9 |   21,761 |   2.7% |
+| wasm_bindgen            |       107 |   11,034 |   1.4% |
+| dlmalloc                |         7 |    7,970 |   1.0% |
+| solidcraft_viewport     |        15 |    6,841 |   0.8% |
+| wgpu_types              |        10 |    4,223 |   0.5% |
+| std                     |        22 |    2,457 |   0.3% |
+| web_sys                 |        26 |    2,361 |   0.3% |
+| bitflags                |         2 |    1,519 |   0.2% |
+| __rustc                 |        14 |    1,363 |   0.2% |
+| solidcraft_geom         |         2 |      609 |   0.1% |
+| solidcore_tess          |         1 |      191 |   0.0% |
+| raw_window_handle       |         1 |       79 |   0.0% |
+| log                     |         4 |       76 |   0.0% |
+| total                   |     1,398 |  808,813 | 100.0% |
+[wasm] No CAD kernel functions /^solidcore(?:-ops)?$/u. Its types appear in 2 functions of alloc.
+[wasm] No editing engine functions /^(?:madori-modeling|solidcraft-(?:engine|doc|kernel|io))$/u.
+[wasm] No UI toolkit functions /^(?:egui(?:[-_].*)?|epaint(?:[-_].*)?|emath|ecolor|eframe|winit)$/u.
+[viewer-wasm-contents] 2 function names cannot be attributed to a crate:
+  atan2 (not exported): unmangled name with no known origin
+  powf (not exported): unmangled name with no known origin
+  To attribute an unmangled name, list it in unmangledOwners in scripts/check/check-viewer-wasm.ts under the crate that defines it. The family check applies to that crate.

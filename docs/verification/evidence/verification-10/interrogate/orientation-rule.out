@@ -1,0 +1,7 @@
+wall n=+y        t=[0,0,1] u=[-1,0,0] v=[0,0,-1] -> reads correctly, upright: true
+wall n=-y        t=[0,0,1] u=[1,0,0] v=[0,0,-1] -> reads correctly, upright: true
+wall n=+x        t=[0,0,1] u=[0,1,0] v=[0,0,-1] -> reads correctly, upright: true
+wall n=-x        t=[0,0,1] u=[0,-1,0] v=[0,0,-1] -> reads correctly, upright: true
+wall diagonal    t=[0,0,1] u=[-0.7071,0.7071,0] v=[0,0,-1] -> reads correctly, upright: true
+floor top n=+z   t=[0,1,0] u=[1,0,0] v=[0,-1,0] -> reads correctly, upright: n/a
+ceiling n=-z     t=[0,1,0] u=[-1,0,0] v=[0,-1,0] -> reads correctly, upright: n/a

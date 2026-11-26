@@ -1,0 +1,5 @@
+base pre-bindgen  2283939 bytes, bindings wasm  1180745 bytes, gzip -9   335988 bytes, brotli -q 11   239387 bytes
+proto pre-bindgen  2321221 bytes, bindings wasm  1215965 bytes, gzip -9   343498 bytes, brotli -q 11   245088 bytes
+a pre-bindgen  2352481 bytes, bindings wasm  1250841 bytes, gzip -9   354872 bytes, brotli -q 11   253755 bytes
+b pre-bindgen  2389247 bytes, bindings wasm  1282558 bytes, gzip -9   359452 bytes, brotli -q 11   256540 bytes
+all pre-bindgen  2418218 bytes, bindings wasm  1314849 bytes, gzip -9   369226 bytes, brotli -q 11   263712 bytes
