@@ -1,4 +1,7 @@
-import type { ApplyOperationsRequest } from "@madori/contracts/geometry-internal";
+import type {
+  ApplyOperationsRequest,
+  SummarizeHouseRequest,
+} from "@madori/contracts/geometry-internal";
 import type { ServiceDeps } from "./deps.ts";
 import type { UnavailableReason } from "../geometry/container-gateway.ts";
 import type { DisplayArtifact, GeometryResult } from "../geometry/geometry-protocol.ts";
@@ -31,6 +34,19 @@ export async function applyHouseOperations(
     { traceId: request.job_id },
     request,
   );
+  return geometryOutcome(response);
+}
+export async function summarizeHouse(
+  { geometry }: Pick<ServiceDeps, "geometry">,
+  patternId: string,
+  traceId: string,
+  request: SummarizeHouseRequest,
+) {
+  return geometryOutcome(
+    await geometry({ kind: "pattern", patternId }).summarizeHouse({ traceId }, request),
+  );
+}
+function geometryOutcome<T>(response: GeometryResult<T>) {
   if (response.kind !== "unavailable") return response;
   const reason = response.reason;
   return permanentUnavailable(reason)

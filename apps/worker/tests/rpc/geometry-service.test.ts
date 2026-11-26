@@ -14,6 +14,9 @@ void test("sample service selects the pattern key and forwards the call", async 
   };
   const keys: GeometryInstance[] = [];
   const fake: GeometryApi = {
+    summarizeHouse() {
+      throw new Error("Unexpected summarizeHouse");
+    },
     sampleDisplay() {
       throw new Error("Unexpected applyOperations");
     },

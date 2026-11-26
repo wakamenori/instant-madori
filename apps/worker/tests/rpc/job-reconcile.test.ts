@@ -69,6 +69,9 @@ await test("Pattern reconciliation on D1", async (t) => {
       testHold: null,
       wakePattern: async () => {},
       geometry: () => ({
+        summarizeHouse() {
+          throw new Error("Unexpected summarizeHouse");
+        },
         sampleDisplay() {
           throw new Error("Unexpected sampleDisplay");
         },

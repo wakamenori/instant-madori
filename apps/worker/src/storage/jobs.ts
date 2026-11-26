@@ -5,6 +5,7 @@ import { z } from "zod";
 import { foundSchema, jsonRows, rows, write } from "./d1.ts";
 import type { D1 } from "./d1.ts";
 import {
+  conversationMessageSchema,
   acceptedJobSchema,
   revisionSchema,
   cancelledJobSchema,
@@ -106,20 +107,47 @@ function activeCondition(right: JobExecutionRight) {
   };
 }
 
-export async function startContext(db: D1, right: JobExecutionRight) {
+export async function startContext(
+  db: D1,
+  right: JobExecutionRight,
+  window: { budgetBytes: number; entryOverheadBytes: number },
+) {
   const active = activeCondition(right);
   return db.first(
     jsonRows(
       {
-        sql: `SELECT json_object('instruction', m.body, 'claimedAt', j.updated_at, 'base',
-          CASE WHEN s.id IS NULL THEN NULL ELSE ${snapshotJson("s")} END) AS json
-        FROM jobs j JOIN messages m ON m.id = j.message_id AND m.pattern_id = j.pattern_id
+        sql: `WITH context AS (
+          SELECT j.pattern_id, j.owner_id, m.id, m.number, m.body, j.updated_at,
+            CASE WHEN s.id IS NULL THEN NULL ELSE ${snapshotJson("s")} END AS base
+          FROM jobs j JOIN messages m ON m.id = j.message_id AND m.pattern_id = j.pattern_id
           LEFT JOIN revisions r ON r.id = j.base_revision_id AND r.pattern_id = j.pattern_id
           LEFT JOIN snapshots s ON s.id = r.snapshot_id AND s.owner_id = j.owner_id
-        WHERE ${active.sql}`,
-        bindings: active.bindings,
+          WHERE ${active.sql}
+        ), earlier AS (
+          SELECT m.number, m.kind, m.body,
+            sum(length(CAST(m.body AS BLOB)) + ?) OVER (ORDER BY m.number DESC) AS cost
+          FROM messages m JOIN context c ON m.pattern_id = c.pattern_id AND m.owner_id = c.owner_id
+          WHERE m.id <> c.id AND (m.number < c.number OR m.kind NOT IN ('instruction', 'answer'))
+        ), recent AS (
+          SELECT number, kind, body FROM earlier WHERE cost <= ? ORDER BY number
+        )
+        SELECT json_object(
+          'instruction', body, 'claimedAt', updated_at, 'base', json(base),
+          'total', (SELECT count(*) FROM earlier),
+          'messages', (SELECT json_group_array(json_object(
+            'number', number, 'kind', kind, 'body', body)) FROM recent)
+        ) AS json FROM context`,
+        bindings: [...active.bindings, window.entryOverheadBytes, window.budgetBytes],
       },
       z.object({
+        total: z.int().nonnegative(),
+        messages: z.array(
+          z.object({
+            number: z.int().positive(),
+            kind: z.union(conversationMessageSchema.options.map((s) => s.shape.kind)),
+            body: z.string(),
+          }),
+        ),
         instruction: z.string(),
         claimedAt: z.iso.datetime(),
         base: snapshotSchema.nullable(),

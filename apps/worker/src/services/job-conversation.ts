@@ -1,10 +1,4 @@
-import {
-  aiTools,
-  aiToolSchemaVersion,
-  parseToolCall,
-  type AiToolCall,
-  type FinishInput,
-} from "@madori/contracts/ai-tools";
+import { parseToolCall, type AiToolCall, type FinishInput } from "@madori/contracts/ai-tools";
 import { z } from "zod";
 import type { AiResponse } from "../ai/round-trip.ts";
 import type { Snapshot } from "../storage/snapshots.ts";
@@ -13,36 +7,6 @@ export type Working =
   { kind: "empty"; v1Base: boolean } | { kind: "edited" | "base"; snapshot: Snapshot };
 export const v1Notice =
   "編集元の案は住宅データを持たない古い形式のため、空の住宅から作り直しました。";
-const system =
-  "Edit the working single-storey house to meet the user's instruction. Read element IDs and inspection findings before editing. Resolve blocking findings, then call finish alone with a named plan and explanation in Japanese.";
-export const prefixSchema = z.strictObject({
-  format: z.literal(1),
-  model: z.string(),
-  promptVersion: z.string(),
-  toolSchemaVersion: z.string(),
-  system: z.string(),
-  tools: z.array(
-    z.strictObject({ name: z.string(), description: z.string(), inputSchemaJson: z.string() }),
-  ),
-  opening: z.array(z.strictObject({ kind: z.literal("text"), text: z.string() })).min(1),
-});
-export async function prefix(model: string, instruction: string, house: string | null) {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(system));
-  const promptVersion =
-    "sha256:" + Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
-  const opening = [{ kind: "text", text: instruction }];
-  if (house !== null)
-    opening.push({ kind: "text", text: "現在の案の住宅データ（JSON）:\n" + house });
-  return {
-    format: 1,
-    model,
-    promptVersion,
-    toolSchemaVersion: aiToolSchemaVersion,
-    system,
-    tools: aiTools,
-    opening,
-  };
-}
 type PlanAnswer = Extract<FinishInput["answer"], { kind: "plan" }>;
 export function explanationBody(plan: PlanAnswer) {
   const section = (label: string, items: readonly string[]) =>

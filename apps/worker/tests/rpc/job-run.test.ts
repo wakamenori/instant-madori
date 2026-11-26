@@ -1,4 +1,7 @@
-import { legacySnapshot } from "./snapshot-support.ts";
+import { emptyHouseSummary, houseSummarySchema } from "@madori/contracts/geometry-internal";
+import { versionOf, prompt, conversationWindow, prefix } from "../../src/services/ai-context.ts";
+import { developmentScript } from "../../src/ai/scripts.ts";
+import { fixtureHouse, legacySnapshot } from "./snapshot-support.ts";
 import { completeJob } from "../../src/services/jobs.ts";
 import { scriptedAi } from "../../src/ai/scripted.ts";
 import type { Ai, AiRequest } from "../../src/ai/round-trip.ts";
@@ -67,14 +70,65 @@ await test("Job runs restore D1 execution rights across retries and lost respons
     return result.job;
   }
   const ok = appliedFixture;
-  async function fixture(results: OperationsResult[] = [ok], existingPattern?: string) {
+  const point = { x: 0, y: 0 };
+  const room = {
+    id: "living",
+    name: "Living",
+    usage: "living",
+    walls: ["south", "east"],
+    interior: { kind: "unmeasured" },
+  };
+  const walls = room.walls.map((id) => ({
+    id,
+    start: point,
+    end: { x: 4000, y: 0 },
+    length: 4000,
+    thickness: 150,
+    height: 2700,
+    left: { kind: "room", room: room.id },
+    right: { kind: "exterior" },
+  }));
+  const door = {
+    id: "door",
+    kind: "door",
+    wall: "south",
+    from: "start",
+    distance: 500,
+    width: 900,
+    height: 2000,
+    sill: 0,
+  };
+  const summary = houseSummarySchema.parse({
+    ...emptyHouseSummary,
+    rooms: [room],
+    walls,
+    openings: [door],
+  });
+  const houseJson = JSON.stringify({
+    version: 1,
+    house: {
+      vertices: [],
+      rooms: [
+        { ...room, edges: room.walls.map((boundary) => ({ boundary, direction: "forward" })) },
+      ],
+      boundaries: walls,
+      openings: [{ ...door, fitting: { kind: "door" } }],
+    },
+  });
+
+  async function fixture(
+    results: OperationsResult[] = [ok],
+    existingPattern?: string,
+    queued?: Awaited<ReturnType<typeof accept>>,
+  ) {
     const patternId = existingPattern ?? (await pattern());
-    const accepted = await accept(patternId);
+    const accepted = queued ?? (await accept(patternId));
     const claimed = await claimNextJob(base, { patternId });
     assert(claimed.kind === "claimed");
     const job = claimed.right.reference;
     const wakes: string[] = [];
     const calls: string[] = [];
+    const summaries: string[] = [];
     const deps: JobWorkflowDeps = {
       ...base,
       wakePattern: (id) => {
@@ -84,6 +138,17 @@ await test("Job runs restore D1 execution rights across retries and lost respons
       geometry: (key) => {
         assert.deepEqual(key, { kind: "pattern", patternId });
         return {
+          summarizeHouse(call, { snapshot }) {
+            assert.equal(call.traceId, accepted.jobId);
+            assert(snapshot.kind === "house");
+            summaries.push(snapshot.json);
+            return Promise.resolve({
+              kind: "ok",
+              value: summary,
+              start: "warm",
+              ms: 1,
+            });
+          },
           sampleDisplay() {
             throw new Error("Unexpected sampleDisplay");
           },
@@ -107,8 +172,168 @@ await test("Job runs restore D1 execution rights across retries and lost respons
         )
         .bind(patternId)
         .first<number>("n");
-    return { job, deps, calls, wakes, state, revisions, snapshots };
+    return { job, deps, calls, summaries, wakes, state, revisions, snapshots };
   }
+  await t.test("prompt bytes are repeatable and version every fixed field", async () => {
+    const input = {
+      summary: houseSummarySchema.parse(emptyHouseSummary),
+      instruction: "plan",
+      messages: [],
+      total: 0,
+      checks: null,
+    };
+    assert.equal(
+      JSON.stringify(await prefix("model", input)),
+      JSON.stringify(await prefix("model", input)),
+    );
+    const version = await versionOf(prompt);
+    for (const key of Object.keys(prompt)) {
+      const changed = { ...prompt, [key]: null };
+      assert.notEqual(await versionOf(changed), version);
+    }
+    assert(conversationWindow.budgetBytes >= 16384 + conversationWindow.entryOverheadBytes);
+  });
+  await t.test(
+    "a v2 opening preserves the cache prefix, selected messages and inspection bytes on replay",
+    async () => {
+      const patternId = await pattern();
+      const old = await acceptInstruction(base, { ...request(patternId), body: "a".repeat(16384) });
+      assert(old.kind === "accepted");
+      const baseClaim = await claimNextJob(base, { patternId });
+      assert(baseClaim.kind === "claimed");
+      const instruction = "台本:plan\n  この壁を変更";
+      const next = await acceptInstruction(base, { ...request(patternId), body: instruction });
+      assert(next.kind === "accepted");
+      const checks =
+        '{ "housing": [{"element":"document","id":"house","reason":{"kind":"no_entrance"}}], "model": [] }';
+      const encode = (s: string) => new Uint8Array(new TextEncoder().encode(s));
+      const snapshot = await db.store.snapshots.write(baseClaim.right, {
+        id: crypto.randomUUID(),
+        now,
+        display: Uint8Array.of(1),
+        house: { ...fixtureHouse, data: encode(houseJson), checks: encode(checks) },
+      });
+      const explanation = "説明".repeat(2400);
+      assert.equal(
+        (await completeJob(base, { right: baseClaim.right, name: "base", snapshot, explanation }))
+          .kind,
+        "committed",
+      );
+      const notice = "通".repeat(5461) + "!";
+      await db.raw
+        .prepare(
+          "INSERT INTO messages(id,pattern_id,owner_id,number,kind,body,created_at) VALUES(?,?,?,4,'notice',?,?)",
+        )
+        .bind(crypto.randomUUID(), patternId, ownerId, notice, now)
+        .run();
+      const later = await accept(patternId);
+      const f = await fixture([ok], patternId, next.job);
+      const requests: AiRequest[] = [];
+      const stopAfterOpening: Ai = {
+        ...editingAi,
+        async roundTrip(req) {
+          requests.push(req);
+          await stop(f.job.jobId);
+          return editingAi.roundTrip(req);
+        },
+      };
+      assert.equal(
+        (
+          await runJob(
+            { ...f.deps, ai: stopAfterOpening },
+            f.job,
+            stepEngine({ loseResultsOnce: "start job" }).steps,
+          )
+        ).kind,
+        "cancelled",
+      );
+      assert.deepEqual(f.summaries, [houseJson]);
+      const first = requests[0]?.conversation;
+      assert(first);
+      assert.deepEqual(first.opening, [
+        { kind: "text", text: "Current plan summary\n" + JSON.stringify(summary) },
+        {
+          kind: "text",
+          text:
+            "Earlier conversation\n(1 older messages omitted.)\n\n[#3 Assistant]\n" +
+            explanation +
+            "\n\n[#4 Notice]\n" +
+            notice,
+        },
+        { kind: "text", text: "Current instruction\n" + instruction },
+        { kind: "text", text: "Inspection findings\n" + checks },
+      ]);
+      await db.store.queue.resumeOnce(
+        await requestKey(ownerId, crypto.randomUUID(), "queue.resume", {
+          patternId,
+          heldBy: f.job.jobId,
+        }),
+        { patternId, heldBy: f.job.jobId, now },
+      );
+      const g = await fixture([ok], patternId, later);
+      const script = scriptedAi(developmentScript);
+      const run = await runJob(
+        {
+          ...g.deps,
+          ai: {
+            ...script,
+            roundTrip(req) {
+              requests.push(req);
+              return script.roundTrip(req);
+            },
+          },
+        },
+        g.job,
+        stepEngine().steps,
+      );
+      assert.equal(run.kind, "committed");
+      const second = requests[1]?.conversation;
+      assert(second);
+      const fixed = (c: typeof first) => JSON.stringify([c.system, c.tools, c.opening[0]]);
+      assert.equal(fixed(first), fixed(second));
+      assert.equal(g.calls.length, 1);
+      const disabled = await fixture([ok], patternId);
+      const end = await runJob(
+        {
+          ...disabled.deps,
+          geometry: (key) => ({
+            ...disabled.deps.geometry(key),
+            summarizeHouse: () =>
+              Promise.resolve({ kind: "unavailable", reason: "containers_disabled" }),
+          }),
+        },
+        disabled.job,
+        stepEngine().steps,
+      );
+      assert.deepEqual(end, { kind: "failed", reason: "containers_disabled" });
+    },
+  );
+  await t.test("development script commits an empty start", async () => {
+    assert(ok.kind === "ok" && ok.value.kind === "applied");
+    const data = new Uint8Array(new TextEncoder().encode(houseJson));
+    const f = await fixture([
+      {
+        ...ok,
+        value: {
+          ...ok.value,
+          operations: [
+            { kind: "rooms_placed", rooms: [{ number: 1, name: "Living", id: room.id }] },
+          ],
+          parts: ok.value.parts.map((part) =>
+            part.artifact.kind === "house"
+              ? { ...part, bytes: data, byte_length: data.length }
+              : part,
+          ),
+        },
+      },
+    ]);
+    assert.equal(
+      (await runJob({ ...f.deps, ai: scriptedAi(developmentScript) }, f.job, stepEngine().steps))
+        .kind,
+      "committed",
+    );
+    assert.deepEqual(f.summaries, []);
+  });
   async function stop(jobId: string) {
     return db.store.jobs.stopOnce(
       await requestKey(ownerId, crypto.randomUUID(), "job.stop", { jobId }),
@@ -152,6 +377,9 @@ await test("Job runs restore D1 execution rights across retries and lost respons
         geometry: () => ({
           sampleDisplay() {
             throw new Error("Unexpected sampleDisplay");
+          },
+          summarizeHouse() {
+            throw new Error("Unexpected summarizeHouse");
           },
           async applyOperations() {
             await stop(f.job.jobId);
@@ -299,13 +527,17 @@ await test("Job runs restore D1 execution rights across retries and lost respons
       assert(first && second);
       assert.deepEqual({ ...second, rounds: [] }, first);
       assert.equal(second.rounds.length, 1);
-      assert.deepEqual(first.opening, [{ kind: "text", text: "作って" }]);
+      assert.deepEqual(first.opening, [
+        { kind: "text", text: "Current plan summary\n" + JSON.stringify(emptyHouseSummary) },
+        { kind: "text", text: "Current instruction\n作って" },
+      ]);
+      assert.deepEqual(f.summaries, []);
       const versions = await db.raw
         .prepare("SELECT ai_model,ai_prompt_version,ai_tool_schema_version FROM jobs WHERE id=?")
         .bind(f.job.jobId)
         .first();
       assert.equal(versions?.["ai_model"], "scripted");
-      assert.match(String(versions?.["ai_prompt_version"]), /^sha256:[0-9a-f]{64}$/u);
+      assert.equal(versions?.["ai_prompt_version"], await versionOf(prompt));
       assert.equal(versions?.["ai_tool_schema_version"], aiToolSchemaVersion);
       const explanation = await db.raw
         .prepare("SELECT body,number FROM messages WHERE job_id=? AND kind='explanation'")

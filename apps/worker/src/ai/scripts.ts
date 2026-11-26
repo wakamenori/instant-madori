@@ -33,11 +33,20 @@ const opening = (wall: string, door: boolean, distance: number) => ({
 });
 
 export function developmentScript({ opening: parts, rounds }: Conversation): ScriptStep {
-  const instruction = parts[0];
-  if (instruction?.kind !== "text") throw new Error("Missing instruction");
-  const first = instruction.text.split(/\r?\n/u, 1)[0];
+  function section(label: string) {
+    const part = parts.find((p) => p.kind === "text" && p.text.startsWith(label + "\n"));
+    if (part?.kind !== "text") throw new Error("Missing " + label);
+    return part.text.slice(label.length + 1);
+  }
+  const first = section("Current instruction").split(/\r?\n/u, 1)[0];
   const name = first?.startsWith("台本:") ? first.slice(3) : "plan";
   if (!["plan", "unresolved", "reject-window"].includes(name)) throw new Error("unknown script");
+  const house = z
+    .object({
+      rooms: z.array(z.object({ id: z.string(), walls: z.array(z.string()).nonempty() })),
+      openings: z.array(z.object({ id: z.string(), kind: z.string() })),
+    })
+    .parse(JSON.parse(section("Current plan summary")));
   const round = rounds.length + 1;
   const call = (tool: string, input: object): ScriptStep => ({
     stop: "tool_calls",
@@ -52,7 +61,7 @@ export function developmentScript({ opening: parts, rounds }: Conversation): Scr
       answer: {
         kind: "plan",
         name: name === "reject-window" ? "窓を直した案" : "台本の案",
-        explanation: parts[1]
+        explanation: house.rooms.length
           ? "LDKの壁の色を変更しました。"
           : "LDKの外壁に玄関ドアと窓を設けました。",
         assumptions: ["平屋を想定しました。"],
@@ -68,27 +77,18 @@ export function developmentScript({ opening: parts, rounds }: Conversation): Scr
       throw new Error(`Unexpected result in round ${r}`);
     return JSON.parse(content.text);
   }
-  const base = parts[1];
-  if (base?.kind === "text") {
-    const { house } = z
-      .object({
-        house: z.object({
-          rooms: z.array(roomSchema).nonempty(),
-          openings: z.array(z.object({ id: z.string(), fitting: z.object({ kind: z.string() }) })),
-        }),
-      })
-      .parse(JSON.parse(base.text.slice(base.text.indexOf("\n") + 1)));
+  if (house.rooms.length) {
     if (round > 1) {
       result(1);
       return finish();
     }
     if (name === "unresolved") {
-      const door = house.openings.find((o) => o.fitting.kind === "door");
+      const door = house.openings.find((o) => o.kind === "door");
       if (!door) throw new Error("Expected a door");
       return edit({ kind: "remove_opening", id: door.id });
     }
     const room = firstItem(house.rooms);
-    return edit(paint(firstItem(room.edges).boundary, room.id));
+    return edit(paint(firstItem(room.walls), room.id));
   }
   if (round === 1) return edit({ kind: "place_rooms", layout });
   const applied = z
