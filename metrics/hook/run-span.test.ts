@@ -151,10 +151,19 @@ void test(
   },
 );
 
-void test("derived commands select one actor from the explicit thread or latest matching run", (t) => {
+void test("derived local spans attribute commands to one actor and count overlapping observations once", (t) => {
   const { cwd, home, env } = fixture(t);
   const start = "2026-11-24T13:00:00.000Z";
   const end = "2026-11-24T13:01:00.000Z";
+  function tool(provider: "codex" | "claude", name: string, at: string, duration: number) {
+    const attributes = Object.entries({
+      "session.id": provider,
+      "event.name": provider === "codex" ? "codex.tool_result" : "tool_result",
+      tool_name: name,
+      duration_ms: String(duration),
+    }).map(([key, stringValue]) => ({ key, value: { stringValue } }));
+    return candidate(`${provider}.otel.log`, name, at, { log_record: { attributes } });
+  }
   const l1 = openL1Writer(home.database, registry);
   try {
     l1.ingest(
@@ -170,7 +179,7 @@ void test("derived commands select one actor from the explicit thread or latest 
             issue: 558,
             title_kind: id === "owner" ? "owner" : "other",
             parent_thread_id: id === "owner" ? null : "owner",
-            provider: "codex",
+            provider: id === "neighbor" ? "claude" : "codex",
             worktree_path: id === "neighbor" ? cwd.slice(0, -1) : cwd,
           }),
           candidate("t3.run", id, start, {
@@ -178,15 +187,26 @@ void test("derived commands select one actor from the explicit thread or latest 
             started_at: startedAt,
           }),
         ]),
-        ...Object.entries({ check: null, setup: "owner" }).map(([name, thread]) =>
-          candidate("run.span", name, start, {
-            name,
-            thread,
-            cwd: join(cwd, "apps"),
-            started_at: start,
-            ended_at: end,
-            exit_code: 0,
-          }),
+        candidate("t3.codex_link", "child-link", start, {
+          conversation_id: "codex",
+          thread_id: "child",
+        }),
+        candidate("claude.hook", "neighbor-link", start, {
+          input: { session_id: "claude" },
+          env: { T3CODE_THREAD_ID: "neighbor" },
+        }),
+        tool("claude", "Bash", end, 60_000),
+        tool("codex", "write_stdin", "2026-11-24T13:01:00.020Z", 5_000),
+        ...Object.entries({ check: null, setup: "owner", build: "neighbor" }).map(
+          ([name, thread]) =>
+            candidate("run.span", name, start, {
+              name,
+              thread,
+              cwd: join(cwd, "apps"),
+              started_at: start,
+              ended_at: end,
+              exit_code: 0,
+            }),
         ),
       ],
       end,
@@ -207,9 +227,15 @@ void test("derived commands select one actor from the explicit thread or latest 
         .all()
         .map(Object.values),
       [
+        ["neighbor", 558, start, end, "Bash"],
         ["child", 558, start, end, "run:check exit 0"],
         ["owner", 558, start, end, "run:setup exit 0"],
       ],
+    );
+    assert.equal(
+      derived.prepare("SELECT sum(local_ms) total FROM mart_effort_interval WHERE issue=558").get()
+        ?.total,
+      3 * 60_000,
     );
   } finally {
     derived.close();
