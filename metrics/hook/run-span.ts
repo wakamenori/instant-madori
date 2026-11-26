@@ -11,17 +11,11 @@ if (!command || separator !== "--" || !["check", "build", "setup"].includes(name
 }
 
 const started = new Date();
-const child = spawn(command, argv, { stdio: "inherit", detached: true });
+// The child stays in the terminal's process group so Ctrl-C reaches it even if this wrapper dies first.
+const child = spawn(command, argv, { stdio: "inherit" });
 for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
   process.on(signal, () => {
-    // Shell chains may have a foreground grandchild holding resources.
-    if (child.pid && child.exitCode === null && child.signalCode === null) {
-      try {
-        process.kill(-child.pid, signal);
-      } catch (error) {
-        if (!(error instanceof Error && "code" in error && error.code === "ESRCH")) throw error;
-      }
-    }
+    if (child.exitCode === null && child.signalCode === null) child.kill(signal);
   });
 }
 child.on("error", (error: NodeJS.ErrnoException) => {
