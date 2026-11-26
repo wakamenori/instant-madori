@@ -1,15 +1,11 @@
+import { legacySnapshot } from "./snapshot-support.ts";
 import assert from "node:assert/strict";
 import { URL, fileURLToPath } from "node:url";
 import { join } from "node:path";
 import process from "node:process";
 import { getTestPlatformProxy } from "./platform-proxy.ts";
 import { z } from "zod";
-import {
-  acceptInstruction,
-  claimNextJob,
-  saveJobSnapshot,
-  completeJob,
-} from "../../src/services/jobs.ts";
+import { acceptInstruction, claimNextJob, completeJob } from "../../src/services/jobs.ts";
 import type { Runtime } from "../../src/services/deps.ts";
 import { createStore } from "../../src/storage/store.ts";
 import { d1 } from "../../src/storage/d1.ts";
@@ -120,15 +116,17 @@ try {
       await accept();
       const claimed = await claimNextJob(deps, { patternId: input.patternId });
       assert(claimed.kind === "claimed");
-      const saved = await saveJobSnapshot(deps, {
-        right: claimed.right,
-        display: new Uint8Array([1, 2, 3]),
-      });
-      assert(saved.kind === "saved");
+      const snapshot = await legacySnapshot(
+        bucket,
+        claimed.right,
+        new Uint8Array([1, 2, 3]),
+        runtime.now(),
+      );
       const done = await completeJob(deps, {
+        explanation: "fixture",
         right: claimed.right,
         name: `seed ${i}`,
-        snapshot: saved.snapshot,
+        snapshot,
       });
       assert(done.kind === "committed");
       revisions.unshift(done.revision);

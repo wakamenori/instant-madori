@@ -153,7 +153,11 @@ function stagingServer(
         });
       } else if (viewed && method === "GET") {
         response = new Response(new Uint8Array([1, 2, 3]), {
-          headers: { "content-type": displayContentType, "x-revision-id": viewed.id },
+          headers: {
+            "content-type": displayContentType,
+            "x-revision-id": viewed.id,
+            "x-floor-plan-storeys": "s1",
+          },
         });
       } else if (url.pathname.endsWith("/patterns")) {
         assert.notEqual(url.pathname, `/api/projects/${project.id}/patterns`);

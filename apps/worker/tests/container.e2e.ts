@@ -47,7 +47,7 @@ void test(
         GEOMETRY_IDLE_TIMEOUT_MS: String(idleTimeoutMs),
         // Local workerd evicts a DO 10 s after its last call closes, so with this hold a job
         // reaches a fresh DO only if the previous job's DO call closed.
-        JOB_TEST_HOLD: "before_commit:15",
+        JOB_TEST_HOLD: "finish_answer:15",
       },
     });
     t.after(() => worker.stop());
@@ -75,7 +75,7 @@ void test(
         const response = await worker.call(`/api/patterns/${pattern.id}/messages`, {
           method: "POST",
           as: user,
-          body: { requestId: crypto.randomUUID(), body: "次の案を作って" },
+          body: { requestId: crypto.randomUUID(), body: "台本:plan" },
         });
         assert.equal(response.status, 202);
         const { job } = acceptInstructionResponseSchema.parse(await response.json());
@@ -105,13 +105,34 @@ void test(
         const bytes = new Uint8Array(await response.arrayBuffer());
         const summary = viewer.describe_display(bytes);
         assert.equal(summary.format_version, 1);
-        assert.equal(summary.bodies, 4);
-        assert.deepEqual(summary.elements, [
-          "sample:slab",
-          "sample:wall-north",
-          "sample:wall-west",
-          "sample:wall-east",
-        ]);
+        assert(summary.bodies > 0);
+        assert(
+          summary.elements.length > 0 && summary.elements.every((id) => !id.startsWith("sample:")),
+        );
+        assert(response.headers.get("x-floor-plan-storeys"));
+        assert.equal(revision.name, "台本の案");
+        const lines = worker
+          .logEntries()
+          .filter(
+            (line) =>
+              line["jobId"] === job.jobId &&
+              line["event"] === "job.step" &&
+              typeof line["aiMs"] === "number",
+          );
+        assert.equal(lines.length, revision.baseRevisionId === null ? 4 : 2);
+        const messages = await worker.call(`/api/patterns/${pattern.id}/messages`, { as: user });
+        const page = z
+          .object({
+            messages: z.array(
+              z.object({ kind: z.string(), body: z.string(), jobId: z.string().nullable() }),
+            ),
+          })
+          .parse(await messages.json());
+        assert(
+          page.messages.some(
+            (m) => m.kind === "explanation" && m.jobId === job.jobId && m.body.includes("LDK"),
+          ),
+        );
         summary.free();
         if (start === "cold") {
           for (const [event, keys] of [
@@ -227,7 +248,7 @@ void test(
               (line) =>
                 line["jobId"] === job.jobId &&
                 line["event"] === "job.step" &&
-                line["step"] === "check test hold before commit" &&
+                line["step"] === "round 2 ai" &&
                 line["outcome"] === "hold",
             );
           if (held) break;
@@ -240,8 +261,8 @@ void test(
             .some(
               (line) =>
                 line["jobId"] === job.jobId &&
-                line["step"] === "render snapshot" &&
-                line["outcome"] === "saved",
+                line["step"] === "round 1 call 1 edit_house" &&
+                line["outcome"] === "edited",
             ),
         );
         const response = await worker.call(`/api/jobs/${job.jobId}/stop`, {
@@ -266,7 +287,7 @@ void test(
             .some(
               (line) =>
                 line["jobId"] === job.jobId &&
-                line["step"] === "commit revision" &&
+                line["step"] === "round 2 finish" &&
                 line["outcome"] === "cancelled",
             ),
         );
@@ -322,6 +343,57 @@ void test(
         );
         assert.deepEqual(modes, ["cold", "adopted", "cold", "adopted", "adopted"]);
       });
+      for (const script of ["reject-window", "unresolved"] as const) {
+        await t.test(script, async () => {
+          const created = await worker.call("/api/projects", {
+            as: user,
+            method: "POST",
+            body: { requestId: crypto.randomUUID() },
+          });
+          const { pattern: own } = createProjectResponseSchema.parse(await created.json());
+          async function send(name: string) {
+            const accepted = await worker.call(`/api/patterns/${own.id}/messages`, {
+              as: user,
+              method: "POST",
+              body: { requestId: crypto.randomUUID(), body: "台本:" + name },
+            });
+            assert.equal(accepted.status, 202);
+            return acceptInstructionResponseSchema.parse(await accepted.json()).job;
+          }
+          const base =
+            script === "unresolved"
+              ? await settleJobs(worker, user, own.id, [(await send("plan")).jobId], 300000)
+              : null;
+          const job = await send(script);
+          const state = await settleJobs(worker, user, own.id, [job.jobId], 300000, {
+            resumeHolds: true,
+          });
+          const lines = worker
+            .logEntries()
+            .filter((l) => l["jobId"] === job.jobId && l["event"] === "job.step");
+          const end = await worker.logLine(job.jobId, "job.finished");
+          if (script === "reject-window") {
+            assert.equal(end["outcome"], "committed");
+            assert.equal(state.currentRevision?.name, "窓を直した案");
+            assert(
+              lines.some(
+                (l) => l["step"] === "round 3 call 1 edit_house" && l["outcome"] === "refused",
+              ),
+            );
+            assert.equal(lines.filter((l) => typeof l["aiMs"] === "number").length, 6);
+          } else {
+            assert.equal(end["reason"], "checks_unresolved");
+            assert.equal(lines.filter((l) => l["outcome"] === "blocked").length, 4);
+            assert.deepEqual(state.currentRevision, base?.currentRevision);
+            assert(state.currentRevision);
+            assert.equal(
+              (await worker.call(`/api/revisions/${state.currentRevision.id}/view`, { as: user }))
+                .status,
+              200,
+            );
+          }
+        });
+      }
       async function probe(body: unknown, traceId: string) {
         const response = await worker.call("/api/__probe/operations", {
           method: "POST",
@@ -436,7 +508,7 @@ void test(
             const accepted = await worker.call(`/api/patterns/${ownPattern.id}/messages`, {
               method: "POST",
               as: user,
-              body: { requestId: crypto.randomUUID(), body: "次の案を作って" },
+              body: { requestId: crypto.randomUUID(), body: "台本:plan" },
             });
             assert.equal(accepted.status, 202);
             const { job } = acceptInstructionResponseSchema.parse(await accepted.json());
@@ -451,10 +523,10 @@ void test(
                   (e) =>
                     e["jobId"] === job.jobId &&
                     e["event"] === "job.step" &&
-                    e["step"] === "render snapshot",
+                    e["step"] === "round 1 call 1 edit_house",
                 )
                 .map((e) => [e["attempt"], e["outcome"]]),
-              [[1, "saved"]],
+              [[1, "edited"]],
               "the first render attempt reached a working Container and no retry hid a failed one",
             );
             return job;

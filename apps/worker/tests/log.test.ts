@@ -274,7 +274,7 @@ await test("structured logs preserve allowed fields at both levels", (t) => {
     });
     logEvent("info", "pattern.advanced", { outcome: "claimed" });
     logEvent("info", "api.request", { outcome: "stopped", jobState: "cancelled" });
-    logEvent("info", "job.step", { step: "check test hold before render", outcome: "hold" });
+    logEvent("info", "job.step", { step: "round 1 ai", outcome: "hold" });
   }
   void sourceValueChecks;
 });

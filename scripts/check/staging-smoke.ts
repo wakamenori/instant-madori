@@ -29,7 +29,7 @@ const missingProjectId = "00000000-0000-4000-8000-000000000000";
 // No request waits on the Container because the job does that work.
 const requestTimeoutMs = 30_000;
 // Covers cold Container readiness (60s), display generation (30s), and one render retry with headroom.
-const renderBudgetMs = 240_000;
+const jobBudgetMs = 240_000;
 export type StagingTarget = { origin: string; jobTimeoutMs: number };
 
 export async function smokeStaging(
@@ -161,6 +161,7 @@ export async function smokeStaging(
     revisionId,
     "the view identifies the committed revision",
   );
+  assert.ok(display.headers.get("x-floor-plan-storeys"), "the revision contains a floor plan");
   assert.ok((await display.arrayBuffer()).byteLength > 0, "display data is not empty");
 }
 
@@ -179,7 +180,7 @@ export function stagingTarget(wranglerJsonc: string): StagingTarget {
     .url()
     .refine((value) => new URL(value).origin === value)
     .parse(origins[0]);
-  return { origin, jobTimeoutMs: (hold?.seconds ?? 0) * 1000 + renderBudgetMs };
+  return { origin, jobTimeoutMs: (hold?.seconds ?? 0) * 1000 + jobBudgetMs };
 }
 
 if (import.meta.main) {

@@ -15,7 +15,7 @@ import { signAccessToken } from "../../../scripts/dev/local-access.ts";
 import { settleJobs } from "./support/settle-jobs.ts";
 
 await test("Queue hold through workerd HTTP", { timeout: 120_000 }, async (t) => {
-  const worker = await startLocalWorker({ vars: { JOB_TEST_HOLD: "before_render:3" } });
+  const worker = await startLocalWorker({ vars: { JOB_TEST_HOLD: "first_answer:3" } });
   t.after(() => worker.stop());
   const owner = newUser("queue-owner");
   const other = newUser("queue-other");

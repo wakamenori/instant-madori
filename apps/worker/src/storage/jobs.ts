@@ -13,7 +13,7 @@ import {
 import { readJobExecutionRight } from "./job-execution.ts";
 import type { JobExecutionRight } from "./job-execution.ts";
 import { revisionJson, finishedJobJson } from "./revisions.ts";
-import { verifyJobSnapshot } from "./snapshots.ts";
+import { snapshotJson, snapshotSchema, verifyJobSnapshot } from "./snapshots.ts";
 import type { Snapshot } from "./snapshots.ts";
 import type { R2 } from "./r2.ts";
 import { createOnceStatements, updateOnceStatements, runOnce } from "./requests.ts";
@@ -106,6 +106,53 @@ function activeCondition(right: JobExecutionRight) {
   };
 }
 
+export async function startContext(db: D1, right: JobExecutionRight) {
+  const active = activeCondition(right);
+  return db.first(
+    jsonRows(
+      {
+        sql: `SELECT json_object('instruction',m.body,'claimedAt',j.updated_at,'base',
+ CASE WHEN s.id IS NULL THEN NULL ELSE ${snapshotJson("s")} END) AS json
+ FROM jobs j JOIN messages m ON m.id=j.message_id
+ LEFT JOIN revisions r ON r.id=j.base_revision_id AND r.pattern_id=j.pattern_id
+ LEFT JOIN snapshots s ON s.id=r.snapshot_id AND s.owner_id=j.owner_id WHERE ${active.sql}`,
+        bindings: active.bindings,
+      },
+      z.object({
+        instruction: z.string(),
+        claimedAt: z.iso.datetime(),
+        base: snapshotSchema.nullable(),
+      }),
+      "job start",
+    ),
+  );
+}
+
+export async function recordAi(
+  db: D1,
+  right: JobExecutionRight,
+  versions: { model: string; promptVersion: string; toolSchemaVersion: string },
+) {
+  const active = activeCondition(right);
+  const result = await db.first(
+    rows(
+      {
+        sql: `UPDATE jobs AS j SET ai_model=?, ai_prompt_version=?, ai_tool_schema_version=?
+ WHERE ${active.sql} RETURNING 1 AS found`,
+        bindings: [
+          versions.model,
+          versions.promptVersion,
+          versions.toolSchemaVersion,
+          ...active.bindings,
+        ],
+      },
+      foundSchema,
+      "active job",
+    ),
+  );
+  return result !== null;
+}
+
 function resultStatement(right: JobExecutionRight) {
   const scope = executionCondition(right);
   return jsonRows(
@@ -139,7 +186,14 @@ export async function completeJob(
   db: D1,
   bucket: R2,
   right: JobExecutionRight,
-  input: { id: string; name: string; snapshot: Snapshot; now: string },
+  input: {
+    id: string;
+    name: string;
+    snapshot: Snapshot;
+    now: string;
+    explanation: { id: string; body: string };
+    notice: { id: string; body: string } | null;
+  },
 ) {
   const { jobId, patternId, generation, baseRevisionId, ownerId } = readJobExecutionRight(right);
   const { id, name, snapshot: suppliedSnapshot, now } = input;
@@ -148,7 +202,22 @@ export async function completeJob(
   const snapshot = await verifyJobSnapshot(bucket, right, suppliedSnapshot);
   if (snapshot === null) return { kind: "invalid_snapshot" as const };
   const active = activeCondition(right);
-  const [, , , results] = await db.batch([
+  function message(kind: "notice" | "explanation", entry: { id: string; body: string } | null) {
+    return write({
+      sql: `INSERT INTO messages (id,pattern_id,owner_id,number,body,created_at,kind,job_id)
+        SELECT ?,j.pattern_id,j.owner_id,(SELECT coalesce(max(number),0)+1 FROM messages WHERE pattern_id=j.pattern_id),?,?,?,j.id
+        FROM jobs j WHERE ${active.sql} AND ? IS NOT NULL`,
+      bindings: [
+        entry?.id ?? null,
+        entry?.body ?? null,
+        now,
+        kind,
+        ...active.bindings,
+        entry?.id ?? null,
+      ],
+    });
+  }
+  const [, , , , , results] = await db.batch([
     write({
       sql: `INSERT INTO snapshots
         (id, owner_id, format_version, manifest_key, manifest_sha256, created_at)
@@ -163,6 +232,8 @@ export async function completeJob(
         ...active.bindings,
       ],
     }),
+    message("notice", input.notice),
+    message("explanation", input.explanation),
     write({
       sql: `INSERT INTO revisions
         (id, pattern_id, owner_id, number, name, snapshot_id, base_revision_id, created_at, job_id, conversation_number)
@@ -170,9 +241,9 @@ export async function completeJob(
           (SELECT coalesce(max(r.number), 0) + 1 FROM revisions r WHERE r.pattern_id = j.pattern_id),
           ?, s.id, j.base_revision_id, ?, j.id, m.number
         FROM jobs j JOIN snapshots s ON s.id = ? AND s.owner_id = j.owner_id
-          JOIN messages m ON m.id = j.message_id AND m.pattern_id = j.pattern_id
+          JOIN messages m ON m.id = ? AND m.pattern_id = j.pattern_id
         WHERE ${active.sql}`,
-      bindings: [id, name, now, snapshot.id, ...active.bindings],
+      bindings: [id, name, now, snapshot.id, input.explanation.id, ...active.bindings],
     }),
     write({
       sql: `UPDATE jobs SET state = 'completed', updated_at = ?

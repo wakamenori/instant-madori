@@ -1,3 +1,4 @@
+import { legacySnapshot } from "./snapshot-support.ts";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { completeJob } from "../../src/services/jobs.ts";
@@ -56,11 +57,7 @@ try {
     const { jobId, generation, baseRevisionId } = readJobExecutionRight(right);
     assert.equal(baseRevisionId, history.at(-1)?.revisionId ?? null);
     const display = new Uint8Array([history.length + 1]);
-    const snapshot = await db.store.snapshots.write(right, {
-      id: crypto.randomUUID(),
-      now,
-      display,
-    });
+    const snapshot = await legacySnapshot(db.bucket, right, display, now);
     if (previousWorker) {
       const id = crypto.randomUUID();
       const bindings = [jobId, patternId, generation, baseRevisionId, ownerId];
@@ -77,7 +74,12 @@ try {
       );
       history.push({ revisionId: id, display });
     } else {
-      const result = await completeJob(db, { right, snapshot, name: "plan" });
+      const result = await completeJob(db, {
+        right,
+        snapshot,
+        explanation: "fixture",
+        name: "plan",
+      });
       assert(result.kind === "committed");
       history.push({ revisionId: result.revision.id, display });
     }

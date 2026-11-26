@@ -134,7 +134,7 @@ export async function writeSnapshot(
     id: string;
     now: string;
     display: Bytes;
-    house?: HouseFiles<Bytes, { svg: Bytes }>;
+    house: HouseFiles<Bytes, { svg: Bytes }>;
   },
 ): Promise<Snapshot> {
   const { ownerId, jobId, generation } = readJobExecutionRight(right);
@@ -147,22 +147,18 @@ export async function writeSnapshot(
     return { key, mediaType, bytes: bytes.byteLength, sha256: await sha256(bytes) };
   }
   const display = await file(fileNames.display, displayContentType, input.display);
-  const manifest = manifestSchema.parse(
-    house === undefined
-      ? { formatVersion: 1, display }
-      : {
-          formatVersion: 2,
-          house: await file(fileNames.house, "application/json", house.data),
-          display,
-          floorPlans: await Promise.all(
-            house.floorPlans.map(async ({ storey, svg }, index) => ({
-              storey,
-              ...(await file(fileNames.floorPlan(index), floorPlanContentType, svg)),
-            })),
-          ),
-          checks: await file(fileNames.checks, "application/json", house.checks),
-        },
-  );
+  const manifest = manifestSchema.parse({
+    formatVersion: 2,
+    house: await file(fileNames.house, "application/json", house.data),
+    display,
+    floorPlans: await Promise.all(
+      house.floorPlans.map(async ({ storey, svg }, index) => ({
+        storey,
+        ...(await file(fileNames.floorPlan(index), floorPlanContentType, svg)),
+      })),
+    ),
+    checks: await file(fileNames.checks, "application/json", house.checks),
+  });
   await Promise.all(files.map(({ key, bytes, mediaType }) => bucket.putNew(key, bytes, mediaType)));
   const manifestBytes = new Uint8Array(new TextEncoder().encode(JSON.stringify(manifest)));
   const manifestKey = snapshotKey(ownerId, id, fileNames.manifest);

@@ -1,5 +1,7 @@
+import type { turnCodec } from "../ai/turns.ts";
 import type { Ai } from "../ai/round-trip.ts";
-import type { JobStepName, JobStepResult } from "./jobs.ts";
+import type { JobStepName } from "../log.ts";
+import type { JobStepResult } from "./jobs.ts";
 import type { JobTestHold } from "./job-test-hold.ts";
 import type { JobExecutionReference } from "../storage/job-execution.ts";
 import type { Store } from "../storage/store.ts";
@@ -73,11 +75,19 @@ export type PatternCoordinatorDeps = StoreDeps<
 
 export type JobWorkflowDeps = StoreDeps<
   "jobs",
-  "restore" | "check" | "complete" | "failAndHoldQueue" | "ownedBySubject"
+  | "restore"
+  | "check"
+  | "complete"
+  | "failAndHoldQueue"
+  | "ownedBySubject"
+  | "startContext"
+  | "recordAi"
 > &
-  StoreDeps<"snapshots", "write"> &
+  StoreDeps<"snapshots", "write" | "open"> &
+  StoreDeps<"work", "read" | "keep"> &
   Pick<ServiceDeps, "geometry" | "runtime" | "wakePattern"> & {
     ai: Ai;
+    turns: typeof turnCodec;
     testHold: JobTestHold | null;
   };
 

@@ -63,12 +63,7 @@ export function judgeLogs(
       expectation.kind === "stopped" &&
       expectation.held &&
       finish &&
-      !job.some(
-        (l) =>
-          l.event === "job.step" &&
-          l.step === "check test hold before render" &&
-          l.outcome === "hold",
-      )
+      !job.some((l) => l.event === "job.step" && l.step === "round 1 ai" && l.outcome === "hold")
     )
       reasons.push(`${expectation.jobId} missing hold before stop`);
     if (expectation.kind !== "restart") continue;

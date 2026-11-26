@@ -7,6 +7,15 @@ const errorDescriptionSchema = z.string().brand(errorDescription);
 
 type FailedGeometry = Exclude<GeometryResult<unknown>, { kind: "ok" }>;
 
+export type JobStepName =
+  | "start job"
+  | `round ${number} ai`
+  | `round ${number} call ${number} ${"edit_house" | "read_house"}`
+  | `round ${number} finish`
+  | "commit revision"
+  | "record failure"
+  | "wake pattern";
+
 export interface LogFields {
   traceId?: string;
   rayId?: string | undefined;
@@ -27,15 +36,16 @@ export interface LogFields {
   jobState?: "cancelled" | "completed" | "failed";
   acceptance?: "applied" | "replayed";
   generation?: number;
-  step?:
-    | "render snapshot"
-    | "commit revision"
-    | "record failure"
-    | "wake pattern"
-    | "check test hold before render"
-    | "check test hold before commit";
+  step?: JobStepName;
   attempt?: number;
   outcome?:
+    | "started"
+    | "edited"
+    | "accepted"
+    | "answered"
+    | "blocked"
+    | "read"
+    | "refused"
     | "saved"
     | "committed"
     | "cancelled"
@@ -63,12 +73,22 @@ export interface LogFields {
   instance?: "created" | "existing";
   bytes?: number;
   geometryStart?: Extract<GeometryResult<unknown>, { kind: "ok" }>["start"];
+  aiMs?: number;
+  saveMs?: number;
+  checkMs?: number;
   geometryMs?: number;
   geometryFailure?: FailedGeometry["reason"];
   geometryStatus?: number;
   geometryViolation?: Extract<FailedGeometry, { reason: "protocol_violation" }>["violation"];
   reason?:
     | FailedGeometry["reason"]
+    | "ai_rejected"
+    | "ai_script_ended"
+    | "ai_unavailable"
+    | "ai_output_limit"
+    | "ai_refused"
+    | "round_limit"
+    | "checks_unresolved"
     | "execution_lost"
     | "invalid_snapshot"
     | "invalid_name"
@@ -117,6 +137,9 @@ const logKeys = {
   instance: "string",
   bytes: "number",
   geometryStart: "string",
+  aiMs: "number",
+  saveMs: "number",
+  checkMs: "number",
   geometryMs: "number",
   geometryFailure: "string",
   geometryStatus: "number",

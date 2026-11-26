@@ -52,7 +52,9 @@ export function developmentScript({ opening: parts, rounds }: Conversation): Scr
       answer: {
         kind: "plan",
         name: name === "reject-window" ? "窓を直した案" : "台本の案",
-        explanation: "LDKの外壁に玄関ドアと窓を設けました。",
+        explanation: parts[1]
+          ? "LDKの壁の色を変更しました。"
+          : "LDKの外壁に玄関ドアと窓を設けました。",
         assumptions: ["平屋を想定しました。"],
         concerns: [],
       },

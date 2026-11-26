@@ -15,7 +15,7 @@ import { signAccessToken } from "../../../scripts/dev/local-access.ts";
 import { settleJobs } from "./support/settle-jobs.ts";
 
 await test("Job stop through workerd HTTP", { timeout: 120_000 }, async (t) => {
-  const worker = await startLocalWorker({ vars: { JOB_TEST_HOLD: "before_render:10" } });
+  const worker = await startLocalWorker({ vars: { JOB_TEST_HOLD: "first_answer:10" } });
   t.after(() => worker.stop());
   const owner = newUser("stop-owner");
   const other = newUser("stop-other");
@@ -59,8 +59,16 @@ await test("Job stop through workerd HTTP", { timeout: 120_000 }, async (t) => {
   }
   const pattern = await create();
   const a = await accept(pattern.id);
-  const held = await worker.logLine(a.jobId, "job.step");
-  assert.equal(held["step"], "check test hold before render");
+  let held;
+  for (let attempt = 0; attempt < 200; attempt++) {
+    held = worker
+      .logEntries()
+      .find((line) => line["jobId"] === a.jobId && line["outcome"] === "hold");
+    if (held) break;
+    await setTimeout(50);
+  }
+  assert(held);
+  assert.equal(held["step"], "round 1 ai");
   assert.equal(held["outcome"], "hold");
   const b = await accept(pattern.id);
   await waitState(

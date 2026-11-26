@@ -1,3 +1,4 @@
+import { legacySnapshot, fixtureHouse } from "./snapshot-support.ts";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { URL, fileURLToPath } from "node:url";
@@ -6,12 +7,7 @@ import process from "node:process";
 import { getTestPlatformProxy } from "./platform-proxy.ts";
 import { z } from "zod";
 import { requestKey } from "../../src/services/requests.ts";
-import {
-  acceptInstruction,
-  claimNextJob,
-  saveJobSnapshot,
-  completeJob,
-} from "../../src/services/jobs.ts";
+import { acceptInstruction, claimNextJob, completeJob } from "../../src/services/jobs.ts";
 import type { Runtime } from "../../src/services/deps.ts";
 import { createStore } from "../../src/storage/store.ts";
 import { d1 } from "../../src/storage/d1.ts";
@@ -242,11 +238,10 @@ try {
             },
           });
         }
-        const saved = await saveJobSnapshot(deps, { right: claimed.right, display: bytes });
-        assert.equal(saved.kind, "saved");
-        return saved.snapshot;
+        return legacySnapshot(bucket, claimed.right, bytes, runtime.now());
       };
       const result = await completeJob(deps, {
+        explanation: "fixture",
         right: claimed.right,
         snapshot: await writeSnapshot(),
         name,
@@ -293,6 +288,7 @@ try {
       const originalBytes = await originalDisplay.arrayBuffer();
       await assert.rejects(
         store.snapshots.write(first.right, {
+          house: fixtureHouse,
           id: snapshot.id,
           now: runtime.now(),
           display: new Uint8Array([1, 2]),

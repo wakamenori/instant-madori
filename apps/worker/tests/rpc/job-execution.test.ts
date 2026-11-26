@@ -1,9 +1,9 @@
+import { saveJobSnapshot, fixtureHouse } from "./snapshot-support.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   acceptInstruction,
   claimNextJob,
-  saveJobSnapshot,
   completeJob,
   recordJobFailure,
   readActiveJob,
@@ -66,7 +66,7 @@ await test("Job execution through services on real D1 and R2", async (t) => {
     return result.snapshot;
   }
   const complete = (right: Right, snapshot: Snapshot) =>
-    completeJob(deps, { right, snapshot, name: "案" });
+    completeJob(deps, { right, snapshot, explanation: "fixture", name: "案" });
   const count = () =>
     Promise.all(
       ["snapshots", "revisions"].map((table) =>
@@ -190,7 +190,14 @@ await test("Job execution through services on real D1 and R2", async (t) => {
       try {
         if (failure === "check") {
           await assert.rejects(
-            db.store.jobs.complete(right, { id: crypto.randomUUID(), name: "", snapshot, now }),
+            db.store.jobs.complete(right, {
+              id: crypto.randomUUID(),
+              name: "",
+              snapshot,
+              now,
+              explanation: { id: crypto.randomUUID(), body: "fixture" },
+              notice: null,
+            }),
             /CHECK constraint failed/,
           );
         } else if (failure === "revision collision") {
@@ -201,7 +208,7 @@ await test("Job execution through services on real D1 and R2", async (t) => {
           await assert.rejects(
             completeJob(
               { ...deps, runtime: { ...db.runtime, newId: () => done.revision.id } },
-              { right, snapshot, name: "案" },
+              { right, snapshot, explanation: "fixture", name: "案" },
             ),
             /UNIQUE constraint failed/,
           );
@@ -305,7 +312,10 @@ await test("Job execution through services on real D1 and R2", async (t) => {
         head: () => Promise.reject(new Error("head unavailable")),
       });
       await assert.rejects(
-        completeJob({ ...deps, store: broken }, { right, snapshot, name: "案" }),
+        completeJob(
+          { ...deps, store: broken },
+          { right, snapshot, explanation: "fixture", name: "案" },
+        ),
         /head unavailable/,
       );
       assert.deepEqual(await count(), before);
@@ -394,7 +404,7 @@ await test("Job execution through services on real D1 and R2", async (t) => {
   );
 
   await t.test(
-    "conversation cutoffs exclude instructions queued before, during, or between retries",
+    "conversation cutoffs include the explanation after queued instructions",
     async () => {
       for (const timing of ["before claim", "while running", "between retries"] as const) {
         const patternId = await pattern();
@@ -405,7 +415,14 @@ await test("Job execution through services on real D1 and R2", async (t) => {
         const snapshot = await save(right);
         if (timing === "between retries") {
           await assert.rejects(
-            db.store.jobs.complete(right, { id: crypto.randomUUID(), name: "", snapshot, now }),
+            db.store.jobs.complete(right, {
+              id: crypto.randomUUID(),
+              name: "",
+              snapshot,
+              now,
+              explanation: { id: crypto.randomUUID(), body: "fixture" },
+              notice: null,
+            }),
             /CHECK constraint failed/,
           );
           await accept(patternId);
@@ -417,7 +434,7 @@ await test("Job execution through services on real D1 and R2", async (t) => {
             .prepare("SELECT conversation_number FROM revisions WHERE id = ?")
             .bind(done.revision.id)
             .first("conversation_number"),
-          first.job.number,
+          first.job.number + 2,
         );
         const second = await claim(patternId);
         const next = await complete(second, await save(second));
@@ -427,7 +444,7 @@ await test("Job execution through services on real D1 and R2", async (t) => {
             .prepare("SELECT conversation_number FROM revisions WHERE id = ?")
             .bind(next.revision.id)
             .first("conversation_number"),
-          2,
+          4,
         );
       }
     },
@@ -437,7 +454,7 @@ await test("Job execution through services on real D1 and R2", async (t) => {
     const { right, snapshot } = await ready();
     const before = await count();
     for (const name of ["", " ", "\u200b", "a\u0007"])
-      assert.deepEqual(await completeJob(deps, { right, snapshot, name }), {
+      assert.deepEqual(await completeJob(deps, { right, snapshot, explanation: "fixture", name }), {
         kind: "invalid_name",
       });
     assert.deepEqual(await count(), before);
@@ -523,11 +540,13 @@ await test("Job execution through services on real D1 and R2", async (t) => {
       const before = await count();
       for (const operation of [
         () => saveJobSnapshot(observed, { right: fake, display: new Uint8Array([1]) }),
-        () => completeJob(observed, { right: fake, snapshot, name: "案" }),
+        () => completeJob(observed, { right: fake, snapshot, explanation: "fixture", name: "案" }),
         async () => recordJobFailure(observed, fake),
         () => observed.store.jobs.check(fake),
         () =>
           observed.store.jobs.complete(fake, {
+            explanation: { id: crypto.randomUUID(), body: "fixture" },
+            notice: null,
             id: crypto.randomUUID(),
             snapshot,
             name: "案",
@@ -537,6 +556,7 @@ await test("Job execution through services on real D1 and R2", async (t) => {
         () => observed.store.jobs.ownedBySubject(fake, "staging:verifier"),
         () =>
           observed.store.snapshots.write(fake, {
+            house: fixtureHouse,
             id: crypto.randomUUID(),
             display: new Uint8Array([1]),
             now,
@@ -554,7 +574,7 @@ await test("Job execution through services on real D1 and R2", async (t) => {
     const constructor = right.constructor as Constructor;
     assert.throws(() => new constructor(Symbol("forged"), fields), TypeError);
     assert.deepEqual(
-      await completeJob(observed, { right, snapshot, name: "案" }),
+      await completeJob(observed, { right, snapshot, explanation: "fixture", name: "案" }),
       await complete(right, snapshot),
     );
     assert(calls > 0);

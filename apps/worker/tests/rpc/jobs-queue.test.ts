@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { acceptedJobSchema, finishedJobSchema } from "@madori/contracts";
+import { queueHeadSql } from "../../src/storage/job-execution.ts";
 import { messagePageSql } from "../../src/storage/messages.ts";
 import {
   revisionPageSql,
@@ -238,6 +239,9 @@ await test("State queue reads scale with queued jobs instead of completed histor
   const waiting = await db.store.revisions.state({ ownerId, patternId });
   assert(waiting?.queuedJobs[0]);
   const firstQueued = waiting.queuedJobs[0];
+  const head = await db.raw.prepare(queueHeadSql).bind(patternId).all<{ id: string }>();
+  assert.equal(head.results[0]?.id, firstQueued.jobId);
+  assert(head.meta.rows_read <= 4 * waiting.queuedJobs.length + 2, JSON.stringify(head.meta));
   const claim = await db.store.jobs.claim({ patternId, now });
   assert(claim.kind === "claimed");
   assert.equal(claim.right.reference.jobId, firstQueued.jobId);
