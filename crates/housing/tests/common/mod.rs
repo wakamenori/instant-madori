@@ -118,3 +118,5 @@ pub fn tiling(rooms: impl Iterator<Item = (Point, Point)>, half: f64, house: &Ho
     }
     result
 }
+
+pub mod layouts;
