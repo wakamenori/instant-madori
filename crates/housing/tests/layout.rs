@@ -572,18 +572,19 @@ fn check_tiling(input: &RoomLayout, house: &House, failures: &mut Vec<String>) {
     }
 }
 
+fn staggered(top: i32) -> RoomLayout {
+    let mut input = layout(&[
+        (0, 3550, 1100, top),
+        (1300, 3550, 7200, 6150),
+        (1100, 6150, 7200, 7000),
+    ]);
+    input.walls.exterior_thickness = 120.0;
+    input.walls.interior_thickness = 240.0;
+    input
+}
+
 #[test]
 fn rejects_a_through_wall_shorter_than_the_t_foot_beside_it() {
-    let staggered = |top| {
-        let mut input = layout(&[
-            (0, 3550, 1100, top),
-            (1300, 3550, 7200, 6150),
-            (1100, 6150, 7200, 7000),
-        ]);
-        input.walls.exterior_thickness = 120.0;
-        input.walls.interior_thickness = 240.0;
-        input
-    };
     for (top, gap) in [(6170, 20.0), (6200, 50.0), (6209, 59.0)] {
         one_error(
             &staggered(top),
@@ -616,6 +617,94 @@ fn rejects_a_through_wall_shorter_than_the_t_foot_beside_it() {
             minimum: 100.0,
         },
     );
+}
+
+#[test]
+fn reports_the_smaller_of_two_setbacks_between_the_same_rooms() {
+    let input = layout(&[(-1000, 0, 0, 1000), (0, 10, 1000, 1020)]);
+    one_error(
+        &input,
+        &[1, 2],
+        Reason::NarrowGap {
+            gap: 10.,
+            minimum: 200.,
+        },
+    );
+}
+
+#[test]
+fn equal_strip_gap_preserves_the_wall_collision_minimum() {
+    let input = layout(&[
+        (10, -1000, 1000, 0),
+        (-1000, 0, 0, 1000),
+        (0, 0, 1000, 1000),
+    ]);
+    one_error(
+        &input,
+        &[1, 2, 3],
+        Reason::NarrowGap {
+            gap: 10.,
+            minimum: 200.,
+        },
+    );
+}
+
+#[test]
+fn far_wall_covering_the_foot_adds_no_gap() {
+    let input = layout(&[
+        (0, 0, 3000, 1000),
+        (0, 1000, 1500, 2000),
+        (1560, 1000, 3000, 2000),
+        (0, 2000, 3000, 3000),
+    ]);
+    one_error(
+        &input,
+        &[1, 2, 3, 4],
+        Reason::NarrowGap {
+            gap: 60.,
+            minimum: 200.,
+        },
+    );
+}
+
+#[test]
+fn thinner_walls_at_the_limits_of_both_feet_preserve_the_full_gap() {
+    let input = layout(&[
+        (-1000, -1000, 0, 0),
+        (0, -1000, 1000, 0),
+        (-1000, 0, -50, 1000),
+        (50, 0, 1000, 1000),
+    ]);
+    let all_rooms = rejections(&input)
+        .into_iter()
+        .filter(|r| r.rooms.iter().map(|room| room.number).eq(1..=4))
+        .map(|r| r.reason)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        all_rooms,
+        [Reason::NarrowGap {
+            gap: 100.,
+            minimum: 200.
+        }]
+    );
+}
+
+#[test]
+fn decimal_half_thickness_at_a_setback_tiles_in_both_directions() {
+    for mirror in [false, true] {
+        let mut input = staggered(6210);
+        input.walls.exterior_thickness = 120.4;
+        // Subtracting these coordinates rounds just below the 60.2 mm reach.
+        input.rooms[0].max.y = input.rooms[2].min.y + input.walls.exterior_thickness / 2.;
+        if mirror {
+            for room in &mut input.rooms {
+                (room.min.y, room.max.y) = (-room.max.y, -room.min.y);
+            }
+        }
+        let mut failures = Vec::new();
+        check_tiling(&input, &build(&input).unwrap(), &mut failures);
+        assert!(failures.is_empty(), "{failures:?}");
+    }
 }
 
 struct Xorshift(u64);
