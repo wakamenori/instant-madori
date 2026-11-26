@@ -517,3 +517,5 @@ mod tests;
 mod probe_kit;
 #[cfg(test)]
 mod roof_probe;
+#[cfg(test)]
+mod wall_probe;
