@@ -50,12 +50,21 @@ pub enum InputSnapshot {
 #[derive(Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Operation {
+    /// Create the storey, walls and rooms of an empty house from rectangular rooms. Rejected with
+    /// house_exists when a house already exists. The result lists each room's number, name and id.
     PlaceRooms { layout: RoomLayout },
+    /// Add a window or door to one wall. The result returns the id of the new opening.
     AttachOpening { opening: OpeningSpec },
+    /// Replace the wall, position, size and fitting of an existing opening. The opening keeps its id.
     ChangeOpening { id: OpeningId, opening: OpeningSpec },
+    /// Remove an existing opening.
     RemoveOpening { id: OpeningId },
+    /// Move a wall perpendicular to itself. The result lists the walls that moved, the area of each
+    /// room before and after in square metres, and the openings that shifted along their wall.
     MoveWall { wall_move: WallMove },
+    /// Paint one face of one wall. A colour already on that face is replaced.
     SetWallColor { wall_color: WallColor },
+    /// Remove the colour from one face of one wall.
     ClearWallColor { wall: BoundaryId, face: FaceRole },
 }
 

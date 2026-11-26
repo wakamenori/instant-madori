@@ -173,7 +173,9 @@ fn verification_one() {
 }
 #[test]
 fn room_names_remain_text() {
-    let plans = render(&verification("<script>alert(\"x\")</script>&\u{1}")).unwrap();
+    let mut data = verification("居間").into_data();
+    data.rooms[0].name = "<script>alert(\"x\")</script>&\u{1}".into();
+    let plans = render(&House::new(data).unwrap()).unwrap();
     let raw = plans[0].svg.as_str();
     assert!(raw.contains("&lt;script&gt;"));
     let doc = Document::parse(raw).unwrap();

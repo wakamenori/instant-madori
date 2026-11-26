@@ -20,7 +20,7 @@ fn layout(rects: &[(Coord, Coord)]) -> House {
             rooms: rects
                 .iter()
                 .map(|&(a, b)| LayoutRoom {
-                    name: String::new(),
+                    name: "Room".into(),
                     usage: RoomUse::Other,
                     min: point(a),
                     max: point(b),

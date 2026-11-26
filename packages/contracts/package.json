@@ -4,6 +4,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./ai-tools": "./src/ai-tools.ts",
     "./geometry-internal": "./src/generated/geometry-internal.ts"
   },
   "scripts": {

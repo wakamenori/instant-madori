@@ -9,6 +9,7 @@ fn reused_generator_writes_into_the_invoking_checkout() -> std::io::Result<()> {
     let outputs = [
         "geometry-internal.ts",
         "display.ts",
+        "ai-tools.schema.json",
         "geometry-internal.schema.json",
     ];
     for checkout in [&first, &second] {

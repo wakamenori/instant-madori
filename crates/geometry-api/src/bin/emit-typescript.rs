@@ -18,5 +18,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         output.join("geometry-internal.schema.json"),
         madori_geometry_api::schema::render_schemas()?,
     )?;
+    std::fs::write(
+        output.join("ai-tools.schema.json"),
+        madori_geometry_api::tools::render_tool_schemas()?,
+    )?;
     Ok(())
 }

@@ -1,0 +1,820 @@
+[
+  {
+    "input": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "description": "Change the working single-storey house with an ordered batch of operations. Lengths are millimetres\non wall centre lines. Copy element ids exactly from earlier results or read_house. The batch is\natomic: the operations apply in order, and if one is rejected, none of them apply and the result\ngives the zero-based index of the rejected operation and the reason. On success, the result lists\neach operation's result and the inspection findings of the changed house. On an empty house, start\nwith place_rooms; other operations on an empty house are rejected with no_house.",
+      "properties": {
+        "operations": {
+          "description": "Applied in this order as one atomic batch.",
+          "items": {
+            "discriminator": {
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "description": "Create the storey, walls and rooms of an empty house from rectangular rooms. Rejected with\nhouse_exists when a house already exists. The result lists each room's number, name and id.",
+                "properties": {
+                  "kind": {
+                    "const": "place_rooms",
+                    "type": "string"
+                  },
+                  "layout": {
+                    "additionalProperties": false,
+                    "description": "Rectangular rooms on wall centre lines, in millimetres. Repeat the exact coordinate for a shared wall.\nEach room must be wider than the thickest wall on both axes. Rooms must not overlap or touch only at a\ncorner, and walls must not overlap: facing perimeter walls need at least one exterior wall thickness\nbetween their centre lines. Where a wall ends on another wall, the piece of that wall beside the joint\nmust be at least half the ending wall's thickness long when a thinner wall continues past it.",
+                    "properties": {
+                      "rooms": {
+                        "items": {
+                          "additionalProperties": false,
+                          "description": "A room bounded by the lower-left and upper-right centre-line corners.",
+                          "properties": {
+                            "max": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "x": {
+                                  "format": "double",
+                                  "type": "number"
+                                },
+                                "y": {
+                                  "format": "double",
+                                  "type": "number"
+                                }
+                              },
+                              "required": [
+                                "x",
+                                "y"
+                              ],
+                              "type": "object"
+                            },
+                            "min": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "x": {
+                                  "format": "double",
+                                  "type": "number"
+                                },
+                                "y": {
+                                  "format": "double",
+                                  "type": "number"
+                                }
+                              },
+                              "required": [
+                                "x",
+                                "y"
+                              ],
+                              "type": "object"
+                            },
+                            "name": {
+                              "description": "Label shown in the floor plan.",
+                              "maxLength": 24,
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "usage": {
+                              "enum": [
+                                "ldk",
+                                "living",
+                                "dining",
+                                "kitchen",
+                                "bedroom",
+                                "japanese_room",
+                                "entrance",
+                                "hall",
+                                "toilet",
+                                "washroom",
+                                "bathroom",
+                                "storage",
+                                "other"
+                              ],
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "name",
+                            "usage",
+                            "min",
+                            "max"
+                          ],
+                          "type": "object"
+                        },
+                        "type": "array"
+                      },
+                      "walls": {
+                        "additionalProperties": false,
+                        "description": "Wall thicknesses and height for the whole storey, in millimetres. The height is also the storey height.",
+                        "properties": {
+                          "exterior_thickness": {
+                            "format": "double",
+                            "type": "number"
+                          },
+                          "height": {
+                            "format": "double",
+                            "type": "number"
+                          },
+                          "interior_thickness": {
+                            "format": "double",
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "exterior_thickness",
+                          "interior_thickness",
+                          "height"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "walls",
+                      "rooms"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "layout"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "description": "Add a window or door to one wall. The result returns the id of the new opening.",
+                "properties": {
+                  "kind": {
+                    "const": "attach_opening",
+                    "type": "string"
+                  },
+                  "opening": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "distance": {
+                        "description": "Distance along the wall from the reference end to the nearer jamb.",
+                        "format": "double",
+                        "type": "number"
+                      },
+                      "fitting": {
+                        "discriminator": {
+                          "propertyName": "kind"
+                        },
+                        "oneOf": [
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "kind": {
+                                "const": "window",
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind"
+                            ],
+                            "type": "object"
+                          },
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "hinge": {
+                                "description": "Boundary end whose nearer jamb carries the hinges, independent of the opening's `from`.",
+                                "enum": [
+                                  "start",
+                                  "end"
+                                ],
+                                "type": "string"
+                              },
+                              "kind": {
+                                "const": "door",
+                                "type": "string"
+                              },
+                              "opens_to": {
+                                "description": "Side of the wall the leaf swings into, looking from the boundary start to the end as for `SideOffsets`: the room on that side, or the exterior when that side has no room.",
+                                "enum": [
+                                  "left",
+                                  "right"
+                                ],
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "hinge",
+                              "opens_to"
+                            ],
+                            "type": "object"
+                          }
+                        ]
+                      },
+                      "from": {
+                        "enum": [
+                          "start",
+                          "end"
+                        ],
+                        "type": "string"
+                      },
+                      "height": {
+                        "format": "double",
+                        "type": "number"
+                      },
+                      "sill": {
+                        "description": "Height of the bottom of the opening above the floor.",
+                        "format": "double",
+                        "type": "number"
+                      },
+                      "wall": {
+                        "type": "string"
+                      },
+                      "width": {
+                        "format": "double",
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "wall",
+                      "from",
+                      "distance",
+                      "width",
+                      "height",
+                      "sill",
+                      "fitting"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "opening"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "description": "Replace the wall, position, size and fitting of an existing opening. The opening keeps its id.",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "const": "change_opening",
+                    "type": "string"
+                  },
+                  "opening": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "distance": {
+                        "description": "Distance along the wall from the reference end to the nearer jamb.",
+                        "format": "double",
+                        "type": "number"
+                      },
+                      "fitting": {
+                        "discriminator": {
+                          "propertyName": "kind"
+                        },
+                        "oneOf": [
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "kind": {
+                                "const": "window",
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind"
+                            ],
+                            "type": "object"
+                          },
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "hinge": {
+                                "description": "Boundary end whose nearer jamb carries the hinges, independent of the opening's `from`.",
+                                "enum": [
+                                  "start",
+                                  "end"
+                                ],
+                                "type": "string"
+                              },
+                              "kind": {
+                                "const": "door",
+                                "type": "string"
+                              },
+                              "opens_to": {
+                                "description": "Side of the wall the leaf swings into, looking from the boundary start to the end as for `SideOffsets`: the room on that side, or the exterior when that side has no room.",
+                                "enum": [
+                                  "left",
+                                  "right"
+                                ],
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "hinge",
+                              "opens_to"
+                            ],
+                            "type": "object"
+                          }
+                        ]
+                      },
+                      "from": {
+                        "enum": [
+                          "start",
+                          "end"
+                        ],
+                        "type": "string"
+                      },
+                      "height": {
+                        "format": "double",
+                        "type": "number"
+                      },
+                      "sill": {
+                        "description": "Height of the bottom of the opening above the floor.",
+                        "format": "double",
+                        "type": "number"
+                      },
+                      "wall": {
+                        "type": "string"
+                      },
+                      "width": {
+                        "format": "double",
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "wall",
+                      "from",
+                      "distance",
+                      "width",
+                      "height",
+                      "sill",
+                      "fitting"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "id",
+                  "opening"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "description": "Remove an existing opening.",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "const": "remove_opening",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "id"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "description": "Move a wall perpendicular to itself. The result lists the walls that moved, the area of each\nroom before and after in square metres, and the openings that shifted along their wall.",
+                "properties": {
+                  "kind": {
+                    "const": "move_wall",
+                    "type": "string"
+                  },
+                  "wall_move": {
+                    "additionalProperties": false,
+                    "description": "Move a wall perpendicular to itself. Every wall on the same straight line moves with it, and the walls\nmeeting that line stretch or shrink to stay connected.",
+                    "properties": {
+                      "distance": {
+                        "description": "Millimetres, greater than zero. Never rounded to a grid.",
+                        "format": "double",
+                        "type": "number"
+                      },
+                      "toward": {
+                        "description": "The face of `wall` the line moves toward: the room on that side, or the exterior. Moving toward a room\nmakes it smaller; moving toward the exterior makes the room on the other side larger.",
+                        "discriminator": {
+                          "propertyName": "kind"
+                        },
+                        "oneOf": [
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "kind": {
+                                "const": "room",
+                                "type": "string"
+                              },
+                              "room": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "room"
+                            ],
+                            "type": "object"
+                          },
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "kind": {
+                                "const": "exterior",
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind"
+                            ],
+                            "type": "object"
+                          }
+                        ]
+                      },
+                      "wall": {
+                        "description": "Any wall on the straight line to move.",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "wall",
+                      "toward",
+                      "distance"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "wall_move"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "description": "Paint one face of one wall. A colour already on that face is replaced.",
+                "properties": {
+                  "kind": {
+                    "const": "set_wall_color",
+                    "type": "string"
+                  },
+                  "wall_color": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "color": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "b": {
+                            "format": "uint8",
+                            "maximum": 255,
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "g": {
+                            "format": "uint8",
+                            "maximum": 255,
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "r": {
+                            "format": "uint8",
+                            "maximum": 255,
+                            "minimum": 0,
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "r",
+                          "g",
+                          "b"
+                        ],
+                        "type": "object"
+                      },
+                      "face": {
+                        "discriminator": {
+                          "propertyName": "kind"
+                        },
+                        "oneOf": [
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "kind": {
+                                "const": "room",
+                                "type": "string"
+                              },
+                              "room": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "room"
+                            ],
+                            "type": "object"
+                          },
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "kind": {
+                                "const": "exterior",
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind"
+                            ],
+                            "type": "object"
+                          }
+                        ]
+                      },
+                      "wall": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "wall",
+                      "face",
+                      "color"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "wall_color"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "description": "Remove the colour from one face of one wall.",
+                "properties": {
+                  "face": {
+                    "discriminator": {
+                      "propertyName": "kind"
+                    },
+                    "oneOf": [
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "kind": {
+                            "const": "room",
+                            "type": "string"
+                          },
+                          "room": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "room"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "kind": {
+                            "const": "exterior",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "kind": {
+                    "const": "clear_wall_color",
+                    "type": "string"
+                  },
+                  "wall": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "wall",
+                  "face"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "maxItems": 32,
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "required": [
+        "operations"
+      ],
+      "title": "EditHouse",
+      "type": "object"
+    },
+    "name": "edit_house"
+  },
+  {
+    "input": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "description": "Read facts about the working house without changing it. Ask for the stored details of elements,\ntheir measured dimensions, or the latest inspection findings. Use ids exactly as earlier results\nreturned them. Use it to find an id that an operation needs, or to check a change before you call\nfinish.",
+      "properties": {
+        "query": {
+          "discriminator": {
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "additionalProperties": false,
+              "description": "The stored details of the elements with these ids and the ids they refer to.",
+              "properties": {
+                "ids": {
+                  "items": {
+                    "maxLength": 64,
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z0-9._:-]+$",
+                    "type": "string"
+                  },
+                  "maxItems": 32,
+                  "minItems": 1,
+                  "type": "array"
+                },
+                "kind": {
+                  "const": "elements",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "ids"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "description": "The measured sizes of the elements with these ids, in millimetres and square metres.",
+              "properties": {
+                "ids": {
+                  "items": {
+                    "maxLength": 64,
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z0-9._:-]+$",
+                    "type": "string"
+                  },
+                  "maxItems": 32,
+                  "minItems": 1,
+                  "type": "array"
+                },
+                "kind": {
+                  "const": "dimensions",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "ids"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "description": "The inspection findings of the working house.",
+              "properties": {
+                "kind": {
+                  "const": "inspection",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "type": "object"
+            }
+          ]
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "title": "ReadHouse",
+      "type": "object"
+    },
+    "name": "read_house"
+  },
+  {
+    "input": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "description": "End your turn with the answer the user reads: a new plan or a question. Call finish alone in its\nturn, after you have seen the results of every edit; a finish call made together with other tools\nis not accepted. A plan turns the working house into a new plan. If findings that block\nconfirmation remain, the result lists them; fix them with edit_house and call finish again. A\nquestion adds no plan, and edits made since the last plan are discarded.",
+      "properties": {
+        "answer": {
+          "discriminator": {
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "additionalProperties": false,
+              "description": "The working house becomes a new plan.",
+              "properties": {
+                "assumptions": {
+                  "description": "Conditions you assumed because the request did not state them, one per item. Empty when\nnone. Write in Japanese for the user.",
+                  "items": {
+                    "maxLength": 200,
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "type": "string"
+                  },
+                  "maxItems": 5,
+                  "type": "array"
+                },
+                "concerns": {
+                  "description": "Usability concerns that remain in this plan, one per item. Empty when none. Write in\nJapanese for the user.",
+                  "items": {
+                    "maxLength": 200,
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "type": "string"
+                  },
+                  "maxItems": 5,
+                  "type": "array"
+                },
+                "explanation": {
+                  "description": "What changed in this plan and why. Write in Japanese for the user.",
+                  "maxLength": 1000,
+                  "minLength": 1,
+                  "pattern": "\\S",
+                  "type": "string"
+                },
+                "kind": {
+                  "const": "plan",
+                  "type": "string"
+                },
+                "name": {
+                  "description": "Short name for the plan in the history list, from what changed. Write in Japanese for the\nuser.",
+                  "maxLength": 40,
+                  "minLength": 1,
+                  "pattern": "\\S",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "name",
+                "explanation",
+                "assumptions",
+                "concerns"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "description": "Ask the user before changing the house further. No plan is added.",
+              "properties": {
+                "choices": {
+                  "description": "Answers the user can pick from. Write in Japanese for the user.",
+                  "items": {
+                    "maxLength": 50,
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "type": "string"
+                  },
+                  "maxItems": 6,
+                  "minItems": 2,
+                  "type": "array"
+                },
+                "kind": {
+                  "const": "question",
+                  "type": "string"
+                },
+                "question": {
+                  "description": "The question the user must answer before you can continue. Write in Japanese for the user.",
+                  "maxLength": 500,
+                  "minLength": 1,
+                  "pattern": "\\S",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "question",
+                "choices"
+              ],
+              "type": "object"
+            }
+          ]
+        }
+      },
+      "required": [
+        "answer"
+      ],
+      "title": "Finish",
+      "type": "object"
+    },
+    "name": "finish"
+  }
+]
