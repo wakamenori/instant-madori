@@ -85,6 +85,10 @@ pub(super) enum Case {
     S1,
     S1b,
     S2,
+    S3,
+    S4,
+    S5,
+    G,
     F1,
     F2,
     F3,
@@ -182,6 +186,9 @@ impl Case {
                 | Self::W
                 | Self::S1
                 | Self::S1b
+                | Self::S3
+                | Self::S4
+                | Self::G
         )
     }
 
@@ -209,6 +216,18 @@ impl Case {
             ),
             Self::S1 => branches(&[90.], &[("ab", 100., 100.), ("fa", 40., 100.)]),
             Self::S1b => branches(&[60.], &[("ab", 100., 100.), ("fa", 40., 100.)]),
+            Self::S3 => branches(&[150.], &[("ab", 100., 100.), ("fa", 40., 100.)]),
+            Self::S4 => branches(&[30.], &[("ab", 100., 100.), ("fa", 40., 100.)]),
+            Self::S5 => branches(
+                &[50., 150.],
+                &[
+                    ("ab", 100., 100.),
+                    ("ga", 40., 100.),
+                    ("da", 50., 50.),
+                    ("ea", 50., 50.),
+                ],
+            ),
+            Self::G => branches(&[30., 150.], &[("ab", 100., 100.), ("ga", 100., 100.)]),
             Self::S2 => branches(&[80., 100.], &[("ab", 100., 100.), ("ga", 40., 100.)]),
             Self::F1 => branches(&[80., 100.], &[]),
             Self::F2 => branches(&[30., 50.], &[]),
@@ -257,8 +276,17 @@ impl Case {
             Self::Y1 | Self::Y2 | Self::YN | Self::Q => {
                 [("ca", Side::Left), ("bc", Side::Right), ("ab", Side::Left)]
             }
+            Self::S3 | Self::S4 => [("da", Side::Left), ("ab", Side::Left), ("da", Side::Right)],
             Self::Z => [("bd", Side::Left), ("cd", Side::Right), ("bc", Side::Left)],
             _ => [("da", Side::Left), ("bc", Side::Right), ("da", Side::Right)],
+        };
+        let targets: Vec<_> = if matches!(self, Self::S4 | Self::S5 | Self::G) {
+            house
+                .boundaries()
+                .flat_map(|w| [Side::Left, Side::Right].map(|s| (w.data().id.as_str(), s)))
+                .collect()
+        } else {
+            targets.to_vec()
         };
         let rows = targets
             .into_iter()
@@ -270,7 +298,7 @@ impl Case {
                     wall,
                     face,
                     color: Srgb {
-                        r: 80 + i as u8 * 60,
+                        r: 80 + i as u8,
                         g: 74,
                         b: 132,
                     },
@@ -283,10 +311,9 @@ impl Case {
     }
     pub fn edited(self, house: House) -> House {
         let vertex = match self {
-            Self::P30 | Self::P45 | Self::P60 | Self::W | Self::A20 => "a",
             Self::X => "h",
             Self::Y1 | Self::Y2 | Self::YN | Self::Q | Self::Z => "b",
-            _ => "c",
+            _ => "a",
         };
         let mut data = house.into_data();
         data.vertices

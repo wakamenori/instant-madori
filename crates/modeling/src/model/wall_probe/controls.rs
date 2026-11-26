@@ -119,21 +119,6 @@ fn n6_short_branches_rejected() {
     assert!(err.contains("SelfIntersecting"));
 }
 #[test]
-fn n7_reentering_step_rejected() {
-    let h = plan::branches(
-        &[50., 150.],
-        &[
-            ("ab", 100., 100.),
-            ("ga", 40., 100.),
-            ("da", 50., 50.),
-            ("ea", 50., 50.),
-        ],
-    );
-    let err = sector::planforms(&h).unwrap_err();
-    println!("{err}");
-    assert!(err.contains("da") && err.contains("SelfIntersecting"));
-}
-#[test]
 fn n8_local_gap_at_t_joint() {
     let deficit = with_bad_rings(Case::P45, |h, rings| {
         let id = BoundaryId::new("be");

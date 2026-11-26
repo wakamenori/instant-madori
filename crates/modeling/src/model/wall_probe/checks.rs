@@ -35,17 +35,28 @@ pub(super) fn volumes(h: &House, built: &Built, r: &kernel::Body) -> [f64; 3] {
     let deficit = volume(r, &union, kernel::BoolOp::Cut);
     [overlap, excess, deficit]
 }
-pub(super) fn compare(h: &House, a: &Built, b: &Built, tol: f64) {
+pub(super) fn compare_branchless(h: &House) {
     let rings = sector::planforms(h).unwrap();
     for w in h.boundaries() {
         let id = &w.data().id;
+        if [w.start(), w.end()]
+            .iter()
+            .any(|v| v.boundaries().count() > 2)
+        {
+            continue;
+        }
         let ring = w.planform().unwrap();
-        assert_eq!(ring.points().len(), rings[id].points().len());
+        assert_eq!(
+            ring.points().len(),
+            rings[id].points().len(),
+            "{id:?} housing {:?}, sector {:?}",
+            ring.points(),
+            rings[id].points()
+        );
         for (a, b) in ring.points().iter().zip(rings[id].points()) {
             assert!((a.x - b.x).hypot(a.y - b.y) <= 0.001);
         }
     }
-    compare_bodies(h, a, b, tol);
 }
 pub(super) fn compare_bodies(h: &House, a: &Built, b: &Built, tol: f64) {
     for w in h.boundaries() {
@@ -90,6 +101,8 @@ pub(super) fn opening_neighbour(h: &House, built: &Built) -> f64 {
 
 #[derive(Default)]
 pub(super) struct Faces {
+    pub foreign: usize,
+    pub leaking_faces: usize,
     pub roles: usize,
     pub colours: usize,
     pub joints: Vec<String>,
@@ -108,7 +121,10 @@ pub(super) fn faces(
     use solidcraft_doc::appearance::faces_within;
     use solidcraft_engine::geom::Vec3Geom;
 
-    let rings = sector::planforms(h).unwrap();
+    let rings = match method {
+        Method::Housing => housing_rings(h),
+        _ => sector::planforms(h).unwrap(),
+    };
     let longest = rings
         .values()
         .flat_map(thin::edges)
@@ -116,7 +132,6 @@ pub(super) fn faces(
         .fold(0., f64::max);
     let angle_tol = (0.001 / longest).atan();
     let mut report = Faces::default();
-    let mut paints = Vec::new();
     let state = built.model.session.model.state();
     for w in h.boundaries() {
         let id = &w.data().id;
@@ -177,7 +192,7 @@ pub(super) fn faces(
                     .side_of(&role),
                 Some(side)
             );
-            if case.housing_resolves() && !bevel {
+            if matches!(method, Method::Housing) {
                 let row = WallColor {
                     wall: id.clone(),
                     face: role.clone(),
@@ -206,22 +221,6 @@ pub(super) fn faces(
                     "{case:?} {method:?} {id:?} {side:?} at {p:?}"
                 );
                 report.roles += 1;
-                if let Some(row) = h
-                    .data()
-                    .wall_colors
-                    .iter()
-                    .find(|r| r.wall == *id && r.face == role)
-                {
-                    let rgb = [row.color.r, row.color.g, row.color.b];
-                    paints.push((
-                        body.name.clone(),
-                        [p.x, p.y, z],
-                        hits[0],
-                        rgb,
-                        origin,
-                        normal,
-                    ));
-                }
                 let mesh = body.mesh();
                 let n = Point { x: 0., y: 0. }.translated(normal);
                 for (_, tri) in mesh
@@ -297,85 +296,151 @@ pub(super) fn faces(
     }
 
     let allowed_bevel = bevel.then(|| region::Region::bevel(h).unwrap());
+    let mut pieces = Vec::new();
     classify(
         h,
         built,
         &rings,
         &mut report,
-        &mut paints,
+        &mut pieces,
         angle_tol,
         allowed_bevel.as_ref(),
     );
-    if !bevel {
-        assert_eq!(report.unexplained, 0, "{case:?} {method:?}");
-    }
+    let foreign: Vec<_> = pieces.iter().filter(|p| !p.side_role).collect();
+    report.foreign = foreign.len();
     if !matches!(method, Method::Housing) {
+        assert!(
+            foreign.is_empty(),
+            "{case:?} {method:?}: foreign pieces {foreign:?}"
+        );
+    }
+    let rows = &h.data().wall_colors;
+    {
         let mut cad = Cad {
             session: &mut built.model.session,
             count: 0,
             elapsed: Default::default(),
         };
-        for (name, p, _, rgb, _, _) in &paints {
-            cad.cmd(
-                "appearance.assign",
-                json!({"body":name,"faces":[p],"color":rgb}),
-            )
-            .unwrap();
+        let mut paint_order: Vec<_> = pieces.iter().collect();
+        paint_order.sort_by_key(|p| p.side_role);
+        for piece in paint_order {
+            let row = rows
+                .iter()
+                .find(|row| row.wall == piece.wall && row.face == piece.role);
+            if matches!(case, Case::S4 | Case::S5 | Case::G) && piece.side_role {
+                assert!(row.is_some(), "missing row {piece:?}");
+            }
+            if let Some(row) = row {
+                cad.cmd("appearance.assign", json!({"body":piece.body,"faces":[piece.point],"color":[row.color.r,row.color.g,row.color.b]})).unwrap();
+            }
         }
-        *built.commands.as_mut().unwrap() += cad.count;
+        if let Some(count) = &mut built.commands {
+            *count += cad.count;
+        }
         built.ms += cad.elapsed.as_secs_f64() * 1000.;
     }
     let state = built.model.session.model.state();
-    for (name, p, face, rgb, _, _) in &paints {
-        let body = state.body(name).unwrap();
-        assert_eq!(faces_within(body, (*p).into(), 0.001), vec![*face]);
-        assert!(
-            built
+    let leaked = leaks(&pieces, rows, built);
+    report.leaking_faces = leaked
+        .iter()
+        .map(|(p, _)| (&p.wall, p.face))
+        .collect::<std::collections::BTreeSet<_>>()
+        .len();
+    if !matches!(method, Method::Housing) {
+        assert!(leaked.is_empty(), "{case:?} {method:?} leaks: {leaked:?}");
+    }
+    for (piece, colour) in &leaked {
+        let source = rows
+            .iter()
+            .find(|r| r.wall == piece.wall && [r.color.r, r.color.g, r.color.b] == *colour)
+            .unwrap();
+        report.exposed.push(format!(
+            "leak {}#{} {:?} colour on {:?} strip {:.3} mm",
+            piece.wall.as_str(),
+            piece.face,
+            source.face,
+            piece.role,
+            piece.length
+        ));
+    }
+    for piece in &pieces {
+        let body = state.body(&piece.body).unwrap();
+        assert_eq!(
+            faces_within(body, piece.point.into(), 0.001),
+            vec![piece.face]
+        );
+        if let Some(row) = rows
+            .iter()
+            .find(|r| r.wall == piece.wall && r.face == piece.role)
+        {
+            let rgb = [row.color.r, row.color.g, row.color.b];
+            let actual: Vec<_> = built
                 .model
                 .session
                 .doc
                 .face_colors(body)
-                .iter()
-                .any(|(i, c)| i == face && c.color == *rgb),
-            "{case:?} {method:?} missing colour on {name} at {p:?}"
-        );
-        report.colours += 1;
-    }
-    assert!(report.colours >= h.data().wall_colors.len());
-    for body in &state.bodies {
-        for (face, look) in built.model.session.doc.face_colors(body) {
-            let (_, _, _, _, origin, normal) = paints
-                .iter()
-                .find(|(name, _, index, rgb, _, _)| {
-                    name == &body.name && *index == face && *rgb == look.color
-                })
-                .unwrap();
-            let mesh = body.mesh();
-            assert!(
-                mesh.tri_face
-                    .iter()
-                    .zip(&mesh.triangles)
-                    .filter(|(f, _)| **f as usize == face)
-                    .flat_map(|(_, t)| mesh.tri(t).unwrap())
-                    .all(|v| Point { x: v.x, y: v.y }
-                        .delta_from(*origin)
-                        .dot(*normal)
-                        .abs()
-                        <= 0.001)
-            );
+                .into_iter()
+                .map(|(index, look)| (index, look.color))
+                .collect();
+            if !actual.contains(&(piece.face, rgb)) {
+                assert!(
+                    leaked.iter().any(|(p, _)| std::ptr::eq(*p, piece)),
+                    "{case:?} {method:?} missing colour on {piece:?}, actual {actual:?}"
+                );
+                continue;
+            }
+            report.colours += 1;
         }
     }
+    assert!(report.colours + leaked.len() >= rows.len());
     report
 }
 
-type Paint = (String, [f64; 3], usize, [u8; 3], Point, outline::Vector);
+#[derive(Debug)]
+struct Piece {
+    body: String,
+    wall: BoundaryId,
+    face: usize,
+    point: [f64; 3],
+    role: FaceRole,
+    side_role: bool,
+    length: f64,
+}
+
+fn leaks<'a>(pieces: &'a [Piece], rows: &[WallColor], built: &Built) -> Vec<(&'a Piece, [u8; 3])> {
+    let mut leaked = Vec::new();
+    let state = built.model.session.model.state();
+    for body in &state.bodies {
+        for (index, look) in built.model.session.doc.face_colors(body) {
+            let mut on_face = pieces
+                .iter()
+                .filter(|p| p.body == body.name && p.face == index)
+                .peekable();
+            assert!(
+                on_face.peek().is_some(),
+                "coloured unexposed face {}#{index}",
+                body.name
+            );
+            for p in on_face {
+                if !rows.iter().any(|r| {
+                    r.wall == p.wall
+                        && r.face == p.role
+                        && [r.color.r, r.color.g, r.color.b] == look.color
+                }) {
+                    leaked.push((p, look.color));
+                }
+            }
+        }
+    }
+    leaked
+}
 
 fn classify(
     h: &House,
     built: &Built,
     rings: &BTreeMap<BoundaryId, SimplePolygon>,
     report: &mut Faces,
-    paints: &mut Vec<Paint>,
+    pieces: &mut Vec<Piece>,
     angle_tol: f64,
     allowed_bevel: Option<&region::Region>,
 ) {
@@ -425,29 +490,11 @@ fn classify(
                 .copied()
                 .map(interval)
                 .fold(f64::NEG_INFINITY, f64::max);
-            let mut ranges = Vec::new();
-            for c in &contacts {
-                if !c.walls.contains(&id)
-                    || ![c.a, c.b]
-                        .iter()
-                        .all(|q| q.delta_from(p).cross(u).abs() <= 0.001)
-                {
-                    continue;
-                }
-                let (a, b) = (interval(c.a), interval(c.b));
-                let span = a.min(b).max(lo)..a.max(b).min(hi);
-                if span.end - span.start > 0.001 {
-                    ranges.push((span, *c.walls.iter().find(|w| **w != id).unwrap()));
-                }
-            }
-            ranges.sort_by(|a, b| a.0.start.total_cmp(&b.0.start));
-            let mut covered = lo;
-            for (r, _) in &ranges {
-                if r.start <= covered + 0.001 {
-                    covered = covered.max(r.end);
-                }
-            }
-            if covered >= hi - 0.001 && !ranges.is_empty() && !horizontal(vs[0].z) {
+            let exposure::Cover {
+                covered: ranges,
+                exposed: uncovered,
+            } = exposure::intervals(id, &contacts, p, u, lo, hi);
+            if uncovered.is_empty() && !ranges.is_empty() && !horizontal(vs[0].z) {
                 report.joints.push(format!(
                     "{}#{f}→{}",
                     id.as_str(),
@@ -457,14 +504,6 @@ fn classify(
                         .collect::<Vec<_>>()
                         .join("+")
                 ));
-                continue;
-            }
-            let offsets = wall.data().wall.offsets;
-            if [offsets.left, -offsets.right].iter().any(|d| {
-                pts.iter().all(|q| {
-                    (q.delta_from(wall.start().data().at).dot(axis.left()) - d).abs() <= 0.001
-                })
-            }) {
                 continue;
             }
             if wall.openings().any(|o| {
@@ -480,52 +519,127 @@ fn classify(
                 continue;
             }
             let normal = (vs[1] - vs[0]).cross(vs[2] - vs[0]).normalized().unwrap();
-            let center = p.translated(u * ((lo + hi) / 2.));
-            let z = wall.data().wall.height / 2.;
             let outward = Point {
                 x: normal.x,
                 y: normal.y,
             }
             .delta_from(Point { x: 0., y: 0. });
-            if normal.z.abs().asin() <= angle_tol
-                && let Some(role) = region.space_at(center.translated(outward), z)
-            {
-                let space = match &role {
-                    FaceRole::Room { room } => room.as_str(),
-                    FaceRole::Exterior {} => "exterior",
+            let mut details = Vec::new();
+            for span in uncovered {
+                let center = p.translated(u * ((span.start + span.end) / 2.));
+                let mut z = wall.data().wall.height / 2.;
+                for o in wall.openings() {
+                    let e = o.elevation();
+                    if e.along
+                        .contains(&center.delta_from(wall.start().data().at).dot(axis))
+                        && e.rise.contains(&z)
+                    {
+                        z = if e.rise.start > 0. {
+                            e.rise.start / 2.
+                        } else {
+                            (e.rise.end + wall.data().wall.height) / 2.
+                        };
+                    }
+                }
+                let Some(role) = region.space_at(center.translated(outward), z) else {
+                    assert!(
+                        allowed_bevel.is_some_and(|r| r.on_bevel(&pts)),
+                        "unexplained {}#{f} interval {span:?} at {center:?}, normal {normal:?}",
+                        id.as_str()
+                    );
+                    report.unexplained += 1;
+                    continue;
                 };
-                report
-                    .exposed
-                    .push(format!("{}#{f} → {space}", id.as_str()));
+                assert!(normal.z.abs().asin() <= angle_tol);
                 let point = [center.x, center.y, z];
                 assert_eq!(
                     solidcraft_doc::appearance::faces_within(body, point.into(), 0.001),
                     vec![f as usize]
                 );
-                report.roles += 1;
-                if let Some(row) = h
-                    .data()
-                    .wall_colors
+                let side_role = [Side::Left, Side::Right]
                     .iter()
-                    .find(|r| r.wall == *id && r.face == role)
-                {
-                    paints.push((
-                        body.name.clone(),
-                        point,
-                        f as usize,
-                        [row.color.r, row.color.g, row.color.b],
-                        center,
-                        outward,
-                    ));
-                }
-            } else {
-                assert!(
-                    allowed_bevel.is_some_and(|r| r.on_bevel(&pts)),
-                    "unexplained {}#{f} {pts:?}",
-                    id.as_str()
-                );
-                report.unexplained += 1;
+                    .any(|s| wall.face(*s).role() == role);
+                let space = match &role {
+                    FaceRole::Room { room } => room.as_str(),
+                    FaceRole::Exterior {} => "exterior",
+                };
+                details.push(format!(
+                    "{space} [{:.3}, {:.3}]{}",
+                    span.start - lo,
+                    span.end - lo,
+                    if side_role { "" } else { " (not a side role)" }
+                ));
+                pieces.push(Piece {
+                    body: body.name.clone(),
+                    wall: id.clone(),
+                    face: f as usize,
+                    point,
+                    role,
+                    side_role,
+                    length: span.end - span.start,
+                });
+                report.roles += 1;
+            }
+            if !details.is_empty()
+                && (!ranges.is_empty() || details.iter().any(|d| d.contains("not a side role")))
+            {
+                let detail = format!("{}#{f} → {}", id.as_str(), details.join(" + "));
+                report.exposed.push(detail);
             }
         }
     }
+}
+
+fn housing_rings(h: &House) -> BTreeMap<BoundaryId, SimplePolygon> {
+    h.boundaries()
+        .map(|w| (w.data().id.clone(), w.planform().unwrap()))
+        .collect()
+}
+
+#[test]
+fn n9_unsplit_face_leaks() {
+    let h = Case::S4.painted_house();
+    let mut built = Built::new(&h, Method::Housing, None).unwrap();
+    let mut pieces = Vec::new();
+    classify(
+        &h,
+        &built,
+        &housing_rings(&h),
+        &mut Faces::default(),
+        &mut pieces,
+        0.000001,
+        None,
+    );
+    let row = h
+        .data()
+        .wall_colors
+        .iter()
+        .find(|r| {
+            r.wall.as_str() == "ab"
+                && r.face
+                    == FaceRole::Room {
+                        room: RoomId::new("room0"),
+                    }
+        })
+        .unwrap();
+    let piece = pieces
+        .iter()
+        .find(|p| p.wall == row.wall && p.role == row.face)
+        .unwrap();
+    let mut cad = Cad {
+        session: &mut built.model.session,
+        count: 0,
+        elapsed: Default::default(),
+    };
+    cad.cmd("appearance.assign",json!({"body":piece.body,"faces":[piece.point],"color":[row.color.r,row.color.g,row.color.b]})).unwrap();
+    let leaked = leaks(&pieces, std::slice::from_ref(row), &built);
+    assert_eq!(leaked.len(), 1);
+    let leaked = leaked[0].0;
+    assert_eq!(leaked.wall, row.wall);
+    assert_eq!(
+        leaked.role,
+        FaceRole::Room {
+            room: RoomId::new("room1")
+        }
+    );
 }

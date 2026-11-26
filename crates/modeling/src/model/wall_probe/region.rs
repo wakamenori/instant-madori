@@ -97,6 +97,9 @@ impl Region {
         }) {
             return None;
         }
+        self.plan_space_at(point)
+    }
+    pub fn plan_space_at(&self, point: Point) -> Option<FaceRole> {
         for (id, room) in &self.rooms {
             if contains(room, point) {
                 return Some(FaceRole::Room { room: id.clone() });

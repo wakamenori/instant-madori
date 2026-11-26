@@ -16,7 +16,15 @@ impl Built {
     pub fn new(h: &House, method: Method, previous: Option<&Self>) -> Result<Self, String> {
         if matches!(method, Method::Housing) {
             let start = std::time::Instant::now();
-            let model = Model::build(h, previous.map(|p| &p.model)).map_err(|e| e.to_string())?;
+            let model = Model::build(
+                &{
+                    let mut data = h.data().clone();
+                    data.wall_colors.clear();
+                    House::new(data).unwrap()
+                },
+                previous.map(|p| &p.model),
+            )
+            .map_err(|e| e.to_string())?;
             return Ok(Self {
                 model,
                 commands: None,

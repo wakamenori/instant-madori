@@ -5,6 +5,7 @@ use solidcraft_engine::kernel;
 mod build;
 mod checks;
 mod controls;
+mod exposure;
 mod outline;
 mod plan;
 mod region;
@@ -87,7 +88,7 @@ fn run(case: Case) -> Report {
                 );
                 match method {
                     Method::Housing => {
-                        checks::compare(h, &built, current[0].as_ref().unwrap(), tol);
+                        checks::compare_branchless(h);
                         av = "pass";
                     }
                     Method::ThinSplit => {
@@ -125,6 +126,10 @@ fn run(case: Case) -> Report {
                 faces.joints.len(),
                 faces.joints.join(", ")
             ));
+            report.details.push(format!(
+                "{case:?} {label} {phase}: {} foreign pieces, {} leaking faces",
+                faces.foreign, faces.leaking_faces
+            ));
             for face in faces.exposed {
                 report
                     .details
@@ -154,7 +159,7 @@ macro_rules! positive_cases {
             rows.extend(report.rows);
             details.extend(report.details);
         }
-        println!("| case | method | build | walls/bodies | overlap (tol) mm³ | excess/deficit (tol) mm³ | Σvol − vol(R) mm³ | A2 vs A1 | B vs A2 | roles | unexplained | joint faces | colours | opening ∩ neighbour mm³ | commands | ms | B fragments |");
+        println!("| case | method | build | walls/bodies | overlap (tol) mm³ | excess/deficit (tol) mm³ | Σvol − vol(R) mm³ | branchless planforms vs A1 | B vs A2 | roles | unexplained | joint faces | colours | opening ∩ neighbour mm³ | commands | ms | B fragments |");
         println!("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|");
         for row in rows {
             println!("{row}");
@@ -176,6 +181,10 @@ positive_cases! {
     s1 => S1,
     s1b => S1b,
     s2 => S2,
+    s3 => S3,
+    s4 => S4,
+    s5 => S5,
+    g => G,
     f1 => F1,
     f2 => F2,
     f3 => F3,

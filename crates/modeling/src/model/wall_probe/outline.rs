@@ -218,7 +218,7 @@ impl Node<'_> {
         })
     }
 }
-fn mitre(v: Point, p: Vector, dp: f64, q: Vector, dq: f64) -> Option<Point> {
+pub(super) fn mitre(v: Point, p: Vector, dp: f64, q: Vector, dq: f64) -> Option<Point> {
     let (a, b) = (p.left(), q.right());
     let det = a.cross(b);
     (det != 0.0).then(|| {
