@@ -100,14 +100,21 @@ async fn apply_operations(
         serde_json::json!({"level":"info","event":"geometry.operations","traceId":trace_id,
         "jobId":request.job_id.as_str(),"operationId":request.operation_id.as_str(),"generation":request.generation})
     );
-    let bytes = run_blocking(&state, trace_id, move || {
+    let encoded = run_blocking(&state, trace_id, move || {
         match route.handle(request, crate::operations::apply) {
             Ok(outcome) => outcome.encode(route.route.response.max_bytes()).map(Ok),
-            Err(ApplyError::InvalidBody) => Ok(Err(ServiceError(ErrorCode::InvalidBody))),
+            Err(ApplyError::InvalidBody(error)) => Ok(Err(error)),
             Err(ApplyError::Build(error)) => Err(error),
         }
     })
-    .await??;
+    .await?;
+    let bytes = encoded.map_err(|error| {
+        eprintln!(
+            "{}",
+            serde_json::json!({"level":"warn","event":"geometry.invalid_body","traceId":trace_id,"error":error})
+        );
+        ServiceError(ErrorCode::InvalidBody)
+    })?;
     Ok((
         [("content-type", madori_geometry_api::bundle::CONTENT_TYPE)],
         bytes,

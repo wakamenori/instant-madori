@@ -6,7 +6,7 @@ use madori_housing::{House, LayoutError, OperationId};
 use madori_modeling::{BuildError, Model, floor_plan};
 
 pub enum ApplyError {
-    InvalidBody,
+    InvalidBody(String),
     Build(String),
 }
 impl From<String> for ApplyError {
@@ -20,9 +20,9 @@ pub fn apply(request: ApplyOperationsRequest) -> Result<ApplyOperationsOutcome, 
         InputSnapshot::Empty {} => None,
         InputSnapshot::House { json } => {
             if json.len() > SNAPSHOT_LIMIT as usize {
-                return Err(ApplyError::InvalidBody);
+                return Err(ApplyError::InvalidBody("snapshot exceeds limit".into()));
             }
-            Some(House::from_json(&json).map_err(|_| ApplyError::InvalidBody)?)
+            Some(House::from_json(&json).map_err(|e| ApplyError::InvalidBody(e.to_string()))?)
         }
     };
     let mut operations = Vec::new();
@@ -41,7 +41,8 @@ pub fn apply(request: ApplyOperationsRequest) -> Result<ApplyOperationsOutcome, 
             }
         }
     }
-    let house = house.ok_or(ApplyError::InvalidBody)?;
+    let house = house
+        .ok_or_else(|| ApplyError::InvalidBody("an empty batch needs a house snapshot".into()))?;
     let housing = house
         .check()
         .err()

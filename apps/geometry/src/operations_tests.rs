@@ -175,3 +175,11 @@ async fn placement_is_repeatable_and_failed_edit_rolls_back_batch() -> Result<()
     assert_eq!(rejection["reason"]["wall"], wall.as_str());
     Ok(())
 }
+#[tokio::test]
+async fn route_limit_replaces_axum_default() -> Result<(), TestError> {
+    let mut body = placement().to_string();
+    body.push_str(&" ".repeat(3 * 1024 * 1024));
+    let res = post("application/json", body).await?;
+    assert_eq!(res.status(), 200);
+    Ok(())
+}
