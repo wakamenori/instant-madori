@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { acceptedJobSchema, finishedJobSchema } from "@madori/contracts";
 import { messagePageSql } from "../../src/storage/messages.ts";
-import { runningJobSql, queuedJobsSql, lastFinishedJobSql } from "../../src/storage/revisions.ts";
+import {
+  revisionPageSql,
+  runningJobSql,
+  queuedJobsSql,
+  lastFinishedJobSql,
+} from "../../src/storage/revisions.ts";
 import { applyJobMigrations, now, openJobDatabase } from "./jobs-support.ts";
 
 await test("State queue reads scale with queued jobs instead of completed history on D1", async (t) => {
@@ -81,6 +86,34 @@ await test("State queue reads scale with queued jobs instead of completed histor
   await appendNotices(3130, 1000);
   assert.equal(await pageReads(null), firstPageReads);
   assert.equal(await pageReads(3100), firstPageReads);
+
+  const revisionReads = async (after: number | null) => {
+    const page = await db.raw.prepare(revisionPageSql).bind(patternId, ownerId, after, 51).all();
+    assert.equal(page.results.length, 51);
+    return page.meta.rows_read;
+  };
+  const firstRevisionReads = await revisionReads(null);
+  const deepRevisionReads = await revisionReads(1000);
+  console.info(JSON.stringify({ firstRevisionReads, deepRevisionReads }));
+  assert.equal(deepRevisionReads, firstRevisionReads);
+  assert(deepRevisionReads <= 60, JSON.stringify({ deepRevisionReads }));
+
+  for (const after of [51, 52]) {
+    const page = await db.store.revisions.list({ ownerId, patternId, after, limit: 50 });
+    assert(page);
+    assert.deepEqual(
+      page.revisions.map((revision) => revision.number),
+      Array.from({ length: 50 }, (_, index) => after - 1 - index),
+    );
+    assert.equal(page.next, after === 51 ? null : 2);
+  }
+  const messages = await db.store.messages.list({ ownerId, patternId, before: 51, limit: 50 });
+  assert(messages);
+  assert.deepEqual(
+    messages.messages.map((message) => message.number),
+    Array.from({ length: 50 }, (_, index) => 50 - index),
+  );
+  assert.equal(messages.next, null);
 
   for (const finished of ["completed", "cancelled"] as const) {
     for (const analyzed of [false, true]) {
