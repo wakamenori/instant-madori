@@ -390,7 +390,7 @@ fn clear_intervals(profiles: &[WallProfile], y: f64) -> Vec<(f64, f64)> {
     events.sort_by(|a, b| a.0.total_cmp(&b.0));
     let (mut cuts, mut adds) = (0, 0);
     let mut start = 0.;
-    let mut result = Vec::new();
+    let mut result: Vec<(f64, f64)> = Vec::new();
     for group in events.chunk_by(|a, b| a.0 == b.0) {
         let before = cuts > 0 && adds == 0;
         for (_, c, a) in group {
@@ -402,9 +402,16 @@ fn clear_intervals(profiles: &[WallProfile], y: f64) -> Vec<(f64, f64)> {
             start = group[0].0;
         }
         if before && !after {
-            result.push((start, group[0].0));
+            if let Some((_, end)) = result.last_mut()
+                && start - *end <= TOL
+            {
+                *end = group[0].0;
+            } else {
+                result.push((start, group[0].0));
+            }
         }
     }
+    result.retain(|(l, r)| *r - *l > TOL);
     result
 }
 
@@ -480,22 +487,33 @@ fn event_heights(profiles: &[WallProfile], height: f64) -> Vec<f64> {
     ys
 }
 
-fn same_track_starts(
+// A passage needs the same horizontal start throughout the band. Tolerance can
+// merge or erase a thin track partway up, changing the pairing of its endpoints.
+fn constrain_starts(
+    feasible: &mut Vec<(f64, f64)>,
     profiles: &[WallProfile],
     low: f64,
     high: f64,
     width: f64,
-) -> Option<Vec<(f64, f64)>> {
+) {
+    if feasible.is_empty() || high - low <= TOL {
+        return;
+    }
     let bottom = clear_intervals(profiles, low + TOL / 2.);
     let top = clear_intervals(profiles, high - TOL / 2.);
-    (bottom.len() == top.len()).then(|| {
-        bottom
-            .into_iter()
-            .zip(top)
-            .map(|((l, r), (s, t))| (l.max(s), r.min(t) - width + TOL))
-            .filter(|(a, b)| a <= b)
-            .collect()
-    })
+    if bottom.len() != top.len() {
+        let mid = low.midpoint(high);
+        constrain_starts(feasible, profiles, low, mid, width);
+        constrain_starts(feasible, profiles, mid, high, width);
+        return;
+    }
+    let starts: Vec<_> = bottom
+        .into_iter()
+        .zip(top)
+        .map(|((l, r), (s, t))| (l.max(s), r.min(t) - width + TOL))
+        .filter(|(a, b)| a <= b)
+        .collect();
+    *feasible = intersect(feasible, &starts);
 }
 
 fn intersect(a: &[(f64, f64)], b: &[(f64, f64)]) -> Vec<(f64, f64)> {
@@ -518,14 +536,8 @@ pub(crate) fn cut_passage(
         return false;
     }
     let mut feasible = vec![(0.0_f64, wall.length() - width + TOL)];
-    for band in event_heights(&profiles, height)
-        .windows(2)
-        .filter(|v| v[1] - v[0] > TOL)
-    {
-        let Some(starts) = same_track_starts(&profiles, band[0], band[1], width) else {
-            return false;
-        };
-        feasible = intersect(&feasible, &starts);
+    for band in event_heights(&profiles, height).windows(2) {
+        constrain_starts(&mut feasible, &profiles, band[0], band[1], width);
         if feasible.is_empty() {
             return false;
         }

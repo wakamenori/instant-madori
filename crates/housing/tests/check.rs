@@ -272,7 +272,7 @@ fn add_blocks_a_cut() {
     );
 }
 
-fn polygons(rings: &[&[(i32, i32)]]) -> House {
+fn polygons<T: Copy + Into<f64>>(rings: &[&[(T, T)]]) -> House {
     let mut d = verification().into_data();
     d.vertices.clear();
     d.boundaries.clear();
@@ -408,7 +408,10 @@ fn coincident_vertex_names_both_ids() {
 }
 #[test]
 fn empty_house_has_no_rooms() {
-    assert_eq!(errors(&polygons(&[])), [document(Reason::NoRooms {})]);
+    assert_eq!(
+        errors(&polygons::<i32>(&[])),
+        [document(Reason::NoRooms {})]
+    );
 }
 #[test]
 fn wall_move_short_step_reports_the_self_intersecting_planform() {
@@ -575,4 +578,192 @@ fn crossing_profiles_can_narrow_the_union_between_their_endpoints() {
         ];
         assert_eq!(errors(&with_modifiers(&h, cuts)), errors(&h));
     }
+}
+
+#[test]
+fn side_by_side_cuts_bridge_a_sub_tolerance_gap() {
+    let h = verification();
+    let left = cut(
+        &h,
+        "left",
+        &[(1000., 0.), (1400., 0.), (1400., 2000.), (1000., 2000.)],
+    );
+    let right = cut(
+        &h,
+        "right",
+        &[
+            (1400.0005, 0.),
+            (1800., 0.),
+            (1800., 2000.),
+            (1400.0005, 2000.),
+        ],
+    );
+    assert_eq!(with_modifiers(&h, vec![left, right]).check(), Ok(()));
+}
+
+#[test]
+fn an_adjacent_cut_preserves_a_wide_passage() {
+    let h = verification();
+    let wide = cut(
+        &h,
+        "wide",
+        &[(0., 0.), (1501.85, 0.), (1701.45, 1800.), (0., 1800.)],
+    );
+    let extra = cut(
+        &h,
+        "extra",
+        &[
+            (1501.85, 0.),
+            (1801.85, 0.),
+            (2001.45, 1800.),
+            (1701.45, 1800.),
+        ],
+    );
+    assert_eq!(with_modifiers(&h, vec![wide.clone()]).check(), Ok(()));
+    // The separate wedge disappears at one sample after tolerance is applied.
+    let wedge = cut(&h, "wedge", &[(3000., 0.), (3300., 1800.), (3000., 1800.)]);
+    assert_eq!(with_modifiers(&h, vec![wide, extra, wedge]).check(), Ok(()));
+}
+
+#[test]
+fn room_overlap_spans_short_scan_bands() {
+    let h = polygons(&[
+        &[
+            (0., 0.),
+            (3000., 0.),
+            (3000., 1000.),
+            (2500., 1999.99925),
+            (2000., 2000.),
+            (0., 2000.),
+        ],
+        &[
+            (500., 1999.9985),
+            (1000., 1999.9985),
+            (1000., 3000.),
+            (500., 3000.),
+        ],
+    ]);
+    let findings = errors(&h);
+    assert!(
+        findings.iter().any(|f| f.id == "r0"
+            && f.reason
+                == Reason::OverlapsRoom {
+                    other: "r1".into(),
+                    min: Point {
+                        x: 500.,
+                        y: 1999.9985
+                    },
+                    max: Point { x: 1000., y: 2000. }
+                }),
+        "{findings:?}"
+    );
+    assert!(
+        !findings
+            .iter()
+            .any(|f| matches!(f.reason, Reason::OverlapsWall { .. }))
+    );
+}
+
+#[test]
+fn triangular_room_overlap_is_widest_at_a_band_end() {
+    let findings = errors(&polygons(&[
+        &[(0., 0.), (2000., 0.), (2000., 2000.), (0., 2000.)],
+        &[(3000., 0.), (3000., 2000.), (1999.9982, 1000.)],
+    ]));
+    assert!(findings.iter().any(|f| matches!(&f.reason,Reason::OverlapsRoom{min,max,..} if min.x == 1999.9982 && max.x == 2000. && min.y < 1000. && max.y > 1000.)), "{findings:?}");
+}
+
+#[test]
+fn shed_door_only_reaches_its_enclosing_courtyard() {
+    let h = build(&layout(
+        &[
+            (0., 0., 9000., 2000.),
+            (0., 2000., 2000., 7000.),
+            (7000., 2000., 9000., 7000.),
+            (0., 7000., 9000., 9000.),
+            (3500., 3500., 5500., 5500.),
+        ],
+        200.,
+        120.,
+    ))
+    .unwrap();
+    let h = door(&h, "shed", &wall(&h, (3500., 3500.), (5500., 3500.)), 600.);
+    assert_eq!(errors(&h), vec![document(Reason::NoEntrance {})]);
+    let h = door(&h, "street", &wall(&h, (0., 0.), (9000., 0.)), 1000.);
+    let shed = h.data().rooms[4].id.as_str();
+    assert!(
+        errors(&h)
+            .iter()
+            .any(|f| f.id == shed && matches!(f.reason, Reason::Unreachable { .. }))
+    );
+    let h = door(
+        &h,
+        "courtyard",
+        &wall(&h, (2000., 2000.), (7000., 2000.)),
+        1000.,
+    );
+    assert!(!errors(&h).iter().any(|f| f.id == shed));
+}
+
+#[test]
+fn enclosed_unreachable_room_lists_all_its_walls() {
+    let mut rooms = Vec::new();
+    for row in 0..3 {
+        for col in 0..3 {
+            let (x, y) = (3000. * f64::from(col), 3000. * f64::from(row));
+            rooms.push((x, y, x + 3000., y + 3000.));
+        }
+    }
+    let h = build(&layout(&rooms, 200., 120.)).unwrap();
+    let h = door(&h, "street", &wall(&h, (0., 0.), (3000., 0.)), 1000.);
+    let centre = &h.data().rooms[4];
+    let walls = centre
+        .edges
+        .iter()
+        .map(|e| e.boundary.as_str().to_owned())
+        .collect();
+    assert!(errors(&h).contains(&Rejection {
+        element: ElementKind::Room,
+        id: centre.id.as_str().into(),
+        reason: Reason::Unreachable { walls }
+    }));
+}
+
+#[test]
+fn cuts_measured_from_opposite_ends_share_a_decimal_seam() {
+    let h = verification();
+    let seam = 400.13;
+    let left = cut(
+        &h,
+        "left",
+        &[(0., 0.), (seam, 0.), (seam, 1800.), (0., 1800.)],
+    );
+    let mut right = cut(
+        &h,
+        "right",
+        &[
+            (4200., 0.),
+            (5200. - seam, 0.),
+            (5200. - seam, 1800.),
+            (4200., 1800.),
+        ],
+    );
+    right.from = WallEnd::End;
+    assert_eq!(with_modifiers(&h, vec![left, right]).check(), Ok(()));
+}
+
+#[test]
+fn narrow_cuts_share_a_slanted_seam() {
+    let h = verification();
+    let left = cut(
+        &h,
+        "left",
+        &[(0., 0.), (402.59, 0.), (502.03, 1800.), (0., 1800.)],
+    );
+    let right = cut(
+        &h,
+        "right",
+        &[(402.59, 0.), (900., 0.), (900., 1800.), (502.03, 1800.)],
+    );
+    assert_eq!(with_modifiers(&h, vec![left, right]).check(), Ok(()));
 }

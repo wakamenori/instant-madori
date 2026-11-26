@@ -48,6 +48,14 @@ enum Node<'a> {
     Room(&'a RoomId),
 }
 
+struct Ring<'a> {
+    first_wall: &'a str,
+    storey: &'a StoreyId,
+    walls: Vec<&'a str>,
+    points: Vec<Point>,
+    twice_area: f64,
+}
+
 fn courtyards(h: &House) -> BTreeMap<&str, Node<'_>> {
     let mut exterior: BTreeMap<_, _> = h
         .rooms()
@@ -55,15 +63,21 @@ fn courtyards(h: &House) -> BTreeMap<&str, Node<'_>> {
         .filter(|e| e.boundary.rooms().count() == 1)
         .map(|e| (e.boundary.data().id.as_str(), e))
         .collect();
-    let mut nodes = BTreeMap::new();
+    let mut rings = Vec::new();
     while let Some((&first, edge)) = exterior.first_key_value() {
         let origin = edge.from;
         let mut current = first;
-        let mut ring = Vec::new();
-        let mut twice_area = 0.;
+        let mut ring = Ring {
+            first_wall: first,
+            storey: &edge.boundary.start().data().storey,
+            walls: Vec::new(),
+            points: Vec::new(),
+            twice_area: 0.,
+        };
         while let Some(edge) = exterior.remove(current) {
-            ring.push(current);
-            twice_area += edge
+            ring.walls.push(current);
+            ring.points.push(edge.from);
+            ring.twice_area += edge
                 .from
                 .delta_from(origin)
                 .cross(edge.to.delta_from(origin));
@@ -75,11 +89,7 @@ fn courtyards(h: &House) -> BTreeMap<&str, Node<'_>> {
                 break;
             };
             if next == first {
-                if twice_area < 0. {
-                    for wall in ring {
-                        nodes.insert(wall, Node::Courtyard(first));
-                    }
-                }
+                rings.push(ring);
                 break;
             }
             if !exterior.get(next).is_some_and(|e| {
@@ -93,6 +103,32 @@ fn courtyards(h: &House) -> BTreeMap<&str, Node<'_>> {
                 break;
             }
             current = next;
+        }
+    }
+    let mut nodes = BTreeMap::new();
+    let courtyards: Vec<_> = rings.iter().filter(|r| r.twice_area < 0.).collect();
+    for ring in &rings {
+        let enclosing = if ring.twice_area < 0. {
+            Some(ring)
+        } else {
+            courtyards
+                .iter()
+                .copied()
+                .filter(|c| {
+                    c.storey == ring.storey
+                        && ring
+                            .points
+                            .first()
+                            .is_some_and(|&p| crate::planform::contains(&c.points, p))
+                })
+                .min_by(|a, b| a.twice_area.abs().total_cmp(&b.twice_area.abs()))
+        };
+        if let Some(c) = enclosing {
+            nodes.extend(
+                ring.walls
+                    .iter()
+                    .map(|&w| (w, Node::Courtyard(c.first_wall))),
+            );
         }
     }
     nodes
@@ -139,7 +175,7 @@ pub(super) fn reach<'a>(h: &'a House) -> Vec<Rejection> {
     h.rooms()
         .filter(|r| !reached.contains(&Node::Room(&r.data().id)))
         .map(|r| {
-            let walls = r
+            let mut walls: Vec<_> = r
                 .edges()
                 .filter(|e| {
                     [Side::Left, Side::Right]
@@ -148,6 +184,14 @@ pub(super) fn reach<'a>(h: &'a House) -> Vec<Rejection> {
                 })
                 .map(|e| e.boundary.data().id.as_str().into())
                 .collect();
+            if walls.is_empty() {
+                walls.extend(
+                    r.data()
+                        .edges
+                        .iter()
+                        .map(|edge| edge.boundary.as_str().to_owned()),
+                );
+            }
             finding(
                 ElementKind::Room,
                 r.data().id.as_str(),

@@ -23,12 +23,26 @@ fn crossing_y((a, b): (Point, Point), (c, d): (Point, Point)) -> Option<f64> {
     ((0.0..=1.0).contains(&t) && (0.0..=1.0).contains(&u)).then_some(a.y + t * dy)
 }
 
-fn intervals(polygon: &[Point], y: f64) -> Vec<(f64, f64)> {
+#[derive(Clone, Copy)]
+struct Crossing {
+    bottom: f64,
+    top: f64,
+    middle: f64,
+}
+
+fn intervals(polygon: &[Point], lo: f64, hi: f64) -> Vec<(Crossing, Crossing)> {
     let mut xs: Vec<_> = edges(polygon)
-        .filter(|(a, b)| (a.y <= y) != (b.y <= y))
-        .map(|(a, b)| a.x + (y - a.y) * (b.x - a.x) / (b.y - a.y))
+        .filter(|(a, b)| (a.y <= lo) != (b.y <= lo))
+        .map(|(a, b)| {
+            let at = |y| a.x + (y - a.y) * (b.x - a.x) / (b.y - a.y);
+            Crossing {
+                bottom: at(lo),
+                top: at(hi),
+                middle: at(lo.midpoint(hi)),
+            }
+        })
         .collect();
-    xs.sort_by(f64::total_cmp);
+    xs.sort_by(|a, b| a.middle.total_cmp(&b.middle));
     xs.as_chunks::<2>().0.iter().map(|p| (p[0], p[1])).collect()
 }
 
@@ -58,26 +72,22 @@ pub(super) fn regions(in_all: &[&[Point]], in_none: &[&[Point]]) -> Vec<Spot> {
     let mut rects: Vec<Spot> = Vec::new();
     for band in ys.windows(2) {
         let (lo, hi) = (band[0], band[1]);
-        if hi - lo <= TOL {
-            continue;
-        }
-        let y = lo.midpoint(hi);
         let mut events = Vec::new();
         for p in in_all {
-            for (l, r) in intervals(p, y) {
+            for (l, r) in intervals(p, lo, hi) {
                 events.push((l, 1i32, 0i32));
                 events.push((r, -1, 0));
             }
         }
         for p in in_none {
-            for (l, r) in intervals(p, y) {
+            for (l, r) in intervals(p, lo, hi) {
                 events.push((l, 0, 1));
                 events.push((r, 0, -1));
             }
         }
-        events.sort_by(|a, b| a.0.total_cmp(&b.0));
+        events.sort_by(|a, b| a.0.middle.total_cmp(&b.0.middle));
         let (mut ins, mut outs) = (0, 0);
-        let mut start: Option<f64> = None;
+        let mut start: Option<Crossing> = None;
         for (x, di, dout) in events {
             let was = ins == required && outs == 0;
             ins += di;
@@ -88,11 +98,11 @@ pub(super) fn regions(in_all: &[&[Point]], in_none: &[&[Point]]) -> Vec<Spot> {
             } else if was
                 && !now
                 && let Some(s) = start.take()
-                && x - s > TOL
+                && (x.bottom - s.bottom > TOL || x.top - s.top > TOL)
             {
                 rects.push(Spot {
-                    min: point(s, lo),
-                    max: point(x, hi),
+                    min: point(s.bottom.min(s.top), lo),
+                    max: point(x.bottom.max(x.top), hi),
                 });
             }
         }
@@ -120,6 +130,7 @@ pub(super) fn regions(in_all: &[&[Point]], in_none: &[&[Point]]) -> Vec<Spot> {
         }
         merged.push(cur);
     }
+    merged.retain(|spot| spot.max.y - spot.min.y > TOL);
     merged
 }
 
