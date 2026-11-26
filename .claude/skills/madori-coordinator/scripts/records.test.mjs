@@ -98,3 +98,77 @@ test("issue and addition enforce label, first block, discovery and type-specific
     );
   }
 });
+
+const projectScope =
+  "## 範囲\n- 触ってよいパス：`apps/worker/src/api/projects.ts`、`apps/worker/tests/projects.test.ts`、`docs/plan.md` の 4.7";
+const mapError = /\.claude\/skills\/verify-madori\/features\//;
+const checkIssue = (body) => checkRecord("issue", body, typeLabels["機能"]);
+
+test("issues and drafts require the verification map for project API changes", () => {
+  const body = projectScope + "\n## 依存\n";
+  const draft = "---\nid: sample\ntitle: 案件\nmilestone: 2\nblockedBy: null\ntype: 機能\n---\n";
+  assert.throws(() => checkIssue(body), mapError);
+  assert.throws(() => renderDraft(draft + body), mapError);
+  const covered = body.replace(
+    " の 4.7",
+    " の 4.7、`.claude/skills/verify-madori/features/projects.md`",
+  );
+  checkIssue(covered);
+  assert.equal(renderDraft(draft + covered), covered);
+  checkRecord("addition", body, typeLabels["機能"]);
+});
+
+test("issues can give a reason for leaving the verification map unchanged", () => {
+  checkIssue(projectScope + "\n- 地図を変えない理由：作りの見直しで画面の振る舞いは変えない");
+  assert.throws(() => checkIssue(projectScope + "\n- 地図を変えない理由:  "), /needs a reason/);
+});
+
+test("scope paths include parent directories and stop at component boundaries", () => {
+  for (const path of ["apps/worker", "apps/web/", "apps/", "./apps/web/**"])
+    assert.throws(() => checkIssue("## 範囲\n- 触ってよいパス: " + path), mapError);
+  for (const path of [
+    "apps/worker/tests/x.ts",
+    "apps/webapp/x",
+    ".claude/skills/madori-coordinator/scripts/records.mjs",
+  ])
+    checkIssue("## 範囲\n- 触ってよいパス: " + path);
+  checkIssue(projectScope + "\r\n  .claude/skills/verify-madori\r\n");
+  assert.throws(
+    () => checkIssue(projectScope + "\n- 目的：.claude/skills/verify-madori"),
+    mapError,
+  );
+});
+
+test("only a visible reason in the scope section exempts a user path", () => {
+  const reason = "- 地図を変えない理由：テストだけ";
+  for (const example of [
+    "## 人の判断\n" + reason,
+    "<!--\n" + reason + "\n-->",
+    "```markdown\n" + reason + "\n```",
+    "~~~md\n" + reason + "\n~~~",
+  ]) {
+    assert.throws(() => checkIssue(projectScope + "\n" + example), mapError);
+  }
+  checkIssue(projectScope + "\n- やらないこと：\n  " + reason);
+});
+
+test("examples do not add paths to the scope", () => {
+  const docs = "- 触ってよいパス：`docs/plan.md`";
+  const example = "- 触ってよいパス：`apps/web/src/x.ts`";
+  checkIssue("## 目的\n```md\n## 範囲\n" + example + "\n```\n## 範囲\n" + docs);
+  checkIssue("## 範囲\n<!--\n" + example + "\n-->\n" + docs);
+  checkIssue("## 範囲\n" + docs + "\n- 地図を変えない理由：");
+  checkIssue("## 目的\n" + example);
+});
+
+test("heading fields, nested bullets and continuation lines include user paths", () => {
+  for (const field of [
+    "### 触ってよいパス\n\n- `apps/worker/src/storage/jobs.ts`",
+    "- 触ってよいパス：\n\n  - `apps/web/src/projects.tsx`",
+    "- 触ってよいパス：\n`apps/web/src/projects.tsx`",
+    "- 触ってよいパス ：`apps/web/src/projects.tsx`",
+    "* **触ってよいパス**: `apps/web/src/projects.tsx`",
+  ]) {
+    assert.throws(() => checkIssue("## 範囲\n" + field), mapError);
+  }
+});
