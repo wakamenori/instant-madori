@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 pub mod apply;
 pub mod bundle;
 pub mod schema;
+pub mod tools;
 pub const PROTOCOL_VERSION: u32 = 1;
 pub const PORT: u16 = 3001;
 pub const TOKEN_ENV: &str = "MADORI_INTERNAL_TOKEN";

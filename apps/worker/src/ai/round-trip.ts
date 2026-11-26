@@ -12,7 +12,8 @@ type ContentPart =
       readonly bytes: Uint8Array;
     };
 
-interface ToolSpec {
+/** Every tool is strict. The provider adapter sends `strict: true`. */
+export interface ToolSpec {
   readonly name: string;
   readonly description: string;
   readonly inputSchemaJson: string;

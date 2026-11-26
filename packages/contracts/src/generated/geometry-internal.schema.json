@@ -8463,6 +8463,7 @@
             "oneOf": [
               {
                 "additionalProperties": false,
+                "description": "Create the storey, walls and rooms of an empty house from rectangular rooms. Rejected with\nhouse_exists when a house already exists. The result lists each room's number, name and id.",
                 "properties": {
                   "kind": {
                     "const": "place_rooms",
@@ -8588,6 +8589,7 @@
               },
               {
                 "additionalProperties": false,
+                "description": "Add a window or door to one wall. The result returns the id of the new opening.",
                 "properties": {
                   "kind": {
                     "const": "attach_opening",
@@ -8696,6 +8698,7 @@
               },
               {
                 "additionalProperties": false,
+                "description": "Replace the wall, position, size and fitting of an existing opening. The opening keeps its id.",
                 "properties": {
                   "id": {
                     "type": "string"
@@ -8808,6 +8811,7 @@
               },
               {
                 "additionalProperties": false,
+                "description": "Remove an existing opening.",
                 "properties": {
                   "id": {
                     "type": "string"
@@ -8825,6 +8829,7 @@
               },
               {
                 "additionalProperties": false,
+                "description": "Move a wall perpendicular to itself. The result lists the walls that moved, the area of each\nroom before and after in square metres, and the openings that shifted along their wall.",
                 "properties": {
                   "kind": {
                     "const": "move_wall",
@@ -8898,6 +8903,7 @@
               },
               {
                 "additionalProperties": false,
+                "description": "Paint one face of one wall. A colour already on that face is replaced.",
                 "properties": {
                   "kind": {
                     "const": "set_wall_color",
@@ -8992,6 +8998,7 @@
               },
               {
                 "additionalProperties": false,
+                "description": "Remove the colour from one face of one wall.",
                 "properties": {
                   "face": {
                     "discriminator": {
