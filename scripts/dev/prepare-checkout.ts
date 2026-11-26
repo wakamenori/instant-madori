@@ -103,7 +103,7 @@ export function prepareCheckout(
       if (process.platform === "darwin") {
         execFileSync("/bin/cp", ["-c", "-R", src, tmp]);
       } else if (process.platform === "linux") {
-        execFileSync("cp", ["-R", "--reflink=always", src, tmp]);
+        execFileSync("cp", ["-R", "--reflink=always", "--preserve=timestamps", src, tmp]);
       } else {
         throw new Error(`Unsupported clone platform: ${process.platform}`);
       }
