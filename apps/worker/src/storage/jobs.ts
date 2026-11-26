@@ -111,11 +111,12 @@ export async function startContext(db: D1, right: JobExecutionRight) {
   return db.first(
     jsonRows(
       {
-        sql: `SELECT json_object('instruction',m.body,'claimedAt',j.updated_at,'base',
- CASE WHEN s.id IS NULL THEN NULL ELSE ${snapshotJson("s")} END) AS json
- FROM jobs j JOIN messages m ON m.id=j.message_id
- LEFT JOIN revisions r ON r.id=j.base_revision_id AND r.pattern_id=j.pattern_id
- LEFT JOIN snapshots s ON s.id=r.snapshot_id AND s.owner_id=j.owner_id WHERE ${active.sql}`,
+        sql: `SELECT json_object('instruction', m.body, 'claimedAt', j.updated_at, 'base',
+          CASE WHEN s.id IS NULL THEN NULL ELSE ${snapshotJson("s")} END) AS json
+        FROM jobs j JOIN messages m ON m.id = j.message_id AND m.pattern_id = j.pattern_id
+          LEFT JOIN revisions r ON r.id = j.base_revision_id AND r.pattern_id = j.pattern_id
+          LEFT JOIN snapshots s ON s.id = r.snapshot_id AND s.owner_id = j.owner_id
+        WHERE ${active.sql}`,
         bindings: active.bindings,
       },
       z.object({
@@ -137,8 +138,8 @@ export async function recordAi(
   const result = await db.first(
     rows(
       {
-        sql: `UPDATE jobs AS j SET ai_model=?, ai_prompt_version=?, ai_tool_schema_version=?
- WHERE ${active.sql} RETURNING 1 AS found`,
+        sql: `UPDATE jobs AS j SET ai_model = ?, ai_prompt_version = ?, ai_tool_schema_version = ?
+          WHERE ${active.sql} RETURNING 1 AS found`,
         bindings: [
           versions.model,
           versions.promptVersion,
@@ -204,8 +205,10 @@ export async function completeJob(
   const active = activeCondition(right);
   function message(kind: "notice" | "explanation", entry: { id: string; body: string } | null) {
     return write({
-      sql: `INSERT INTO messages (id,pattern_id,owner_id,number,body,created_at,kind,job_id)
-        SELECT ?,j.pattern_id,j.owner_id,(SELECT coalesce(max(number),0)+1 FROM messages WHERE pattern_id=j.pattern_id),?,?,?,j.id
+      sql: `INSERT INTO messages (id, pattern_id, owner_id, number, body, created_at, kind, job_id)
+        SELECT ?, j.pattern_id, j.owner_id,
+          (SELECT coalesce(max(m.number), 0) + 1 FROM messages m WHERE m.pattern_id = j.pattern_id),
+          ?, ?, ?, j.id
         FROM jobs j WHERE ${active.sql} AND ? IS NOT NULL`,
       bindings: [
         entry?.id ?? null,

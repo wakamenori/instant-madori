@@ -123,7 +123,6 @@ export function elements(text: string, ids: string[]) {
 export function toolText(value: unknown, limit: number): string {
   const json = JSON.stringify(value);
   if (new TextEncoder().encode(json).byteLength <= limit) return json;
-  // Reduce every array together so nested inspection findings also fit.
   let keep = 32;
   for (;;) {
     const shortened = JSON.stringify(value, (_key: string, v: unknown): unknown =>
