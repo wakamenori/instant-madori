@@ -15,6 +15,7 @@ type Run = {
 };
 type Observation = Run & Pick<TestResult, "outcome">;
 type Verdict =
+  | { kind: "broken"; evidence: string }
   | { kind: "flaky"; evidence: string }
   | { kind: "failing" }
   | { kind: "suspect"; branches: string[] }
@@ -23,9 +24,44 @@ type Verdict =
 function runLabel(o: Observation) {
   return `${o.workflow} ${o.runId}/${o.attempt}`;
 }
+const brokenAfter = 2;
+
+function failuresSinceMainFailed(observations: Observation[]) {
+  let lastPass: Observation | undefined;
+  let failures: Observation[] = [];
+  for (const o of observations
+    .filter((o) => o.outcome !== "skip")
+    .sort((a, b) => a.runId - b.runId || a.attempt - b.attempt)) {
+    if (o.outcome === "pass") {
+      lastPass = o;
+      failures = [];
+    } else if (failures.length || o.headBranch === "main") failures.push(o);
+  }
+  return { lastPass, failures };
+}
+
 export function verdict(observations: Observation[]): Verdict {
   const passes = observations.filter((o) => o.outcome === "pass");
   const fails = observations.filter((o) => o.outcome === "fail");
+  if (!fails.length) return { kind: "stable" };
+  if (!passes.length) return { kind: "failing" };
+  const { lastPass, failures } = failuresSinceMainFailed(observations);
+  const first = failures[0];
+  const latest = failures.at(-1);
+  if (
+    failures.length >= brokenAfter &&
+    first &&
+    latest &&
+    !failures.some(
+      (failure) =>
+        failure.headBranch === "main" && passes.some((pass) => pass.headSha === failure.headSha),
+    )
+  ) {
+    return {
+      kind: "broken",
+      evidence: `${failures.length} failures in a row since main failed on ${first.headSha}: first ${runLabel(first)}, latest ${runLabel(latest)}; last pass ${lastPass ? runLabel(lastPass) : "not in window"}`,
+    };
+  }
   for (const fail of fails) {
     const pass = passes.find((o) => o.headSha === fail.headSha);
     if (pass)
@@ -37,15 +73,20 @@ export function verdict(observations: Observation[]): Verdict {
   const mainFails = fails.filter((o) => o.headBranch === "main");
   if (mainFails.length && passes.some((o) => o.headBranch === "main"))
     return { kind: "flaky", evidence: "main failures: " + mainFails.map(runLabel).join(", ") };
-  if (!fails.length) return { kind: "stable" };
-  if (!passes.length) return { kind: "failing" };
   const branches = [...new Set(fails.map((o) => o.headBranch))].sort();
   const [branch] = branches;
   if (branch && branches.length === 1 && branch !== "main") return { kind: "branch-local", branch };
   return { kind: "suspect", branches };
 }
 
-const order: Verdict["kind"][] = ["flaky", "failing", "suspect", "branch-local", "stable"];
+const order: Verdict["kind"][] = [
+  "broken",
+  "flaky",
+  "failing",
+  "suspect",
+  "branch-local",
+  "stable",
+];
 export function formatReport(tests: Map<string, Observation[]>, all: boolean, filter?: string) {
   const rows = [];
   for (const [id, observations] of tests) {
@@ -65,7 +106,7 @@ export function formatReport(tests: Map<string, Observation[]>, all: boolean, fi
     }
     if (!counts.size) continue;
     const detail =
-      v.kind === "flaky"
+      v.kind === "broken" || v.kind === "flaky"
         ? v.evidence
         : v.kind === "suspect"
           ? v.branches.join(", ")

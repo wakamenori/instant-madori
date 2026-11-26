@@ -110,3 +110,52 @@ void test("report escapes control characters from artifact ids", () => {
   assert.match(report, /a\\nb\\u001b\[2J/u);
   assert.doesNotMatch(report, /\p{Cc}/u);
 });
+
+void test("consecutive main failures report their first and latest attempts and the last pass", () => {
+  const runs = [
+    obs("fail", "main", 5),
+    obs("fail", "main", 4, "4", 2),
+    obs("fail", "main", 4),
+    obs("pass", "main", 3),
+    obs("pass", "main", 2),
+    obs("pass", "main", 1),
+  ];
+  assert.equal(verdict(runs).kind, "broken");
+  assert.match(
+    formatReport(new Map([["test", runs]]), false),
+    /^broken {2}3\/6 failed \(50\.0%\).*3 failures in a row since main failed on 4: first deploy-staging 4\/1, latest deploy-staging 5\/1; last pass deploy-staging 3\/1$/u,
+  );
+});
+void test("a failing main commit that passed stays flaky", () => {
+  for (const runs of [
+    [obs("pass", "main", 3), obs("fail", "main", 4), obs("pass", "main", 4, "4", 2)],
+    [obs("fail", "main", 4), obs("fail", "main", 5), obs("pass", "main", 4, "4", 2)],
+    [
+      obs("fail", "main", 10, "X"),
+      obs("pass", "main", 10, "X", 2),
+      obs("fail", "main", 11, "X"),
+      obs("fail", "main", 11, "X", 2),
+    ],
+  ])
+    assert.equal(verdict(runs).kind, "flaky");
+});
+void test("PR runs can extend or end a main failure streak", () => {
+  const main = [
+    ...Array.from({ length: 5 }, (_, i) => obs("pass", "main", i + 1)),
+    obs("fail", "main", 6),
+  ];
+  const broken = [...main, obs("fail", "pr-a", 7), obs("fail", "pr-b", 8)];
+  const flaky = [...main, obs("pass", "pr-a", 7), obs("fail", "pr-b", 8)];
+  assert.equal(verdict(broken).kind, "broken");
+  assert.equal(verdict(flaky).kind, "flaky");
+  assert.match(
+    formatReport(
+      new Map([
+        ["a", flaky],
+        ["b", broken],
+      ]),
+      false,
+    ),
+    /^broken [^\n]+\nflaky /u,
+  );
+});
