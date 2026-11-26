@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import { constants } from "node:os";
 import { createServer } from "node:net";
@@ -40,6 +40,25 @@ export function startTethered(
   );
 }
 
+export function killGroup(group: number) {
+  try {
+    process.kill(-group, "SIGKILL");
+  } catch (error) {
+    if (!(error instanceof Error && "code" in error)) throw error;
+    if (error.code === "ESRCH") return;
+    if (error.code === "EPERM") {
+      // macOS returns EPERM when only zombies remain in the group.
+      const rows = execFileSync("ps", ["-A", "-o", "pgid=", "-o", "stat="], { encoding: "utf8" });
+      const hasLiveMember = rows.split("\n").some((row) => {
+        const [pgid, stat] = row.trim().split(/\s+/);
+        return Number(pgid) === group && !stat?.startsWith("Z");
+      });
+      if (!hasLiveMember) return;
+    }
+    throw error;
+  }
+}
+
 if (import.meta.main) {
   const [parent, command, ...args] = process.argv.slice(2);
   const spawner = Number(parent);
@@ -51,11 +70,7 @@ if (import.meta.main) {
 
   const sweep = () => {
     if (!server.child.pid) return;
-    try {
-      process.kill(-server.child.pid, "SIGKILL");
-    } catch (error) {
-      if (!(error instanceof Error && "code" in error && error.code === "ESRCH")) throw error;
-    }
+    killGroup(server.child.pid);
   };
   let escalation: NodeJS.Timeout | undefined;
   const release = () => {
