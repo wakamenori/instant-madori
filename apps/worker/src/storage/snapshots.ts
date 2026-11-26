@@ -1,7 +1,7 @@
 import { readJobExecutionRight } from "./job-execution.ts";
 import type { JobExecutionRight } from "./job-execution.ts";
 import type { R2 } from "./r2.ts";
-import { displayContentType } from "@madori/contracts";
+import { displayContentType, elementIdSchema } from "@madori/contracts";
 import { z } from "zod";
 import { parseJsonColumn, StorageCorruption } from "./rows.ts";
 
@@ -64,6 +64,51 @@ function snapshotKey(ownerId: string, snapshotId: string, name: string) {
   return `owners/${ownerId}/snapshots/${snapshotId}/${name}`;
 }
 
+const storedHouseSchema = z.object({
+  version: z.literal(1),
+  house: z.object({
+    vertices: z.array(
+      z.object({ id: elementIdSchema, at: z.object({ x: z.number(), y: z.number() }) }),
+    ),
+    boundaries: z.array(
+      z.object({
+        id: elementIdSchema,
+        start: elementIdSchema,
+        end: elementIdSchema,
+        wall: z.object({
+          offsets: z.object({ left: z.number(), right: z.number() }),
+          height: z.number(),
+        }),
+      }),
+    ),
+    rooms: z.array(
+      z.object({
+        id: elementIdSchema,
+        name: z.string(),
+        usage: z.string(),
+        edges: z.array(
+          z.object({ boundary: elementIdSchema, direction: z.enum(["forward", "reverse"]) }),
+        ),
+      }),
+    ),
+    openings: z.array(
+      z.object({
+        id: elementIdSchema,
+        wall: elementIdSchema,
+        width: z.number(),
+        height: z.number(),
+        sill: z.number(),
+        fitting: z.object({ kind: z.enum(["window", "door"]) }),
+      }),
+    ),
+  }),
+});
+export type StoredHouse = z.infer<typeof storedHouseSchema>["house"];
+
+export function parseStoredHouse(text: string): StoredHouse {
+  return parseJsonColumn(text, storedHouseSchema, "house").house;
+}
+
 type Bytes = Uint8Array<ArrayBuffer>;
 export interface HouseFiles<F, Plan = F> {
   data: F;
@@ -73,7 +118,7 @@ export interface HouseFiles<F, Plan = F> {
 export type SnapshotFile = { contentType: string; read(): Promise<Bytes> };
 export type OpenedSnapshot = {
   display: SnapshotFile;
-  house: HouseFiles<SnapshotFile> | null;
+  house: (HouseFiles<SnapshotFile> & { readHouse(): Promise<StoredHouse> }) | null;
 };
 
 async function sha256(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
@@ -184,18 +229,21 @@ export async function openSnapshot(bucket: R2, snapshot: Snapshot): Promise<Open
       },
     };
   }
+  const display = openFile(fileNames.display, manifest.display);
+  if (manifest.formatVersion === 1) return { display, house: null };
+  const data = openFile(fileNames.house, manifest.house);
   return {
-    display: openFile(fileNames.display, manifest.display),
-    house:
-      manifest.formatVersion === 1
-        ? null
-        : {
-            data: openFile(fileNames.house, manifest.house),
-            floorPlans: manifest.floorPlans.map((plan, index) => ({
-              ...openFile(fileNames.floorPlan(index), plan),
-              storey: plan.storey,
-            })),
-            checks: openFile(fileNames.checks, manifest.checks),
-          },
+    display,
+    house: {
+      data,
+      async readHouse() {
+        return parseStoredHouse(new TextDecoder().decode(await data.read()));
+      },
+      floorPlans: manifest.floorPlans.map((plan, index) => ({
+        ...openFile(fileNames.floorPlan(index), plan),
+        storey: plan.storey,
+      })),
+      checks: openFile(fileNames.checks, manifest.checks),
+    },
   };
 }

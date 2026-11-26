@@ -1,7 +1,4 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
-import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import {
@@ -13,26 +10,8 @@ import {
   displayContentType,
 } from "@madori/contracts";
 import { newUser, startLocalWorker } from "./support/local-worker.ts";
-import type { LocalWorker } from "./support/local-worker.ts";
 
-const execFileAsync = promisify(execFile);
-async function fixture(worker: LocalWorker, input: unknown): Promise<unknown> {
-  return worker.withPausedWorker(async (state) => {
-    const { stdout } = await execFileAsync(
-      process.execPath,
-      [
-        fileURLToPath(new URL("./rpc/revision-fixture.ts", import.meta.url)),
-        state,
-        JSON.stringify(input),
-      ],
-      { timeout: 120_000, maxBuffer: 1024 * 1024 },
-    );
-    const last = stdout.trim().split("\n").at(-1);
-    assert(last);
-    const result: unknown = JSON.parse(last);
-    return result;
-  });
-}
+import { revisionFixture } from "./revision-fixture.ts";
 
 await test("Immutable revisions through local D1, R2 and public HTTP", async (t) => {
   const worker = await startLocalWorker();
@@ -75,9 +54,9 @@ await test("Immutable revisions through local D1, R2 and public HTTP", async (t)
   });
   const { revisions } = revisionListResponseSchema
     .omit({ nextCursor: true })
-    .parse(await fixture(worker, { kind: "commit", ownerId, patternId: pattern.id }));
+    .parse(await revisionFixture(worker, { kind: "commit", ownerId, patternId: pattern.id }));
   await t.test("once-only storage operations apply first and replay on a resend", async () => {
-    assert.deepEqual(await fixture(worker, { kind: "once", ownerId }), { ok: true });
+    assert.deepEqual(await revisionFixture(worker, { kind: "once", ownerId }), { ok: true });
   });
   const latest = revisions.at(-1);
   const first = revisions[0];
@@ -178,7 +157,13 @@ await test("Immutable revisions through local D1, R2 and public HTTP", async (t)
     ] as const) {
       const revision = revisions[index];
       assert(revision);
-      await fixture(worker, { kind: "damage", ownerId, revisionId: revision.id, target, missing });
+      await revisionFixture(worker, {
+        kind: "damage",
+        ownerId,
+        revisionId: revision.id,
+        target,
+        missing,
+      });
       const response = await worker.call(`/api/revisions/${revision.id}/view`, { as: owner });
       assert.equal(response.status, 500);
       assert.deepEqual(apiErrorSchema.parse(await response.json()), { error: "internal_error" });
