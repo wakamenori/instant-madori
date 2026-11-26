@@ -1,32 +1,10 @@
+import { registerTsx } from "../tsx-test-loader.ts";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
-import { registerHooks } from "node:module";
 import { test } from "node:test";
-import ts from "typescript";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 void test("viewport uses the caller's label and exposes status outside the image", async () => {
-  const source = await readFile(new URL("./model-viewport.tsx", import.meta.url), "utf8");
-  const js = ts
-    .transpileModule(source, {
-      compilerOptions: {
-        jsx: ts.JsxEmit.ReactJSX,
-        module: ts.ModuleKind.ESNext,
-        target: ts.ScriptTarget.ES2022,
-      },
-    })
-    .outputText.replace(
-      /from "([^"]+)"/g,
-      (_all: string, specifier: string) => `from ${JSON.stringify(import.meta.resolve(specifier))}`,
-    );
-  const hooks = registerHooks({
-    load(url, context, nextLoad) {
-      if (url === import.meta.resolve("./model-viewport.tsx")) {
-        return { format: "module", source: js, shortCircuit: true };
-      }
-      return nextLoad(url, context);
-    },
-  });
+  const hooks = await registerTsx(new URL("./model-viewport.tsx", import.meta.url));
   const module = await import("./model-viewport.tsx").finally(() => hooks.deregister());
   const html = renderToStaticMarkup(
     createElement(module.ModelViewport, { display: null, label: "Different model" }),
