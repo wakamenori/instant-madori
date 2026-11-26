@@ -19,7 +19,12 @@ FROM issue_change ic JOIN change c USING(pr) JOIN stg_actions_job j
  ON j.workflow='check' AND (j.head_branch=c.head_ref OR EXISTS(SELECT 1 FROM json_each(j.pr_numbers) WHERE value=c.pr));
 
 CREATE TABLE span AS
-WITH occupancy_labels AS (
+WITH local_command AS (
+ SELECT payload->>'$.thread' thread,payload->>'$.cwd' cwd,payload->>'$.name' name,
+  payload->>'$.started_at' start,payload->>'$.ended_at' end,
+  coalesce(payload->>'$.exit_code',payload->>'$.signal') result
+ FROM staging_record WHERE source='run.span' AND valid_to IS NULL
+), occupancy_labels AS (
  SELECT issue,id,event,created_at FROM stg_github_issue_timeline WHERE label='staging を占有中'
 ), launches AS (
  SELECT occurred_at,payload->>'$.input.session_id' session,payload->>'$.input.tool_use_id' tool_use_id,
@@ -31,6 +36,30 @@ WITH occupancy_labels AS (
 ), completions AS (
  SELECT *,row_number() OVER (PARTITION BY session,notification->>'$.tool_use_id',notification->>'$.task_id' ORDER BY occurred_at,natural_key) arrival
  FROM notifications
+), tool_spans(actor,issue,kind,start,end,detail) AS (
+ SELECT t.thread_id,i.issue,iif(c.mark='decision','decision','local_run'),c.start,c.end,iif(c.stands_for='local_run','waited:'||c.name,c.name)
+ FROM stg_tool_call c JOIN stg_session_thread t USING(session) JOIN inside_actor i ON i.id=t.thread_id
+ WHERE c.mark IS NULL OR c.mark='decision' OR c.stands_for='local_run'
+), background_spans(actor,issue,kind,start,end,detail) AS (
+ SELECT t.thread_id,i.issue,'local_run',l.occurred_at,coalesce(c.notification->>'$.ended_at',c.occurred_at),
+  'background:'||coalesce('exit '||(c.notification->>'$.exit_code'),c.notification->>'$.status')
+ FROM launches l JOIN completions c ON c.session=l.session AND c.notification->>'$.tool_use_id'=l.tool_use_id
+  AND c.notification->>'$.task_id'=l.task_id AND c.arrival=1
+ JOIN stg_session_thread t ON t.session=l.session JOIN inside_actor i ON i.id=t.thread_id
+), observed_spans AS (
+ SELECT * FROM tool_spans UNION ALL SELECT * FROM background_spans
+), command_spans(actor,issue,kind,start,end,detail) AS (
+ SELECT i.id,i.issue,'local_run',c.start,c.end,'run:'||c.name||' exit '||c.result
+ FROM local_command c JOIN (SELECT id,min(issue) issue FROM inside_actor GROUP BY id) i ON i.id=coalesce(
+  (SELECT id FROM inside_actor WHERE id=c.thread),
+  (SELECT a.id FROM inside_actor a JOIN stg_t3_thread t ON t.id=a.id JOIN stg_t3_run r ON r.thread_id=a.id
+   WHERE (c.cwd=t.worktree_path OR substr(c.cwd,1,length(t.worktree_path)+1)=t.worktree_path||'/')
+    AND r.started_at<=c.start ORDER BY r.started_at DESC,a.id LIMIT 1))
+ WHERE NOT EXISTS (SELECT 1 FROM actor WHERE id=c.thread AND role='coordinator')
+), kept_commands AS MATERIALIZED (
+ SELECT r.* FROM command_spans r WHERE NOT EXISTS (
+  SELECT 1 FROM observed_spans o WHERE o.actor=r.actor AND o.kind='local_run'
+   AND (o.detail GLOB 'waited:*') IS NOT TRUE AND o.start<=r.start AND o.end>=r.end)
 )
 SELECT a.id actor,a.issue,CASE role WHEN 'owner' THEN 'owner_turn' WHEN 'implementer' THEN 'implementer_run'
  WHEN 'advisor' THEN 'advisor_run' WHEN 'verifier' THEN 'verifier_run' ELSE 'coordinator_turn' END kind,r.started_at start,r.completed_at end,
@@ -42,14 +71,10 @@ UNION ALL SELECT a.id,a.issue,'advisor_run',s.started_at,s.completed_at,NULL FRO
 WHERE s.origin='provider_native'
 UNION ALL SELECT t.thread_id,i.issue,'generation',m.start,m.end,NULL
 FROM stg_model_call m JOIN stg_session_thread t USING(session) JOIN inside_actor i ON i.id=t.thread_id
-UNION ALL SELECT t.thread_id,i.issue,iif(c.mark='decision','decision','local_run'),c.start,c.end,iif(c.stands_for='local_run','waited:'||c.name,c.name)
-FROM stg_tool_call c JOIN stg_session_thread t USING(session) JOIN inside_actor i ON i.id=t.thread_id
-WHERE c.mark IS NULL OR c.mark='decision' OR c.stands_for='local_run'
-UNION ALL SELECT t.thread_id,i.issue,'local_run',l.occurred_at,coalesce(c.notification->>'$.ended_at',c.occurred_at),
- 'background:'||coalesce('exit '||(c.notification->>'$.exit_code'),c.notification->>'$.status')
-FROM launches l JOIN completions c ON c.session=l.session AND c.notification->>'$.tool_use_id'=l.tool_use_id
- AND c.notification->>'$.task_id'=l.task_id AND c.arrival=1
-JOIN stg_session_thread t ON t.session=l.session JOIN inside_actor i ON i.id=t.thread_id
+UNION ALL SELECT o.* FROM observed_spans o
+WHERE (o.detail GLOB 'waited:*') IS NOT TRUE OR o.kind<>'local_run' OR NOT EXISTS (
+ SELECT 1 FROM kept_commands r WHERE r.actor=o.actor AND r.start<o.end AND o.start<r.end)
+UNION ALL SELECT * FROM kept_commands
 UNION ALL SELECT j.run_id||'/'||j.run_attempt,ij.issue,'ci_run',min(j.started_at),
  iif(count(*)=count(j.completed_at),max(j.completed_at),NULL),NULL
 FROM stg_actions_job j JOIN check_issue_attempt ij USING(run_id,run_attempt)
