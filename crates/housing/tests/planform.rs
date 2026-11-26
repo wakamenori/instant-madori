@@ -50,15 +50,22 @@ fn wall(h: &House, a: Point, b: Point) -> BoundaryView<'_> {
 fn ring(w: BoundaryView<'_>, coords: &[(i32, i32)]) {
     let polygon = w.planform().unwrap();
     let expected: Vec<_> = coords.iter().map(|&(x, y)| point(x, y)).collect();
-    assert_eq!(polygon.points().len(), expected.len());
-    assert!((0..expected.len()).any(|i| {
+    assert_same_ring(polygon.points(), &expected);
+}
+fn assert_same_ring(actual: &[Point], expected: &[Point]) {
+    assert_eq!(actual.len(), expected.len());
+    let matches = (0..expected.len()).any(|i| {
         expected
             .iter()
             .cycle()
             .skip(i)
             .take(expected.len())
-            .eq(polygon.points())
-    }));
+            .eq(actual)
+    });
+    assert!(
+        matches,
+        "expected a rotation of {expected:?}, got {actual:?}"
+    );
 }
 fn area(points: &[Point]) -> f64 {
     points
@@ -143,6 +150,31 @@ fn stepped_through_wall() {
             (4060, -40),
         ],
     );
+    ring(
+        wall(&h, point(-100, -100), point(4000, -100)),
+        &[(-200, -200), (4000, -200), (4000, 0), (0, 0)],
+    );
+    ring(
+        wall(&h, point(4000, -100), point(8100, -100)),
+        &[(4000, -160), (8200, -160), (8000, -40), (4000, -40)],
+    );
+    let outer = [
+        point(-200, -200),
+        point(4000, -200),
+        point(4000, -160),
+        point(8200, -160),
+        point(8200, 5200),
+        point(-200, 5200),
+    ];
+    let walls: f64 = h
+        .boundaries()
+        .map(|w| area(w.planform().unwrap().points()))
+        .sum();
+    let rooms: f64 = h
+        .rooms()
+        .map(|r| area(r.interior().unwrap().outline()))
+        .sum();
+    assert_eq!(walls + rooms, area(&outer));
 }
 #[test]
 fn crossing_tiles_four_rooms() {
@@ -317,6 +349,62 @@ fn two_branches_meeting_before_the_through_face() {
 }
 
 #[test]
+fn only_the_two_branches_meeting_before_the_face_are_rejected() {
+    let junction = point(3000, 0);
+    let removed = point(6000, 0);
+    let h = layout(&[
+        (0, 0, 3000, 4000),
+        (3000, 0, 6000, 4000),
+        (6000, 0, 9000, 4000),
+    ]);
+    let bottom = wall(&h, junction, removed).data().id.clone();
+    let mut data = h.into_data();
+    let vertex = |at| {
+        data.vertices
+            .iter()
+            .find(|v| v.at == at)
+            .unwrap()
+            .id
+            .clone()
+    };
+    let junction_id = vertex(junction);
+    let removed_id = vertex(removed);
+    data.boundaries.retain(|w| w.id != bottom);
+    data.vertices.retain(|v| v.id != removed_id);
+    for w in &mut data.boundaries {
+        for end in [&mut w.start, &mut w.end] {
+            if *end == removed_id {
+                *end = junction_id.clone();
+            }
+        }
+    }
+    for r in &mut data.rooms {
+        r.edges.retain(|e| e.boundary != bottom);
+    }
+    let h = House::new(data).unwrap();
+    assert!(h.rooms().all(|r| r.interior().is_ok()));
+    let branches = [
+        wall(&h, junction, point(3000, 4000)).data().id.clone(),
+        wall(&h, junction, point(6000, 4000)).data().id.clone(),
+    ];
+    for w in h.boundaries() {
+        if branches.contains(&w.data().id) {
+            let errors = w.planform().unwrap_err();
+            assert!(matches!(
+                errors.as_slice(),
+                [Rejection {
+                    element: ElementKind::Vertex,
+                    id,
+                    reason: Reason::UnresolvedJoint { .. },
+                }] if id == junction_id.as_str()
+            ));
+        } else {
+            w.planform().unwrap();
+        }
+    }
+}
+
+#[test]
 fn winding_survives_rounded_products_and_signed_zero() {
     let n = 2f64.powi(51);
     let a = Point { x: 0., y: 0. };
@@ -340,6 +428,29 @@ fn winding_survives_rounded_products_and_signed_zero() {
     );
 }
 
+fn assert_reversed_wall_rings(h: &House) {
+    let mut data = h.data().clone();
+    for w in &mut data.boundaries {
+        std::mem::swap(&mut w.start, &mut w.end);
+        let offsets = &mut w.wall.offsets;
+        std::mem::swap(&mut offsets.left, &mut offsets.right);
+    }
+    for edge in data.rooms.iter_mut().flat_map(|r| &mut r.edges) {
+        edge.direction = match edge.direction {
+            Direction::Forward => Direction::Reverse,
+            Direction::Reverse => Direction::Forward,
+        };
+    }
+    let reversed = House::new(data).unwrap();
+    for w in h.boundaries() {
+        let other = reversed.boundary(&w.data().id).unwrap();
+        assert_same_ring(
+            other.planform().unwrap().points(),
+            w.planform().unwrap().points(),
+        );
+    }
+}
+
 #[test]
 fn half_thickness_step_beside_an_l_corner_draws_a_triangle() {
     let h = layout_with_walls(
@@ -355,6 +466,7 @@ fn half_thickness_step_beside_an_l_corner_draws_a_triangle() {
         wall(&h, point(4000, 0), point(4000, 100)),
         &[(4100, -100), (4100, 100), (3900, 100)],
     );
+    assert_reversed_wall_rings(&h);
 }
 
 #[test]
@@ -372,6 +484,7 @@ fn half_thickness_stem_on_a_stepped_through_wall_keeps_the_uncovered_half() {
         wall(&h, point(3200, 3700), point(3200, 3800)),
         &[(3200, 3750), (3250, 3750), (3250, 3800), (3200, 3800)],
     );
+    assert_reversed_wall_rings(&h);
 }
 
 #[test]
