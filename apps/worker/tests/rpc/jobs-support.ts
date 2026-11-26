@@ -1,3 +1,5 @@
+import assert from "node:assert/strict";
+import { acceptInstruction, claimNextJob } from "../../src/services/jobs.ts";
 import { readFile } from "node:fs/promises";
 import { URL, fileURLToPath } from "node:url";
 import { unstable_splitSqlQuery } from "wrangler";
@@ -16,13 +18,21 @@ export const conversationMigration = new URL(
   "../../migrations/0005_conversation_kinds.sql",
   import.meta.url,
 );
-const aiAttemptsMigration = new URL("../../migrations/0006_ai_attempts.sql", import.meta.url);
+export const aiAttemptsMigration = new URL(
+  "../../migrations/0006_ai_attempts.sql",
+  import.meta.url,
+);
+export const snapshotMigration = new URL(
+  "../../migrations/0007_snapshot_format_2.sql",
+  import.meta.url,
+);
 export async function applyJobMigrations(db: Awaited<ReturnType<typeof openJobDatabase>>) {
   for (const migration of [
     jobMigration,
     queueHoldMigration,
     conversationMigration,
     aiAttemptsMigration,
+    snapshotMigration,
   ])
     await db.apply(await readFile(migration, "utf8"));
 }
@@ -78,4 +88,43 @@ export async function openJobDatabase() {
     await proxy.dispose();
     throw error;
   }
+}
+
+export async function snapshotPattern(db: Awaited<ReturnType<typeof openJobDatabase>>) {
+  const ownerId = await db.owner("snapshot");
+  const patternId = crypto.randomUUID();
+  const created = await db.store.projects.createOnce(
+    {
+      ownerId,
+      requestId: crypto.randomUUID(),
+      operation: "project.create",
+      fingerprint: "fixture",
+    },
+    {
+      id: crypto.randomUUID(),
+      name: "P",
+      now,
+      firstPattern: { id: patternId, name: "T", defaultNamePrefix: "T" },
+    },
+  );
+  assert.equal(created.kind, "applied");
+  const deps = { ...db, wakePattern: async () => {} };
+  async function claim() {
+    const accepted = await acceptInstruction(deps, {
+      ownerId,
+      patternId,
+      requestId: crypto.randomUUID(),
+      body: "案を作って",
+    });
+    assert.equal(accepted.kind, "accepted");
+    const job = await claimNextJob(deps, { patternId });
+    assert(job.kind === "claimed");
+    return job.right;
+  }
+  async function snapshot(revisionId: string) {
+    const row = await db.store.revisions.snapshot({ ownerId, revisionId });
+    assert(row);
+    return row;
+  }
+  return { ownerId, patternId, claim, snapshot };
 }

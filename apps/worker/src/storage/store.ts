@@ -108,8 +108,8 @@ export function createStore(db: D1, bucket: R2) {
         right: Parameters<typeof snapshots.writeSnapshot>[1],
         input: Parameters<typeof snapshots.writeSnapshot>[2],
       ) => snapshots.writeSnapshot(bucket, right, input),
-      display: (snapshot: Parameters<typeof snapshots.readSnapshotDisplay>[1]) =>
-        snapshots.readSnapshotDisplay(bucket, snapshot),
+      open: (snapshot: Parameters<typeof snapshots.openSnapshot>[1]) =>
+        snapshots.openSnapshot(bucket, snapshot),
     },
   };
 }

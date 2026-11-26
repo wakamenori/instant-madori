@@ -11,6 +11,12 @@ await test("Conversation migration preserves previous Worker operations and cons
   ]);
 });
 
+await test("Snapshot migration preserves revisions and previous Worker commits", async () => {
+  await promisify(execFile)(process.execPath, [
+    fileURLToPath(new URL("./rpc/snapshot-format-migration-fixture.ts", import.meta.url)),
+  ]);
+});
+
 await test("Queue hold migration preserves populated queues and previous Worker writes", async () => {
   await promisify(execFile)(process.execPath, [
     fileURLToPath(new URL("./rpc/queue-hold-migration-fixture.ts", import.meta.url)),
@@ -129,7 +135,7 @@ await test("Revision and snapshot constraints", async (t) => {
       ('t3', 'p2', 'u2', 1, 'T', 1, '${now}', '${now}');
     INSERT INTO snapshots VALUES
       ('s1', 'u1', 1, 'one/manifest.json', '${hash}', '${now}'),
-      ('s2', 'u2', 1, 'two/manifest.json', '${hash}', '${now}');
+      ('s2', 'u2', 2, 'two/manifest.json', '${hash}', '${now}');
     INSERT INTO revisions (id, pattern_id, owner_id, number, name, snapshot_id, base_revision_id, created_at) VALUES ('r1', 't1', 'u1', 1, 'R', 's1', NULL, '${now}');
   `);
   for (const [label, sql, expected] of [
@@ -175,8 +181,8 @@ await test("Revision and snapshot constraints", async (t) => {
     ],
     [
       "only implemented manifest versions can be stored",
-      `INSERT INTO snapshots VALUES ('bad', 'u1', 2, 'bad', '${hash}', '${now}')`,
-      /CHECK constraint failed: format_version = 1/,
+      `INSERT INTO snapshots VALUES ('bad', 'u1', 3, 'bad', '${hash}', '${now}')`,
+      /CHECK constraint failed: snapshots_format_version/,
     ],
     [
       "hash must be lowercase hex",
