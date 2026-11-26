@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
+import { constants } from "node:os";
 import { createServer } from "node:net";
 import { setTimeout } from "node:timers/promises";
 
@@ -21,8 +22,68 @@ export function start(command: string, args: string[], options: SpawnOptions = {
   return { child, finished };
 }
 
+export type Run = ReturnType<typeof start>;
+
+const stopGraceMs = 5000;
+// Escalate before stop() can kill the tether itself.
+const tetherGraceMs = stopGraceMs - 1000;
+
+export function startTethered(
+  command: string,
+  args: readonly string[],
+  options: SpawnOptions = {},
+): Run {
+  return start(
+    process.execPath,
+    [import.meta.filename, String(process.pid), command, ...args],
+    options,
+  );
+}
+
+if (import.meta.main) {
+  const [parent, command, ...args] = process.argv.slice(2);
+  const spawner = Number(parent);
+  if (!Number.isSafeInteger(spawner) || spawner <= 1 || !command) {
+    console.error("Usage: processes.ts <spawner-pid> <command> [args...]");
+    process.exit(2);
+  }
+  if (process.ppid !== spawner) process.exit(1);
+
+  const sweep = () => {
+    if (!server.child.pid) return;
+    try {
+      process.kill(-server.child.pid, "SIGKILL");
+    } catch (error) {
+      if (!(error instanceof Error && "code" in error && error.code === "ESRCH")) throw error;
+    }
+  };
+  let escalation: NodeJS.Timeout | undefined;
+  const release = () => {
+    if (escalation) return;
+    // Wrangler owns Container disposal. Signalling workerd too races that cleanup.
+    server.child.kill("SIGTERM");
+    escalation = globalThis.setTimeout(sweep, tetherGraceMs).unref();
+  };
+  for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"]) process.on(signal, release);
+  // A terminal signal during spawn must already belong to the release handler.
+  const server = start(command, args, { stdio: "inherit" });
+  const poll = setInterval(() => {
+    if (process.ppid !== spawner) release();
+  }, 250);
+  const outcome = await server.finished;
+  clearInterval(poll);
+  clearTimeout(escalation);
+  sweep();
+  if (outcome.kind === "error") {
+    console.error(outcome.error.message);
+    process.exitCode = 127;
+  } else {
+    process.exitCode = outcome.signal ? 128 + constants.signals[outcome.signal] : outcome.code;
+  }
+}
+
 export async function stop(processes: ReturnType<typeof start>[]) {
-  const grace = setTimeout(5000, undefined, { ref: false });
+  const grace = setTimeout(stopGraceMs, undefined, { ref: false });
   async function signal({ child, finished }: ReturnType<typeof start>, name: NodeJS.Signals) {
     if (!child.pid) return;
     try {

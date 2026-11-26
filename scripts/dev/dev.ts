@@ -1,16 +1,16 @@
-import { dockerTetherEnv } from "../shared/docker-tether.ts";
 import { machineSlots, withDockerSlot } from "../shared/docker-slots.ts";
 import {
+  devContainersEnabled,
+  devServers,
   finishDevelopment,
   holdCheckout,
   resolveDevSession,
   type DevSession,
 } from "./dev-session.ts";
 import { ensureDevAccess } from "./local-access.ts";
-import { assertSucceeded, start, stop } from "../shared/processes.ts";
+import { assertSucceeded, start, startTethered, stop } from "../shared/processes.ts";
 import type { ProcessOutcome } from "../shared/processes.ts";
 
-const jobTestHold = process.env["MADORI_DEV_JOB_TEST_HOLD"];
 const wrangler = "node_modules/wrangler/bin/wrangler.js";
 
 // Installed before any child starts: children run in their own process groups, so Ctrl-C
@@ -19,9 +19,8 @@ const wrangler = "node_modules/wrangler/bin/wrangler.js";
 // handling, which would exit at once and leave the children running.
 const controller = new AbortController();
 const interrupted = new Error("Development interrupted");
-const containers = process.env["MADORI_DEV_CONTAINERS"] !== "0";
 const interruption = new Promise<ProcessOutcome>((resolve) => {
-  for (const signal of ["SIGINT", "SIGTERM"])
+  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"])
     process.on(signal, () => {
       controller.abort(interrupted);
       resolve({ kind: "exit", code: 0, signal: null });
@@ -58,27 +57,9 @@ async function develop(session: DevSession) {
   console.info(
     "Geometry runs in Docker; the first amd64 image build takes several minutes. MADORI_DEV_CONTAINERS=0 disables containers.",
   );
-  const processes = [
-    start(
-      process.execPath,
-      [
-        wrangler,
-        "dev",
-        "--local",
-        ...session.wranglerArgs,
-        ...(jobTestHold === undefined ? [] : ["--var", `JOB_TEST_HOLD:${jobTestHold}`]),
-        ...(!containers ? ["--enable-containers=false"] : []),
-      ],
-      {
-        cwd: "apps/worker",
-        env: { ...process.env, ...dockerTetherEnv(process.env) },
-      },
-    ),
-    start(process.execPath, ["node_modules/vite/bin/vite.js", ...session.viteArgs], {
-      cwd: "apps/web",
-      env: { ...process.env, ...session.viteEnv },
-    }),
-  ];
+  const processes = devServers(session, process.env).map(({ command, args, options }) =>
+    startTethered(command, args, options),
+  );
   const result = await Promise.race([...processes.map(({ finished }) => finished), interruption]);
   // Decide the exit status before stopping: a Ctrl-C during shutdown must not hide a crash.
   const stoppedByUser = controller.signal.aborted;
@@ -86,7 +67,7 @@ async function develop(session: DevSession) {
 }
 
 if (migrated) {
-  if (containers) {
+  if (devContainersEnabled(process.env)) {
     try {
       await withDockerSlot(machineSlots(), { purpose: "pnpm dev", signal: controller.signal }, () =>
         develop(session),

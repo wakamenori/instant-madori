@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { once } from "node:events";
 import { createInterface } from "node:readline";
 import { test } from "node:test";
 import type { TestContext } from "node:test";
 import { setTimeout } from "node:timers/promises";
 import { z } from "zod";
-import { start, stop } from "./processes.ts";
+import { start, startTethered, stop } from "./processes.ts";
 
 const zombieGroup = String.raw`
 import json, os, select, signal
@@ -216,4 +219,91 @@ await test("stop shares one grace deadline across children", { timeout: 15_000 }
   const elapsed = performance.now() - started;
   assert.ok(elapsed < 6000, `stop took ${elapsed.toFixed(0)} ms`);
   assert.deepEqual(await b.finished, { kind: "exit", code: null, signal: "SIGKILL" });
+});
+
+const fakeWorkerd = `
+  const fs = require("node:fs");
+  process.on("SIGTERM", () => fs.appendFileSync(process.env.LOG, process.pid + "\\n"));
+  process.stdin.resume().on("end", () => setTimeout(() => process.exit(0), 100));
+  fs.writeFileSync(process.env.PIDS, JSON.stringify([process.ppid, process.pid]));
+`;
+
+const fakeWrangler = `
+  const { spawn } = require("node:child_process");
+  const child = spawn(process.execPath, ["-e", ${JSON.stringify(fakeWorkerd)}], {
+    stdio: ["pipe", "ignore", "inherit"],
+  });
+  process.on("SIGTERM", () => {
+    require("node:fs").appendFileSync(process.env.LOG, process.pid + "\\n");
+    if (process.env.IGNORE_TERM !== "1") child.stdin.end();
+  });
+`;
+
+async function serverFixture(t: TestContext, mode: "normal" | "orphan" | "stubborn") {
+  const directory = await mkdtemp(join(tmpdir(), "madori-server-"));
+  const log = join(directory, "signals");
+  const pidFile = join(directory, "pids");
+  const options = {
+    env: { ...process.env, LOG: log, PIDS: pidFile, IGNORE_TERM: mode === "stubborn" ? "1" : "0" },
+  };
+  const spawner = `
+    import { startTethered } from ${JSON.stringify(new URL("./processes.ts", import.meta.url).href)};
+    startTethered(process.execPath, ["-e", ${JSON.stringify(fakeWrangler)}]);
+  `;
+  const run =
+    mode === "orphan"
+      ? start(process.execPath, ["--input-type=module", "-e", spawner], options)
+      : startTethered(process.execPath, ["-e", fakeWrangler], options);
+  let group: number | undefined;
+  t.after(async () => {
+    run.child.kill("SIGKILL");
+    if (group !== undefined) {
+      try {
+        process.kill(-group, "SIGKILL");
+      } catch (error) {
+        if (!(error instanceof Error && "code" in error && error.code === "ESRCH")) throw error;
+      }
+    }
+    await run.finished;
+    await rm(directory, { recursive: true });
+  });
+  const pids = await t.waitFor(
+    async () =>
+      z
+        .tuple([z.number().int().positive(), z.number().int().positive()])
+        .parse(JSON.parse(await readFile(pidFile, "utf8"))),
+    { timeout: 5000 },
+  );
+  group = pids[0];
+  async function assertStopped() {
+    await t.waitFor(
+      () => {
+        for (const pid of pids) assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
+      },
+      { timeout: 2000 },
+    );
+    group = undefined;
+    assert.equal(await readFile(log, "utf8"), `${pids[0]}\n`);
+  }
+  return { run, assertStopped };
+}
+
+await test("stop signals only the server leader and leaves both processes gone", async (t) => {
+  const { run, assertStopped } = await serverFixture(t, "normal");
+  await stop([run]);
+  await assertStopped();
+  assert.deepEqual(await run.finished, { kind: "exit", code: 0, signal: null });
+});
+
+await test("killing the spawner stops the server and its child", async (t) => {
+  const { run, assertStopped } = await serverFixture(t, "orphan");
+  run.child.kill("SIGKILL");
+  await assertStopped();
+});
+
+await test("the tether kills a stubborn server and its group after the grace", async (t) => {
+  const { run, assertStopped } = await serverFixture(t, "stubborn");
+  await stop([run]);
+  await assertStopped();
+  assert.deepEqual(await run.finished, { kind: "exit", code: 137, signal: null });
 });

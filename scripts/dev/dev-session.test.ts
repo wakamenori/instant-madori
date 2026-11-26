@@ -3,11 +3,12 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { test } from "node:test";
 import {
   defaultDevPorts,
   type DevPorts,
+  devServers,
   devWorkerPort,
   finishDevelopment,
   holdCheckout,
@@ -179,3 +180,14 @@ void test(
     });
   },
 );
+
+void test("dev passes the Docker tether to Wrangler and the worker port to Vite", async () => {
+  const session = await resolveDevSession({}, { inUse: () => Promise.resolve(false) });
+  const [wrangler, vite] = devServers(session, {});
+  assert.equal(
+    wrangler.options.env["WRANGLER_DOCKER_BIN"],
+    fileURLToPath(new URL("../shared/docker-tether.sh", import.meta.url)),
+  );
+  assert.equal(wrangler.options.env["MADORI_DOCKER_TETHER_TARGET"], "docker");
+  assert.equal(vite.options.env["MADORI_DEV_WORKER_PORT"], "8787");
+});

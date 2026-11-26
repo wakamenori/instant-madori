@@ -170,16 +170,23 @@ if [ -s "$EVIDENCE/dev.env" ]; then
   . "$EVIDENCE/dev.env"
   for i in $(seq 1 60); do lsof -nP -iTCP:"$WEB_PORT" -iTCP:"$WORKER_PORT" -sTCP:LISTEN >/dev/null || break; sleep 1; done
 fi
-sleep 3
 grep -oE 'containerName = workerd-[0-9a-f]{16}-' "$EVIDENCE/dev.log" | sed -E 's/^containerName = workerd-//; s/-$//' | sort -u >| "$EVIDENCE/container-sessions.txt"
 case $(wc -l < "$EVIDENCE/container-sessions.txt" | tr -d ' ') in
   0) ;;
-  1) docker ps -aq --filter "label=dev.workerd.session=$(cat "$EVIDENCE/container-sessions.txt")" | xargs -r docker rm --force ;;
+  1)
+    label="label=dev.workerd.session=$(cat "$EVIDENCE/container-sessions.txt")"
+    for i in $(seq 1 15); do [ -z "$(docker ps -aq --filter "$label")" ] && break; sleep 1; done
+    if [ -n "$(docker ps -aq --filter "$label")" ]; then
+      echo "pnpm dev left Containers of its session; report this:" >&2
+      docker ps -a --filter "$label" --format '{{.Names}} {{.Status}}' | tee "$EVIDENCE/leftover-containers.txt" >&2
+      docker ps -aq --filter "$label" | xargs -r docker rm --force
+    fi
+    ;;
   *) echo "Several Container sessions in dev.log; removed nothing:" >&2; cat "$EVIDENCE/container-sessions.txt" >&2 ;;
 esac
 ```
 
-workerd は Container を作るたびに、`dev.log` へ `containerName = workerd-<ID>-instant-madori-GeometryContainer-…` の警告を書く。`<ID>` はこの回の `pnpm dev` のセッションの ID で、その Container と `-proxy` には `dev.workerd.session=<ID>` のラベルが付く。Wrangler は終了時にこのラベルの Container を消す。最後の `case` は、ID が一つのときだけその消し残しを消す。TypeScript の変更で Worker を読み込み直しても、ID は変わらない。ID が二つ以上出たら、`dev.log` にほかのセッションの行が混ざったか、Container の設定が変わって Wrangler が別のセッションを始めたので、何も消さずに候補を報告して止まる。片付けは、プロセスグループが消えるのを待ってから、`dev.log` の `Web: … | Worker: …` の行からこの回のポートを読み直す。起動の確認を一度も通していなくても、自分のポートを確かめられる。この行が無ければ、`pnpm dev` はポートを選ぶ前に止まっていて、何も待ち受けていない。片付けの後、`dev.env` の二つのポートが空き、`kill -0` がグループを見つけないことを確かめる。開いたプレビューのタブは `t3_preview_close` で閉じる。終わったら `$EVIDENCE` の場所を報告する。
+workerd は Container を作るたびに、`dev.log` へ `containerName = workerd-<ID>-instant-madori-GeometryContainer-…` の警告を書く。`<ID>` はこの回の `pnpm dev` のセッションの ID で、その Container と `-proxy` には `dev.workerd.session=<ID>` のラベルが付く。Wrangler は終了時に、別のプロセスでこのラベルの Container を消すので、`pnpm dev` が終わってから数秒は Container が見えることがある。最後の `case` は、ID が一つのときだけ、そのラベルの Container が消えるのを15秒まで待つ。それでも残っていれば、`pnpm dev` の止め方の不具合なので、残った Container を `leftover-containers.txt` に残して報告し、消す。TypeScript の変更で Worker を読み込み直しても、ID は変わらない。ID が二つ以上出たら、`dev.log` にほかのセッションの行が混ざったか、Container の設定が変わって Wrangler が別のセッションを始めたので、何も消さずに候補を報告して止まる。片付けは、プロセスグループが消えるのを待ってから、`dev.log` の `Web: … | Worker: …` の行からこの回のポートを読み直す。起動の確認を一度も通していなくても、自分のポートを確かめられる。この行が無ければ、`pnpm dev` はポートを選ぶ前に止まっていて、何も待ち受けていない。片付けの後、`dev.env` の二つのポートが空き、`kill -0` がグループを見つけないことを確かめる。開いたプレビューのタブは `t3_preview_close` で閉じる。終わったら `$EVIDENCE` の場所を報告する。
 
 ## マージの後に staging を確かめる
 
