@@ -339,3 +339,84 @@ fn winding_survives_rounded_products_and_signed_zero() {
         .is_ok()
     );
 }
+
+#[test]
+fn half_thickness_step_beside_an_l_corner_draws_a_triangle() {
+    let h = layout_with_walls(
+        &[
+            (0, 0, 4000, 5000),
+            (4000, 100, 8000, 2500),
+            (4000, 2500, 8000, 5000),
+        ],
+        200.,
+        200.,
+    );
+    ring(
+        wall(&h, point(4000, 0), point(4000, 100)),
+        &[(4100, -100), (4100, 100), (3900, 100)],
+    );
+}
+
+#[test]
+fn half_thickness_stem_on_a_stepped_through_wall_keeps_the_uncovered_half() {
+    let h = layout_with_walls(
+        &[
+            (0, 0, 8000, 3700),
+            (0, 3700, 3200, 6000),
+            (3200, 3800, 8000, 6000),
+        ],
+        100.,
+        200.,
+    );
+    ring(
+        wall(&h, point(3200, 3700), point(3200, 3800)),
+        &[(3200, 3750), (3250, 3750), (3250, 3800), (3200, 3800)],
+    );
+}
+
+#[test]
+fn steps_shorter_than_half_a_thickness_still_fold() {
+    for (rectangles, exterior, interior, moved, wall_ends) in [
+        (
+            [
+                (0, 0, 4000, 5000),
+                (4000, 300, 8000, 2500),
+                (4000, 2500, 8000, 5000),
+            ],
+            200.,
+            200.,
+            (300, 50),
+            ((4000, 0), (4000, 50)),
+        ),
+        (
+            [
+                (0, 0, 8000, 3700),
+                (0, 3700, 3200, 6000),
+                (3200, 4000, 8000, 6000),
+            ],
+            100.,
+            200.,
+            (4000, 3750),
+            ((3200, 3700), (3200, 3750)),
+        ),
+    ] {
+        let mut data = layout_with_walls(&rectangles, exterior, interior).into_data();
+        for v in &mut data.vertices {
+            if v.at.y == f64::from(moved.0) {
+                v.at.y = moved.1.into();
+            }
+        }
+        let h = House::new(data).unwrap();
+        let (a, b) = wall_ends;
+        assert!(matches!(
+            wall(&h, point(a.0, a.1), point(b.0, b.1))
+                .planform()
+                .unwrap_err()
+                .as_slice(),
+            [Rejection {
+                reason: Reason::SelfIntersecting { .. },
+                ..
+            }]
+        ));
+    }
+}
