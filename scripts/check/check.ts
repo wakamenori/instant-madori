@@ -87,6 +87,7 @@ export async function runChecks(
     gates.rustStage("Build Wasm bindings");
     await script("Build Wasm bindings", "scripts/build/build-wasm.ts");
     await script("Viewer Wasm contents", "scripts/check/check-viewer-wasm.ts");
+    await script("Viewer Wasm size", "scripts/check/check-viewer-wasm-size.ts");
   } else {
     await access("crates/viewer/pkg/madori_viewer.d.ts").catch(() => {
       throw new Error("Wasm bindings are missing. Run pnpm setup first (or pnpm check --full).");

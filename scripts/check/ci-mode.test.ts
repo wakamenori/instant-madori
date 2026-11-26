@@ -24,6 +24,8 @@ void test("Container, display, dependency, upstream and CI changes need the full
     "scripts/check/boundaries.ts",
     "scripts/check/check.ts",
     "scripts/check/check-viewer-wasm.ts",
+    "scripts/check/check-viewer-wasm-size.ts",
+    "scripts/check/check-viewer-wasm-size.json",
     "scripts/check/check-viewer-wasm.test.ts",
     "scripts/check/rust-symbols.ts",
     "scripts/check/rust-symbols.test.ts",

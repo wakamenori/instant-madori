@@ -1,0 +1,9 @@
+{
+  "entries": [
+    {
+      "limits": { "raw": 1240000, "gzip": 355000 },
+      "measured": { "raw": 1180481, "gzip": 337799 },
+      "reason": "Baseline before material rendering (plan 6.4), measured on a release build of main 6588dd1cd with no Wasm cache. Each limit is the measured size plus 5%, rounded up to 1,000 B."
+    }
+  ]
+}
