@@ -157,6 +157,7 @@ pub enum Reason {
         max: Point,
     },
     NoRooms {},
+    InvalidName {},
     TooNarrow {
         axis: Axis,
         size: f64,

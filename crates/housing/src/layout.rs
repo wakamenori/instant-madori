@@ -9,6 +9,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+const ROOM_NAME_MAX_CHARS: usize = 24;
+
 /// Rectangular rooms on wall centre lines, in millimetres. Repeat the exact coordinate for a shared wall.
 /// Each room must be wider than the thickest wall on both axes. Rooms must not overlap or touch only at a
 /// corner, and walls must not overlap: facing perimeter walls need at least one exterior wall thickness
@@ -34,6 +36,8 @@ pub struct LayoutWalls {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct LayoutRoom {
+    /// Label shown in the floor plan.
+    #[schemars(length(min = 1, max = ROOM_NAME_MAX_CHARS))]
     pub name: String,
     pub usage: RoomUse,
     pub min: Point,
@@ -166,6 +170,12 @@ impl RoomLayout {
         }
         let minimum = minimum_room_width([walls.exterior_thickness, walls.interior_thickness]);
         for (i, room) in self.rooms.iter().enumerate() {
+            if room.name.trim().is_empty()
+                || room.name.chars().count() > ROOM_NAME_MAX_CHARS
+                || room.name.chars().any(char::is_control)
+            {
+                errors.push(self.rejection([i], Reason::InvalidName {}));
+            }
             for (axis, low, high, low_field, high_field) in [
                 (Axis::X, room.min.x, room.max.x, "min.x", "max.x"),
                 (Axis::Y, room.min.y, room.max.y, "min.y", "max.y"),

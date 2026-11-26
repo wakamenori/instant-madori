@@ -813,3 +813,19 @@ fn accepted_layouts_draw_every_wall() {
     );
     assert!(accepted >= 1000, "only {accepted} accepted layouts");
 }
+
+#[test]
+fn layout_room_names_count_unicode_scalars_and_identify_invalid_rooms() {
+    let mut input = evidence();
+    for name in [
+        String::new(),
+        "　 ".into(),
+        "室".repeat(25),
+        "部\n屋".into(),
+    ] {
+        input.rooms[1].name = name;
+        one_error(&input, &[2], Reason::InvalidName {});
+    }
+    input.rooms[1].name = "𠮷".repeat(24);
+    assert!(build(&input).is_ok());
+}
