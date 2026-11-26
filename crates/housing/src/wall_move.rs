@@ -1,4 +1,5 @@
 use crate::{
+    check::Layer,
     joint::Vector,
     layout::minimum_room_width,
     opening::fit_wall,
@@ -7,7 +8,10 @@ use crate::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    mem::discriminant,
+};
 
 /// Move a wall perpendicular to itself. Every wall on the same straight line moves with it, and the walls
 /// meeting that line stretch or shrink to stay connected.
@@ -310,6 +314,18 @@ fn facing_width(room: RoomView<'_>, edge: EdgeView<'_>, frame: Frame) -> Option<
         .min_by(f64::total_cmp)
 }
 
+fn same_fault(a: &Rejection, b: &Rejection) -> bool {
+    a.element == b.element
+        && a.id == b.id
+        && discriminant(&a.reason) == discriminant(&b.reason)
+        && match (&a.reason, &b.reason) {
+            (Reason::OverlapsWall { other: x, .. }, Reason::OverlapsWall { other: y, .. }) => {
+                x == y
+            }
+            _ => true,
+        }
+}
+
 impl WallMove {
     fn reject(&self, reason: Reason) -> Rejection {
         reject(ElementKind::Wall, self.wall.as_str(), reason)
@@ -362,6 +378,7 @@ impl House {
             &mut errors,
         );
         check(errors)?;
+        check(self.created_findings(&moved))?;
         Ok((
             moved,
             WallMoveReport {
@@ -370,6 +387,26 @@ impl House {
                 openings,
             },
         ))
+    }
+
+    /// IDs survive a move while coordinates shift, so match by element, kind and the other wall.
+    /// Compare fit only if no shape finding is new: a missing planform leaves a gap in its footprint.
+    fn created_findings(&self, moved: &House) -> Vec<Rejection> {
+        for layer in [Layer::Shapes, Layer::Fit] {
+            let mut after = moved.findings(layer);
+            if after.is_empty() {
+                continue;
+            }
+            for before in self.findings(layer) {
+                if let Some(i) = after.iter().position(|a| same_fault(&before, a)) {
+                    after.remove(i);
+                }
+            }
+            if !after.is_empty() {
+                return after;
+            }
+        }
+        vec![]
     }
 
     fn changed_rooms(

@@ -1,4 +1,6 @@
 #![allow(clippy::unwrap_used)]
+mod common;
+use common::layouts::{Xorshift, random_layout};
 use madori_housing::*;
 
 type Coord = (i32, i32);
@@ -329,9 +331,15 @@ fn stepped_run_stops_at_the_end_of_the_shrinking_wall() {
     let mut r = request(
         &wall(&h, (0, 3000), (4000, 3000)),
         FaceRole::Exterior {},
-        1999.,
+        1900.,
     );
     h.move_wall(&r).unwrap();
+    r.distance = 1999.;
+    let step = wall(&h, (4000, 3000), (4000, 5000));
+    assert!(matches!(
+        assert_rejected(&h, r.clone()).as_slice(),
+        [Rejection { id, reason: Reason::SelfIntersecting { .. }, .. }] if id == step.as_str()
+    ));
     for d in [2000., 2500.] {
         r.distance = d;
         assert_eq!(
@@ -635,4 +643,125 @@ fn the_moved_wall_planform_follows_the_new_centre_line() {
             (lo.min(x), hi.max(x))
         });
     assert_eq!(xs, (5174.5, 5294.5));
+}
+
+fn assert_moved_house_tiles(house: &House, half_exterior: f64, movement: &WallMove) {
+    let rooms = house.rooms().map(|room| {
+        let mut corners = room.edges().map(|edge| edge.from);
+        let first = corners.next().unwrap();
+        corners.fold((first, first), |(min, max), p| {
+            (
+                Point {
+                    x: min.x.min(p.x),
+                    y: min.y.min(p.y),
+                },
+                Point {
+                    x: max.x.max(p.x),
+                    y: max.y.max(p.y),
+                },
+            )
+        })
+    });
+    let result = common::tiling(rooms, half_exterior, house);
+    assert!(
+        result.uncovered <= 1e-3 && result.overlap <= 1e-3,
+        "{movement:?}: {result:?}"
+    );
+}
+
+#[test]
+fn moving_a_short_through_wall_rejects_the_gap_but_accepts_the_exact_limit() {
+    let mut input = common::layouts::layout(&[
+        (0, 0, 1600, 3000),
+        (1600, 0, 4000, 3000),
+        (1455, 3000, 4000, 5000),
+    ]);
+    input.walls.exterior_thickness = 120.;
+    input.walls.interior_thickness = 240.;
+    let house = House::from_layout(&OperationId::new("move"), &input).unwrap();
+    let mut movement = request(
+        &wall(&house, (1455, 3000), (1455, 5000)),
+        toward(&house, 2),
+        25.,
+    );
+    let (moved, _) = house.move_wall(&movement).unwrap();
+    assert_moved_house_tiles(&moved, 60., &movement);
+
+    movement.distance = 50.;
+    let result = house.move_wall(&movement);
+    assert!(result.is_err(), "50 mm move left a gap but was accepted");
+    let errors = result.unwrap_err();
+    assert_eq!(
+        errors.as_slice(),
+        &[Rejection {
+            element: ElementKind::Room,
+            id: house.data().rooms[0].id.as_str().into(),
+            reason: Reason::WallGap {
+                min: point((1480, 2880)),
+                max: point((1505, 2940))
+            },
+        }]
+    );
+}
+
+#[test]
+fn accepted_random_wall_moves_tile_the_moved_room_rectangles() -> Result<(), LayoutError> {
+    let mut rng = Xorshift(0x9e37_79b9_7f4a_7c15);
+    let thicknesses = [
+        (60., 300.),
+        (90., 180.),
+        (120., 240.),
+        (100., 200.),
+        (99.9, 150.3),
+        (200., 120.),
+    ];
+    let mut accepted = 0;
+    for _ in 0..150 {
+        let input = random_layout(&mut rng, &thicknesses);
+        let (ext, int) = (
+            input.walls.exterior_thickness,
+            input.walls.interior_thickness,
+        );
+        let distances = [
+            5.,
+            10.,
+            25.,
+            50.,
+            100.,
+            200.,
+            300.,
+            ext / 2.,
+            int / 2.,
+            (int - ext).abs(),
+            (int - ext).abs() / 2.,
+        ];
+        let mut house = match House::from_layout(&OperationId::new("move"), &input) {
+            Ok(house) => house,
+            Err(LayoutError::Rejected(_)) => continue,
+            Err(error) => return Err(error),
+        };
+        for _ in 0..6 {
+            let wall = house
+                .boundaries()
+                .nth(rng.below(house.boundaries().count()))
+                .unwrap();
+            let side = if rng.below(2) == 0 {
+                Side::Left
+            } else {
+                Side::Right
+            };
+            let movement = request(
+                &wall.data().id,
+                wall.face(side).role(),
+                distances[rng.below(distances.len())],
+            );
+            if let Ok((moved, _)) = house.move_wall(&movement) {
+                assert_moved_house_tiles(&moved, ext / 2., &movement);
+                accepted += 1;
+                house = moved;
+            }
+        }
+    }
+    assert!(accepted >= 250, "only {accepted} accepted moves");
+    Ok(())
 }

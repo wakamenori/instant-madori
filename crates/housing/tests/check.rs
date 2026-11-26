@@ -413,6 +413,16 @@ fn empty_house_has_no_rooms() {
         [document(Reason::NoRooms {})]
     );
 }
+/// The wall at y 3000 moved 1990 mm outward, leaving a 10 mm step: a house a wall move refuses to make.
+fn short_step(h: House) -> House {
+    let mut d = h.into_data();
+    for v in &mut d.vertices {
+        if v.at.y == 3000. {
+            v.at.y = 4990.;
+        }
+    }
+    House::new(d).unwrap()
+}
 #[test]
 fn wall_move_short_step_reports_the_self_intersecting_planform() {
     let h = build(&layout(
@@ -424,14 +434,22 @@ fn wall_move_short_step_reports_the_self_intersecting_planform() {
     let h = door(&h, "entrance", &wall(&h, (0., 0.), (4000., 0.)), 1000.);
     let h = door(&h, "shared", &wall(&h, (4000., 0.), (4000., 3000.)), 1000.);
     assert_eq!(h.check(), Ok(()));
-    let (h, _) = h
+    let step = wall(&h, (4000., 3000.), (4000., 5000.));
+    let moved = h
         .move_wall(&WallMove {
             wall: wall(&h, (0., 3000.), (4000., 3000.)),
             toward: FaceRole::Exterior {},
             distance: 1990.,
         })
-        .unwrap();
-    let step = wall(&h, (4000., 4990.), (4000., 5000.));
+        .unwrap_err();
+    assert!(
+        moved
+            .as_slice()
+            .iter()
+            .any(|f| f.id == step.as_str() && matches!(f.reason, Reason::SelfIntersecting { .. })),
+        "{moved:?}"
+    );
+    let h = short_step(h);
     let e = errors(&h);
     assert!(
         matches!(e.as_slice(), [Rejection { element: ElementKind::Wall, id, reason: Reason::SelfIntersecting { .. } }] if id == step.as_str()),
@@ -500,13 +518,7 @@ fn failed_planform_blocks_fit_even_with_a_nonrectangular_room() {
         120.,
     ))
     .unwrap();
-    let (h, _) = h
-        .move_wall(&WallMove {
-            wall: wall(&h, (0., 3000.), (4000., 3000.)),
-            toward: FaceRole::Exterior {},
-            distance: 1990.,
-        })
-        .unwrap();
+    let h = short_step(h);
     let step = wall(&h, (4000., 4990.), (4000., 5000.));
     let mut d = h.into_data();
     for v in &mut d.vertices {
