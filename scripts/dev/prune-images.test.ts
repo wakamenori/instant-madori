@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { delimiter, join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
+import { z } from "zod";
 import {
   parseImages,
   parseSessionsSince,
@@ -134,4 +140,48 @@ void test("only Docker delete conflicts and vanished objects are tolerated", () 
   for (const other of ["", missing + "\nconnection lost", "failed: No such image: repo:tag"])
     assert.throws(() => parseToleratedErrors(other, removal));
   assert.throws(() => parseToleratedErrors(conflict, inventory));
+});
+
+function runPrune(docker: string, ps: string, ...args: string[]) {
+  const dir = mkdtempSync(join(tmpdir(), "prune-images-"));
+  try {
+    for (const [name, script] of [
+      ["docker", docker],
+      ["ps", ps],
+    ] as const) {
+      writeFileSync(join(dir, name), `#!/bin/sh\n${script}\n`, { mode: 0o700 });
+    }
+    return spawnSync(
+      process.execPath,
+      [fileURLToPath(new URL("./prune-images.ts", import.meta.url)), ...args],
+      {
+        encoding: "utf8",
+        env: { ...process.env, PATH: dir + delimiter + (process.env.PATH ?? "") },
+      },
+    );
+  } finally {
+    rmSync(dir, { recursive: true });
+  }
+}
+
+void test("carried ps durations protect Wrangler sessions at hour and day boundaries", () => {
+  const now = Date.UTC(2026, 0);
+  assert.equal(parseSessionsSince("      60:00 node x/wrangler-dist/cli.js", now), now - 3900_000);
+  assert.equal(parseSessionsSince("   24:00:00 node x/wrangler-dist/cli.js", now), now - 86700_000);
+});
+
+void test("pruning reports the Wrangler cutoff when macOS ps prints 60:00", () => {
+  const start = Date.now();
+  const run = runPrune(
+    "exit 0",
+    "echo '      60:00 /usr/libexec/coreduetd'\necho '      60:00 node x/wrangler-dist/cli.js'",
+    "--dry-run",
+  );
+  const end = Date.now();
+  assert.equal(run.status, 0, run.stderr);
+  const plan = z
+    .object({ event: z.literal("docker.images.prune.plan"), sessionsSince: z.iso.datetime() })
+    .parse(JSON.parse(run.stdout));
+  const sessionNow = Date.parse(plan.sessionsSince) + 3900_000;
+  assert.ok(start <= sessionNow && sessionNow <= end);
 });
