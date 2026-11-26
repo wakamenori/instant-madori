@@ -1,4 +1,6 @@
 mod check;
+mod cuts;
+use cuts::WallCuts;
 mod projection;
 pub use check::{Mismatch, MismatchReason, Mismatches, Subject};
 mod paint;
@@ -199,7 +201,10 @@ impl Source<'_> {
             },
             Self::Opening(o) => {
                 let wall = o.wall();
-                let elevation = o.elevation();
+                let cuts = WallCuts::of(wall)?;
+                let elevation = cuts
+                    .cut(&o.data().id)
+                    .ok_or_else(|| reject(Reason::UnknownOpening {}))?;
                 let start = wall.start().data().at;
                 let end = wall.end().data().at;
                 let (dx, dy) = (end.x - start.x, end.y - start.y);
@@ -212,20 +217,14 @@ impl Source<'_> {
                 let offsets = wall.data().wall.offsets;
                 let left = offsets.left + CUT_MARGIN_MM;
                 let right = -offsets.right - CUT_MARGIN_MM;
-                let span = elevation.along;
+                let span = &elevation.along;
                 let points = vec![
                     at(span.start, right),
                     at(span.end, right),
                     at(span.end, left),
                     at(span.start, left),
                 ];
-                let mut rise = elevation.rise;
-                if rise.start <= 0. {
-                    rise.start -= CUT_MARGIN_MM;
-                }
-                if rise.end >= wall.data().wall.height {
-                    rise.end += CUT_MARGIN_MM;
-                }
+                let rise = &elevation.rise;
                 Prism {
                     outline: SimplePolygon::new(points).map_err(reject)?,
                     base: base + rise.start,
@@ -371,15 +370,9 @@ impl Model {
             };
             let args = match source {
                 Source::Opening(o) => {
-                    let targets = pieces
-                        .get(&o.data().wall)
-                        .filter(|t| !t.is_empty())
-                        .ok_or_else(|| {
-                            error(CommandError::Rejected {
-                                command: "solid.extrude".into(),
-                                message: "host has no bodies to cut".into(),
-                            })
-                        })?;
+                    let Some(targets) = pieces.get(&o.data().wall).filter(|t| !t.is_empty()) else {
+                        continue;
+                    };
                     json!({"operation":"cut","targets":targets})
                 }
                 _ => json!({"operation":"new","body_name":element.as_str()}),
