@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { setTimeout } from "node:timers/promises";
+import { z } from "zod";
 import { test } from "node:test";
 import type { Revision } from "@madori/contracts";
 import {
@@ -40,6 +41,7 @@ void test(
     const idleTimeoutMs = 60_000;
     const worker = await startLocalWorker({
       containers: true,
+      entry: "tests/rpc/geometry-probe.ts",
       readyTimeoutMs: 800_000,
       vars: {
         GEOMETRY_IDLE_TIMEOUT_MS: String(idleTimeoutMs),
@@ -319,6 +321,99 @@ void test(
             "reused a live DO",
         );
         assert.deepEqual(modes, ["cold", "adopted", "cold", "adopted", "adopted"]);
+      });
+      async function probe(body: unknown, traceId: string) {
+        const response = await worker.call("/api/__probe/operations", {
+          method: "POST",
+          body: { patternId: `probe-${traceId}`, traceId, body },
+        });
+        assert.equal(response.status, 200);
+        return response.json();
+      }
+      const base = { job_id: "probe", operation_id: "place", generation: 1 };
+      await t.test("a room placement returns display bodies with housing IDs", async () => {
+        const result = await probe(
+          {
+            ...base,
+            snapshot: { kind: "empty" },
+            operations: [
+              {
+                kind: "place_rooms",
+                layout: {
+                  walls: { exterior_thickness: 200, interior_thickness: 100, height: 2800 },
+                  rooms: [
+                    {
+                      name: "room",
+                      usage: "living",
+                      min: { x: 0, y: 0 },
+                      max: { x: 4000, y: 3000 },
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+          crypto.randomUUID(),
+        );
+        const { value } = z
+          .object({
+            kind: z.literal("ok"),
+            value: z.object({
+              kind: z.literal("applied"),
+              operations: z.array(
+                z.object({
+                  kind: z.literal("rooms_placed"),
+                  rooms: z.array(z.object({ id: z.string() })),
+                }),
+              ),
+              parts: z.array(
+                z.object({ artifact: z.object({ kind: z.string() }), bytes: z.string() }),
+              ),
+            }),
+          })
+          .parse(result);
+        const part = (kind: string) => {
+          const p = value.parts.find((p) => p.artifact.kind === kind);
+          assert(p);
+          return Buffer.from(p.bytes, "base64");
+        };
+        const ids = z.array(z.object({ id: z.string() }));
+        const { house } = z
+          .object({ house: z.object({ boundaries: ids, rooms: ids }) })
+          .parse(JSON.parse(part("house").toString()));
+        const summary = viewer.describe_display(part("display"));
+        try {
+          assert.deepEqual(
+            new Set(summary.elements),
+            new Set([...house.boundaries, ...house.rooms].map((e) => e.id)),
+          );
+          assert.deepEqual(
+            value.operations.flatMap((o) => o.rooms.map((r) => r.id)),
+            house.rooms.map((r) => r.id),
+          );
+        } finally {
+          summary.free();
+        }
+      });
+      await t.test("oversize requests never start the probe Container", async () => {
+        const trace = crypto.randomUUID();
+        const limit = geometryInternal.routes.applyOperations.request.max_bytes;
+        const body = {
+          ...base,
+          snapshot: { kind: "house", json: "x".repeat(limit) },
+          operations: [],
+        };
+        assert.deepEqual(await probe(body, trace), {
+          kind: "failed",
+          reason: "request_too_large",
+          bytes: Buffer.byteLength(JSON.stringify(body)),
+          limit,
+        });
+        assert(
+          !worker
+            .logEntries()
+            .some((entry) => entry["event"] === "container.ready" && entry["traceId"] === trace),
+        );
       });
       await t.test(
         "a Container killed outside the gateway is replaced by the next job",
