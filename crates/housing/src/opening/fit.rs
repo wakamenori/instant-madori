@@ -16,7 +16,7 @@ pub struct OpeningPlacement {
     pub width: f64,
 }
 
-const DOOR_MINIMUM_WIDTH_MM: f64 = 600.0;
+pub(crate) const DOOR_MINIMUM_WIDTH_MM: f64 = 600.0;
 const WINDOW_MINIMUM_WIDTH_MM: f64 = 300.0;
 
 fn squeeze_floor(fitting: Fitting) -> f64 {

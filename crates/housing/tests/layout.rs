@@ -789,6 +789,15 @@ fn accepted_layouts_draw_every_wall() {
         }
         if let Ok(house) = build(&input) {
             accepted += 1;
+            assert_eq!(
+                house.check().unwrap_err().as_slice(),
+                &[Rejection {
+                    element: ElementKind::Document,
+                    id: String::new(),
+                    reason: Reason::NoEntrance {}
+                }],
+                "{input:?}"
+            );
             for wall in house.boundaries() {
                 let planform = wall.planform();
                 assert!(planform.is_ok(), "{input:?}: {:?}", planform.err());

@@ -119,6 +119,43 @@ pub enum Reason {
     },
     NoRoom {},
     UnusedVertex {},
+    CoincidentVertex {
+        other: String,
+        distance: f64,
+    },
+    OnBoundary {
+        boundary: String,
+        along: f64,
+        distance: f64,
+    },
+    OverlapsRoom {
+        other: String,
+        min: Point,
+        max: Point,
+    },
+    NotRectangle {
+        corners: Vec<Point>,
+    },
+    NotPassable {
+        width: f64,
+        height: f64,
+    },
+    NoEntrance {},
+    Unreachable {
+        walls: Vec<String>,
+    },
+    FloorSelfIntersecting {
+        at: Point,
+    },
+    OverlapsWall {
+        other: String,
+        min: Point,
+        max: Point,
+    },
+    WallGap {
+        min: Point,
+        max: Point,
+    },
     NoRooms {},
     TooNarrow {
         axis: Axis,

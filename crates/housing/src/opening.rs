@@ -1,4 +1,5 @@
 mod fit;
+pub(crate) use fit::DOOR_MINIMUM_WIDTH_MM;
 pub(crate) use fit::fit_wall;
 pub use fit::{OpeningAdjustment, OpeningPlacement};
 
