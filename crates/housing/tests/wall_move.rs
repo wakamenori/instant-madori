@@ -331,9 +331,15 @@ fn stepped_run_stops_at_the_end_of_the_shrinking_wall() {
     let mut r = request(
         &wall(&h, (0, 3000), (4000, 3000)),
         FaceRole::Exterior {},
-        1999.,
+        1900.,
     );
     h.move_wall(&r).unwrap();
+    r.distance = 1999.;
+    let step = wall(&h, (4000, 3000), (4000, 5000));
+    assert!(matches!(
+        assert_rejected(&h, r.clone()).as_slice(),
+        [Rejection { id, reason: Reason::SelfIntersecting { .. }, .. }] if id == step.as_str()
+    ));
     for d in [2000., 2500.] {
         r.distance = d;
         assert_eq!(

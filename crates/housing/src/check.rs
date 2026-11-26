@@ -5,7 +5,7 @@ mod scan;
 mod walls;
 
 #[derive(Clone, Copy, PartialEq)]
-enum Layer {
+pub(crate) enum Layer {
     Plan,
     Scope,
     Connections,
@@ -101,5 +101,13 @@ impl House {
             }
         }
         Rejections::from_errors(errors).map_or(Ok(()), Err)
+    }
+
+    pub(crate) fn findings(&self, layer: Layer) -> Vec<Rejection> {
+        RULES
+            .iter()
+            .filter(|rule| rule.layer == layer)
+            .flat_map(|rule| (rule.run)(self))
+            .collect()
     }
 }
