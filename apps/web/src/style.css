@@ -71,3 +71,74 @@ p {
 .project-list time {
   font-variant-numeric: tabular-nums;
 }
+main:has(.project-layout) {
+  max-width: 80rem;
+  margin-block: 2rem;
+}
+.project-layout {
+  display: grid;
+  gap: 2rem;
+}
+.project-layout > section {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+@media (min-width: 60rem) {
+  .project-layout {
+    grid-template-columns: 3fr 2fr;
+  }
+}
+.conversation-pane {
+  align-self: start;
+  padding: 1rem;
+  border: 1px solid #cad4cd;
+  border-radius: 12px;
+  background: white;
+}
+.conversation-log {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+  max-height: 55vh;
+  overflow-y: auto;
+  list-style: none;
+  padding: 0;
+}
+.entry {
+  align-self: flex-start;
+  max-width: 90%;
+  padding: 0.75rem 1rem;
+  border-radius: 10px;
+  background: #f2f4f1;
+}
+.entry p {
+  margin: 0.25rem 0;
+  white-space: pre-wrap;
+}
+.entry-instruction,
+.entry-answer {
+  align-self: flex-end;
+  background: #e4eee8;
+}
+.entry-notice {
+  color: #56615b;
+}
+.delivery-badge {
+  font-size: 0.85rem;
+  background: white;
+  border: 1px solid #bbc9c0;
+  border-radius: 1rem;
+  padding: 0.1rem 0.5rem;
+}
+.instruction-form {
+  display: grid;
+  gap: 0.5rem;
+}
+.instruction-form textarea {
+  resize: vertical;
+  font: inherit;
+  padding: 0.6rem;
+}
+.instruction-form button {
+  justify-self: end;
+}

@@ -1,6 +1,22 @@
+import {
+  buildTimeline,
+  mergeRows,
+  type InstructionBody,
+  type TimelineEntry,
+  type Outbox,
+  type OutboxEntry,
+  type ServerRows,
+} from "./conversation.ts";
 import type { Pattern, HoldingJob, PatternStateResponse, Revision } from "@madori/contracts";
-import { ApiError, listPatterns, readPatternState, fetchRevisionView } from "./api.ts";
-import { failureMessage } from "./failure.ts";
+import {
+  ApiError,
+  listPatterns,
+  listMessages,
+  sendInstruction,
+  readPatternState,
+  fetchRevisionView,
+} from "./api.ts";
+import { failureMessage, sendFailureMessage } from "./failure.ts";
 import type { ProjectId } from "./route.ts";
 type Activity =
   | { kind: "working"; queued: number }
@@ -29,6 +45,7 @@ export type ProjectView =
       activity: Activity;
       shown: RevisionView | null;
       problem: string | null;
+      timeline: readonly TimelineEntry[];
     };
 function delay(ms: number, signal: AbortSignal): Promise<void> {
   signal.throwIfAborted();
@@ -58,48 +75,231 @@ async function loadRevision(
   return { revision, display };
 }
 
-export async function watchProject({
-  projectId,
-  signal,
-  onView,
-  wait = delay,
-}: {
-  projectId: ProjectId;
-  signal: AbortSignal;
-  onView: (view: ProjectView) => void;
-  wait?: typeof delay;
-}): Promise<void> {
-  let last: Extract<ProjectView, { kind: "open" }> | undefined;
-  try {
-    const patterns = await listPatterns(projectId, signal).catch((error: unknown) => {
-      if (error instanceof ApiError && error.code === "not_found") return null;
-      throw error;
-    });
-    signal.throwIfAborted();
-    if (patterns === null) {
-      onView({ kind: "not_found" });
-      return;
-    }
-    const pattern = patterns[0];
-    if (!pattern) throw new ApiError("unexpected_response");
+type Dependencies = { wait?: typeof delay; newRequestId?: () => string; sendTimeoutMs?: number };
+export type ProjectSession = {
+  readonly start: () => () => void;
+  readonly subscribe: (listener: () => void) => () => void;
+  readonly getView: () => ProjectView;
+  readonly send: (body: InstructionBody) => void;
+  readonly resend: (requestId: string) => void;
+  readonly retry: () => void;
+};
 
-    for (;;) {
-      const state = await readPatternState(pattern.id, signal);
-      const shown: RevisionView | null = await loadRevision(
-        state.currentRevision,
-        last?.shown ?? null,
-        signal,
-      );
-      signal.throwIfAborted();
-      const activity = summarizeActivity(state);
-      last = { kind: "open", pattern, shown, activity, problem: null };
-      onView(last);
-      if (activity.kind === "idle" || activity.kind === "held") return;
-      await wait(1000, signal);
-    }
-  } catch (error) {
-    if (signal.aborted) return;
-    const message = failureMessage(error);
-    onView(last ? { ...last, problem: message } : { kind: "failed", message });
+function signature(state: PatternStateResponse) {
+  return JSON.stringify([
+    state.currentRevision?.id,
+    state.runningJob?.jobId,
+    state.queuedJobs.map((job) => job.jobId),
+    state.queueHold?.job,
+    state.lastFinishedJob,
+  ]);
+}
+
+function wakeLatch(signal: AbortSignal, wait: typeof delay) {
+  let pending = false;
+  let sleeper: AbortController | null = null;
+  return {
+    wake() {
+      pending = true;
+      sleeper?.abort();
+    },
+    async sleep(ms: number | null) {
+      if (!pending && !signal.aborted) {
+        sleeper = new AbortController();
+        const interrupted = AbortSignal.any([sleeper.signal, signal]);
+        try {
+          if (ms === null)
+            await new Promise<void>((resolve) =>
+              interrupted.addEventListener("abort", () => resolve(), { once: true }),
+            );
+          else await wait(ms, interrupted);
+        } catch (error) {
+          if (!interrupted.aborted) throw error;
+        } finally {
+          sleeper = null;
+        }
+      }
+      pending = false;
+    },
+  };
+}
+
+export function createProjectSession(
+  projectId: ProjectId,
+  deps: Dependencies = {},
+): ProjectSession {
+  const listeners = new Set<() => void>();
+  let view: ProjectView = { kind: "opening" };
+  let state: PatternStateResponse | null = null;
+  let rows: ServerRows = new Map();
+  let outbox: Outbox = [];
+  let pattern: Pattern | undefined;
+  let rereadRequested = true;
+  let active: { controller: AbortController; latch: ReturnType<typeof wakeLatch> } | null = null;
+
+  function publish(next: ProjectView) {
+    view = next;
+    for (const listener of listeners) listener();
   }
+  function publishOutbox() {
+    if (view.kind === "open") publish({ ...view, timeline: buildTimeline(rows, outbox, state) });
+  }
+  async function poll(signal: AbortSignal, latch: ReturnType<typeof wakeLatch>) {
+    let rowsSig: string | undefined;
+    let backoff = 1000;
+    while (!signal.aborted) {
+      let interval: number | null = 1000;
+      try {
+        if (!pattern) {
+          const patterns = await listPatterns(projectId, signal);
+          signal.throwIfAborted();
+          pattern = patterns[0];
+          if (!pattern) throw new ApiError("unexpected_response");
+        }
+        let latest = await readPatternState(pattern.id, signal);
+        const sig = signature(latest);
+        let updated = rows;
+        signal.throwIfAborted();
+        if (sig !== rowsSig || rereadRequested) {
+          rereadRequested = false;
+          const page = await listMessages(pattern.id, null, signal);
+          updated = mergeRows(rows, page.messages);
+          if (updated.size > rows.size) latest = await readPatternState(pattern.id, signal);
+        }
+        const shown = await loadRevision(
+          latest.currentRevision,
+          view.kind === "open" ? view.shown : null,
+          signal,
+        );
+        signal.throwIfAborted();
+        state = latest;
+        rows = updated;
+        rowsSig = sig;
+        const activity = summarizeActivity(state);
+        publish({
+          kind: "open",
+          pattern,
+          shown,
+          activity,
+          problem: null,
+          timeline: buildTimeline(rows, outbox, state),
+        });
+        backoff = 1000;
+        if (
+          (activity.kind === "idle" || activity.kind === "held") &&
+          signature(state) === rowsSig &&
+          outbox.every((e) => e.delivery.kind !== "accepted" || rows.has(e.delivery.job.messageId))
+        )
+          interval = null;
+      } catch (error) {
+        if (signal.aborted) return;
+        if (!pattern && error instanceof ApiError && error.code === "not_found") {
+          publish({ kind: "not_found" });
+          return;
+        }
+        rereadRequested = true;
+        const message = failureMessage(error);
+        publish(view.kind === "open" ? { ...view, problem: message } : { kind: "failed", message });
+        interval = backoff;
+        backoff = Math.min(backoff * 2, 30000);
+      }
+      await latch.sleep(interval);
+    }
+  }
+
+  function setDelivery(requestId: string, delivery: OutboxEntry["delivery"]) {
+    outbox = outbox.map((e) => (e.requestId === requestId ? { ...e, delivery } : e));
+    publishOutbox();
+  }
+  let delivering = false;
+  async function drain() {
+    if (delivering) return;
+    delivering = true;
+    try {
+      while (active && pattern) {
+        const entry = outbox.find((e) => e.delivery.kind === "sending");
+        if (!entry) return;
+        const { requestId, body } = entry;
+        const lifetime = active.controller.signal;
+        const signal = AbortSignal.any([
+          lifetime,
+          AbortSignal.timeout(deps.sendTimeoutMs ?? 15000),
+        ]);
+        try {
+          const job = await sendInstruction(pattern.id, { requestId, body }, signal);
+          setDelivery(requestId, { kind: "accepted", job });
+        } catch (error) {
+          if (!lifetime.aborted)
+            setDelivery(requestId, { kind: "unsent", message: sendFailureMessage(error) });
+        }
+        rereadRequested = true;
+        active?.latch.wake();
+      }
+    } finally {
+      delivering = false;
+    }
+  }
+
+  return {
+    start() {
+      active?.controller.abort();
+      const controller = new AbortController();
+      const latch = wakeLatch(controller.signal, deps.wait ?? delay);
+      active = { controller, latch };
+      void poll(controller.signal, latch);
+      void drain();
+      controller.signal.addEventListener(
+        "abort",
+        () => {
+          if (active?.controller !== controller) return;
+          active = null;
+          outbox = outbox.map((e) =>
+            e.delivery.kind === "sending"
+              ? {
+                  ...e,
+                  delivery: {
+                    kind: "unsent",
+                    message: sendFailureMessage(controller.signal.reason),
+                  },
+                }
+              : e,
+          );
+          publishOutbox();
+        },
+        { once: true },
+      );
+      return () => controller.abort();
+    },
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    getView: () => view,
+    send(body) {
+      if (!active || view.kind !== "open") return;
+      outbox = [
+        ...outbox,
+        {
+          body,
+          requestId: deps.newRequestId?.() ?? crypto.randomUUID(),
+          seq: outbox.length,
+          delivery: { kind: "sending" },
+        },
+      ];
+      publishOutbox();
+      void drain();
+    },
+    resend(requestId) {
+      if (!active || outbox.find((e) => e.requestId === requestId)?.delivery.kind !== "unsent")
+        return;
+      setDelivery(requestId, { kind: "sending" });
+      void drain();
+    },
+    retry() {
+      rereadRequested = true;
+      active?.latch.wake();
+    },
+  };
 }

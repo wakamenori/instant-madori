@@ -18,7 +18,7 @@
 
 ## How to get to it (user POV)
 
-- 画面からはまだ指示を送れず、画像も添えられない。送った指示の進み具合と確定した案は、案件画面に出る（[案件画面で案を見る](./project-view.md)）。この機能の手順では、`POST /api/patterns/<id>/messages`、`GET /api/patterns/<id>/state`、`GET /api/patterns/<id>/revisions`、`GET /api/revisions/<id>/view` を使う。
+- 画面からは、案件画面の指示欄で文章の指示を送れる（[案件画面で指示を送り、会話を読む](./project-chat.md)）。画像はまだ添えられない。送った指示の進み具合と確定した案は、案件画面に出る（[案件画面で案を見る](./project-view.md)）。この機能の手順では、`POST /api/patterns/<id>/messages`、`GET /api/patterns/<id>/state`、`GET /api/patterns/<id>/revisions`、`GET /api/revisions/<id>/view` を使う。
 
 ## Driving it with curl
 
