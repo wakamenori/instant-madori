@@ -1,0 +1,31 @@
+--- a/crates/modeling/src/model/sun_probe/standalone/src/lib.rs
++++ b/crates/modeling/src/model/sun_probe/standalone/src/lib.rs
+@@ -270,6 +270,10 @@
+                     grid::run(&d, f, *s, method, pitch as f64)
+                 };
+                 areas[f.role] += r.area / 1e6;
++                #[cfg(not(target_arch = "wasm32"))]
++                if std::env::var_os("SUN_FACES").is_some() {
++                    eprintln!("face {} {} area={:.6} cand={}", sun, f.id, r.area / 1e6, r.candidates);
++                }
+                 for (a, b) in counts.iter_mut().zip([
+                     r.rays,
+                     r.r1,
+--- a/crates/modeling/src/model/sun_probe/standalone/src/exact.rs
++++ b/crates/modeling/src/model/sun_probe/standalone/src/exact.rs
+@@ -46,10 +46,14 @@
+ pub(super) fn run(d: &Data, f: &Face, s: V) -> ResultRow {
+     let mut pieces: Vec<Poly> = f.tris.iter().map(|t| t.to_vec()).collect();
+     let mut shadows = vec![];
++    #[cfg(not(target_arch = "wasm32"))]
++    let eps: f64 = std::env::var("SUN_EPS").ok().and_then(|s| s.parse().ok()).unwrap_or(1e-7);
++    #[cfg(target_arch = "wasm32")]
++    let eps: f64 = 1e-7;
+     for tri in &d.opaque {
+         let front = clip(
+             tri,
+-            |v| v.sub(f.o).dot(f.n) - 1e-7,
++            |v| v.sub(f.o).dot(f.n) - eps,
+             |a, b, t| a.add(b.sub(a).mul(t)),
+         );
+         let mut p: Poly = front.iter().map(|q| f.project(*q, s)).collect();
