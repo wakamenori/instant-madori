@@ -1,6 +1,6 @@
 import { aiTools, aiToolSchemaVersion } from "@madori/contracts/ai-tools";
 import type { ConversationMessage } from "@madori/contracts";
-import { houseSummarySchemaVersion } from "@madori/contracts/geometry-internal";
+import { houseSummarySchema } from "@madori/contracts/geometry-internal";
 import type { HouseSummary } from "@madori/contracts/geometry-internal";
 import { z } from "zod";
 type MessageKind = ConversationMessage["kind"];
@@ -26,7 +26,7 @@ export const prompt = {
   separator: "\n\n",
   omitted: "({n} older messages omitted.)",
   conversationBytes: 32768,
-  summarySchemaVersion: houseSummarySchemaVersion,
+  summarySchema: z.toJSONSchema(houseSummarySchema),
 };
 function header(number: number, speaker: string) {
   return prompt.entry.replace("{number}", String(number)).replace("{speaker}", speaker);

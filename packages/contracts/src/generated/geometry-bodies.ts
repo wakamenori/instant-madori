@@ -25,4 +25,3 @@ export const summarizeHouseRequestSchema = z.object({ "snapshot": z.discriminate
 export type SummarizeHouseRequest = z.input<typeof summarizeHouseRequestSchema>;
 
 export const geometryBodySchemas = { applyOperationsOutcomeSchema, applyOperationsRequestSchema, errorBodySchema, healthSchema, houseSummarySchema, summarizeHouseRequestSchema };
-export const houseSummarySchemaVersion = "sha256:3645b5340c25278396d9105fcdbcac5856871268b655eee9291ca30ef2d1ab8a";

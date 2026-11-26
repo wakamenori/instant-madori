@@ -129,13 +129,13 @@ export async function startContext(
           FROM messages m JOIN context c ON m.pattern_id = c.pattern_id AND m.owner_id = c.owner_id
           WHERE m.id <> c.id AND (m.number < c.number OR m.kind NOT IN ('instruction', 'answer'))
         ), recent AS (
-          SELECT number, kind, body FROM earlier WHERE cost <= ? ORDER BY number
+          SELECT number, kind, body FROM earlier WHERE cost <= ?
         )
         SELECT json_object(
           'instruction', body, 'claimedAt', updated_at, 'base', json(base),
           'total', (SELECT count(*) FROM earlier),
           'messages', (SELECT json_group_array(json_object(
-            'number', number, 'kind', kind, 'body', body)) FROM recent)
+            'number', number, 'kind', kind, 'body', body) ORDER BY number) FROM recent)
         ) AS json FROM context`,
         bindings: [...active.bindings, window.entryOverheadBytes, window.budgetBytes],
       },
