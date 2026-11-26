@@ -1357,6 +1357,169 @@ index 000000000..96c7a981b
 +print("compared role areas:",count)
 +print("mismatches:",mismatches)
 +assert mismatches==0
+diff --git a/crates/modeling/src/model/sun_probe/standalone/e2_cases.py b/crates/modeling/src/model/sun_probe/standalone/e2_cases.py
+new file mode 100644
+index 000000000..606a6723f
+--- /dev/null
++++ b/crates/modeling/src/model/sun_probe/standalone/e2_cases.py
+@@ -0,0 +1,75 @@
++import json, math, os, subprocess, sys
++from pathlib import Path
++from e2_scenes import raw, scenes, convert
++adv = raw.parent/"interrogate"
++sys.path.insert(0,str(adv/"adversary-1"))
++from scene import Scene
++tmp = Path("target/sunbench/cases")
++tmp.mkdir(exist_ok=True)
++old = raw/"scenes"
++source = tmp/"source.scene"
++test = tmp/"test.scene"
++exe = tmp.parent/"release/sunbench"
++
++def transform(script,*args):
++    subprocess.run([sys.executable,"-B",adv/script,*map(str,args)],stdout=subprocess.DEVNULL,check=True)
++def run(path,m):
++    return list(map(json.loads,subprocess.check_output([exe,path,str(m),"25","0","1"],text=True).splitlines()))
++def check(label,case,src,angle=0,scale=1,shift=(0,0,0),grid=False):
++    convert(src,test,case,angle,scale,shift)
++    reference=run(test,0) if grid else []
++    for i,(e,e2) in enumerate(zip(run(test,3),run(test,4))):
++        exp = list(Scene(src).suns[i][2])
++        if case=="slit":
++            b=math.radians([0,7.125,10,12.680][i]);a=math.pi/6
++            exp=[(.05-.2*math.tan(b))*(1-.2*math.tan(a)/math.cos(b))*math.cos(b)/math.tan(a),0,0]
++        if case.startswith("gap"):exp[1:]=[0,0]
++        if scale!=1:
++            exp[1]*=scale
++            exp[2]*=math.hypot(math.cos(math.pi/6),scale*math.sin(math.pi/6))
++        if grid:exp=reference[i]["areas"]
++        if label=="roof45":
++            e["areas"]=[dict(e["faces"]).get("roof/1",0)]
++            e2["areas"]=[dict(e2["faces"]).get("roof/1",0)]
++            exp=[0]
++        if label=="grazing":
++            e["areas"]=[dict(e["faces"]).get("west000/4",0)]
++            e2["areas"]=[dict(e2["faces"]).get("west000/4",0)]
++            exp=[0]
++        yield dict(case=case,variant=label,idx=i,sun=e["sun"],expected=exp,E=e["areas"],E2=e2["areas"])
++def cases():
++    for p in sorted(old.glob("*.scene")):
++        if p.stem!="house":yield from check("fixed",p.stem,p)
++    for case in ["wall","slope","floor","slit","gap20"]:
++        for angle in range(0,91,5):
++            for mode in ["f64plane","meshplane"]:
++                transform("adversary-1/rotate.py",old/(case+".scene"),source,angle)
++                if mode=="meshplane":transform("adversary-1/meshplane.py",source,source)
++                yield from check(f"{mode} {angle}°",case,source,angle)
++    for c in [0.52,math.sqrt(.48),math.sqrt(.75),1.04]:
++        transform("adversary-1/scale.py",old/"slope.scene",source,c)
++        yield from check(f"pitch {math.degrees(math.atan(c/math.sqrt(3))):.1f}°","slope",source,scale=c)
++    for dz in [.1,1,10,1000.1]:
++        transform("adversary-1/shift.py",old/"slope.scene",source,0,0,dz)
++        yield from check(f"dz {dz} mm","slope",source,shift=(0,0,dz))
++    transform("adversary-2/eave.py",old/"slope.scene",source)
++    yield from check("eave","slope",source)
++    for name,case,alt,az in [("roof45","slope",45,0),("grazing","wall",20,1e-8)]:
++        a,b=map(math.radians,(alt,az))
++        sc=Scene(old/(case+".scene"))
++        sc.suns=[[name,[math.cos(a)*math.sin(b),-math.cos(a)*math.cos(b),math.sin(a)],[-1]*3]]
++        sc.write(source)
++        yield from check(name,case,source)
++    sc=Scene(old/"house.scene")
++    ids=[i for i,t in enumerate(sc.ts) if max(sc.vs[k][1] for k in t[:3])>=-1000]
++    remap={j:i for i,j in enumerate(ids)}
++    sc.ts=[sc.ts[i] for i in ids]
++    for f in sc.faces:f[4]=[remap[i] for i in f[4]]
++    sc.write(source)
++    convert(source,scenes/"house-noneighbors.scene","house")
++    transform("adversary-1/rotate.py",source,source,30)
++    yield from check("no neighbors 30° (G25)","house",source,angle=30,grid=True)
++
++if __name__=="__main__":
++    with (raw/"e2-cases.jsonl").open("w") as out:
++        for record in cases():print(json.dumps(record,ensure_ascii=False),file=out)
+diff --git a/crates/modeling/src/model/sun_probe/standalone/e2_measure.py b/crates/modeling/src/model/sun_probe/standalone/e2_measure.py
+new file mode 100644
+index 000000000..85995bfbe
+--- /dev/null
++++ b/crates/modeling/src/model/sun_probe/standalone/e2_measure.py
+@@ -0,0 +1,38 @@
++import json, re, subprocess, sys
++from pathlib import Path
++from e2_scenes import convert,raw,scenes
++base=Path(__file__).parent
++target=Path("target/sunbench")
++def measure(platform, label, scene, n=0, pitch=1000):
++    args=list(map(str,[4,pitch,n,5]))
++    if platform=="macos":
++        cmd=["/usr/bin/time","-l",target/"release/sunbench",scene,*args]
++    elif platform=="wasm":
++        cmd=["/usr/bin/time","-l","node",base/"wasm.mjs",target/"wasm32-unknown-unknown/release/sunbench.wasm",scene,*args]
++    else:
++        cmd=["docker","run","--rm","--platform","linux/amd64","-v",f"{scene.resolve()}:/house:ro","sunbench-e2","/house",*args]
++    r=subprocess.run(cmd,capture_output=True,text=True,check=True)
++    rss=int(re.search(r"VmHWM:\s*(\d+)" if platform=="linux" else r"(\d+)\s+maximum resident set size",r.stderr)[1])*(1024 if platform=="linux" else 1)
++    rows=list(map(json.loads,r.stdout.splitlines()))
++    assert len(rows)==30
++    for row in rows:
++        row.update(platform=platform,scenario=label,rss_bytes=rss)
++        if platform=="wasm":row["linear_bytes"]=int(re.search(r"wasm_bytes (\d+)",r.stderr)[1])
++        yield row
++def jobs(platform):
++    house=scenes/"house.scene"
++    yield from measure(platform,"baseline",house)
++    if platform=="linux":return
++    yield from measure(platform,"no neighbors",scenes/"house-noneighbors.scene")
++    for n in (4,16,32,64):yield from measure(platform,"cylinders",house,n)
++    for pitch in (500,2000):yield from measure(platform,"cell size",house,pitch=pitch)
++    for n in (100000,400000):
++        src=target/"cases"/"below.scene"; dst=src.with_suffix(".sun2")
++        subprocess.run([sys.executable,"-B",raw.parent/"interrogate/adversary-1/addtris.py",raw/"scenes/house.scene",src,str(n)],check=True)
++        convert(src,dst,"house")
++        yield from measure(platform,f"underground {n}",dst)
++if __name__=="__main__":
++    platform=sys.argv[1]
++    with (raw/f"e2-{platform}.jsonl").open("w") as out:
++        for row in jobs(platform):
++            print(json.dumps(row,separators=(',',':')),file=out)
+diff --git a/crates/modeling/src/model/sun_probe/standalone/e2_scenes.py b/crates/modeling/src/model/sun_probe/standalone/e2_scenes.py
+new file mode 100644
+index 000000000..789ed79a3
+--- /dev/null
++++ b/crates/modeling/src/model/sun_probe/standalone/e2_scenes.py
+@@ -0,0 +1,32 @@
++import math
++from pathlib import Path
++
++raw = Path("docs/verification/evidence/verification-12/raw")
++scenes = raw / "scenes2"
++
++
++def convert(src, dst, case, angle=0, scale=1, shift=(0, 0, 0)):
++    house = case == "house"
++    size = range(2 if house else 1)
++    width = 4800 if house else 4000
++    depth = 3900 if house else {"wall": 2000, "slope": 3000}.get(case, 4000)
++    height = 4000 if case == "slope" else 2400
++    c, s = math.cos(math.radians(angle)), math.sin(math.radians(angle))
++    rooms = []
++    for level in size:
++        for row in size:
++            for col in size:
++                z = 2600 * level
++                values = [scale*z + shift[2], scale*(z+height) + shift[2]]
++                for dx, dy in ((0, 0), (width, 0), (width, depth), (0, depth)):
++                    x, y = col*(width+200)+dx, row*(depth+200)+dy
++                    values.extend([x*c-y*s+shift[0], x*s+y*c+shift[1]])
++                rooms.append(" ".join(map(str, values)))
++    dst.write_text(src.read_text().replace("SUN1", "SUN2", 1).rstrip() + "\n" +
++                   str(len(rooms)) + "\n" + "\n".join(rooms) + "\n")
++
++
++if __name__ == "__main__":
++    scenes.mkdir(exist_ok=True)
++    for src in (raw/"scenes").glob("*.scene"):
++        convert(src, scenes/src.name, src.stem)
 diff --git a/crates/modeling/src/model/sun_probe/standalone/measure.py b/crates/modeling/src/model/sun_probe/standalone/measure.py
 new file mode 100644
 index 000000000..071b5ff38
@@ -1492,14 +1655,131 @@ index 000000000..be0e04b32
 +        }
 +    }
 +}
+diff --git a/crates/modeling/src/model/sun_probe/standalone/src/e2.rs b/crates/modeling/src/model/sun_probe/standalone/src/e2.rs
+new file mode 100644
+index 000000000..8283864ec
+--- /dev/null
++++ b/crates/modeling/src/model/sun_probe/standalone/src/e2.rs
+@@ -0,0 +1,107 @@
++use super::*;
++
++fn trim(poly: Poly, distance: impl Fn(P) -> f64) -> Poly {
++    exact::clip(
++        &poly,
++        |p| {
++            let d = distance(p);
++            if d.abs() < 0.001 { 0. } else { d }
++        },
++        |a, b, t| [a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])],
++    )
++}
++pub(super) fn regions(d: &Data) -> Vec<(usize, Vec<Poly>)> {
++    let mut result = vec![];
++    for (i, f) in d.faces.iter().enumerate() {
++        for r in &d.rooms {
++            if f.role == 0 && (f.n.2 < 0.999999 || (f.o.2 - r.bottom).abs() > 0.01) {
++                continue;
++            }
++            let mut pieces = vec![];
++            for tri in &f.tris {
++                let mut p = tri.to_vec();
++                for j in 0..4 {
++                    let a = r.corners[j];
++                    let b = r.corners[(j + 1) % 4];
++                    let len = (a[0] - b[0]).hypot(a[1] - b[1]);
++                    p = trim(p, |uv| {
++                        let q = f.xyz(uv);
++                        cross(a, b, [q.0, q.1]) / len
++                    });
++                }
++                if f.role == 1 {
++                    p = trim(p, |uv| f.xyz(uv).2 - r.bottom);
++                    p = trim(p, |uv| r.top - f.xyz(uv).2);
++                } else if f.role == 2
++                    && !p.iter().any(|uv| {
++                        let z = f.xyz(*uv).2;
++                        z > r.bottom + 0.01 && z <= r.top + 0.01
++                    })
++                {
++                    continue;
++                }
++                if exact::area(&p) > 1e-8 {
++                    pieces.push(p);
++                }
++            }
++            if !pieces.is_empty() {
++                result.push((i, pieces));
++            }
++        }
++    }
++    result
++}
++pub(super) struct Grid {
++    cells: std::collections::HashMap<(i32, i32), Vec<usize>>,
++    u: V,
++    v: V,
++    size: f64,
++}
++impl Grid {
++    fn key(&self, p: V) -> [i32; 2] {
++        [self.u, self.v].map(|n| (p.dot(n) / self.size).floor() as i32)
++    }
++    fn cells_for(&self, pts: impl Iterator<Item = V>) -> impl Iterator<Item = (i32, i32)> {
++        let mut lo = [i32::MAX; 2];
++        let mut hi = [i32::MIN; 2];
++        for p in pts {
++            let k = self.key(p);
++            for i in 0..2 {
++                lo[i] = lo[i].min(k[i]);
++                hi[i] = hi[i].max(k[i]);
++            }
++        }
++        (lo[0]..=hi[0]).flat_map(move |x| (lo[1]..=hi[1]).map(move |y| (x, y)))
++    }
++    pub(super) fn new(d: &Data, s: V, size: f64) -> Self {
++        let axis = if s.0.abs() < 0.9 {
++            V(1., 0., 0.)
++        } else {
++            V(0., 1., 0.)
++        };
++        let u = s.cross(axis).unit();
++        let mut grid = Self {
++            cells: Default::default(),
++            u,
++            v: s.cross(u),
++            size,
++        };
++        for (i, tri) in d.opaque.iter().enumerate() {
++            for key in grid.cells_for(tri.iter().copied()).collect::<Vec<_>>() {
++                grid.cells.entry(key).or_default().push(i);
++            }
++        }
++        grid
++    }
++    pub(super) fn query(&self, f: &Face, pieces: &[Poly]) -> Vec<usize> {
++        let mut ids = vec![];
++        for k in self.cells_for(pieces.iter().flatten().map(|p| f.xyz(*p))) {
++            if let Some(list) = self.cells.get(&k) {
++                ids.extend_from_slice(list);
++            }
++        }
++        ids.sort_unstable();
++        ids.dedup();
++        ids
++    }
++}
 diff --git a/crates/modeling/src/model/sun_probe/standalone/src/exact.rs b/crates/modeling/src/model/sun_probe/standalone/src/exact.rs
 new file mode 100644
-index 000000000..e705d6094
+index 000000000..f8318a6a9
 --- /dev/null
 +++ b/crates/modeling/src/model/sun_probe/standalone/src/exact.rs
-@@ -0,0 +1,94 @@
+@@ -0,0 +1,120 @@
 +use super::*;
-+fn clip<T: Copy>(poly: &[T], distance: impl Fn(T) -> f64, lerp: impl Fn(T, T, f64) -> T) -> Vec<T> {
++pub(super) fn clip<T: Copy>(
++    poly: &[T],
++    distance: impl Fn(T) -> f64,
++    lerp: impl Fn(T, T, f64) -> T,
++) -> Vec<T> {
 +    let mut out = vec![];
 +    for i in 0..poly.len() {
 +        let a = poly[i];
@@ -1514,7 +1794,7 @@ index 000000000..e705d6094
 +    }
 +    out
 +}
-+fn area(p: &[P]) -> f64 {
++pub(super) fn area(p: &[P]) -> f64 {
 +    (1..p.len().saturating_sub(1))
 +        .map(|i| cross(p[0], p[i], p[i + 1]) / 2.)
 +        .sum()
@@ -1544,17 +1824,39 @@ index 000000000..e705d6094
 +    }
 +}
 +pub(super) fn run(d: &Data, f: &Face, s: V) -> ResultRow {
-+    let mut pieces: Vec<Poly> = f.tris.iter().map(|t| t.to_vec()).collect();
++    solve(
++        f,
++        s,
++        f.tris.iter().map(|t| t.to_vec()).collect(),
++        d.opaque.iter(),
++        1e-7,
++    )
++}
++pub(super) fn solve<'a>(
++    f: &Face,
++    s: V,
++    mut pieces: Vec<Poly>,
++    triangles: impl Iterator<Item = &'a [V; 3]>,
++    eps: f64,
++) -> ResultRow {
++    let receiver = bounds(pieces.iter().flatten());
 +    let mut shadows = vec![];
-+    for tri in &d.opaque {
-+        let front = clip(
-+            tri,
-+            |v| v.sub(f.o).dot(f.n) - 1e-7,
-+            |a, b, t| a.add(b.sub(a).mul(t)),
-+        );
++    for tri in triangles {
++        let distance = |v: V| {
++            let d = v.sub(f.o).dot(f.n);
++            if eps == 0.01 {
++                if d.abs() <= eps { 0. } else { d }
++            } else {
++                d - eps
++            }
++        };
++        if !tri.iter().any(|&v| distance(v) > 0.) {
++            continue;
++        }
++        let front = clip(tri, distance, |a, b, t| a.add(b.sub(a).mul(t)));
 +        let mut p: Poly = front.iter().map(|q| f.project(*q, s)).collect();
 +        let a = area(&p);
-+        if a.abs() < 1e-8 || !overlap(f.b, bounds(p.iter())) {
++        if a.abs() < 1e-8 || !overlap(receiver, bounds(p.iter())) {
 +            continue;
 +        }
 +        if a < 0. {
@@ -1733,12 +2035,13 @@ index 000000000..286407db9
 +}
 diff --git a/crates/modeling/src/model/sun_probe/standalone/src/lib.rs b/crates/modeling/src/model/sun_probe/standalone/src/lib.rs
 new file mode 100644
-index 000000000..04e2e1c23
+index 000000000..330a33e83
 --- /dev/null
 +++ b/crates/modeling/src/model/sun_probe/standalone/src/lib.rs
-@@ -0,0 +1,312 @@
+@@ -0,0 +1,402 @@
 +use std::collections::BTreeMap;
 +mod bvh;
++mod e2;
 +mod exact;
 +mod grid;
 +#[derive(Clone, Copy, Debug, Default)]
@@ -1790,6 +2093,7 @@ index 000000000..04e2e1c23
 +    (0..2).all(|k| p[k] >= b[0][k] - 1e-7 && p[k] <= b[1][k] + 1e-7)
 +}
 +struct Face {
++    own: Vec<usize>,
 +    id: String,
 +    o: V,
 +    n: V,
@@ -1831,7 +2135,13 @@ index 000000000..04e2e1c23
 +    peak: u64,
 +    pieces: u64,
 +}
++struct Room {
++    bottom: f64,
++    top: f64,
++    corners: [P; 4],
++}
 +struct Data {
++    rooms: Vec<Room>,
 +    opaque: Vec<[V; 3]>,
 +    bvh: bvh::Tree,
 +    faces: Vec<Face>,
@@ -1843,8 +2153,18 @@ index 000000000..04e2e1c23
 +        for row in 0..2 {
 +            for col in 0..2 {
 +                for i in 0..n {
-+                    let x = (col * 5000 + 1900 + (i % 4) * 730) as f64;
-+                    let y = (row * 4100 + 450 + (i / 4) * 900) as f64;
++                    let x = (col * 5000
++                        + if n <= 16 {
++                            1900 + (i % 4) * 730
++                        } else {
++                            250 + (i % 8) * 600
++                        }) as f64;
++                    let y = (row * 4100
++                        + if n <= 16 {
++                            450 + (i / 4) * 900
++                        } else {
++                            240 + (i / 8) * 480
++                        }) as f64;
 +                    let z = (level * 2600) as f64;
 +                    let point = |j: usize, h: f64| {
 +                        let a = (j % 64) as f64 * std::f64::consts::TAU / 64.;
@@ -1889,7 +2209,11 @@ index 000000000..04e2e1c23
 +impl Data {
 +    fn read(input: &str, n: usize, ray: bool) -> Self {
 +        let mut r = Reader(input.split_whitespace());
-+        assert_eq!(r.token(), "SUN1");
++        let rooms_present = match r.token() {
++            "SUN1" => false,
++            "SUN2" => true,
++            _ => panic!("unknown scene"),
++        };
 +        let vs: Vec<_> = (0..r.n())
 +            .map(|_| {
 +                let p = r.v().arr().map(|x| x as f32 as f64);
@@ -1897,10 +2221,13 @@ index 000000000..04e2e1c23
 +            })
 +            .collect();
 +        let mut opaque = vec![];
++        let mut indices = vec![];
 +        let ts: Vec<_> = (0..r.n())
 +            .map(|_| {
 +                let t = [vs[r.n()], vs[r.n()], vs[r.n()]];
-+                if r.n() == 0 {
++                let solid = r.n() == 0;
++                indices.push(if solid { Some(opaque.len()) } else { None });
++                if solid {
 +                    opaque.push(t);
 +                }
 +                t
@@ -1920,6 +2247,7 @@ index 000000000..04e2e1c23
 +                let v = n.cross(u).unit();
 +                let u = v.cross(n);
 +                let mut f = Face {
++                    own: vec![],
 +                    id,
 +                    role,
 +                    n,
@@ -1929,7 +2257,13 @@ index 000000000..04e2e1c23
 +                    tris: vec![],
 +                    b: [[0.; 2]; 2],
 +                };
-+                f.tris = (0..r.n()).map(|_| ts[r.n()].map(|q| f.uv(q))).collect();
++                f.tris = (0..r.n())
++                    .map(|_| {
++                        let i = r.n();
++                        f.own.extend(indices[i]);
++                        ts[i].map(|q| f.uv(q))
++                    })
++                    .collect();
 +                f.b = bounds(f.tris.iter().flatten());
 +                f
 +            })
@@ -1945,6 +2279,17 @@ index 000000000..04e2e1c23
 +                (name, s)
 +            })
 +            .collect();
++        let rooms = if rooms_present {
++            (0..r.n())
++                .map(|_| Room {
++                    bottom: r.scalar(),
++                    top: r.scalar(),
++                    corners: std::array::from_fn(|_| [r.scalar(), r.scalar()]),
++                })
++                .collect()
++        } else {
++            vec![]
++        };
 +        furniture(&mut opaque, n);
 +        let bvh = if ray {
 +            bvh::Tree::new(&mut opaque.clone())
@@ -1952,6 +2297,7 @@ index 000000000..04e2e1c23
 +            bvh::Tree::new(&mut [])
 +        };
 +        Self {
++            rooms,
 +            opaque,
 +            bvh,
 +            faces,
@@ -1990,17 +2336,56 @@ index 000000000..04e2e1c23
 +    println!("{line}");
 +}
 +pub fn bench(input: &str, m: usize, pitch: usize, n: usize, reps: usize) {
-+    let method = ["G", "A", "Q", "E-convex"][m];
++    let method = ["G", "A", "Q", "E-convex", "E2"][m];
 +    for rep in 0..reps {
 +        let t = now();
-+        let d = Data::read(input, n, m != 3);
++        let d = Data::read(input, n, m < 3);
++        let regions = if m == 4 {
++            assert!(!d.rooms.is_empty());
++            e2::regions(&d)
++        } else {
++            vec![]
++        };
 +        let prep = now() - t;
 +        for (idx, (sun, s)) in d.suns.iter().enumerate() {
 +            let t = now();
 +            let mut areas = [0.; 3];
 +            let mut counts = [0u64; 8];
 +            let mut candidates = vec![];
-+            for f in &d.faces {
++            let mut pairs = 0;
++            let mut indexed = 0;
++            let mut face_areas = vec![];
++            if m == 4 && s.2 > 0. {
++                let grid = e2::Grid::new(&d, *s, if pitch == 0 { 1000. } else { pitch as f64 });
++                indexed = d.opaque.len();
++                for (i, pieces) in &regions {
++                    let f = &d.faces[*i];
++                    if s.dot(f.n) <= 0.01 {
++                        continue;
++                    }
++                    let ids = grid.query(f, pieces);
++                    pairs += ids.len();
++                    let r = exact::solve(
++                        f,
++                        *s,
++                        pieces.clone(),
++                        ids.into_iter()
++                            .filter(|i| !f.own.contains(i))
++                            .map(|i| &d.opaque[i]),
++                        0.01,
++                    );
++                    areas[f.role] += r.area / 1e6;
++                    face_areas.push((f.id.as_str(), r.area / 1e6));
++                    counts[1] += r.r1;
++                    counts[3] += r.candidates;
++                    counts[4] += r.cuts;
++                    counts[5] += r.pieces;
++                    counts[6] += r.attempts;
++                    counts[7] = counts[7].max(r.peak);
++                    candidates.push(r.candidates);
++                }
++            }
++            for f in d.faces.iter().filter(|_| m != 4) {
 +                let r = if s.2 <= 0. || s.dot(f.n) <= 1e-10 {
 +                    ResultRow::default()
 +                } else if m == 3 {
@@ -2009,6 +2394,7 @@ index 000000000..04e2e1c23
 +                    grid::run(&d, f, *s, method, pitch as f64)
 +                };
 +                areas[f.role] += r.area / 1e6;
++                face_areas.push((f.id.as_str(), r.area / 1e6));
 +                for (a, b) in counts.iter_mut().zip([
 +                    r.rays,
 +                    r.r1,
@@ -2024,8 +2410,14 @@ index 000000000..04e2e1c23
 +                candidates.push(r.candidates);
 +            }
 +            let ms = now() - t;
++            let faces = face_areas
++                .iter()
++                .map(|(id, a)| format!("[\"{id}\",{a}]"))
++                .collect::<Vec<_>>()
++                .join(",");
 +            emit(format!(
-+                r#"{{"method":"{method}","pitch":{pitch},"rep":{rep},"n":{n},"sun":"{sun}","idx":{idx},"prep":{prep},"ms":{ms},"areas":{areas:?},"counts":{counts:?},"face_candidates":{candidates:?},"opaque":{}}}"#,
++                r#"{{"method":"{method}","pitch":{pitch},"rep":{rep},"n":{n},"sun":"{sun}","idx":{idx},"prep":{prep},"ms":{ms},"areas":{areas:?},"counts":{counts:?},"face_candidates":{candidates:?},"regions":{},"faces":[{faces}],"pairs":{pairs},"indexed":{indexed},"opaque":{}}}"#,
++                regions.len(),
 +                d.opaque.len()
 +            ));
 +        }
