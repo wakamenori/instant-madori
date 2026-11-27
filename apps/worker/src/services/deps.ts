@@ -81,12 +81,14 @@ export type JobWorkflowDeps = StoreDeps<
   | "failAndHoldQueue"
   | "ownedBySubject"
   | "startContext"
+  | "limit"
   | "askQuestion"
   | "recordAi"
 > &
+  AiCostDeps &
   StoreDeps<"snapshots", "write" | "open"> &
   StoreDeps<"work", "read" | "keep"> &
-  Pick<ServiceDeps, "geometry" | "runtime" | "wakePattern"> & {
+  Pick<ServiceDeps, "geometry" | "wakePattern"> & {
     ai: Ai;
     turns: typeof turnCodec;
     testHold: JobTestHold | null;
