@@ -34,7 +34,6 @@ export async function meteredRoundTrip(
   const now = deps.runtime.now();
   const { jobId, generation } = right.reference;
   const fields = { jobId, generation, attemptId, reservedMicroUsd: estimate.reserve };
-  const elapsed = () => Date.parse(deps.runtime.now()) - Date.parse(now);
 
   const result = await deps.store.aiCost.reserve(right, {
     attemptId,
@@ -44,11 +43,15 @@ export async function meteredRoundTrip(
     now,
   });
   if (result.kind !== "reserved") {
-    logEvent("info", "ai.attempt", { ...fields, aiMs: elapsed(), outcome: result.kind });
+    logEvent("info", "ai.attempt", { ...fields, outcome: result.kind });
     return result;
   }
+  const sentAt = Date.parse(deps.runtime.now());
+  const elapsed = () => Date.parse(deps.runtime.now()) - sentAt;
+  let aiMs: number | undefined;
   try {
     const response = await deps.ai.roundTrip(request);
+    aiMs = elapsed();
     const usage =
       response.kind === "ok"
         ? response.assistant.usage
@@ -65,7 +68,7 @@ export async function meteredRoundTrip(
     logEvent("info", "ai.attempt", {
       ...fields,
       ...usage,
-      aiMs: elapsed(),
+      aiMs,
       outcome: "settled",
       chargedMicroUsd: charged,
     });
@@ -73,7 +76,7 @@ export async function meteredRoundTrip(
   } catch (error) {
     logEvent("error", "ai.attempt", {
       ...fields,
-      aiMs: elapsed(),
+      aiMs: aiMs ?? elapsed(),
       outcome: "unsettled",
       error: describeError(error),
     });
