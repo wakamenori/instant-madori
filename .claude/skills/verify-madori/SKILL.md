@@ -231,7 +231,7 @@ AUTH=$(mise exec -- node --env-file="$MAIN/.env" -e 'process.stdout.write(`Autho
 c() { printf '%s\n' "$HDRS" | curl -sS -H @- "$@"; }
 ```
 
-- **利用者を確かめる。** `c "$STG/api/me"` の `email` が `ai-verifier@staging.invalid`。403 なら、Worker にこの service token の Client ID が渡っていない（README「stagingへデプロイする」）。
+- **利用者を確かめる。** `c "$STG/api/me" | jq -r .user.email` が `ai-verifier@staging.invalid`。403 なら、Worker にこの service token の Client ID が渡っていない（README「stagingへデプロイする」）。
 - **案件を得る。** `body='{"requestId":"0b5f0a3e-7d4c-4f7a-9a51-2c1e7c0e9b18","name":"実際のAIの確認"}'` で `c -o "$D/project.json" -w '%{http_code}\n' -X POST "$STG/api/projects" -H "$J" -H "origin: $STG" -d "$body"`。初回は `201`、再送は記録済みの結果を返す。`PID=$(jq -r .project.id "$D/project.json")` を設定する。
 - **パターンを足す。** 指示ごとに新しいパターンで始める。`body=$(printf '{"requestId":"%s","name":"%s"}' "$(uuidgen)" "平屋 $(date +%m%d-%H%M)")` で `c -o "$D/pattern.json" -w '%{http_code}\n' -X POST "$STG/api/projects/$PID/patterns" -H "$J" -H "origin: $STG" -d "$body"`。`201`。`PAT=$(jq -r .pattern.id "$D/pattern.json")` を設定する。
 - **送る。** `SENT=$(date +%s)` を設定し、`body=$(printf '{"requestId":"%s","body":"%s"}' "$(uuidgen)" "6畳くらいの寝室と、広めのLDKがある小さな平屋")` で `c -o "$D/accept.json" -w '%{http_code}\n' -X POST "$STG/api/patterns/$PAT/messages" -H "$J" -H "origin: $STG" -d "$body"`。`202`。`JOB=$(jq -r .job.jobId "$D/accept.json")` を設定する。
