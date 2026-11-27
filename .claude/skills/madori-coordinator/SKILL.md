@@ -175,10 +175,7 @@ node .claude/skills/madori-coordinator/scripts/rank-ready.mjs
 - Issue の「人の判断」が決まっていなければ、担当を立てずにユーザーに聞く。
 - 立てる前に毎回 `df -h /` を見る。準備で使う数 GB を引いて 20 GiB が残らなければ立てず、「見回り」の手順2のとおりに片付ける。
 - Issue 一つにつき、担当のスレッドを一つ立てる。`t3_thread_launch` で worktree を origin/main から作る。題は `#<番号> <Issue の題>` にする。
-- `modelSelection` を `{instanceId: <instance>, model: "claude-opus-5-5", options: [{id: "effort", value: <effort>}]}` にし、effort を省かない。`<instance>` は、`t3_thread_list` の `currentThreadId` のスレッド（指揮役自身）の `providerInstanceId` を写す。`claudeAgent` と決め打ちしない。effort は次で決める。
-  - 基準は high。
-  - 「PRで決めること」がある Issue と、AGENTS.md が Docker での `pnpm check --full` を求める経路（Container・表示データ）を触る Issue は xhigh。
-  - 判断がほとんど要らない機械的な Issue は medium。
+- `modelSelection` を `{instanceId: <instance>, model: <モデル>, options: [{id: "effort", value: <effort>}]}` にし、effort を省かない。`<instance>` は、`t3_thread_list` の `currentThreadId` のスレッド（指揮役自身）の `providerInstanceId` を写す。`claudeAgent` と決め打ちしない。モデルと effort は [pstack-models.md](../../rules/pstack-models.md) の `madori-owner` の行に従う。
 - 応答の `modelSelection` に選んだ effort が返ったことを確かめ、その effort と理由を Issue にコメントする。
 - 最初の指示は次の一行にする。`<threadId>` は指揮役のスレッドの ID で、担当はそこへ報告する。
 
@@ -195,10 +192,9 @@ node .claude/skills/madori-coordinator/scripts/rank-ready.mjs
 
 担当から報告が来たら、PR の今の状態を `gh pr view` と `gh pr checks` で確かめてから、検証役を立てる。「資源の枠」が埋まっていれば、空くまで立てない。ディスクの空きは、「担当を立てる」と同じく毎回確かめる。
 
-- 検証役は、差分の大部分を書いた系統と別の系統のモデルにする。実装は Codex が書くので、普段は Claude Code の Opus にする。差分の大部分を Claude が書いた PR は、Codex に確かめさせる。
-- `delegate_task` の `target` で、モデルと effort を明示する。effort は high に固定し、Issue によって変えない。poteto-mode が検証を上げ下げの例外にしているため。high にするのは、Anthropic が確かめや例外ケースが大事な作業に high を勧め、xhigh を30分を超える長い作業に取っておくよう勧めているため（[Effort](https://platform.claude.com/docs/en/build-with-claude/effort)）。
-  - Opus：`{providerInstanceId: <instance>, model: "claude-opus-5-5", options: {effort: "high"}}`。`<instance>` は「担当を立てる」と同じく、指揮役自身のスレッドの `providerInstanceId` を写す。
-  - Codex：`{providerInstanceId: "codex", model: <モデル>, options: {reasoningEffort: "high"}}`。モデルは [pstack-models.md](../../rules/pstack-models.md) の、PR の playbook の行から取る。該当する playbook の行が無いときは、`feature, refactoring` の行を使う。
+- 検証役は、差分の大部分を書いた系統と別の系統のモデルにする。モデルと effort は [pstack-models.md](../../rules/pstack-models.md) の `madori-verifier` の行に従い、`delegate_task` の `target` で明示する。
+  - Opus：`{providerInstanceId: <instance>, model: <モデル>, options: {effort: <effort>}}`。`<instance>` は「担当を立てる」と同じく、指揮役自身のスレッドの `providerInstanceId` を写す。
+  - Codex：`{providerInstanceId: "codex", model: <モデル>, options: {reasoningEffort: <effort>}}`。
 - `delegate_task` に `isolation: "worktree"` を付けて、指揮役のスレッドの子として立てる。指示は [verifier-brief.md](verifier-brief.md) の `{…}` を埋めて渡す。
 - `delegate_task` の `title` を `PR #<PR>（#<Issue>）の検証（<回>回目）` にする。`<回>` は指示の `{ATTEMPT}` と同じ数である。計測（`metrics/ingest/polled.ts` の `threadTitle`）はこの形で検証役のスレッドを見分け、Issue と PR に結ぶので、ほかの形にしない。
 - 指示に足してよいのは、試す入力と確かめ方だけにする。合否の基準を足すなら、先に Issue に書く。普段の手順と食い違う禁止は書かない。足した基準に拠る不合格が出たら、その基準を見直してから、同じ検証役に判定し直させる。
