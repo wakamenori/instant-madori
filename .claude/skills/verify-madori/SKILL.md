@@ -217,6 +217,29 @@ mise exec -- node --env-file="$MAIN/.env" scripts/check/staging-smoke.ts
 
 `Staging smoke passed: <Origin>` が出れば通っている。staging の画面は Access のログインが要り、このスキルにはまだその手順が無い。画面の確認が要るときは、確かめられなかったこととして報告する。
 
+### 実際のAIで指示を確かめる
+
+staging では、疎通の確認の検証用の利用者（`staging:verifier`）だけが台本のAIを使い、ほかの利用者は Claude Opus 5.5 を使う。実際のAIは、二つ目の service token の検証用の利用者（`staging:ai-verifier`）で確かめる。メインのチェックアウトの `.env` の `STAGING_AI_ACCESS_CLIENT_ID` と `STAGING_AI_ACCESS_CLIENT_SECRET` を使い、値は表示しない。指示を送るたびに実際の費用がかかるので、終わった証拠に要る回数だけ送る。このユーザーのジョブは `JOB_TEST_HOLD` で待たない。一つの指示は十数往復で、終わるまでに数分から20分ほどかかる。下の各手順は一つのスクリプトで続けて実行する。
+
+```sh
+STG=https://instant-madori-staging.firpmnfiywl.workers.dev
+ACCOUNT=4a67230af28ec94d9c70ca48572d8e9f
+J='content-type: application/json'
+D="$EVIDENCE/staging-real-ai"; mkdir -p "$D"
+HDRS=$(mise exec -- node --env-file="$MAIN/.env" -e 'process.stdout.write(`CF-Access-Client-Id: ${process.env.STAGING_AI_ACCESS_CLIENT_ID}\nCF-Access-Client-Secret: ${process.env.STAGING_AI_ACCESS_CLIENT_SECRET}\n`)')
+AUTH=$(mise exec -- node --env-file="$MAIN/.env" -e 'process.stdout.write(`Authorization: Bearer ${process.env.CLOUDFLARE_API_TOKEN}\n`)')
+c() { printf '%s\n' "$HDRS" | curl -sS -H @- "$@"; }
+```
+
+- **利用者を確かめる。** `c "$STG/api/me"` の `email` が `ai-verifier@staging.invalid`。403 なら、Worker にこの service token の Client ID が渡っていない（README「stagingへデプロイする」）。
+- **案件を得る。** `body='{"requestId":"0b5f0a3e-7d4c-4f7a-9a51-2c1e7c0e9b18","name":"実際のAIの確認"}'` で `c -o "$D/project.json" -w '%{http_code}\n' -X POST "$STG/api/projects" -H "$J" -H "origin: $STG" -d "$body"`。初回は `201`、再送は記録済みの結果を返す。`PID=$(jq -r .project.id "$D/project.json")` を設定する。
+- **パターンを足す。** 指示ごとに新しいパターンで始める。`body=$(printf '{"requestId":"%s","name":"%s"}' "$(uuidgen)" "平屋 $(date +%m%d-%H%M)")` で `c -o "$D/pattern.json" -w '%{http_code}\n' -X POST "$STG/api/projects/$PID/patterns" -H "$J" -H "origin: $STG" -d "$body"`。`201`。`PAT=$(jq -r .pattern.id "$D/pattern.json")` を設定する。
+- **送る。** `SENT=$(date +%s)` を設定し、`body=$(printf '{"requestId":"%s","body":"%s"}' "$(uuidgen)" "6畳くらいの寝室と、広めのLDKがある小さな平屋")` で `c -o "$D/accept.json" -w '%{http_code}\n' -X POST "$STG/api/patterns/$PAT/messages" -H "$J" -H "origin: $STG" -d "$body"`。`202`。`JOB=$(jq -r .job.jobId "$D/accept.json")` を設定する。
+- **終わるまで待つ。** `for i in $(seq 1 180); do c -o "$D/state.json" "$STG/api/patterns/$PAT/state"; jq -e --arg j "$JOB" '.lastFinishedJob.jobId == $j' "$D/state.json" >/dev/null && break; sleep 10; done`。`jq .lastFinishedJob "$D/state.json"` の `state` が `completed` で、`revision` がある。`awaiting_answer` なら AI が質問した。`queueHold.job.question` を控え、終わった証拠が案を求めるなら、選択肢の一つで答えて同じように待つ。`failed` なら `reason` を控え、下のログで試行を読む。
+- **案を見る。** `REV=$(jq -r .lastFinishedJob.revision.id "$D/state.json")`。`c -D "$D/view.headers" -o "$D/view.bin" "$STG/api/revisions/$REV/view"` が 200 で、`x-floor-plan-storeys` が空でない（版2の案）。`c "$STG/api/patterns/$PAT/messages" | jq '[.messages[] | select(.kind == "explanation")] | length'` が1以上で、AI の説明がある。
+- **費用の行を読む。** `CLOUDFLARE_API_TOKEN="$(sed -n 's/^CLOUDFLARE_API_TOKEN=//p' "$MAIN/.env")" pnpm --filter @madori/worker exec wrangler d1 execute DB --remote --env staging --json --command "SELECT id, reserved, charged, uncached_input_tokens, output_tokens, cache_read_tokens, cache_write_5m_tokens, cache_write_1h_tokens, reserved_at, settled_at FROM ai_attempts WHERE job_id = '$JOB' ORDER BY reserved_at" >| "$D/attempts.json"`。試行ごとに一行あり、精算した行は `charged` と利用量を持つ。`charged` が `null` の行は応答を受け取れなかった試行で、予約額のまま数える。
+- **ログを読む。** 「冷えた起動の Container のログを確かめる」の `logs` 関数を同じスクリプトで定義し、`logs jobId "$JOB" >| "$D/logs.json"; jq -r '.result.events.events[] | select(.source.event? == "ai.attempt") | [.source.attemptId, .source.outcome, .source.aiMs, .source.chargedMicroUsd // "", .source.outputTokens // ""] | @tsv' "$D/logs.json"`。行の `attemptId` が `attempts.json` の `id` と一つずつ対応し、`aiMs` が試行ごとの待ち時間になる。ログは呼び出しが終わってから載るので、足りなければ1分おいて読み直す。
+
 ### 冷えた起動の Container のログを確かめる
 
 接続用 DO の呼び出しは、操作が終わると閉じる。Workers Logs は、呼び出しのログを呼び出しが終わってから載せる。そのため、冷えた起動の `container.started` と `container.ready` は、その描画が終わってから1分ほどで検索できる。休止（10分）の後まで見えなければ、呼び出しが閉じていない。
