@@ -1,6 +1,67 @@
 use super::*;
 
-use crate::outline::clearest_point;
+use crate::outline::{clearest_point, contains};
+use solidcraft_engine::{
+    geom::prelude::*,
+    sketch::{LinkGeom, Profile, profile_at_point},
+};
+
+pub struct Assessment<'h> {
+    pub(crate) house: &'h House,
+    pub(crate) floors: BTreeMap<RoomId, RoomFloor>,
+    pub(super) mismatches: Vec<Mismatch>,
+}
+
+impl Assessment<'_> {
+    pub fn mismatches(&self) -> &[Mismatch] {
+        &self.mismatches
+    }
+
+    pub fn room_area(&self, room: &RoomId) -> Option<Area> {
+        match self.floors.get(room)? {
+            RoomFloor::Housing(interior) => Some(interior.area()),
+            RoomFloor::Projected { area, .. } => Some(*area),
+            RoomFloor::Rejected(_) => None,
+        }
+    }
+}
+
+pub(crate) enum RoomFloor {
+    Housing(Interior),
+    Projected {
+        interior: Interior,
+        parts: Vec<FloorPart>,
+        area: Area,
+    },
+    Rejected(Rejections),
+}
+
+pub(crate) struct FloorPart {
+    pub outer: Vec<Point>,
+    pub holes: Vec<Vec<Point>>,
+}
+
+impl FloorPart {
+    pub fn rings(&self) -> impl Iterator<Item = &[Point]> {
+        std::iter::once(self.outer.as_slice()).chain(self.holes.iter().map(Vec::as_slice))
+    }
+
+    fn from_profile(profile: &Profile) -> Option<Self> {
+        let mut rings = profile.region.loops().map(|ring| {
+            ring.segs
+                .iter()
+                .map(|seg| match LinkGeom::from_seg(seg) {
+                    Some(LinkGeom::Line(a, _)) => Some(Point { x: a.x, y: a.y }),
+                    _ => None,
+                })
+                .collect::<Option<Vec<_>>>()
+        });
+        Some(Self {
+            outer: rings.next()??,
+            holes: rings.collect::<Option<_>>()?,
+        })
+    }
+}
 
 fn project(
     session: &mut Session,
@@ -31,32 +92,13 @@ fn project(
     Ok(sketch)
 }
 
-fn projected_m2(projection: &Session, sketch: u64, point: Point) -> Option<f64> {
-    // A failed feature persists in its session. Isolate each probe so later rooms can still be measured.
-    let mut probe = projection.scratch();
-    let args = json!({
-        "sketch":sketch,
-        "profiles":[{"point":[point.x,point.y]}],
-        "exact_regions":true,
-        "distance":1,
-        "operation":"new",
-    });
-    let reply = execute_checked(&mut probe, "solid.extrude", &args).ok()?;
-    let [name] = reply["created_bodies"].as_array()?.as_slice() else {
-        return None;
-    };
-    let state = probe.model.state();
-    let body = state.body(name.as_str()?)?;
-    Some(
-        solidcraft_engine::kernel::measure_mass(&body.body)
-            .ok()?
-            .volume
-            / 1e6,
-    )
-}
-
 impl Model {
-    pub(super) fn check_areas(&self, house: &House, out: &mut Vec<Mismatch>) {
+    pub(super) fn assess_floors(
+        &self,
+        house: &House,
+        out: &mut Vec<Mismatch>,
+    ) -> BTreeMap<RoomId, RoomFloor> {
+        let mut floors = BTreeMap::new();
         for storey in house.storeys().map(|s| s.data()) {
             let mut rooms = house
                 .rooms()
@@ -95,8 +137,15 @@ impl Model {
                 }
             }
             let mut projection = self.session.scratch();
-            let sketch = match project(&mut projection, storey.base_elevation, refs, seams) {
-                Ok(id) => id,
+            let sketch_id = project(&mut projection, storey.base_elevation, refs, seams);
+            let state = projection.model.state();
+            let sketch = sketch_id.and_then(|id| {
+                state
+                    .sketch(id)
+                    .ok_or_else(|| invalid_reply("sketch.finish", "solved sketch"))
+            });
+            let profiles = match sketch {
+                Ok(sketch) => Some(sketch.profiles.as_slice()),
                 Err(e) => {
                     out.push(Mismatch::element(
                         ElementKind::Storey,
@@ -105,36 +154,137 @@ impl Model {
                             message: e.to_string(),
                         },
                     ));
-                    continue;
+                    None
                 }
             };
             for room in rooms {
-                let report =
-                    |reason| Mismatch::element(ElementKind::Room, room.data().id.as_str(), reason);
-                let interior = match room.interior() {
-                    Ok(i) => i,
+                let id = &room.data().id;
+                let mut report = |reason| {
+                    out.push(Mismatch::element(ElementKind::Room, id.as_str(), reason));
+                };
+                let floor = match room.expected_floor() {
+                    Ok(expected) => match profiles {
+                        Some(profiles) => assess_room(expected, profiles, &mut report),
+                        None => RoomFloor::Housing(expected.into_interior()),
+                    },
                     Err(rejections) => {
-                        out.push(report(MismatchReason::Housing { rejections }));
-                        continue;
+                        report(MismatchReason::Housing {
+                            rejections: rejections.clone(),
+                        });
+                        RoomFloor::Rejected(rejections)
                     }
                 };
-                let (seed, clearance) = clearest_point(interior.outline());
-                if clearance <= LENGTH_TOLERANCE_MM {
-                    out.push(report(MismatchReason::NoSeed { clearance }));
-                    continue;
-                }
-                match projected_m2(&projection, sketch, seed) {
-                    None => out.push(report(MismatchReason::NoRegion { seed })),
-                    Some(projected_m2) if !interior.area().matches_square_metres(projected_m2) => {
-                        out.push(report(MismatchReason::AreaMismatch {
-                            expected_m2: interior.area().unrounded_square_metres(),
-                            projected_m2,
-                            seed,
-                        }))
-                    }
-                    Some(_) => {}
-                }
+                floors.insert(id.clone(), floor);
             }
         }
+        floors
+    }
+}
+
+fn area_agrees(
+    expected: Area,
+    projected_m2: f64,
+    seed: Point,
+    report: &mut impl FnMut(MismatchReason),
+) -> bool {
+    let agrees = expected.matches_square_metres(projected_m2);
+    if !agrees {
+        report(MismatchReason::AreaMismatch {
+            expected_m2: expected.unrounded_square_metres(),
+            projected_m2,
+            seed,
+        });
+    }
+    agrees
+}
+
+fn assess_room(
+    expected: ExpectedFloor,
+    profiles: &[Profile],
+    report: &mut impl FnMut(MismatchReason),
+) -> RoomFloor {
+    let (seed, clearance) = clearest_point(&[expected.interior().outline()]);
+    if !expected.changes_outline() {
+        if clearance <= LENGTH_TOLERANCE_MM {
+            report(MismatchReason::NoSeed { clearance });
+        } else if let Some(i) = profile_at_point(profiles, [seed.x, seed.y].into()) {
+            area_agrees(expected.area(), profiles[i].area / 1e6, seed, report);
+        } else {
+            report(MismatchReason::NoRegion { seed });
+        }
+        return RoomFloor::Housing(expected.into_interior());
+    }
+
+    let is_floor = |rings: &[&[Point]]| {
+        let (point, clearance) = clearest_point(rings);
+        clearance > LENGTH_TOLERANCE_MM
+            && expected.interior().contains(point)
+            && !expected.in_bulge(point)
+    };
+    let mut parts = Vec::new();
+    for profile in profiles {
+        if let Some(part) = FloorPart::from_profile(profile) {
+            if is_floor(&part.rings().collect::<Vec<_>>())
+                && let Some(area) = Area::from_rings(part.rings())
+            {
+                parts.push((area, part));
+            }
+        } else {
+            // Use a polyline for ownership only. The floor polygon and area require exact lines.
+            let rings: Vec<Vec<_>> = profile
+                .region
+                .loops()
+                .map(|ring| {
+                    ring.polyline(LENGTH_TOLERANCE_MM)
+                        .iter()
+                        .map(|p| Point { x: p.x, y: p.y })
+                        .collect()
+                })
+                .collect();
+            if is_floor(&rings.iter().map(Vec::as_slice).collect::<Vec<_>>()) {
+                report(MismatchReason::ProjectionFailed {
+                    message: "room profile contains a non-line segment".into(),
+                });
+                return RoomFloor::Housing(expected.into_interior());
+            }
+        }
+    }
+    if parts.is_empty() {
+        report(MismatchReason::NoRegion { seed });
+        return RoomFloor::Housing(expected.into_interior());
+    }
+
+    let measured: Area = parts.iter().map(|(area, _)| *area).sum();
+    let area = if area_agrees(
+        expected.area(),
+        measured.unrounded_square_metres(),
+        seed,
+        report,
+    ) {
+        expected.area()
+    } else {
+        measured
+    };
+    let rings: Vec<Vec<_>> = parts
+        .iter()
+        .map(|(_, part)| part.rings().collect())
+        .collect();
+    for bulge in expected.bulges() {
+        let (seed, _) = clearest_point(&[bulge.inside()]);
+        if rings.iter().any(|part| contains(part, seed)) {
+            report(MismatchReason::MissingBulge {
+                modifier: bulge.modifier.clone(),
+                seed,
+            });
+        }
+    }
+    parts.sort_by(|(a, _), (b, _)| {
+        b.unrounded_square_metres()
+            .total_cmp(&a.unrounded_square_metres())
+    });
+    RoomFloor::Projected {
+        interior: expected.into_interior(),
+        parts: parts.into_iter().map(|(_, part)| part).collect(),
+        area,
     }
 }

@@ -151,7 +151,8 @@ mod tests {
             );
         }
         let house = House::from_json(TWO_ROOMS)?;
-        let plans = madori_modeling::floor_plan::render(&house)?;
+        let model = madori_modeling::Model::build(&house, None)?;
+        let plans = madori_modeling::floor_plan::render(&model.assess(&house))?;
         for (index, room) in house.rooms().enumerate() {
             let text = room.interior()?.area().text();
             assert!(

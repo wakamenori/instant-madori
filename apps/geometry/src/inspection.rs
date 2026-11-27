@@ -30,6 +30,9 @@ pub fn mismatch(m: Mismatch) -> Result<ModelMismatch, String> {
             seed,
         },
         SourceReason::NoRegion { seed } => MismatchReason::NoRegion { seed },
+        SourceReason::MissingBulge { modifier, seed } => {
+            MismatchReason::MissingBulge { modifier, seed }
+        }
         SourceReason::NoSeed { clearance } => MismatchReason::NoSeed { clearance },
         SourceReason::ProjectionFailed { message } => MismatchReason::ProjectionFailed { message },
         SourceReason::MeasureFailed { message } => MismatchReason::MeasureFailed { message },

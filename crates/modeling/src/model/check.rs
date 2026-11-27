@@ -45,6 +45,10 @@ pub enum MismatchReason {
     NoRegion {
         seed: Point,
     },
+    MissingBulge {
+        modifier: ModifierId,
+        seed: Point,
+    },
     NoSeed {
         clearance: f64,
     },
@@ -92,12 +96,20 @@ impl EntryKind {
 }
 impl Model {
     pub fn check(&self, house: &House) -> Result<(), Mismatches> {
+        Mismatches::from_vec(self.assess(house).mismatches).map_or(Ok(()), Err)
+    }
+
+    pub fn assess<'h>(&self, house: &'h House) -> Assessment<'h> {
         let mut out = Vec::new();
         self.correspondence(house, &mut out);
         self.orphans(&mut out);
-        self.check_areas(house, &mut out);
+        let floors = self.assess_floors(house, &mut out);
         self.check_colors(house, &mut out);
-        Mismatches::from_vec(out).map_or(Ok(()), Err)
+        Assessment {
+            house,
+            floors,
+            mismatches: out,
+        }
     }
 
     fn orphans(&self, out: &mut Vec<Mismatch>) {

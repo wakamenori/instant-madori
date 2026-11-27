@@ -37,8 +37,8 @@ pub(super) struct Label {
     pub font: f64,
 }
 impl Label {
-    pub fn new(ring: &Ring, lines: [&str; 3]) -> Self {
-        let (at, clearance) = clearest_point(&ring.0);
+    pub fn new(rings: &[&[Point]], lines: [&str; 3]) -> Self {
+        let (at, clearance) = clearest_point(rings);
         let widest = lines
             .into_iter()
             .zip([1., 0.75, 0.75])
@@ -268,7 +268,7 @@ mod tests {
         );
         assert_eq!(ring.0.len(), 4);
         let name = "ウォークインクローゼット";
-        let label = Label::new(&ring, [name, "1.92 m²", "1.1畳"]);
+        let label = Label::new(&[&ring.0], [name, "1.92 m²", "1.1畳"]);
         for em in [
             name.chars().count() as f64,
             7. * 0.6 * 0.75,

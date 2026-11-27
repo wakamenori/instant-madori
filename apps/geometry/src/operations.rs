@@ -58,20 +58,14 @@ pub fn apply(request: ApplyOperationsRequest) -> Result<ApplyOperationsOutcome, 
         }
         Err(e) => return Err(e.to_string().into()),
     };
-    let findings = model
-        .check(&house)
-        .err()
-        .map(|found| {
-            found
-                .as_slice()
-                .iter()
-                .cloned()
-                .map(crate::inspection::mismatch)
-                .collect::<Result<Vec<_>, _>>()
-        })
-        .transpose()?
-        .unwrap_or_default();
-    let plans = match floor_plan::render(&house) {
+    let assessment = model.assess(&house);
+    let findings = assessment
+        .mismatches()
+        .iter()
+        .cloned()
+        .map(crate::inspection::mismatch)
+        .collect::<Result<Vec<_>, _>>()?;
+    let plans = match floor_plan::render(&assessment) {
         Ok(plans) => plans,
         Err(rejections) => {
             return Ok(ApplyOperationsOutcome::Unbuildable {

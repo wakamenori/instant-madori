@@ -1,6 +1,10 @@
 #![allow(clippy::unwrap_used)]
 use madori_housing::*;
-use madori_modeling::floor_plan::render;
+use madori_modeling::{Model, floor_plan::render};
+
+fn render_house(house: &House) -> Result<Vec<madori_modeling::floor_plan::StoreyPlan>, Rejections> {
+    render(&Model::build(house, None).unwrap().assess(house))
+}
 use roxmltree::{Document, Node};
 use std::{collections::BTreeMap, fs, path::Path};
 
@@ -85,7 +89,7 @@ fn class<'a, 'd>(root: Node<'a, 'd>, name: &str) -> Vec<Node<'a, 'd>> {
 #[test]
 fn verification_one() {
     let house = verification("居間");
-    let plans = render(&house).unwrap();
+    let plans = render_house(&house).unwrap();
     assert_eq!(plans.len(), 1);
     let plan = &plans[0];
     let root = Document::parse(plan.svg.as_str()).unwrap();
@@ -175,7 +179,7 @@ fn verification_one() {
 fn room_names_remain_text() {
     let mut data = verification("居間").into_data();
     data.rooms[0].name = "<script>alert(\"x\")</script>&\u{1}".into();
-    let plans = render(&House::new(data).unwrap()).unwrap();
+    let plans = render_house(&House::new(data).unwrap()).unwrap();
     let raw = plans[0].svg.as_str();
     assert!(raw.contains("&lt;script&gt;"));
     let doc = Document::parse(raw).unwrap();
@@ -204,7 +208,8 @@ fn unresolved_joint_rejects_plan() {
         .unwrap();
     let id = junction.id.clone();
     junction.at.y = 1000.;
-    let err = render(&House::new(data).unwrap()).unwrap_err();
+    let model = Model::build(&verification("居間"), None).unwrap();
+    let err = render(&model.assess(&House::new(data).unwrap())).unwrap_err();
     assert!(
         err.as_slice()
             .iter()
@@ -220,7 +225,7 @@ fn empty_storey_has_viewbox_and_annotations() {
         height: 2400.,
         base_elevation: 2600.,
     });
-    let plans = render(&House::new(data).unwrap()).unwrap();
+    let plans = render_house(&House::new(data).unwrap()).unwrap();
     assert_eq!(plans.len(), 2);
     assert_eq!(plans[1].storey, id);
     let doc = Document::parse(plans[1].svg.as_str()).unwrap();
@@ -273,7 +278,7 @@ fn pentagonal_room_merges_the_through_wall_at_a_t_joint() {
     );
     let id = room.id.clone();
     data.boundaries.push(second);
-    let plans = render(&House::new(data).unwrap()).unwrap();
+    let plans = render_house(&House::new(data).unwrap()).unwrap();
     let doc = Document::parse(plans[0].svg.as_str()).unwrap();
     let room = class(doc.root(), "room")
         .into_iter()
@@ -306,7 +311,7 @@ fn clips_partial_openings_and_preserves_ids_for_empty_ones() {
             Fitting::Door { .. } => length - 350.,
         };
     }
-    let plans = render(&House::new(data).unwrap()).unwrap();
+    let plans = render_house(&House::new(data).unwrap()).unwrap();
     let doc = Document::parse(plans[0].svg.as_str()).unwrap();
     let openings = class(doc.root(), "opening");
     assert_eq!(openings.len(), 2);
@@ -339,7 +344,7 @@ fn door_leaf_swings_into_the_opens_to_room() {
         unreachable!()
     };
     let room = door.wall().room(opens_to).unwrap().interior().unwrap();
-    let plans = render(&house).unwrap();
+    let plans = render_house(&house).unwrap();
     let doc = Document::parse(plans[0].svg.as_str()).unwrap();
     let group = class(doc.root(), "opening")
         .into_iter()
@@ -358,4 +363,119 @@ fn door_leaf_swings_into_the_opens_to_room() {
         },
     );
     assert!((min.x..=max.x).contains(&tip.x) && (min.y..=max.y).contains(&tip.y));
+}
+
+#[test]
+fn floor_plan_draws_the_projected_notch_and_keeps_exact_area_text() {
+    let input = verification("居間");
+    let wall = input
+        .boundaries()
+        .find(|w| w.rooms().count() == 2)
+        .unwrap()
+        .data()
+        .id
+        .clone();
+    let wp = |along, up| WallPoint { along, up };
+    let rect = |end| Profile {
+        start: wp(2000., 900.),
+        segments: [
+            wp(end, 900.),
+            wp(end, 2000.),
+            wp(2000., 2000.),
+            wp(2000., 900.),
+        ]
+        .map(|to| Segment::Line { to })
+        .to_vec(),
+    };
+    let arch = Profile {
+        start: wp(2050., 0.),
+        segments: vec![
+            Segment::Line { to: wp(2450., 0.) },
+            Segment::Line {
+                to: wp(2450., 1000.),
+            },
+            Segment::Arc {
+                through: wp(2250., 1400.),
+                to: wp(2050., 1000.),
+            },
+            Segment::Line { to: wp(2050., 0.) },
+        ],
+    };
+    let dome = Profile {
+        start: wp(2000., 1000.),
+        segments: vec![
+            Segment::Line {
+                to: wp(2800., 1000.),
+            },
+            Segment::Arc {
+                through: wp(2400., 1400.),
+                to: wp(2000., 1000.),
+            },
+        ],
+    };
+    for (name, profile, depth, square_mm, area) in [
+        ("notch", rect(2600.), 20., 19_688_000., "19.68 m²"),
+        ("exact", rect(2500.), 20., 19_690_000., "19.69 m²"),
+        ("arch", arch, 20., 19_690_000., "19.69 m²"),
+        ("dome", dome, 25., 19_680_000., "19.68 m²"),
+    ] {
+        let mut data = input.data().clone();
+        data.modifiers.push(Modifier {
+            id: ModifierId::new(name),
+            wall: wall.clone(),
+            from: WallEnd::Start,
+            effect: Effect::Add {
+                to: AddTo::Both {},
+                protrusion: depth,
+            },
+            profile,
+        });
+        let house = House::new(data).unwrap();
+        let model = Model::build(&house, None).unwrap();
+        let assessment = model.assess(&house);
+        assert!(
+            assessment.mismatches().is_empty(),
+            "{name}: {:?}",
+            assessment.mismatches()
+        );
+        for room in house.rooms() {
+            assert_eq!(
+                assessment
+                    .room_area(&room.data().id)
+                    .unwrap()
+                    .unrounded_square_metres(),
+                square_mm / 1e6
+            );
+        }
+        let plans = render(&assessment).unwrap();
+        let doc = Document::parse(plans[0].svg.as_str()).unwrap();
+        let root = doc.root_element();
+        assert_eq!(class(root, "wall-bulge").len(), 2);
+        assert_eq!(
+            class(root, "room-area")
+                .iter()
+                .map(Node::text)
+                .collect::<Vec<_>>(),
+            [Some(area); 2]
+        );
+        assert_eq!(
+            class(root, "room-tatami")
+                .iter()
+                .map(Node::text)
+                .collect::<Vec<_>>(),
+            [Some("12.1畳"); 2]
+        );
+        if name == "notch" {
+            let points: Vec<_> = class(root, "room-floor")
+                .into_iter()
+                .flat_map(|node| node.attribute("points").unwrap().split_whitespace())
+                .collect();
+            for corner in ["3920,-1900", "3920,-2500", "4080,-1900", "4080,-2500"] {
+                assert!(points.contains(&corner), "{corner}: {points:?}");
+            }
+            let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("floor-plan");
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(dir.join("verification-1-bulge.svg"), plans[0].svg.as_str()).unwrap();
+        }
+    }
 }

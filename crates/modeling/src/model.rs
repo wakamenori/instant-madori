@@ -8,6 +8,8 @@ mod profile;
 mod projection;
 pub use check::{Mismatch, MismatchReason, Mismatches, Subject};
 pub use modifier::{HostChange, ModifierFailure};
+pub use projection::Assessment;
+pub(crate) use projection::RoomFloor;
 mod paint;
 mod side;
 mod snapshot;

@@ -6,8 +6,8 @@ pub mod floor_plan;
 mod model;
 mod outline;
 pub use model::{
-    BuildError, Entry, EntryKind, HostChange, LoadError, Mismatch, MismatchReason, Mismatches,
-    Model, ModifierFailure, Subject, WallColorFailure,
+    Assessment, BuildError, Entry, EntryKind, HostChange, LoadError, Mismatch, MismatchReason,
+    Mismatches, Model, ModifierFailure, Subject, WallColorFailure,
 };
 
 use solidcraft_doc::Document;
