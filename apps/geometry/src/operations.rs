@@ -3,7 +3,7 @@ use madori_geometry_api::{
     bundle::{Part, SNAPSHOT_LIMIT},
 };
 use madori_housing::{House, LayoutError, OperationId};
-use madori_modeling::{BuildError, Model, floor_plan};
+use madori_modeling::{BuildError, Evaluation, Model, floor_plan};
 
 pub enum ApplyError {
     InvalidBody(String),
@@ -15,7 +15,9 @@ impl From<String> for ApplyError {
     }
 }
 
-pub fn apply(request: ApplyOperationsRequest) -> Result<ApplyOperationsOutcome, ApplyError> {
+pub fn apply(
+    request: ApplyOperationsRequest,
+) -> Result<(ApplyOperationsOutcome, Option<Evaluation>), ApplyError> {
     let mut house = match request.snapshot {
         InputSnapshot::Empty {} => None,
         InputSnapshot::House { json } => {
@@ -34,10 +36,13 @@ pub fn apply(request: ApplyOperationsRequest) -> Result<ApplyOperationsOutcome, 
                 operations.push(result);
             }
             Err(reason) => {
-                return Ok(ApplyOperationsOutcome::Rejected {
-                    index: u32::try_from(index).map_err(|e| e.to_string())?,
-                    reason,
-                });
+                return Ok((
+                    ApplyOperationsOutcome::Rejected {
+                        index: u32::try_from(index).map_err(|e| e.to_string())?,
+                        reason,
+                    },
+                    None,
+                ));
             }
         }
     }
@@ -51,10 +56,13 @@ pub fn apply(request: ApplyOperationsRequest) -> Result<ApplyOperationsOutcome, 
     let model = match Model::build(&house) {
         Ok(model) => model,
         Err(BuildError::House(rejections)) => {
-            return Ok(ApplyOperationsOutcome::Unbuildable {
-                operations,
-                rejections,
-            });
+            return Ok((
+                ApplyOperationsOutcome::Unbuildable {
+                    operations,
+                    rejections,
+                },
+                None,
+            ));
         }
         Err(e) => return Err(e.to_string().into()),
     };
@@ -74,10 +82,13 @@ pub fn apply(request: ApplyOperationsRequest) -> Result<ApplyOperationsOutcome, 
     let plans = match floor_plan::render(&house) {
         Ok(plans) => plans,
         Err(rejections) => {
-            return Ok(ApplyOperationsOutcome::Unbuildable {
-                operations,
-                rejections,
-            });
+            return Ok((
+                ApplyOperationsOutcome::Unbuildable {
+                    operations,
+                    rejections,
+                },
+                Some(model.evaluation()),
+            ));
         }
     };
     let display = model
@@ -100,14 +111,17 @@ pub fn apply(request: ApplyOperationsRequest) -> Result<ApplyOperationsOutcome, 
             plan.svg.into_string().into_bytes(),
         )?);
     }
-    Ok(ApplyOperationsOutcome::Applied {
-        operations,
-        parts,
-        inspection: Inspection {
-            housing,
-            model: findings,
+    Ok((
+        ApplyOperationsOutcome::Applied {
+            operations,
+            parts,
+            inspection: Inspection {
+                housing,
+                model: findings,
+            },
         },
-    })
+        Some(model.evaluation()),
+    ))
 }
 
 fn step(

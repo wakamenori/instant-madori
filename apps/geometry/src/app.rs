@@ -12,6 +12,7 @@ use madori_geometry_api::{
     DISPLAY_CONTENT_TYPE, ERROR, ErrorBody, ErrorCode, Health, MAX_DISPLAY_BYTES, Method, headers,
     routes,
 };
+use madori_modeling::Evaluation;
 use std::{sync::Arc, time::Instant};
 use tokio::sync::Semaphore;
 #[derive(Clone)]
@@ -101,25 +102,36 @@ async fn apply_operations(
         "jobId":request.job_id.as_str(),"operationId":request.operation_id.as_str(),"generation":request.generation})
     );
     let encoded = run_blocking(&state, trace_id, move || {
-        match route.handle(request, crate::operations::apply) {
-            Ok(outcome) => outcome.encode(route.route.response.max_bytes()).map(Ok),
+        let mut evaluation = None;
+        match route.handle(request, |request| {
+            let (outcome, counts) = crate::operations::apply(request)?;
+            evaluation = counts;
+            Ok(outcome)
+        }) {
+            Ok(outcome) => outcome
+                .encode(route.route.response.max_bytes())
+                .map(|bytes| Ok((bytes, evaluation))),
             Err(ApplyError::InvalidBody(error)) => Ok(Err(error)),
             Err(ApplyError::Build(error)) => Err(error),
         }
     })
     .await?;
-    let bytes = encoded.map_err(|error| {
+    let (bytes, evaluation) = encoded.map_err(|error| {
         eprintln!(
             "{}",
             serde_json::json!({"level":"warn","event":"geometry.invalid_body","traceId":trace_id,"error":error})
         );
         ServiceError(ErrorCode::InvalidBody)
     })?;
-    Ok((
+    let mut response = (
         [("content-type", madori_geometry_api::bundle::CONTENT_TYPE)],
         bytes,
     )
-        .into_response())
+        .into_response();
+    if let Some(evaluation) = evaluation {
+        response.extensions_mut().insert(evaluation);
+    }
+    Ok(response)
 }
 async fn summarize_house(
     JsonRequest(request): JsonRequest<madori_geometry_api::summary::SummarizeHouseRequest>,
@@ -264,14 +276,26 @@ async fn log_request(request: Request, next: Next) -> Response {
     );
     response
 }
-fn request_log(
+pub(super) fn request_log(
     response: &Response,
     path: &str,
     trace: Option<&str>,
     ms: u128,
     high_water: Option<u64>,
 ) -> serde_json::Value {
-    serde_json::json!({"level":if response.status().is_server_error() {"error"} else {"info"},"event":"geometry.request","traceId":trace,"route":path,"status":response.status().as_u16(),"ms":ms,"bytes":response.body().size_hint().exact(),"vmHwmKib":high_water})
+    let evaluation = response.extensions().get::<Evaluation>();
+    serde_json::json!({
+        "level": if response.status().is_server_error() { "error" } else { "info" },
+        "event": "geometry.request",
+        "traceId": trace,
+        "route": path,
+        "status": response.status().as_u16(),
+        "ms": ms,
+        "bytes": response.body().size_hint().exact(),
+        "vmHwmKib": high_water,
+        "recomputed": evaluation.map(|e| e.recomputed),
+        "restored": evaluation.map(|e| e.restored),
+    })
 }
 
 #[cfg(test)]
@@ -366,6 +390,8 @@ mod tests {
             assert_eq!(log["traceId"], "trace-1");
             assert_eq!(log["event"], "geometry.request");
             assert_eq!(log["bytes"], 3);
+            assert_eq!(log.get("recomputed"), Some(&serde_json::Value::Null));
+            assert_eq!(log.get("restored"), Some(&serde_json::Value::Null));
         }
     }
     #[test]

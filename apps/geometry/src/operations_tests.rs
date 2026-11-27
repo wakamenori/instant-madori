@@ -11,6 +11,13 @@ fn placement() -> Value {
 }
 async fn post(content_type: &str, body: String) -> Result<Response, TestError> {
     let app = router(AppState::new(InternalToken::parse("test-token".into())?));
+    post_to(app, content_type, body).await
+}
+async fn post_to(
+    app: axum::Router,
+    content_type: &str,
+    body: String,
+) -> Result<Response, TestError> {
     Ok(app
         .oneshot(
             Request::post(routes::APPLY_OPERATIONS.route.path)
@@ -19,6 +26,46 @@ async fn post(content_type: &str, body: String) -> Result<Response, TestError> {
                 .body(Body::from(body))?,
         )
         .await?)
+}
+#[tokio::test]
+async fn evaluation_is_logged_per_batch() -> Result<(), TestError> {
+    let app = router(AppState::new(InternalToken::parse("test-token".into())?));
+    let mut request = placement();
+    let layout = serde_json::from_value(request["operations"][0]["layout"].clone())?;
+    let house =
+        madori_housing::House::from_layout(&madori_housing::OperationId::new("op:0"), &layout)?;
+    let wall = &house.data().boundaries[0].id;
+    request["operations"]
+        .as_array_mut()
+        .ok_or("missing operations")?
+        .push(json!({
+            "kind":"set_wall_color", "wall_color":{
+                "wall":wall, "face":{"kind":"exterior"}, "color":{"r":0,"g":0,"b":255}
+            }
+        }));
+    let mut counts = Vec::new();
+    for _ in 0..2 {
+        let response = post_to(app.clone(), "application/json", request.to_string()).await?;
+        assert_eq!(response.status(), 200);
+        let evaluation = response
+            .extensions()
+            .get::<madori_modeling::Evaluation>()
+            .ok_or("missing evaluation")?;
+        assert!(evaluation.recomputed > 0);
+        assert!(evaluation.restored > 0);
+        let log = crate::app::request_log(
+            &response,
+            routes::APPLY_OPERATIONS.route.path,
+            None,
+            0,
+            None,
+        );
+        assert_eq!(log["recomputed"], evaluation.recomputed);
+        assert_eq!(log["restored"], evaluation.restored);
+        counts.push(*evaluation);
+    }
+    assert_eq!(counts[0], counts[1]);
+    Ok(())
 }
 #[tokio::test]
 async fn json_rejections_are_protocol_errors() -> Result<(), TestError> {
