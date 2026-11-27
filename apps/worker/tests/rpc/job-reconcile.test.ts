@@ -72,9 +72,6 @@ await test("Pattern reconciliation on D1", async (t) => {
         summarizeHouse() {
           throw new Error("Unexpected summarizeHouse");
         },
-        sampleDisplay() {
-          throw new Error("Unexpected sampleDisplay");
-        },
         applyOperations: () => Promise.resolve(appliedFixture),
       }),
     };

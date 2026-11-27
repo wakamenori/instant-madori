@@ -136,9 +136,7 @@ impl BodyKind {
 }
 pub mod routes {
     use super::apply::{ApplyOperationsOutcome, ApplyOperationsRequest};
-    use super::{
-        BodyKind, DISPLAY_CONTENT_TYPE, JsonBody, JsonRoute, MAX_DISPLAY_BYTES, Method, Route,
-    };
+    use super::{BodyKind, JsonBody, JsonRoute, Method, Route};
     pub const HEALTH: Route = Route {
         name: "health",
         method: Method::Get,
@@ -148,17 +146,6 @@ pub mod routes {
         response: BodyKind::Json {
             schema: JsonBody::new::<super::Health>("healthSchema"),
             max_bytes: 4096,
-        },
-    };
-    pub const SAMPLE_DISPLAY: Route = Route {
-        name: "sampleDisplay",
-        method: Method::Get,
-        path: "/v1/sample/display",
-        authenticated: true,
-        request: BodyKind::None,
-        response: BodyKind::Binary {
-            content_type: DISPLAY_CONTENT_TYPE,
-            max_bytes: MAX_DISPLAY_BYTES,
         },
     };
     pub const APPLY_OPERATIONS: JsonRoute<ApplyOperationsRequest, ApplyOperationsOutcome> =
@@ -178,12 +165,7 @@ pub mod routes {
         "houseSummarySchema",
         1024 * 1024,
     );
-    pub const ALL: &[Route] = &[
-        HEALTH,
-        SAMPLE_DISPLAY,
-        APPLY_OPERATIONS.route,
-        SUMMARIZE_HOUSE.route,
-    ];
+    pub const ALL: &[Route] = &[HEALTH, APPLY_OPERATIONS.route, SUMMARIZE_HOUSE.route];
 }
 /// Transport and protocol failures only. Expected route outcomes are 200 bodies with a
 /// `kind` union. BuildFailed means a deterministic build failed unexpectedly.

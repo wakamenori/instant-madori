@@ -4,7 +4,7 @@ import type {
 } from "@madori/contracts/geometry-internal";
 import type { ServiceDeps } from "./deps.ts";
 import type { UnavailableReason } from "../geometry/container-gateway.ts";
-import type { DisplayArtifact, GeometryResult } from "../geometry/geometry-protocol.ts";
+import type { GeometryResult } from "../geometry/geometry-protocol.ts";
 
 const afterUnavailable = {
   containers_disabled: "fail",
@@ -20,7 +20,7 @@ type PermanentUnavailable = {
   [R in UnavailableReason]: (typeof afterUnavailable)[R] extends "fail" ? R : never;
 }[UnavailableReason];
 export type GeometryFailure =
-  PermanentUnavailable | Extract<GeometryResult<DisplayArtifact>, { kind: "failed" }>["reason"];
+  PermanentUnavailable | Extract<GeometryResult<unknown>, { kind: "failed" }>["reason"];
 function permanentUnavailable(reason: UnavailableReason): reason is PermanentUnavailable {
   return afterUnavailable[reason] === "fail";
 }

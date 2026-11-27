@@ -14,7 +14,6 @@ export interface BinaryBody {
   bytes: ArrayBuffer;
   contentType: string;
 }
-export type DisplayArtifact = BinaryBody;
 type Violation =
   "content_type" | "too_large" | "invalid_json" | "schema" | "status" | "stream_chunk" | "bundle";
 export type GeometryResult<T> =
@@ -295,7 +294,6 @@ export const routeTimeouts = {
   summarizeHouse: 10_000,
   applyOperations: 60_000,
   health: 2_000,
-  sampleDisplay: 30_000,
 } satisfies Record<keyof typeof geometryInternal.routes, number>;
 export const callGeometry = createGeometryCaller(
   geometryInternal.routes,
@@ -310,10 +308,4 @@ export async function acceptReadinessResponse(response: Response): Promise<boole
     if (error instanceof ProtocolViolation) return false;
     throw error;
   }
-}
-export function readSampleDisplay(
-  send: Send,
-  call: GeometryCall,
-): Promise<GeometryResult<DisplayArtifact>> {
-  return callGeometry(send, "sampleDisplay", call);
 }
