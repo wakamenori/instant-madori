@@ -1,17 +1,14 @@
 import { parseToolCall, type AiToolCall, type FinishInput } from "@madori/contracts/ai-tools";
 import { z } from "zod";
 import type { AiResponse } from "../ai/round-trip.ts";
-import type { Snapshot } from "../storage/snapshots.ts";
-import type { AiCostLimit } from "./ai-cost.ts";
-import { limits } from "../limits.ts";
-
-export type Working =
-  { kind: "empty"; v1Base: boolean } | { kind: "edited" | "base"; snapshot: Snapshot };
+import { limits, type JobLimit } from "../limits.ts";
 
 export const limitNotices = {
   perInstruction: `この指示のAI費用が上限の${limits.aiCost.perInstruction / 1_000_000}米ドルに達したため、未確定の変更を採用せずに終了しました。案は最後に確定したもののままです。`,
   monthly: `今月のサービス全体のAI費用が上限の${limits.aiCost.monthly / 1_000_000}米ドルに達したため、この指示を終了しました。未確定の変更は採用していません。上限は毎月1日（協定世界時）に戻ります。`,
-} satisfies Record<AiCostLimit, string>;
+  rounds: `AIとのやり取りが上限の${limits.jobRun.rounds}回に達したため、未確定の変更を採用せずに終了しました。案は最後に確定したもののままです。指示を分けるか、条件を具体的にして送り直してください。`,
+  checkFixes: `確定を止める検査の指摘が、AIが${limits.jobRun.checkFixes}回直しても解消しなかったため、未確定の変更を採用せずに終了しました。案は最後に確定したもののままです。条件を見直して送り直してください。`,
+} satisfies Record<JobLimit, string>;
 
 export const v1Notice =
   "編集元の案は住宅データを持たない古い形式のため、空の住宅から作り直しました。";

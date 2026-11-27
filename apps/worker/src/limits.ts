@@ -70,3 +70,6 @@ export const limits = {
   editHouse: { maxOperations: number };
   jobRun: { rounds: number; checkFixes: number };
 };
+
+/** Every cap that ends a job as `limited`. */
+export type JobLimit = keyof typeof limits.aiCost | keyof typeof limits.jobRun;

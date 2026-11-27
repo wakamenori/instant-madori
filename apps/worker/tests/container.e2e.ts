@@ -9,6 +9,7 @@ import type { Revision } from "@madori/contracts";
 import {
   acceptInstructionResponseSchema,
   createProjectResponseSchema,
+  messageListResponseSchema,
   revisionListResponseSchema,
   stopJobResponseSchema,
   patternStateResponseSchema,
@@ -16,6 +17,7 @@ import {
 import { settleJobs } from "./support/settle-jobs.ts";
 import { geometryInternal, houseSummarySchema } from "@madori/contracts/geometry-internal";
 import { startLocalWorker, newUser } from "./support/local-worker.ts";
+import { limitNotices } from "../src/services/job-conversation.ts";
 const docker = promisify(execFile);
 async function runningContainers() {
   const { stdout } = await docker("docker", [
@@ -389,9 +391,22 @@ void test(
             );
             assert.equal(lines.filter((l) => typeof l["aiMs"] === "number").length, 6);
           } else {
-            assert.equal(end["reason"], "checks_unresolved");
+            assert.equal(end["outcome"], "limited");
+            assert.equal(end["limit"], "checkFixes");
             assert.equal(lines.filter((l) => l["outcome"] === "blocked").length, 4);
             assert.deepEqual(state.currentRevision, base?.currentRevision);
+            assert.equal(state.lastFinishedJob?.state, "limited");
+            const response = await worker.call(`/api/patterns/${own.id}/messages`, { as: user });
+            assert.equal(response.status, 200);
+            const { messages } = messageListResponseSchema.parse(await response.json());
+            assert(
+              messages.some(
+                (message) =>
+                  message.jobId === job.jobId &&
+                  message.kind === "notice" &&
+                  message.body === limitNotices.checkFixes,
+              ),
+            );
             assert(state.currentRevision);
             assert.equal(
               (await worker.call(`/api/revisions/${state.currentRevision.id}/view`, { as: user }))
