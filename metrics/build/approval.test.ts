@@ -163,6 +163,17 @@ void test("Codex owner approval cards become human waits and hook-only permissio
       thread_id: "owner",
     }),
     ...(await poller.poll(new AbortController().signal)),
+    candidate("codex.otel.log", "tool-result", at(151), {
+      log_record: {
+        attributes: Object.entries({
+          "session.id": "session",
+          "event.name": "codex.tool_result",
+          "event.timestamp": at(151),
+          tool_name: "exec_command",
+          duration_ms: "122000",
+        }).map(([key, stringValue]) => ({ key, value: { stringValue } })),
+      },
+    }),
     candidate("codex.hook", "session/PermissionRequest/request-2", hookAt, {
       at: hookAt,
       input: {
@@ -195,6 +206,16 @@ void test("Codex owner approval cards become human waits and hook-only permissio
       .map(Object.values),
     [["wait", "human", "approval", 120_000]],
     "The full two minutes the owner spends blocked on the T3 card count as human approval wait",
+  );
+  assert.deepEqual(
+    db
+      .prepare(
+        "SELECT start,end FROM span WHERE actor='owner' AND kind='local_run' AND detail='exec_command'",
+      )
+      .all()
+      .map(Object.values),
+    [[end, at(151)]],
+    "The owner's command runs from the approval answer to the tool result",
   );
   const duringHook = db
     .prepare("SELECT wait_target FROM mart_effort_interval WHERE issue=560 AND start<=? AND end>?")
