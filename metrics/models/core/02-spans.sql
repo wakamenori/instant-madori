@@ -37,7 +37,12 @@ WITH local_command AS (
  SELECT *,row_number() OVER (PARTITION BY session,notification->>'$.tool_use_id',notification->>'$.task_id' ORDER BY occurred_at,natural_key) arrival
  FROM notifications
 ), tool_spans(actor,issue,kind,start,end,detail) AS (
- SELECT t.thread_id,i.issue,iif(c.mark='decision','decision','local_run'),c.start,c.end,iif(c.stands_for='local_run','waited:'||c.name,c.name)
+ SELECT t.thread_id,i.issue,iif(c.mark='decision','decision','local_run'),
+  iif(c.mark='decision',c.start,coalesce((
+   SELECT min(coalesce(a.resolved_at,c.end),c.end) FROM stg_t3_approval a
+   WHERE a.thread_id=t.thread_id AND a.requested_at>c.start AND a.requested_at<c.end
+   ORDER BY a.requested_at DESC,a.id DESC LIMIT 1),c.start)),
+  c.end,iif(c.stands_for='local_run','waited:'||c.name,c.name)
  FROM stg_tool_call c JOIN stg_session_thread t USING(session) JOIN inside_actor i ON i.id=t.thread_id
  WHERE c.mark IS NULL OR c.mark='decision' OR c.stands_for='local_run'
 ), background_spans(actor,issue,kind,start,end,detail) AS (
