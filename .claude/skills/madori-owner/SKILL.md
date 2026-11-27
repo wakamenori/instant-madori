@@ -80,13 +80,26 @@ Agent ツールに `isolation: "worktree"` を付けて立てた subagent（inte
 
 `check` が最新の head で成功したら、報告先のスレッドへ `t3_thread_send` で一度だけ送る。送ったら、ターンを終えて待つ。
 
+送る前に、自分の worktree の `target/` を消して、PR が開いている間のディスクを空ける。`delegate_task` で立てた Codex の子がすべて終わりを知らせていなければ、消さない。終わっていれば、worktree のルートで次を実行する。`target` が実体のディレクトリでない、Git が無視していないか追跡している、この worktree で cargo、rustc、Clippy、node（`pnpm check` と `pnpm dev`）が動いている、のどれかに当たると、消さずに理由を出す。
+
+```sh
+df -h / | tail -n 1
+keep=$(
+  { test -d target && test ! -L target; } || echo "target is not a real directory"
+  { test "$(git check-ignore target)" = target && test -z "$(git ls-files target)"; } || echo "git does not ignore target or tracks files in it"
+  lsof -a -d cwd -c cargo -c rustc -c clippy -c node 2>/dev/null | grep -F " $(pwd -P)" | sed 's/^/running in this worktree: /'
+)
+if [ -z "$keep" ]; then command rm -r -- target && df -h / | tail -n 1; else printf '%s\n' "$keep"; fi
+```
+
 - PR の URL と head の SHA
 - 終わった証拠の項目ごとに、実行したコマンドと結果
 - 設計を決めたなら、その結論
 - Codex に使ったモデルと `reasoningEffort`、その effort にした理由
 - 範囲の外で見つけたこと、最初に見つけた時点、その根拠
+- `target/` を消す前と後の `df -h /` の空きを一行で。消さなかったなら、その理由
 
-マージするかは指揮役が決める。頼まれたときだけマージする。直しを頼まれたら、同じブランチで直して push し、同じ形でもう一度報告する。rebase も、頼まれたときだけ行う。
+マージするかは指揮役が決める。頼まれたときだけマージする。直しを頼まれたら、同じブランチで直して push し、同じ形でもう一度報告する。ブランチが Rust の入力（`scripts/check/rust-inputs.ts`）に触れていれば、直した後の Rust の検査が `target/` を作り直す。mbx を使う既定では、外部のクレートはストアから使い回す。rebase も、頼まれたときだけ行う。
 
 ## マージの後
 
