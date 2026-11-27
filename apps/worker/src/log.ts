@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { JobLimit } from "./limits.ts";
 import type { HttpMethod, RoutePath } from "./api/http.ts";
 import type { GeometryResult } from "./geometry/geometry-protocol.ts";
 
@@ -15,6 +16,7 @@ export type JobStepName =
   | `round ${number} finish`
   | "commit revision"
   | "record failure"
+  | "record limit"
   | "wake pattern";
 
 export interface LogFields {
@@ -35,7 +37,8 @@ export interface LogFields {
   messageNumber?: number;
   queue?: "applied" | "replayed";
   stop?: "applied" | "replayed";
-  jobState?: "awaiting_answer" | "cancelled" | "completed" | "failed";
+  jobState?: "awaiting_answer" | "cancelled" | "completed" | "failed" | "limited";
+  limit?: JobLimit;
   acceptance?: "applied" | "replayed";
   generation?: number;
   step?: JobStepName;
@@ -57,6 +60,7 @@ export interface LogFields {
     | "stopped"
     | "already_finished"
     | "not_committed"
+    | "limited"
     | "failed"
     | "not_running"
     | "woken"
@@ -90,8 +94,6 @@ export interface LogFields {
     | "ai_unavailable"
     | "ai_output_limit"
     | "ai_refused"
-    | "round_limit"
-    | "checks_unresolved"
     | "execution_lost"
     | "invalid_snapshot"
     | "invalid_name"
@@ -127,6 +129,7 @@ const logKeys = {
   queue: "string",
   stop: "string",
   jobState: "string",
+  limit: "string",
   acceptance: "string",
   generation: "number",
   step: "string",

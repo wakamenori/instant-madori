@@ -6,6 +6,15 @@ import { systemRuntime } from "../runtime.ts";
 import { jobReferenceSchema, runJob } from "../services/jobs.ts";
 import type { JobEnd, JobExecutionReference, JobStepResult, JobSteps } from "../services/jobs.ts";
 
+const finishLevel = {
+  committed: "info",
+  cancelled: "info",
+  asked: "info",
+  limited: "info",
+  failed: "error",
+  not_running: "error",
+} satisfies Record<JobEnd["kind"], "info" | "error">;
+
 export class JobWorkflow extends WorkflowEntrypoint<Env, JobExecutionReference> {
   override async run(
     event: Readonly<WorkflowEvent<JobExecutionReference>>,
@@ -31,6 +40,7 @@ export class JobWorkflow extends WorkflowEntrypoint<Env, JobExecutionReference> 
               attempt,
               outcome: settled.kind,
               ...settled.timings,
+              ...(settled.kind === "limited" && settled.limit && { limit: settled.limit }),
               ...("reason" in settled ? { reason: settled.reason } : {}),
               ...("revisionId" in settled ? { revisionId: settled.revisionId } : {}),
             });
@@ -48,19 +58,14 @@ export class JobWorkflow extends WorkflowEntrypoint<Env, JobExecutionReference> 
         }),
     };
     const end = await runJob(jobWorkflowDeps(this.env, systemRuntime), job, steps);
-    logEvent(
-      end.kind === "committed" || end.kind === "cancelled" || end.kind === "asked"
-        ? "info"
-        : "error",
-      "job.finished",
-      {
-        ...ids,
-        outcome: end.kind,
-        ...(end.ms === undefined ? {} : { ms: end.ms }),
-        ...("revisionId" in end && { revisionId: end.revisionId }),
-        ...("reason" in end && { reason: end.reason }),
-      },
-    );
+    logEvent(finishLevel[end.kind], "job.finished", {
+      ...ids,
+      outcome: end.kind,
+      ...(end.kind === "limited" && end.limit && { limit: end.limit }),
+      ...(end.ms === undefined ? {} : { ms: end.ms }),
+      ...("revisionId" in end && { revisionId: end.revisionId }),
+      ...("reason" in end && { reason: end.reason }),
+    });
     return end;
   }
 }

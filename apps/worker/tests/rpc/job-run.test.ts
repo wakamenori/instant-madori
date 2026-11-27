@@ -1,9 +1,11 @@
+import { aiModels, limits } from "../../src/limits.ts";
+import { estimateAttempt } from "../../src/services/cost.ts";
 import { emptyHouseSummary, houseSummarySchema } from "@madori/contracts/geometry-internal";
 import { versionOf, prompt, conversationWindow, prefix } from "../../src/services/ai-context.ts";
 import { developmentScript } from "../../src/ai/scripts.ts";
 import { fixtureHouse, legacySnapshot } from "./snapshot-support.ts";
 import { completeJob } from "../../src/services/jobs.ts";
-import { scriptedAi } from "../../src/ai/scripted.ts";
+import { scriptedAi, type ScriptStep } from "../../src/ai/scripted.ts";
 import type { Ai, AiRequest } from "../../src/ai/round-trip.ts";
 import { aiToolSchemaVersion } from "@madori/contracts/ai-tools";
 
@@ -13,6 +15,7 @@ import {
   acceptInstruction,
   claimNextJob,
   runJob,
+  stopJob,
   jobReferenceSchema,
 } from "../../src/services/jobs.ts";
 import type { JobExecutionReference } from "../../src/services/jobs.ts";
@@ -23,6 +26,7 @@ import { turnCodec } from "../../src/ai/turns.ts";
 import { editingAi, appliedFixture, type OperationsResult } from "./operations-support.ts";
 import { requestKey } from "../../src/services/requests.ts";
 import { jobTestHoldSettingSchema } from "../../src/services/job-test-hold.ts";
+import { limitNotices } from "../../src/services/job-conversation.ts";
 import { jobInstanceId, jobRuns } from "../../src/workflows/job-runs.ts";
 import { applyJobMigrations, openJobDatabase, now } from "./jobs-support.ts";
 
@@ -40,6 +44,18 @@ await test("Job runs restore D1 execution rights across retries and lost respons
     runtime: db.runtime,
     wakePattern: async () => {},
   };
+  const fullOutput = {
+    uncachedInputTokens: 10,
+    outputTokens: 32_000,
+    cacheReadTokens: 0,
+    cacheWrite1hTokens: 0,
+    cacheWrite5mTokens: 0,
+  };
+  const prices = aiModels[limits.ai.model].microUsdPerMillionTokens;
+  const charge =
+    (fullOutput.outputTokens * prices.output + fullOutput.uncachedInputTokens * prices.input) /
+    1_000_000;
+  const outputReserve = (fullOutput.outputTokens * prices.output) / 1_000_000;
   async function pattern() {
     const result = await db.store.projects.createOnce(
       {
@@ -169,7 +185,17 @@ await test("Job runs restore D1 execution rights across retries and lost respons
         )
         .bind(patternId)
         .first<number>("n");
-    return { job, deps, calls, summaries, wakes, state, revisions, snapshots };
+    return {
+      right: claimed.right,
+      job,
+      deps,
+      calls,
+      summaries,
+      wakes,
+      state,
+      revisions,
+      snapshots,
+    };
   }
   await t.test("prompt bytes are repeatable and version every fixed field", async () => {
     const input = {
@@ -231,7 +257,9 @@ await test("Job runs restore D1 execution rights across retries and lost respons
         async roundTrip(req) {
           requests.push(req);
           await stop(f.job.jobId);
-          return editingAi.roundTrip(req);
+          const response = await editingAi.roundTrip(req);
+          assert(response.kind === "ok");
+          return { ...response, assistant: { ...response.assistant, usage: fullOutput } };
         },
       };
       assert.equal(
@@ -243,6 +271,10 @@ await test("Job runs restore D1 execution rights across retries and lost respons
           )
         ).kind,
         "cancelled",
+      );
+      assert.deepEqual(
+        (await attempts(f.job.jobId)).map((row) => row.charged),
+        [charge],
       );
       assert.deepEqual(f.summaries, [houseJson]);
       const first = requests[0]?.conversation;
@@ -337,6 +369,285 @@ await test("Job runs restore D1 execution rights across retries and lost respons
       { jobId, now },
     );
   }
+  async function attempts(jobId: string) {
+    return (
+      await db.raw
+        .prepare(
+          "SELECT charged, counted, reserved FROM ai_attempts WHERE job_id = ? ORDER BY rowid",
+        )
+        .bind(jobId)
+        .all<{ charged: number | null; counted: number; reserved: number }>()
+    ).results;
+  }
+  function seedReservation(job: JobExecutionReference, amount: number, date = now) {
+    return db.raw
+      .prepare(
+        `INSERT INTO ai_attempts (id, job_id, generation, reserved, estimated_input_tokens, estimated_output_tokens, reserved_at)
+        VALUES (?, ?, ?, ?, 1, 1, ?)`,
+      )
+      .bind(crypto.randomUUID(), job.jobId, job.generation, amount, date)
+      .run();
+  }
+  async function notices(jobId: string) {
+    return (
+      await db.raw
+        .prepare("SELECT body FROM messages WHERE kind = 'notice' AND job_id = ?")
+        .bind(jobId)
+        .all<{ body: string }>()
+    ).results.map((row) => row.body);
+  }
+  async function jobMessages(jobId: string) {
+    return (
+      await db.raw
+        .prepare("SELECT kind, body FROM messages WHERE job_id = ?")
+        .bind(jobId)
+        .all<{ kind: string; body: string }>()
+    ).results;
+  }
+  async function assertHeld(job: JobExecutionReference) {
+    const state = await db.store.revisions.state({ ownerId, patternId: job.patternId });
+    assert.equal(state?.queueHold?.job.jobId, job.jobId);
+    assert.equal(state?.queueHold?.job.state, "limited");
+    assert.equal(state?.lastFinishedJob?.state, "limited");
+    assert.equal(
+      await db.raw
+        .prepare("SELECT holds_queue FROM jobs WHERE id=?")
+        .bind(job.jobId)
+        .first("holds_queue"),
+      1,
+    );
+    assert.equal((await claimNextJob(base, { patternId: job.patternId })).kind, "not_claimed");
+  }
+  await t.test(
+    "the first reservation past the instruction cap preserves the last revision and holds the queue",
+    async () => {
+      const first = await fixture();
+      assert.equal((await runJob(first.deps, first.job, stepEngine().steps)).kind, "committed");
+      const previous = await first.revisions();
+      const patternId = first.job.patternId;
+      const b = await accept(patternId);
+      await accept(patternId);
+      const f = await fixture([ok], patternId, b);
+      const script = scriptedAi((view) => ({
+        usage: fullOutput,
+        stop: "tool_calls",
+        parts: [
+          {
+            kind: "tool_call",
+            name: "edit_house",
+            id: "edit-" + view.rounds.length,
+            inputJson: JSON.stringify({ operations: [{ kind: "remove_opening", id: "door" }] }),
+          },
+        ],
+      }));
+      let calls = 0;
+      const ai: Ai = {
+        ...script,
+        roundTrip(request) {
+          calls++;
+          return script.roundTrip(request);
+        },
+      };
+      const engine = stepEngine();
+      assert.deepEqual(await runJob({ ...f.deps, ai }, f.job, engine.steps), {
+        kind: "limited",
+        limit: "perInstruction",
+        ms: 0,
+      });
+      const paidRounds = Math.floor((limits.aiCost.perInstruction - outputReserve) / charge) + 1;
+      assert.equal(calls, paidRounds);
+      assert(engine.attempts.includes(`round ${paidRounds + 1} ai`));
+      const rows = await attempts(b.jobId);
+      assert.deepEqual(
+        rows.map((row) => row.charged),
+        Array(paidRounds).fill(charge),
+      );
+      assert.equal(await db.store.work.read(f.right, `rounds/${paidRounds + 1}.json`), null);
+      assert.deepEqual(await f.revisions(), previous);
+      assert.deepEqual(await notices(b.jobId), [
+        "この指示のAI費用が上限の5米ドルに達したため、未確定の変更を採用せずに終了しました。案は最後に確定したもののままです。",
+      ]);
+      await assertHeld(f.job);
+      const stopped = await stopJob(base, {
+        ownerId,
+        requestId: crypto.randomUUID(),
+        jobId: b.jobId,
+      });
+      assert(stopped.kind === "stop");
+      assert.equal(stopped.result.outcome, "already_finished");
+      assert.equal(stopped.result.job.state, "limited");
+      assert.deepEqual(await runJob(f.deps, f.job, stepEngine().steps), {
+        kind: "limited",
+        limit: null,
+      });
+    },
+  );
+  await t.test("one micro-dollar left service-wide prevents the first AI call", async () => {
+    const date = "2027-01-01T00:00:00.000Z";
+    await seedReservation((await fixture()).job, limits.aiCost.monthly - 1, date);
+    const patternId = await pattern();
+    const a = await accept(patternId);
+    await accept(patternId);
+    const f = await fixture([ok], patternId, a);
+    let calls = 0;
+    const ai: Ai = {
+      ...editingAi,
+      roundTrip(request) {
+        calls++;
+        return editingAi.roundTrip(request);
+      },
+    };
+    const end = await runJob(
+      { ...f.deps, ai, runtime: { ...base.runtime, now: () => date } },
+      f.job,
+      stepEngine().steps,
+    );
+    assert.equal(end.kind, "limited");
+    assert(end.kind === "limited" && end.limit === "monthly");
+    assert.equal(calls, 0);
+    assert.deepEqual(await attempts(a.jobId), []);
+    assert.deepEqual(await notices(a.jobId), [
+      "今月のサービス全体のAI費用が上限の100米ドルに達したため、この指示を終了しました。未確定の変更は採用していません。上限は毎月1日（協定世界時）に戻ります。",
+    ]);
+    assert.deepEqual((await f.revisions())?.revisions, []);
+    await assertHeld(f.job);
+  });
+  await t.test("a missing AI response counts its reservation when the step retries", async () => {
+    const f = await fixture();
+    let calls = 0;
+    const ai: Ai = {
+      ...editingAi,
+      async roundTrip(request) {
+        if (++calls === 1) throw new Error("response lost");
+        const response = await editingAi.roundTrip(request);
+        assert(response.kind === "ok");
+        return { ...response, assistant: { ...response.assistant, usage: fullOutput } };
+      },
+    };
+    const engine = stepEngine();
+    assert.equal((await runJob({ ...f.deps, ai }, f.job, engine.steps)).kind, "committed");
+    assert.equal(engine.attempts.filter((name) => name === "round 1 ai").length, 2);
+    const rows = await attempts(f.job.jobId);
+    assert.deepEqual(
+      rows.map((row) => row.charged),
+      [null, charge, charge],
+    );
+    assert(rows[0] && rows[0].counted === rows[0].reserved && rows[0].counted > 0);
+  });
+  await t.test("replaying a kept first round uses its one settled attempt", async () => {
+    const f = await fixture();
+    const script = scriptedAi([
+      {
+        stop: "tool_calls",
+        usage: fullOutput,
+        parts: [
+          {
+            kind: "tool_call",
+            name: "finish",
+            id: "ask",
+            inputJson: JSON.stringify({
+              answer: { kind: "question", question: "色は？", choices: ["赤", "青"] },
+            }),
+          },
+        ],
+      },
+    ]);
+    let calls = 0;
+    const ai: Ai = {
+      ...script,
+      roundTrip(request) {
+        calls++;
+        return script.roundTrip(request);
+      },
+    };
+    const engine = stepEngine({ loseResultsOnce: "round 1 ai" });
+    const end = await runJob({ ...f.deps, ai }, f.job, engine.steps);
+    assert.equal(end.kind, "asked");
+    assert.equal(engine.attempts.filter((name) => name === "round 1 ai").length, 2);
+    assert.equal(calls, 1);
+    assert.deepEqual(
+      (await attempts(f.job.jobId)).map((row) => row.charged),
+      [charge],
+    );
+  });
+  for (const reason of ["no_provider", "script_ended", "rejected"] as const) {
+    await t.test(reason + " settles at zero", async () => {
+      const f = await fixture();
+      const total = () =>
+        db.raw
+          .prepare(
+            "SELECT coalesce(sum(counted), 0) AS total FROM ai_attempts WHERE month = substr(?,1,7)",
+          )
+          .bind(now)
+          .first<number>("total");
+      const before = await total();
+      const ai: Ai = {
+        ...editingAi,
+        roundTrip: () => Promise.resolve({ kind: "failed", reason, detail: "unsent" }),
+      };
+      assert.equal((await runJob({ ...f.deps, ai }, f.job, stepEngine().steps)).kind, "failed");
+      assert.deepEqual(
+        (await attempts(f.job.jobId)).map((row) => row.charged),
+        [0],
+      );
+      assert.equal(await total(), before);
+    });
+  }
+  await t.test("a stop before the limit batch suppresses the notice", async () => {
+    const f = await fixture();
+    await seedReservation(f.job, limits.aiCost.perInstruction);
+    const jobs = {
+      ...f.deps.store.jobs,
+      limit: async (...args: Parameters<typeof db.store.jobs.limit>) => {
+        await stop(f.job.jobId);
+        return db.store.jobs.limit(...args);
+      },
+    };
+    const end = await runJob(
+      { ...f.deps, store: { ...f.deps.store, jobs } },
+      f.job,
+      stepEngine().steps,
+    );
+    assert.equal(end.kind, "cancelled");
+    assert.deepEqual(await notices(f.job.jobId), []);
+  });
+  await t.test("a reserved finish that settles exactly at the cap commits", async () => {
+    const f = await fixture();
+    const ai: Ai = {
+      ...editingAi,
+      async roundTrip(request) {
+        const response = await editingAi.roundTrip(request);
+        if (response.kind !== "ok" || request.conversation.rounds.length === 0) return response;
+        const bound = estimateAttempt(request);
+        return {
+          ...response,
+          assistant: {
+            ...response.assistant,
+            usage: { ...fullOutput, uncachedInputTokens: 0, cacheWrite1hTokens: bound.inputTokens },
+          },
+        };
+      },
+    };
+    let reservations = 0;
+    const aiCost: typeof db.store.aiCost = {
+      ...db.store.aiCost,
+      async reserve(right, input) {
+        if (++reservations === 2)
+          await seedReservation(f.job, limits.aiCost.perInstruction - input.reserve);
+        return db.store.aiCost.reserve(right, input);
+      },
+    };
+    const end = await runJob(
+      { ...f.deps, ai, store: { ...f.deps.store, aiCost } },
+      f.job,
+      stepEngine().steps,
+    );
+    assert.equal(end.kind, "committed");
+    assert.equal(
+      (await attempts(f.job.jobId)).reduce((sum, row) => sum + row.counted, 0),
+      5_000_000,
+    );
+  });
   for (const at of ["first_answer", "finish_answer"] as const) {
     await t.test(`stop during ${at} ends cancelled and wakes without a revision`, async () => {
       const f = await fixture();
@@ -517,6 +828,10 @@ await test("Job runs restore D1 execution rights across retries and lost respons
       );
       assert.equal(end.kind, "committed");
       assert.equal(requests.length, 2);
+      assert.deepEqual(
+        (await attempts(f.job.jobId)).map((row) => row.charged),
+        [0, 0],
+      );
       const [first, second] = requests.map((r) => r.conversation);
       assert(first && second);
       assert.deepEqual({ ...second, rounds: [] }, first);
@@ -596,17 +911,107 @@ await test("Job runs restore D1 execution rights across retries and lost respons
       [".g1.r1.c1", ".g1.r1.c2", ".g1.r1.c2"].map((s) => f.job.jobId + s),
     );
   });
-  await t.test("a call-less turn is nudged until the round limit", async () => {
+  await t.test("an over-cap batch is a tool error and never reaches the Container", async () => {
     const f = await fixture();
-    const ai = scriptedAi(() => ({ stop: "end", parts: [{ kind: "text", text: "draft" }] }));
-    const engine = stepEngine();
-    assert.deepEqual(await runJob({ ...f.deps, ai }, f.job, engine.steps), {
-      kind: "failed",
-      reason: "round_limit",
-      ms: 0,
+    const { maxOperations } = limits.editHouse;
+    const call = (id: string, length: number) => ({
+      kind: "tool_call" as const,
+      name: "edit_house",
+      id,
+      inputJson: JSON.stringify({
+        operations: Array.from({ length }, () => ({ kind: "remove_opening", id: "o" })),
+      }),
     });
-    assert(engine.cache.has("round 24 ai"));
-    assert.equal(await f.snapshots(), 0);
+    const script = scriptedAi([
+      { stop: "tool_calls", parts: [call("big", maxOperations + 1)] },
+      { stop: "tool_calls", parts: [call("fits", maxOperations)] },
+      { stop: "refusal", parts: [{ kind: "text", text: "end" }] },
+    ]);
+    const requests: { request: AiRequest; calls: number; summaries: number }[] = [];
+    const ai: Ai = {
+      model: script.model,
+      roundTrip(request) {
+        requests.push({ request, calls: f.calls.length, summaries: f.summaries.length });
+        return script.roundTrip(request);
+      },
+    };
+    const engine = stepEngine();
+    await runJob({ ...f.deps, ai }, f.job, engine.steps);
+
+    const second = requests[1];
+    assert(second);
+    assert.equal(second.calls, 0);
+    assert.equal(second.summaries, 0);
+    const reply = second.request.conversation.rounds[0]?.reply;
+    assert(reply?.kind === "tool_results");
+    assert.equal(reply.results.length, 1);
+    const result = reply.results[0];
+    assert(result);
+    assert.equal(result.callId, "big");
+    assert.equal(result.isError, true);
+    const content = result.content[0];
+    assert(content?.kind === "text");
+    assert.match(content.text, new RegExp(`\\b${maxOperations}\\b`, "u"));
+    assert(!engine.attempts.includes("round 1 call 1 edit_house"));
+
+    assert.equal(requests[2]?.calls, 1);
+    assert.deepEqual(f.calls, [`${f.job.jobId}.g1.r2.c1`]);
+  });
+  const callLessAnswer = (): ScriptStep => ({
+    stop: "end",
+    parts: [{ kind: "text", text: "draft" }],
+  });
+  for (const scenario of [
+    { name: "a call-less turn is nudged until the round limit" },
+    {
+      name: "a lost round-limit step result preserves the limit and its single notice",
+      loseResultsOnce: "record limit",
+    },
+  ]) {
+    await t.test(scenario.name, async () => {
+      const f = await fixture();
+      let calls = 0;
+      const script = scriptedAi(callLessAnswer);
+      const ai: Ai = {
+        model: script.model,
+        roundTrip(request) {
+          calls++;
+          return script.roundTrip(request);
+        },
+      };
+      const engine = stepEngine(scenario);
+      assert.deepEqual(await runJob({ ...f.deps, ai }, f.job, engine.steps), {
+        kind: "limited",
+        limit: "rounds",
+        ms: 0,
+      });
+      assert.equal(calls, limits.jobRun.rounds);
+      assert(engine.cache.has(`round ${limits.jobRun.rounds} ai`));
+      assert(!engine.attempts.includes(`round ${limits.jobRun.rounds + 1} ai`));
+      assert.equal(await f.state(), "limited");
+      assert.equal(await f.snapshots(), 0);
+      assert.deepEqual((await f.revisions())?.revisions, []);
+      assert.deepEqual(await jobMessages(f.job.jobId), [
+        { kind: "notice", body: limitNotices.rounds },
+      ]);
+    });
+  }
+  await t.test("a stop just before the round limit cancels the job without a notice", async () => {
+    const f = await fixture();
+    const ai = scriptedAi(callLessAnswer);
+    const { steps } = stepEngine();
+    assert.deepEqual(
+      await runJob({ ...f.deps, ai }, f.job, {
+        ...steps,
+        async do(name, config, body) {
+          if (name === "record limit") await stop(f.job.jobId);
+          return steps.do(name, config, body);
+        },
+      }),
+      { kind: "cancelled", ms: 0 },
+    );
+    assert.equal(await f.state(), "cancelled");
+    assert.deepEqual(await notices(f.job.jobId), []);
   });
   await t.test("a v1 base starts empty and commits the notice before the explanation", async () => {
     const patternId = await pattern();
@@ -633,7 +1038,7 @@ await test("Job runs restore D1 execution rights across retries and lost respons
     );
     assert.match(String(messages.results[0]?.["body"]), /空の住宅から作り直しました/u);
   });
-  await t.test("four blocked finishes fail and preserve the earlier revision", async () => {
+  await t.test("four blocked finishes end limited and preserve the earlier revision", async () => {
     const first = await fixture();
     const original = await runJob(first.deps, first.job, stepEngine().steps);
     assert(original.kind === "committed" && ok.kind === "ok" && ok.value.kind === "applied");
@@ -652,7 +1057,8 @@ await test("Job runs restore D1 execution rights across retries and lost respons
       ],
       first.job.patternId,
     );
-    const ai = scriptedAi((view) => ({
+    let aiCalls = 0;
+    const script = scriptedAi((view) => ({
       stop: "tool_calls",
       parts: [
         {
@@ -671,18 +1077,33 @@ await test("Job runs restore D1 execution rights across retries and lost respons
         },
       ],
     }));
+    const ai: Ai = {
+      model: script.model,
+      roundTrip(request) {
+        aiCalls++;
+        return script.roundTrip(request);
+      },
+    };
     const engine = stepEngine();
     assert.deepEqual(await runJob({ ...f.deps, ai }, f.job, engine.steps), {
-      kind: "failed",
-      reason: "checks_unresolved",
+      kind: "limited",
+      limit: "checkFixes",
       ms: 0,
     });
     assert.deepEqual(f.calls, [f.job.jobId + ".g1.r1.check"]);
-    assert.equal(engine.attempts.filter((n) => n.endsWith(" finish")).length, 4);
+    assert.equal(
+      engine.attempts.filter((n) => n.endsWith(" finish")).length,
+      limits.jobRun.checkFixes + 1,
+    );
+    assert.equal(aiCalls, limits.jobRun.checkFixes + 1);
     assert.deepEqual(
       (await f.revisions())?.revisions.map((r) => r.id),
       [original.revisionId],
     );
+    assert.equal(await f.state(), "limited");
+    assert.deepEqual(await jobMessages(f.job.jobId), [
+      { kind: "notice", body: limitNotices.checkFixes },
+    ]);
   });
   await t.test("a mixed finish is a tool error and other calls run", async () => {
     const f = await fixture();

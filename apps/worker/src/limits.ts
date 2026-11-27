@@ -56,8 +56,17 @@ export const limits = {
     maxPerInstruction: 3,
     maxEdgePx: aiImage.downscaleEdgePx,
   },
+  editHouse: { maxOperations: 32 },
+  jobRun: {
+    rounds: 24,
+    checkFixes: 3,
+  },
 } as const satisfies {
   aiCost: { monthly: MicroUsd; perInstruction: MicroUsd };
   ai: { model: AiModelId };
   assets: { maxBytes: number; maxEdgePx: number; maxPerInstruction: number };
+  editHouse: { maxOperations: number };
+  jobRun: { rounds: number; checkFixes: number };
 };
+
+export type JobLimit = keyof typeof limits.aiCost | keyof typeof limits.jobRun;
