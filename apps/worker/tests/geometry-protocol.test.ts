@@ -4,17 +4,30 @@ import type { GatewayRequest } from "../src/geometry/container-gateway.ts";
 import { geometryInternal, geometryBodySchemas } from "@madori/contracts/geometry-internal";
 import {
   acceptGeometryHealth,
-  readSampleDisplay,
   callGeometry,
   acceptBytes,
   createGeometryCaller,
   acceptReadinessResponse,
 } from "../src/geometry/geometry-protocol.ts";
+import type { Send } from "../src/geometry/geometry-protocol.ts";
+
 const call = { traceId: "trace-1" };
-const binaryCall = (send: Parameters<typeof readSampleDisplay>[0], call: { traceId: string }) =>
-  callGeometry(send, "sampleDisplay", {
-    ...call,
-  });
+const binaryRoutes = {
+  display: {
+    ...geometryInternal.routes.health,
+    name: "display",
+    authenticated: true,
+    path: "/v1/display",
+    response: {
+      kind: "binary",
+      content_type: geometryInternal.displayContentType,
+      max_bytes: geometryInternal.maxDisplayBytes,
+    },
+  },
+} as const;
+const callBinary = createGeometryCaller(binaryRoutes, geometryBodySchemas, { display: 30_000 });
+const binaryCall = (send: Send, options: typeof call) => callBinary(send, "display", options);
+const healthCall = (send: Send, options: typeof call) => callGeometry(send, "health", options);
 void test(
   "protocol validates health, errors, type and bounded streamed bytes",
   { timeout: 2000 },
@@ -138,28 +151,6 @@ void test("generic JSON routes validate bodies, status, type, and bounded stream
 });
 
 void test(
-  "sample declaration selects its contract route and binary accept policy",
-  { timeout: 2000 },
-  async () => {
-    const result = await readSampleDisplay((request) => {
-      assert.equal(request.path, geometryInternal.routes.sampleDisplay.path);
-      assert.equal(request.method, geometryInternal.routes.sampleDisplay.method);
-      assert.equal(request.timeoutMs, 30_000);
-      assert.equal(request.traceId, call.traceId);
-      return Promise.resolve({
-        kind: "response",
-        response: new Response(new Uint8Array([7]), {
-          headers: { "content-type": geometryInternal.displayContentType },
-        }),
-        start: "cold",
-        ms: 1,
-      });
-    }, call);
-    assert.equal(result.kind, "ok");
-  },
-);
-
-void test(
   "JSON limits, forwarding and protocol diagnostics identify the failure",
   { timeout: 2000 },
   async () => {
@@ -212,8 +203,8 @@ void test(
     assert(cancelled);
   },
 );
-void test("sample declaration enforces the display byte limit", async () => {
-  const boundary = await readSampleDisplay(
+void test("binary response slots enforce their byte limit", async () => {
+  const boundary = await binaryCall(
     () =>
       Promise.resolve({
         kind: "response",
@@ -228,7 +219,7 @@ void test("sample declaration enforces the display byte limit", async () => {
   assert.equal(boundary.kind, "ok");
   if (boundary.kind === "ok")
     assert.equal(boundary.value.bytes.byteLength, geometryInternal.maxDisplayBytes);
-  const result = await readSampleDisplay(
+  const result = await binaryCall(
     () =>
       Promise.resolve({
         kind: "response",
@@ -262,20 +253,17 @@ void test("acceptBytes and acceptJson decode generic bodies", async () => {
 
 void test("route names select method, path and timeout even when callers forward wider options", async () => {
   const options = { traceId: "wider", path: "/wrong", method: "POST", timeoutMs: 1 };
-  for (const [name, timeoutMs] of [
-    ["health", 2000],
-    ["sampleDisplay", 30000],
+  for (const [invoke, route, timeoutMs] of [
+    [healthCall, geometryInternal.routes.health, 2_000],
+    [binaryCall, binaryRoutes.display, 30_000],
   ] as const) {
-    const result = await callGeometry(
-      (request) => {
-        assert.equal(request.path, geometryInternal.routes[name].path);
-        assert.equal(request.method, geometryInternal.routes[name].method);
-        assert.equal(request.timeoutMs, timeoutMs);
-        return Promise.resolve({ kind: "unavailable", reason: "containers_disabled" });
-      },
-      name,
-      options,
-    );
+    const result = await invoke((request) => {
+      assert.equal(request.path, route.path);
+      assert.equal(request.method, route.method);
+      assert.equal(request.timeoutMs, timeoutMs);
+      assert.equal(request.traceId, options.traceId);
+      return Promise.resolve({ kind: "unavailable", reason: "containers_disabled" });
+    }, options);
     assert.deepEqual(result, { kind: "unavailable", reason: "containers_disabled" });
   }
 });
@@ -293,7 +281,7 @@ void test("contract request slots select serialization and prohibit unsafe pairi
       request: { kind: "json", schema: "commandSchema", max_bytes: 4096 },
     },
     binary: {
-      ...geometryInternal.routes.sampleDisplay,
+      ...binaryRoutes.display,
       method: "POST",
       request: { kind: "binary", content_type: "application/snapshot", max_bytes: 4096 },
     },
@@ -324,7 +312,7 @@ void test("contract request slots select serialization and prohibit unsafe pairi
     const send = () =>
       Promise.resolve({ kind: "unavailable", reason: "containers_disabled" } as const);
     // @ts-expect-error A body is forbidden for a bodyless route.
-    void callGeometry(send, "sampleDisplay", { ...call, body: new Uint8Array([1]) });
+    void callGeometry(send, "health", { ...call, body: new Uint8Array([1]) });
     // @ts-expect-error JSON input comes from the named schema.
     void invoke(send, "json", { ...call, body: { count: "wrong" } });
     // @ts-expect-error A binary request needs bytes.
@@ -365,7 +353,7 @@ void test(
           cancelled = true;
         },
       });
-      const result = await callGeometry(
+      const result = await binaryCall(
         () =>
           Promise.resolve({
             kind: "response",
@@ -376,7 +364,6 @@ void test(
             start: "warm",
             ms: 1,
           }),
-        "sampleDisplay",
         call,
       );
       assert.deepEqual(result, { kind: "failed", reason: "protocol_violation", status, violation });
@@ -409,11 +396,10 @@ void test(
   "protocol errors require their media type on every route",
   { timeout: 2000 },
   async () => {
-    for (const name of ["health", "sampleDisplay"] as const) {
+    for (const callRoute of [healthCall, binaryCall]) {
       const invoke = (response: Response) =>
-        callGeometry(
+        callRoute(
           () => Promise.resolve({ kind: "response", response, start: "warm", ms: 1 }),
-          name,
           call,
         );
       for (const contentType of ["text/html", null]) {
@@ -445,11 +431,10 @@ void test(
   "protocol error size is bounded at the contract limit on every route",
   { timeout: 2000 },
   async () => {
-    for (const name of ["health", "sampleDisplay"] as const) {
+    for (const callRoute of [healthCall, binaryCall]) {
       const invoke = (response: Response) =>
-        callGeometry(
+        callRoute(
           () => Promise.resolve({ kind: "response", response, start: "warm", ms: 1 }),
-          name,
           call,
         );
       for (const advertised of [false, true]) {

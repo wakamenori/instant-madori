@@ -10,9 +10,6 @@ function renderWithRejection(error: unknown) {
       summarizeHouse() {
         throw new Error("Unexpected summarizeHouse");
       },
-      sampleDisplay() {
-        throw new Error("Unexpected applyOperations");
-      },
       // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- RPC can reject with foreign values.
       applyOperations: () => Promise.reject(error),
     };

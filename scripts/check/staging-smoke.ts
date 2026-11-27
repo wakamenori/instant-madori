@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { setTimeout } from "node:timers/promises";
@@ -28,7 +29,7 @@ const createProject = {
 const missingProjectId = "00000000-0000-4000-8000-000000000000";
 // No request waits on the Container because the job does that work.
 const requestTimeoutMs = 30_000;
-// Covers cold Container readiness (60s), display generation (30s), and one render retry with headroom.
+// Covers cold Container readiness (60s), a house operation batch (60s), and one retry with headroom.
 const jobBudgetMs = 240_000;
 export type StagingTarget = { origin: string; jobTimeoutMs: number };
 
@@ -38,7 +39,24 @@ export async function smokeStaging(
   {
     fetcher = fetch,
     pollIntervalMs = 2_000,
-  }: { fetcher?: typeof fetch; pollIntervalMs?: number } = {},
+    describeDisplay = async (bytes) => {
+      const viewer = await import("../../crates/viewer/pkg/madori_viewer.js");
+      const wasm = await readFile(
+        new URL("crates/viewer/pkg/madori_viewer_bg.wasm", repositoryRoot),
+      );
+      await viewer.default({ module_or_path: wasm });
+      const summary = viewer.describe_display(bytes);
+      try {
+        return summary.elements;
+      } finally {
+        summary.free();
+      }
+    },
+  }: {
+    fetcher?: typeof fetch;
+    pollIntervalMs?: number;
+    describeDisplay?: (bytes: Uint8Array) => Promise<string[]>;
+  } = {},
 ): Promise<void> {
   const withToken = {
     "CF-Access-Client-Id": token.clientId,
@@ -162,7 +180,19 @@ export async function smokeStaging(
     "the view identifies the committed revision",
   );
   assert.ok(display.headers.get("x-floor-plan-storeys"), "the revision contains a floor plan");
-  assert.ok((await display.arrayBuffer()).byteLength > 0, "display data is not empty");
+  const bytes = new Uint8Array(await display.arrayBuffer());
+  assert.ok(bytes.byteLength > 0, "display data is not empty");
+  const elements = await describeDisplay(bytes);
+  assert.ok(elements.length > 0, "the display carries housing element IDs");
+  for (const element of elements) {
+    const picked = await request(`/api/revisions/${revisionId}/pick`, {
+      method: "POST",
+      headers: mutationHeaders,
+      body: JSON.stringify({ element }),
+    });
+    assert.equal(picked.status, 200, `display element ${element} is in the revision's house`);
+    await picked.arrayBuffer();
+  }
 }
 
 export function stagingTarget(wranglerJsonc: string): StagingTarget {

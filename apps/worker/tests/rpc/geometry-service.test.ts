@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { applyHouseOperations } from "../../src/services/geometry.ts";
 import type { GeometryApi, GeometryInstance } from "../../src/geometry/geometry-client.ts";
 
-void test("sample service selects the pattern key and forwards the call", async () => {
+void test("geometry service selects the pattern key and forwards the call", async () => {
   const call = { traceId: "service-trace" };
   const request = {
     job_id: call.traceId,
@@ -16,9 +16,6 @@ void test("sample service selects the pattern key and forwards the call", async 
   const fake: GeometryApi = {
     summarizeHouse() {
       throw new Error("Unexpected summarizeHouse");
-    },
-    sampleDisplay() {
-      throw new Error("Unexpected applyOperations");
     },
     applyOperations: (actual, received) => {
       assert.deepEqual(actual, call);
