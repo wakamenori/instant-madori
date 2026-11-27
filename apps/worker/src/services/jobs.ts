@@ -1,5 +1,5 @@
-import { meteredRoundTrip, type AiCostLimit } from "./ai-cost.ts";
-import { limits } from "../limits.ts";
+import { meteredRoundTrip } from "./ai-cost.ts";
+import { limits, type JobLimit } from "../limits.ts";
 import { verifierSubject } from "../identity.ts";
 import type { Conversation } from "../ai/round-trip.ts";
 import type { JobWorkPath } from "../storage/job-work.ts";
@@ -220,8 +220,6 @@ type JobFailureReason =
   | "ai_script_ended"
   | "ai_unavailable"
   | "ai_output_limit"
-  | "checks_unresolved"
-  | "round_limit"
   | GeometryFailure
   | "execution_lost"
   | "invalid_snapshot"
@@ -229,7 +227,7 @@ type JobFailureReason =
   | "retries_exhausted";
 type Committed = { kind: "committed"; revisionId: string };
 type Asked = { kind: "asked" };
-type Limited = { kind: "limited"; limit: AiCostLimit | null };
+type Limited = { kind: "limited"; limit: JobLimit | null };
 type Cancelled = { kind: "cancelled" };
 type NotCommitted = { kind: "not_committed"; reason: JobFailureReason };
 export type JobEnd = (
@@ -311,8 +309,6 @@ export async function sweepStalledPatterns(deps: StalledPatternSweepDeps) {
 }
 
 const jobLimits = {
-  maxRounds: 24,
-  maxBlockedFinishes: 3,
   maxCallsPerRound: 8,
   maxOutputTokens: 32000,
   toolResultMaxBytes: 32768,
@@ -550,7 +546,14 @@ async function converse(
   let working = start.working;
   let blocked = 0;
   const history: History = [];
-  for (let round = 1; round <= jobLimits.maxRounds; round++) {
+  const recordLimit = (limit: keyof typeof limits.jobRun) =>
+    steps.do("record limit", storageStep, async (): Promise<Interrupted> => {
+      const live = await current(deps, job);
+      if (live.kind === "limited") return { kind: "limited", limit };
+      if (live.kind !== "active") return live;
+      return endLimited(deps, live.right, limit);
+    });
+  for (let round = 1; round <= limits.jobRun.rounds; round++) {
     const answer = await steps.do(`round ${round} ai`, aiStep, () =>
       ask(deps, job, start, history, round),
     );
@@ -697,14 +700,13 @@ async function converse(
       if (gate.kind !== "blocked" && gate.kind !== "refused") return gate;
       if (gate.kind === "blocked") {
         working = { kind: "edited", snapshot: gate.snapshot };
-        if (++blocked > jobLimits.maxBlockedFinishes)
-          return { kind: "not_committed", reason: "checks_unresolved" };
+        if (++blocked > limits.jobRun.checkFixes) return recordLimit("checkFixes");
       }
       results.push(gate.result);
     }
     history.push({ turn, reply: { kind: "tool_results", results } });
   }
-  return { kind: "not_committed", reason: "round_limit" };
+  return recordLimit("rounds");
 }
 
 export async function runJob(
@@ -766,7 +768,7 @@ async function afterExecutionLost(
 async function endLimited(
   deps: JobWorkflowDeps,
   right: JobExecutionRight,
-  limit: AiCostLimit,
+  limit: JobLimit,
 ): Promise<Interrupted> {
   const result = await deps.store.jobs.limit(right, {
     notice: { id: deps.runtime.newId(), body: limitNotices[limit] },
