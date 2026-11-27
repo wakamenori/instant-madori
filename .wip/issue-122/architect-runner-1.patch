@@ -1,0 +1,1615 @@
+diff --git a/crates/housing/src/check.rs b/crates/housing/src/check.rs
+index 0e7805834..d714dba1a 100644
+--- a/crates/housing/src/check.rs
++++ b/crates/housing/src/check.rs
+@@ -69,6 +69,10 @@ const RULES: &[Rule] = &[
+         layer: Layer::Fit,
+         run: walls::gaps,
+     },
++    Rule {
++        layer: Layer::Fit,
++        run: walls::floor_overlaps,
++    },
+ ];
+ 
+ fn finding(element: ElementKind, id: &str, reason: Reason) -> Rejection {
+diff --git a/crates/housing/src/check/walls.rs b/crates/housing/src/check/walls.rs
+index 7cfe38e40..99c136ecd 100644
+--- a/crates/housing/src/check/walls.rs
++++ b/crates/housing/src/check/walls.rs
+@@ -10,20 +10,7 @@ pub(super) fn planforms(h: &House) -> Vec<Rejection> {
+     failures(h.boundaries().map(BoundaryView::planform))
+ }
+ pub(super) fn floors(h: &House) -> Vec<Rejection> {
+-    failures(h.rooms().map(|r| {
+-        let floor = r.interior()?;
+-        SimplePolygon::new(floor.outline().to_vec()).map_err(|reason| {
+-            finding(
+-                ElementKind::Room,
+-                r.data().id.as_str(),
+-                match reason {
+-                    Reason::SelfIntersecting { at } => Reason::FloorSelfIntersecting { at },
+-                    e => e,
+-                },
+-            )
+-            .into()
+-        })
+-    }))
++    failures(h.rooms().map(RoomView::interior))
+ }
+ pub(super) fn reference_areas(h: &House) -> Vec<Rejection> {
+     failures(h.storeys().map(StoreyView::reference_area))
+@@ -86,3 +73,31 @@ pub(super) fn gaps(h: &House) -> Vec<Rejection> {
+     }
+     errors
+ }
++
++pub(super) fn floor_overlaps(h: &House) -> Vec<Rejection> {
++    let walls: Vec<_> = h
++        .boundaries()
++        .filter_map(|w| Some((w, w.planform().ok()?)))
++        .collect();
++    let mut errors = Vec::new();
++    for r in h.rooms() {
++        let Ok(floor) = r.interior() else { continue };
++        let Ok(floor) = SimplePolygon::new(floor.outline().to_vec()) else { continue };
++        for (w, p) in &walls {
++            if w.start().data().storey == *r.storey()
++                && let Some(s) = scan::overlap(&floor, p)
++            {
++                errors.push(finding(
++                    ElementKind::Room,
++                    r.data().id.as_str(),
++                    Reason::OverlapsWall {
++                        other: w.data().id.as_str().into(),
++                        min: s.min,
++                        max: s.max,
++                    },
++                ));
++            }
++        }
++    }
++    errors
++}
+diff --git a/crates/housing/src/joint.rs b/crates/housing/src/joint.rs
+index 02ca03082..cd8c61978 100644
+--- a/crates/housing/src/joint.rs
++++ b/crates/housing/src/joint.rs
+@@ -5,6 +5,9 @@ use std::{
+ };
+ 
+ const THROUGH_DEVIATION: f64 = 3.0_f64.to_radians();
++/// Directions closer than this are the same: over the whole coordinate range they part by less than
++/// `SAME_POINT_MM`.
++const SAME_ANGLE: f64 = crate::measure::SAME_POINT_MM / crate::topology::LIMIT_MM;
+ 
+ #[derive(Copy, Clone, Debug)]
+ pub(crate) struct Vector {
+@@ -131,12 +134,19 @@ impl<'a> Joint<'a> {
+         if let Some(pair) = ends.windows(2).find(|w| w[0].angle == w[1].angle) {
+             return Err(unresolved(vertex, &[pair[0].id, pair[1].id]));
+         }
+-        let mut best = None;
++        let mut best: Option<((f64, &str, &str), [usize; 2])> = None;
+         for (i, a) in ends.iter().enumerate() {
+             for (j, b) in ends.iter().enumerate().skip(i + 1) {
+                 let deviation = a.u.deviation(b.u);
+                 let key = (deviation, a.id.min(b.id), a.id.max(b.id));
+-                if deviation <= THROUGH_DEVIATION && best.is_none_or(|(old, _)| key < old) {
++                let wins = |(old, x, y): (f64, &str, &str)| {
++                    if (deviation - old).abs() <= SAME_ANGLE {
++                        (key.1, key.2) < (x, y)
++                    } else {
++                        deviation < old
++                    }
++                };
++                if deviation <= THROUGH_DEVIATION && best.is_none_or(|(old, _)| wins(old)) {
+                     best = Some((key, [i, j]));
+                 }
+             }
+diff --git a/crates/housing/src/layout.rs b/crates/housing/src/layout.rs
+index a2d0fe71c..352ae7e3b 100644
+--- a/crates/housing/src/layout.rs
++++ b/crates/housing/src/layout.rs
+@@ -10,6 +10,8 @@ use serde::{Deserialize, Serialize};
+ use std::fmt;
+ 
+ const ROOM_NAME_MAX_CHARS: usize = 24;
++#[doc(hidden)]
++pub static SKIP_SWEEP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+ 
+ /// Rectangular rooms on wall centre lines, in millimetres. Repeat the exact coordinate for a shared wall.
+ /// Each room must be wider than the thickest wall on both axes. Rooms must not overlap or touch only at a
+@@ -243,7 +245,9 @@ impl House {
+         }
+         check(overlaps)?;
+         let walls = sweep::Walls::new(layout);
+-        check(walls.collisions(layout))?;
++        if !SKIP_SWEEP.load(std::sync::atomic::Ordering::Relaxed) {
++            check(walls.collisions(layout))?;
++        }
+         Self::new(walls.emit(layout, &IdScope::new(operation))).map_err(LayoutError::Internal)
+     }
+ }
+diff --git a/crates/housing/src/measure.rs b/crates/housing/src/measure.rs
+index 04af55867..9ea4fc536 100644
+--- a/crates/housing/src/measure.rs
++++ b/crates/housing/src/measure.rs
+@@ -97,49 +97,107 @@ impl Interior {
+     }
+ }
+ 
++/// Points closer than this are one point (plan 3.1: SolidCraft's same-point distance). Faces of the outline
++/// whose ends are closer are zero-length, and a corner closer than this to the line of its neighbours is no corner.
++pub(crate) const SAME_POINT_MM: f64 = 1e-6;
++/// No meeting point of two faces lies beyond this distance: every input coordinate is within `LIMIT_MM`.
++const MEETING_LIMIT_MM: f64 = 4.0 * crate::topology::LIMIT_MM;
++
++pub(crate) fn same_point(a: Point, b: Point) -> bool {
++    a.delta_from(b).length() <= SAME_POINT_MM
++}
++
++/// Distance of `p` from the line through `a` with unit direction `u`.
++fn off_line(a: Point, u: Vector, p: Point) -> f64 {
++    u.cross(p.delta_from(a)).abs()
++}
++
++/// Removes repeated points and go-and-return spikes along one line, both judged with `SAME_POINT_MM`.
++pub(crate) fn without_spikes(mut ring: Vec<Point>) -> Vec<Point> {
++    loop {
++        let n = ring.len();
++        if n < 3 {
++            return ring;
++        }
++        let Some(i) = (0..n).find(|&i| {
++            let (a, b, c) = (ring[(i + n - 1) % n], ring[i], ring[(i + 1) % n]);
++            if same_point(a, b) {
++                return true;
++            }
++            let ab = b.delta_from(a);
++            let back = c.delta_from(b).dot(ab) < 0.0;
++            back && off_line(a, ab.unit(), c) <= SAME_POINT_MM
++        }) else {
++            return ring;
++        };
++        ring.remove(i);
++    }
++}
++
++/// One face of the outline as the offsets grow from 0 (`[0]`, the centre lines) to their values (`[1]`).
++/// Every point of the construction is linear in the offsets, so each end moves on a straight line.
++#[derive(Clone, Copy)]
+ struct Segment {
+-    start: Point,
+-    end: Point,
+-    line: Point,
++    start: [Point; 2],
++    end: [Point; 2],
++    anchor: [Point; 2],
+     unit: Vector,
+ }
+ 
+ impl Segment {
+-    fn new(start: Point, end: Point, direction: Vector) -> Self {
+-        Self {
+-            start,
+-            end,
+-            line: start,
+-            unit: direction.unit(),
+-        }
++    fn run(&self, t: usize) -> f64 {
++        self.end[t].delta_from(self.start[t]).dot(self.unit)
+     }
+-    fn run(&self) -> f64 {
+-        self.end.delta_from(self.start).dot(self.unit)
++    /// The offset fraction at which this face shrinks to nothing, if it does by the full offsets.
++    fn collapse(&self) -> Option<f64> {
++        let (r0, r1) = (self.run(0), self.run(1));
++        (r1 < 0.0).then(|| if r0 > 0.0 { r0 / (r0 - r1) } else { 0.0 })
+     }
+ }
+ 
+-enum Parallel {
++enum Meeting {
++    At([Point; 2]),
++    SameLine,
+     Opposed,
+     PreviousHidden,
+     NextHidden,
+-    SameLine,
+ }
+ 
+-fn parallel(previous: &Segment, next: &Segment) -> Parallel {
+-    if previous.unit.dot(next.unit) < 0.0 {
+-        return Parallel::Opposed;
++fn meeting(p: &Segment, q: &Segment) -> Meeting {
++    let aligned = p.unit.dot(q.unit) > 0.0;
++    if off_line(p.anchor[1], p.unit, q.anchor[1]) <= SAME_POINT_MM
++        && off_line(p.anchor[1], p.unit, q.end[1]) <= SAME_POINT_MM
++    {
++        return Meeting::SameLine;
+     }
+-    let side = next.unit.cross(previous.line.delta_from(next.line));
+-    if side < 0.0 {
+-        Parallel::PreviousHidden
+-    } else if side > 0.0 {
+-        Parallel::NextHidden
++    let den = p.unit.cross(q.unit);
++    let at = |t: usize| {
++        p.anchor[t].translated(p.unit * (q.anchor[t].delta_from(p.anchor[t]).cross(q.unit) / den))
++    };
++    let (a0, a1) = (at(0), at(1));
++    let bounded = |x: Point| x.delta_from(p.anchor[1]).length() <= MEETING_LIMIT_MM;
++    if den != 0.0 && bounded(a1) && a0.x.is_finite() && a0.y.is_finite() {
++        return Meeting::At([a0, a1]);
++    }
++    if !aligned {
++        let facing = p.unit.cross(q.anchor[1].delta_from(p.anchor[1])) > 0.0;
++        return if facing {
++            Meeting::Opposed
++        } else if p.run(1) <= q.run(1) {
++            Meeting::PreviousHidden
++        } else {
++            Meeting::NextHidden
++        };
++    }
++    if q.unit.cross(p.anchor[1].delta_from(q.anchor[1])) < 0.0 {
++        Meeting::PreviousHidden
+     } else {
+-        Parallel::SameLine
++        Meeting::NextHidden
+     }
+ }
+ 
+ struct Corner {
++    vertex: Point,
+     chain: Vec<Point>,
+     direction: Vector,
+ }
+@@ -147,23 +205,43 @@ struct Corner {
+ fn contour(corners: &[Corner]) -> Option<Interior> {
+     let mut segments = Vec::new();
+     for (corner, next) in corners.iter().zip(corners.iter().cycle().skip(1)) {
+-        for pair in corner.chain.windows(2) {
+-            segments.push(Segment::new(pair[0], pair[1], pair[1].delta_from(pair[0])));
++        let mut chain = corner.chain.clone();
++        chain.dedup_by(|b, a| same_point(*a, *b));
++        let v = corner.vertex;
++        for pair in chain.windows(2) {
++            segments.push(Segment {
++                start: [v, pair[0]],
++                end: [v, pair[1]],
++                anchor: [v, pair[0]],
++                unit: pair[1].delta_from(pair[0]).unit(),
++            });
+         }
+-        segments.push(Segment::new(
+-            *corner.chain.last()?,
+-            *next.chain.first()?,
+-            corner.direction,
+-        ));
++        let (from, to) = (*chain.last()?, *next.chain.first()?);
++        segments.push(Segment {
++            start: [v, from],
++            end: [next.vertex, to],
++            anchor: [v, from],
++            unit: corner.direction.unit(),
++        });
+     }
+-    loop {
+-        let (i, run) = segments
++    let order = std::env::var("ORDER").unwrap_or_default();
++    while let Some((i, _)) = {
++        let hidden = segments
+             .iter()
+-            .map(Segment::run)
+             .enumerate()
+-            .min_by(|a, b| a.1.total_cmp(&b.1))?;
+-        if run >= 0.0 {
+-            break;
++            .filter_map(|(i, s)| Some((i, (s.collapse()?, s.run(1)))));
++        match order.as_str() {
++            "negative" => hidden.min_by(|a, b| a.1.1.total_cmp(&b.1.1)),
++            "first" => hidden.min_by_key(|a| a.0),
++            "last" => hidden.max_by(|a, b| a.1.1.total_cmp(&b.1.1)),
++            _ => hidden.min_by(|a, b| a.1.0.total_cmp(&b.1.0).then(a.1.1.total_cmp(&b.1.1))),
++        }
++    } {
++        if std::env::var("DBG").is_ok() {
++            for (k, s) in segments.iter().enumerate() {
++                eprintln!("seg {k} {:?} -> {:?} run0 {} run1 {} col {:?}", s.start[1], s.end[1], s.run(0), s.run(1), s.collapse());
++            }
++            eprintln!("remove {i}");
+         }
+         segments.remove(i);
+         let mut next = i;
+@@ -174,52 +252,37 @@ fn contour(corners: &[Corner]) -> Option<Interior> {
+             }
+             next %= n;
+             let prev = (next + n - 1) % n;
+-            let (p, q) = (&segments[prev], &segments[next]);
+-            let den = p.unit.cross(q.unit);
+-            if den != 0.0 {
+-                let at = p
+-                    .line
+-                    .translated(p.unit * (q.line.delta_from(p.line).cross(q.unit) / den));
+-                segments[prev].end = at;
+-                segments[next].start = at;
+-                break;
+-            }
+-            match parallel(p, q) {
+-                Parallel::Opposed => return None,
+-                Parallel::PreviousHidden => {
++            match meeting(&segments[prev], &segments[next]) {
++                Meeting::At(at) => {
++                    segments[prev].end = at;
++                    segments[next].start = at;
++                    break;
++                }
++                Meeting::Opposed => return None,
++                Meeting::PreviousHidden => {
+                     segments.remove(prev);
+                     if prev < next {
+                         next -= 1;
+                     }
+                 }
+-                Parallel::NextHidden => {
++                Meeting::NextHidden => {
+                     segments.remove(next);
+                 }
+-                Parallel::SameLine => {
+-                    segments[prev].end = segments[next].end;
++                Meeting::SameLine => {
++                    let q = segments[next];
++                    let p = &mut segments[prev];
++                    p.end = q.end;
++                    if p.run(1) < 0.0 {
++                        p.unit = q.unit;
++                        p.anchor = q.anchor;
++                    }
+                     segments.remove(next);
+                     break;
+                 }
+             }
+         }
+     }
+-    let mut outline: Vec<_> = segments.iter().map(|s| s.start).collect();
+-    outline.dedup();
+-    if outline.first() == outline.last() {
+-        outline.pop();
+-    }
+-    while outline.len() >= 3 {
+-        let n = outline.len();
+-        let Some(i) = (0..n).find(|&i| {
+-            let (a, b, c) = (outline[(i + n - 1) % n], outline[i], outline[(i + 1) % n]);
+-            a == b
+-                || (crate::planform::exact_orientation(a, b, c).is_eq()
+-                    && !crate::planform::between(a, c, b))
+-        }) else {
+-            break;
+-        };
+-        outline.remove(i);
+-    }
++    let outline = without_spikes(segments.iter().map(|s| s.start[1]).collect());
+     let origin = *outline.first()?;
+     let mut twice = 0.0;
+     let mut perimeter = 0.0;
+@@ -271,6 +334,7 @@ impl RoomView<'_> {
+                 .and_then(|j| j.corner(e.id(), arriving.id(), &self.data().id))
+             {
+                 Ok(chain) => corners.push(Corner {
++                    vertex: e.from,
+                     chain,
+                     direction: e.to.delta_from(e.from),
+                 }),
+@@ -280,9 +344,18 @@ impl RoomView<'_> {
+         if let Some(errors) = Rejections::from_errors(errors) {
+             return Err(errors);
+         }
+-        contour(&corners)
++        let floor = contour(&corners)
+             .filter(|floor| floor.area.square_millimetres > 0.0)
+-            .ok_or_else(|| no_floor(ElementKind::Room, self.data().id.as_str()).into())
++            .ok_or_else(|| no_floor(ElementKind::Room, self.data().id.as_str()))?;
++        SimplePolygon::new(floor.outline.clone()).map_err(|reason| Rejection {
++            element: ElementKind::Room,
++            id: self.data().id.as_str().into(),
++            reason: match reason {
++                Reason::SelfIntersecting { at } => Reason::FloorSelfIntersecting { at },
++                e => e,
++            },
++        })?;
++        Ok(floor)
+     }
+ }
+ 
+@@ -362,5 +435,12 @@ fn exterior_corner<'a>(
+         incoming.centre_offset(),
+         [next, incoming.id()],
+     )?;
+-    Ok((next, Corner { chain, direction }))
++    Ok((
++        next,
++        Corner {
++            vertex: vertex.data().at,
++            chain,
++            direction,
++        },
++    ))
+ }
+diff --git a/crates/housing/src/planform.rs b/crates/housing/src/planform.rs
+index 10347d019..b8eebc769 100644
+--- a/crates/housing/src/planform.rs
++++ b/crates/housing/src/planform.rs
+@@ -1,6 +1,7 @@
+ use crate::{
+     BoundaryView, ElementKind, Point, Reason, Rejection, Rejections,
+     joint::{Joint, Vector},
++    measure::{SAME_POINT_MM, same_point},
+ };
+ use std::cmp::Ordering;
+ 
+@@ -167,7 +168,7 @@ impl BoundaryView<'_> {
+         let end = Joint::new(self.end())?.end(id)?;
+         let along = self.end().data().at.delta_from(self.start().data().at);
+         Ok(
+-            SimplePolygon::new(ring_without_zero_length_faces(start, end, along)).map_err(
++            SimplePolygon::new(merged(ring_without_zero_length_faces(start, end, along))).map_err(
+                 |reason| Rejection {
+                     element: ElementKind::Wall,
+                     id: id.into(),
+@@ -179,7 +180,15 @@ impl BoundaryView<'_> {
+ }
+ 
+ fn face_runs_backwards(from: Point, to: Point, direction: Vector) -> bool {
+-    to.delta_from(from).dot(direction) < 0.0
++    to.delta_from(from).dot(direction.unit()) < -SAME_POINT_MM
++}
++
++fn merged(mut ring: Vec<Point>) -> Vec<Point> {
++    ring.dedup_by(|b, a| same_point(*a, *b));
++    while ring.len() > 1 && ring.first().zip(ring.last()).is_some_and(|(a, b)| same_point(*a, *b)) {
++        ring.pop();
++    }
++    ring
+ }
+ 
+ fn ring_without_zero_length_faces(start: Vec<Point>, end: Vec<Point>, along: Vector) -> Vec<Point> {
+@@ -199,10 +208,10 @@ fn ring_without_zero_length_faces(start: Vec<Point>, end: Vec<Point>, along: Vec
+     {
+         return ring;
+     }
+-    if start_last == end_first {
++    if same_point(start_last, end_first) {
+         cut_slit(&mut ring, seam);
+     }
+-    if first == last && ring.first() == Some(&first) {
++    if same_point(first, last) && ring.first() == Some(&first) {
+         cut_slit(&mut ring, 0);
+     }
+     ring
+@@ -213,11 +222,13 @@ fn cut_slit(ring: &mut Vec<Point>, mut k: usize) {
+         let n = ring.len();
+         let (prev, next) = ((k + n - 1) % n, (k + 1) % n);
+         let (p, s, q) = (ring[prev], ring[k], ring[next]);
+-        let (removed, kept) = if s == q {
++        let ps = p.delta_from(s);
++        let tip = ps.dot(q.delta_from(s)) > 0.0 && ps.unit().cross(q.delta_from(s)).abs() <= SAME_POINT_MM;
++        let (removed, kept) = if same_point(s, q) {
+             (next, k)
+-        } else if p == s {
++        } else if same_point(p, s) {
+             (prev, k)
+-        } else if exact_orientation(p, s, q).is_eq() && !between(p, q, s) {
++        } else if tip {
+             let near = if p.delta_from(s).length() <= q.delta_from(s).length() {
+                 prev
+             } else {
+diff --git a/crates/housing/tests/acceptance_probe.rs b/crates/housing/tests/acceptance_probe.rs
+new file mode 100644
+index 000000000..ac5fe9790
+--- /dev/null
++++ b/crates/housing/tests/acceptance_probe.rs
+@@ -0,0 +1,94 @@
++#![allow(clippy::unwrap_used)]
++//! Probe: which random rectangle layouts does the 90 degree sweep accept, and which does
++//! "build the house, then House::check" accept?
++mod common;
++use common::layouts::{Xorshift, random_layout};
++use madori_housing::*;
++use std::{collections::BTreeMap, sync::atomic::Ordering};
++
++fn kind(r: &Reason) -> String {
++    format!("{r:?}").split([' ', '{', '(']).next().unwrap_or("").to_owned()
++}
++
++fn build_then_check(input: &RoomLayout) -> Result<House, Vec<String>> {
++    SKIP_SWEEP.store(true, Ordering::Relaxed);
++    let built = House::from_layout(&OperationId::new("job-1:layout"), input);
++    SKIP_SWEEP.store(false, Ordering::Relaxed);
++    let house = built.map_err(|e| vec![format!("layout {e}").chars().take(60).collect()])?;
++    let findings: Vec<_> = house
++        .check()
++        .err()
++        .map(|e| e.as_slice().to_vec())
++        .unwrap_or_default()
++        .into_iter()
++        .filter(|r| !matches!(r.reason, Reason::NoEntrance {} | Reason::Unreachable { .. }))
++        .map(|r| kind(&r.reason))
++        .collect();
++    if findings.is_empty() { Ok(house) } else { Err(findings) }
++}
++
++#[test]
++#[ignore = "probe"]
++fn acceptance_probe() {
++    let thicknesses = [
++        (200., 200.),
++        (200., 120.),
++        (150., 150.),
++        (120., 120.),
++        (100., 200.),
++        (123.4, 123.4),
++        (99.9, 150.3),
++    ];
++    for seed in [0x2545_f491_4f6c_dd1d_u64, 0x1234_5678_9abc_def1, 0x0bad_cafe_dead_beef] {
++        let mut rng = Xorshift(seed);
++        let (mut both, mut sweep_only, mut check_only, mut neither) = (0, 0, 0, 0);
++        let mut check_only_reasons = BTreeMap::<String, usize>::new();
++        let mut sweep_only_reasons = BTreeMap::<String, usize>::new();
++        let mut neither_reasons = BTreeMap::<String, usize>::new();
++        let mut check_only_tiling_bad = 0;
++        let mut shown = 0;
++        for _ in 0..4000 {
++            let input = random_layout(&mut rng, &thicknesses);
++            let sweep = House::from_layout(&OperationId::new("job-1:layout"), &input);
++            let checked = build_then_check(&input);
++            match (&sweep, &checked) {
++                (Ok(_), Ok(_)) => both += 1,
++                (Ok(_), Err(r)) => {
++                    sweep_only += 1;
++                    for k in r {
++                        *sweep_only_reasons.entry(k.clone()).or_default() += 1;
++                    }
++                }
++                (Err(e), Ok(house)) => {
++                    check_only += 1;
++                    let name = match e {
++                        LayoutError::Rejected(r) => kind(&r.as_slice()[0].reason),
++                        LayoutError::Internal(_) => "internal".into(),
++                    };
++                    *check_only_reasons.entry(name).or_default() += 1;
++                    let t = common::tiling(
++                        input.rooms.iter().map(|room| (room.min, room.max)),
++                        input.walls.exterior_thickness / 2.,
++                        house,
++                    );
++                    if !(t.uncovered <= 1e-3 && t.overlap <= 1e-3) {
++                        check_only_tiling_bad += 1;
++                    }
++                    if shown < 2 {
++                        shown += 1;
++                        println!("  check-only example: {e} :: {input:?}");
++                    }
++                }
++                (Err(_), Err(r)) => {
++                    neither += 1;
++                    for k in r {
++                        *neither_reasons.entry(k.clone()).or_default() += 1;
++                    }
++                }
++            }
++        }
++        println!(
++            "seed {seed:x}: both {both} sweep-only {sweep_only} check-only {check_only} (tiling bad {check_only_tiling_bad}) neither {neither}\n  sweep-only reasons {sweep_only_reasons:?}\n  check-only sweep reasons {check_only_reasons:?}\n  neither check reasons {neither_reasons:?}"
++        );
++    }
++}
+diff --git a/crates/housing/tests/convex_oracle.rs b/crates/housing/tests/convex_oracle.rs
+new file mode 100644
+index 000000000..9f54589cc
+--- /dev/null
++++ b/crates/housing/tests/convex_oracle.rs
+@@ -0,0 +1,223 @@
++#![allow(clippy::unwrap_used)]
++//! Probe: single convex rooms with per-wall offsets. With only two walls per vertex every corner is a
++//! rule 2 mitre, so the floor equals the room polygon clipped by every face's inner half-plane.
++use madori_housing::*;
++
++struct Rng(u64);
++impl Rng {
++    fn next(&mut self) -> u64 {
++        self.0 ^= self.0 << 13;
++        self.0 ^= self.0 >> 7;
++        self.0 ^= self.0 << 17;
++        self.0
++    }
++    fn unit(&mut self) -> f64 {
++        (self.next() % 1_000_000) as f64 / 1_000_000.0
++    }
++}
++
++fn shoelace(p: &[(f64, f64)]) -> f64 {
++    let mut a = 0.0;
++    for i in 0..p.len() {
++        let (x0, y0) = p[i];
++        let (x1, y1) = p[(i + 1) % p.len()];
++        a += x0 * y1 - x1 * y0;
++    }
++    a / 2.0
++}
++
++fn clip(poly: &[(f64, f64)], o: (f64, f64), u: (f64, f64)) -> Vec<(f64, f64)> {
++    let side = |p: (f64, f64)| u.0 * (p.1 - o.1) - u.1 * (p.0 - o.0);
++    let mut out = vec![];
++    for i in 0..poly.len() {
++        let (a, b) = (poly[i], poly[(i + 1) % poly.len()]);
++        let (sa, sb) = (side(a), side(b));
++        if sa >= 0.0 {
++            out.push(a);
++        }
++        if (sa >= 0.0) != (sb >= 0.0) {
++            let t = sa / (sa - sb);
++            out.push((a.0 + t * (b.0 - a.0), a.1 + t * (b.1 - a.1)));
++        }
++    }
++    out
++}
++
++fn convex_case(rng: &mut Rng) -> Option<(Vec<(f64, f64)>, Vec<f64>)> {
++    let n = 3 + (rng.next() % 10) as usize;
++    let mut angles: Vec<f64> = (0..n).map(|_| rng.unit() * std::f64::consts::TAU).collect();
++    angles.sort_by(f64::total_cmp);
++    let r = 1500.0 + rng.unit() * 3500.0;
++    let pts: Vec<(f64, f64)> = angles
++        .iter()
++        .map(|a| ((r * a.cos()).round(), (r * a.sin()).round()))
++        .collect();
++    for i in 0..n {
++        let (a, b, c) = (pts[(i + n - 1) % n], pts[i], pts[(i + 1) % n]);
++        let (u, v) = ((b.0 - a.0, b.1 - a.1), (c.0 - b.0, c.1 - b.1));
++        let cross = u.0 * v.1 - u.1 * v.0;
++        let dot = u.0 * v.0 + u.1 * v.1;
++        if cross <= 0.0 || cross.atan2(dot) < 3.5f64.to_radians() {
++            return None;
++        }
++    }
++    let offsets = (0..n).map(|_| 20.0 + rng.unit() * 0.9 * r).collect();
++    Some((pts, offsets))
++}
++
++pub fn house(pts: &[(f64, f64)], offsets: &[f64]) -> House {
++    let floor = StoreyId::new("s");
++    let n = pts.len();
++    let data = HouseData {
++        storeys: vec![Storey {
++            id: floor.clone(),
++            base_elevation: 0.,
++            height: 2400.,
++        }],
++        vertices: pts
++            .iter()
++            .enumerate()
++            .map(|(i, &(x, y))| Vertex {
++                id: VertexId::new(format!("v{i}")),
++                storey: floor.clone(),
++                at: Point { x, y },
++            })
++            .collect(),
++        boundaries: (0..n)
++            .map(|i| Boundary {
++                id: BoundaryId::new(format!("w{i}")),
++                start: VertexId::new(format!("v{i}")),
++                end: VertexId::new(format!("v{}", (i + 1) % n)),
++                wall: Wall {
++                    height: 2400.,
++                    offsets: SideOffsets {
++                        left: offsets[i],
++                        right: 50.,
++                    },
++                },
++            })
++            .collect(),
++        rooms: vec![Room {
++            id: RoomId::new("r"),
++            name: "r".into(),
++            usage: RoomUse::Other,
++            edges: (0..n)
++                .map(|i| Edge {
++                    boundary: BoundaryId::new(format!("w{i}")),
++                    direction: Direction::Forward,
++                })
++                .collect(),
++        }],
++        wall_colors: vec![],
++        objects: vec![],
++        modifiers: vec![],
++        openings: vec![],
++    };
++    House::new(data).unwrap()
++}
++
++#[test]
++#[ignore = "probe"]
++fn convex_oracle() {
++    let mut rng = Rng(0x9e37_79b9_7f4a_7c15);
++    let (mut cases, mut ok, mut empty_ok) = (0, 0, 0);
++    let mut bad = std::collections::BTreeMap::<&str, usize>::new();
++    let mut shown = 0;
++    for _ in 0..20000 {
++        let Some((pts, offsets)) = convex_case(&mut rng) else { continue };
++        cases += 1;
++        let n = pts.len();
++        let mut floor = pts.clone();
++        for i in 0..n {
++            let (a, b) = (pts[i], pts[(i + 1) % n]);
++            let len = (b.0 - a.0).hypot(b.1 - a.1);
++            let u = ((b.0 - a.0) / len, (b.1 - a.1) / len);
++            let o = (a.0 - u.1 * offsets[i], a.1 + u.0 * offsets[i]);
++            floor = clip(&floor, o, u);
++            if floor.len() < 3 {
++                floor.clear();
++                break;
++            }
++        }
++        let expected = if floor.is_empty() { 0.0 } else { shoelace(&floor) };
++        let h = house(&pts, &offsets);
++        let room = h.rooms().next().unwrap();
++        let verdict = match room.interior() {
++            Err(_) if expected < 1.0 => {
++                empty_ok += 1;
++                None
++            }
++            Err(_) => Some("NoFloor but oracle has floor"),
++            Ok(i) if SimplePolygon::new(i.outline().to_vec()).is_err() => Some("self-intersecting outline"),
++            Ok(i) if i.area().matches_square_metres(expected / 1e6) =>
++            {
++                ok += 1;
++                None
++            }
++            Ok(_) => Some("area differs from oracle"),
++        };
++        if let Some(kind) = verdict {
++            *bad.entry(kind).or_default() += 1;
++            if shown < 3 {
++                shown += 1;
++                println!(
++                    "{kind}: pts {pts:?} offsets {offsets:?} expected {expected} got {:?}",
++                    room.interior().map(|i| (i.area(), i.outline().to_vec()))
++                );
++            }
++        }
++    }
++    println!("cases {cases} ok {ok} empty_ok {empty_ok} bad {bad:?}");
++}
++
++fn star_case(rng: &mut Rng) -> (Vec<(f64, f64)>, Vec<f64>) {
++    let n = 4 + (rng.next() % 9) as usize;
++    let mut angles: Vec<f64> = (0..n).map(|_| rng.unit() * std::f64::consts::TAU).collect();
++    angles.sort_by(f64::total_cmp);
++    let pts: Vec<(f64, f64)> = angles
++        .iter()
++        .map(|a| {
++            let r = 1000.0 + rng.unit() * 4000.0;
++            ((r * a.cos()).round(), (r * a.sin()).round())
++        })
++        .collect();
++    let offsets = (0..n).map(|_| 20.0 + rng.unit() * 600.0).collect();
++    (pts, offsets)
++}
++
++#[test]
++#[ignore = "probe"]
++fn star_orders() {
++    let mut rng = Rng(0x5eed_1234_abcd_0001);
++    let order = std::env::var("ORDER").unwrap_or_default();
++    let mut lines = vec![];
++    let (mut ok, mut no_floor, mut crossing) = (0, 0, 0);
++    for _ in 0..20000 {
++        let (pts, offsets) = star_case(&mut rng);
++        let simple = SimplePolygon::new(pts.iter().map(|&(x, y)| Point { x, y }).collect()).is_ok();
++        if !simple {
++            lines.push("skip".to_string());
++            continue;
++        }
++        let h = house(&pts, &offsets);
++        let r = h.rooms().next().unwrap().interior();
++        let valid = h.check().err().is_none_or(|e| e.as_slice().iter().all(|f| matches!(f.reason, Reason::NoEntrance {} | Reason::NotRectangle { .. })));
++        let tag = if valid { "V" } else { "x" };
++        lines.push(tag.to_string() + &match &r {
++            Ok(i) => {
++                ok += 1;
++                format!("{:.3}", i.area().unrounded_square_metres() * 1e6)
++            }
++            Err(e) => {
++                if matches!(e.as_slice()[0].reason, Reason::FloorSelfIntersecting { .. }) {
++                    crossing += 1;
++                } else {
++                    no_floor += 1;
++                }
++                format!("{:?}", e.as_slice()[0].reason).chars().take(12).collect::<String>()
++            }
++        });
++    }
++    std::fs::write(format!("/private/tmp/claude-501/-Users-matsukokuumahikari--t3-worktrees-instant-madori-t3-347daf4c-6136477725593502/3d868869-0290-4d53-84b4-34e9908038a4/scratchpad/star-{order}.txt"), lines.join("\n")).unwrap();
++    println!("order {order}: ok {ok} no_floor {no_floor} self-intersecting {crossing}");
++}
+diff --git a/crates/housing/tests/nofloor45.rs b/crates/housing/tests/nofloor45.rs
+new file mode 100644
+index 000000000..478b3377b
+--- /dev/null
++++ b/crates/housing/tests/nofloor45.rs
+@@ -0,0 +1,36 @@
++#![allow(clippy::unwrap_used)]
++mod common;
++use common::layouts::layout;
++use madori_housing::*;
++
++#[test]
++#[ignore = "probe"]
++fn nofloor45() {
++    let mut input = layout(&[]);
++    input.walls.exterior_thickness = 100.0;
++    input.walls.interior_thickness = 200.0;
++    let rooms = [(0.1, 0.1, 4300.1, 650.1), (0.1, 650.1, 4300.1, 1250.1), (0.1, 1250.1, 4300.1, 1900.1), (0.1, 1900.1, 4300.1, 6000.1), (4300.1, -199.9, 5200.1, 6050.1), (5200.1, 0.1, 6150.1, 2800.1), (5200.1, 2800.1, 6150.1, 6000.1)];
++    input.rooms = rooms
++        .iter()
++        .enumerate()
++        .map(|(i, &(a, b, c, d))| LayoutRoom {
++            name: format!("r{i}"),
++            usage: RoomUse::Other,
++            min: Point { x: a, y: b },
++            max: Point { x: c, y: d },
++        })
++        .collect();
++    let house = House::from_layout(&OperationId::new("job-1:layout"), &input).unwrap();
++    let (sin, cos) = 30f64.to_radians().sin_cos();
++    let mut data = house.data().clone();
++    for v in &mut data.vertices {
++        let Point { x, y } = v.at;
++        v.at = Point {
++            x: x * cos - y * sin,
++            y: x * sin + y * cos,
++        };
++    }
++    let house = House::new(data).unwrap();
++    let r = house.rooms().nth(4).unwrap();
++    println!("RESULT {:?}", r.interior().err());
++}
+diff --git a/crates/housing/tests/polygon_layout_probe.rs b/crates/housing/tests/polygon_layout_probe.rs
+new file mode 100644
+index 000000000..b41785cd6
+--- /dev/null
++++ b/crates/housing/tests/polygon_layout_probe.rs
+@@ -0,0 +1,349 @@
++#![allow(clippy::unwrap_used)]
++//! Probe: a polygon-room layout builder (exact splitting on integer input) followed by House::check.
++mod common;
++use common::layouts::{Xorshift, random_layout};
++use madori_housing::*;
++use std::collections::BTreeMap;
++
++fn accepted(rooms: &[Vec<P>], ext: f64, int: f64) -> Result<Vec<f64>, String> {
++    let house = House::new(build(rooms, ext, int)?).map_err(|e| format!("new {e}"))?;
++    let findings: Vec<_> = house
++        .check()
++        .err()
++        .map(|e| e.as_slice().to_vec())
++        .unwrap_or_default()
++        .into_iter()
++        .filter(|r| {
++            !matches!(
++                r.reason,
++                Reason::NoEntrance {} | Reason::NotRectangle { .. } | Reason::Unreachable { .. }
++            )
++        })
++        .map(|r| format!("{:?}", r.reason).split([' ', '{']).next().unwrap_or("").to_owned())
++        .collect();
++    if !findings.is_empty() {
++        return Err(findings.join(","));
++    }
++    Ok(house
++        .rooms()
++        .map(|r| r.interior().unwrap().area().unrounded_square_metres())
++        .collect())
++}
++
++/// (4x - 3y, 3x + 4y) turns by atan2(3, 4) and scales by 5 exactly in integers, so every adjacency stays exact.
++#[test]
++#[ignore = "probe"]
++fn exact_rotation_of_layouts() {
++    let thicknesses = [(200., 200.), (200., 120.), (150., 150.), (120., 120.), (100., 200.)];
++    let mut rng = Xorshift(0x2545_f491_4f6c_dd1d);
++    let (mut integer, mut both, mut neither, mut differ, mut area_differ) = (0, 0, 0, 0, 0);
++    let mut kinds = BTreeMap::<String, usize>::new();
++    for _ in 0..8000 {
++        let input = random_layout(&mut rng, &thicknesses);
++        let corners: Option<Vec<[P; 2]>> = input
++            .rooms
++            .iter()
++            .map(|r| {
++                let int = |v: f64| (v.fract() == 0.0).then_some(v as i64);
++                Some([(int(r.min.x)?, int(r.min.y)?), (int(r.max.x)?, int(r.max.y)?)])
++            })
++            .collect();
++        let Some(corners) = corners else { continue };
++        integer += 1;
++        let ring = |[(a, b), (c, d)]: [P; 2], f: &dyn Fn(P) -> P| {
++            vec![f((a, b)), f((c, b)), f((c, d)), f((a, d))]
++        };
++        let scaled: Vec<_> = corners.iter().map(|&c| ring(c, &|(x, y)| (5 * x, 5 * y))).collect();
++        let turned: Vec<_> = corners
++            .iter()
++            .map(|&c| ring(c, &|(x, y)| (4 * x - 3 * y, 3 * x + 4 * y)))
++            .collect();
++        let (ext, int) = (input.walls.exterior_thickness, input.walls.interior_thickness);
++        match (accepted(&scaled, ext, int), accepted(&turned, ext, int)) {
++            (Ok(a), Ok(b)) => {
++                both += 1;
++                if a.iter().zip(&b).any(|(x, y)| (x - y).abs() > 1e-6) {
++                    area_differ += 1;
++                }
++            }
++            (Err(e), Err(_)) => {
++                neither += 1;
++                *kinds.entry(e).or_default() += 1;
++            }
++            (a, b) => {
++                differ += 1;
++                if differ <= 3 {
++                    println!("  differ: scaled {:?} turned {:?}", a.err(), b.err());
++                }
++            }
++        }
++    }
++    println!(
++        "integer layouts {integer}: both accepted {both} (area differ {area_differ}) both rejected {neither} differ {differ}"
++    );
++    println!("  rejection kinds (scaled) {kinds:?}");
++}
++
++type P = (i64, i64);
++
++fn on_open_segment(a: P, b: P, p: P) -> bool {
++    let cross = (b.0 - a.0) * (p.1 - a.1) - (b.1 - a.1) * (p.0 - a.0);
++    let dot = (p.0 - a.0) * (b.0 - a.0) + (p.1 - a.1) * (b.1 - a.1);
++    let len2 = (b.0 - a.0).pow(2) + (b.1 - a.1).pow(2);
++    cross == 0 && dot > 0 && dot < len2
++}
++
++fn signed_area(ring: &[P]) -> i64 {
++    (0..ring.len())
++        .map(|i| {
++            let (a, b) = (ring[i], ring[(i + 1) % ring.len()]);
++            a.0 * b.1 - b.0 * a.1
++        })
++        .sum()
++}
++
++/// Splits every room edge at every corner lying exactly on it, keys pieces by their two end points, and gives the
++/// left of each new boundary to the earlier room. Rooms on the same side of one piece overlap.
++pub fn build(rooms: &[Vec<P>], ext: f64, int: f64) -> Result<HouseData, String> {
++    let rings: Vec<Vec<P>> = rooms
++        .iter()
++        .map(|r| {
++            let mut r = r.clone();
++            if signed_area(&r) < 0 {
++                r[1..].reverse();
++            }
++            r
++        })
++        .collect();
++    let corners: Vec<P> = {
++        let mut c: Vec<P> = rings.iter().flatten().copied().collect();
++        c.sort_unstable();
++        c.dedup();
++        c
++    };
++    let mut pieces: Vec<Vec<(P, P)>> = vec![];
++    let mut sides = BTreeMap::<(P, P), [Option<usize>; 2]>::new();
++    for (i, ring) in rings.iter().enumerate() {
++        let mut room = vec![];
++        for k in 0..ring.len() {
++            let (a, b) = (ring[k], ring[(k + 1) % ring.len()]);
++            let mut cuts: Vec<P> = corners.iter().copied().filter(|&p| on_open_segment(a, b, p)).collect();
++            cuts.sort_by_key(|p| (p.0 - a.0) * (b.0 - a.0) + (p.1 - a.1) * (b.1 - a.1));
++            let mut points = vec![a];
++            points.extend(cuts);
++            points.push(b);
++            for w in points.windows(2) {
++                let (from, to) = (w[0], w[1]);
++                let (key, side) = if from < to { ((from, to), 0) } else { ((to, from), 1) };
++                let slot = &mut sides.entry(key).or_default()[side];
++                if let Some(other) = slot {
++                    return Err(format!("Overlap rooms {} and {}", *other + 1, i + 1));
++                }
++                *slot = Some(i);
++                room.push((from, to));
++            }
++        }
++        pieces.push(room);
++    }
++    let storey = StoreyId::new("s1");
++    let mut data = HouseData {
++        storeys: vec![Storey {
++            id: storey.clone(),
++            base_elevation: 0.,
++            height: 2400.,
++        }],
++        rooms: vec![],
++        boundaries: vec![],
++        vertices: vec![],
++        wall_colors: vec![],
++        objects: vec![],
++        modifiers: vec![],
++        openings: vec![],
++    };
++    let mut vertices = BTreeMap::<P, VertexId>::new();
++    let mut seen = BTreeMap::<(P, P), BoundaryId>::new();
++    for (i, room) in pieces.iter().enumerate() {
++        let mut edges = vec![];
++        for &(from, to) in room {
++            let key = if from < to { (from, to) } else { (to, from) };
++            if let Some(id) = seen.get(&key) {
++                edges.push(Edge {
++                    boundary: id.clone(),
++                    direction: Direction::Reverse,
++                });
++                continue;
++            }
++            let mut intern = |p: P| {
++                let n = vertices.len() + 1;
++                vertices
++                    .entry(p)
++                    .or_insert_with(|| {
++                        let id = VertexId::new(format!("v{n}"));
++                        data.vertices.push(Vertex {
++                            id: id.clone(),
++                            storey: storey.clone(),
++                            at: Point {
++                                x: p.0 as f64,
++                                y: p.1 as f64,
++                            },
++                        });
++                        id
++                    })
++                    .clone()
++            };
++            let (start, end) = (intern(from), intern(to));
++            let both = sides[&key].iter().all(Option::is_some);
++            let half = if both { int } else { ext } / 2.;
++            let id = BoundaryId::new(format!("w{}", data.boundaries.len() + 1));
++            data.boundaries.push(Boundary {
++                id: id.clone(),
++                start,
++                end,
++                wall: Wall {
++                    height: 2400.,
++                    offsets: SideOffsets {
++                        left: half,
++                        right: half,
++                    },
++                },
++            });
++            seen.insert(key, id.clone());
++            edges.push(Edge {
++                boundary: id,
++                direction: Direction::Forward,
++            });
++        }
++        data.rooms.push(Room {
++            id: RoomId::new(format!("r{}", i + 1)),
++            name: format!("r{}", i + 1),
++            usage: RoomUse::Other,
++            edges,
++        });
++    }
++    Ok(data)
++}
++
++fn report(name: &str, rooms: &[Vec<P>], ext: f64, int: f64, expected: &[Option<f64>]) {
++    let data = match build(rooms, ext, int) {
++        Ok(d) => d,
++        Err(e) => {
++            println!("{name}: layout rejected: {e}");
++            return;
++        }
++    };
++    let house = match House::new(data) {
++        Ok(h) => h,
++        Err(e) => {
++            println!("{name}: House::new failed {e}");
++            return;
++        }
++    };
++    let findings: Vec<_> = house
++        .check()
++        .err()
++        .map(|e| e.as_slice().to_vec())
++        .unwrap_or_default()
++        .into_iter()
++        .filter(|r| !matches!(r.reason, Reason::NoEntrance {} | Reason::NotRectangle { .. }))
++        .map(|r| format!("{} {:?}", r.id, r.reason))
++        .collect();
++    println!("{name}: findings {findings:?}");
++    for (room, want) in house.rooms().zip(expected) {
++        match (room.interior(), want) {
++            (Ok(i), Some(m2)) => println!(
++                "  {} area {:.6} m2 expected {m2:.6} match {} outline {:?}",
++                room.data().id.as_str(),
++                i.area().unrounded_square_metres(),
++                i.area().matches_square_metres(*m2),
++                i.outline().iter().map(|p| (p.x, p.y)).collect::<Vec<_>>()
++            ),
++            (r, _) => println!("  {} {:?}", room.data().id.as_str(), r.map(|i| i.area()).err()),
++        }
++    }
++}
++
++#[test]
++#[ignore = "probe"]
++fn polygon_layout_probe() {
++    let s2 = std::f64::consts::SQRT_2;
++    let trapezoid = 2800.0 * ((5900.0 - 100.0 * s2 - 100.0) + (3100.0 - 100.0 * s2 - 100.0)) / 2.0 / 1e6;
++    report(
++        "45-degree trapezoid",
++        &[vec![(0, 0), (6000, 0), (3000, 3000), (0, 3000)]],
++        200.,
++        120.,
++        &[Some(trapezoid)],
++    );
++    report(
++        "L alone",
++        &[vec![(0, 0), (6000, 0), (6000, 3000), (3000, 3000), (3000, 5000), (0, 5000)]],
++        200.,
++        120.,
++        &[Some(21.84)],
++    );
++    report(
++        "L with notch room",
++        &[
++            vec![(0, 0), (6000, 0), (6000, 3000), (3000, 3000), (3000, 5000), (0, 5000)],
++            vec![(3000, 3000), (6000, 3000), (6000, 5000), (3000, 5000)],
++        ],
++        200.,
++        120.,
++        &[Some(22.0384), Some(2.94 * 1.94)],
++    );
++    report(
++        "U alone (collinear top edges)",
++        &[vec![(0, 0), (7000, 0), (7000, 5000), (5000, 5000), (5000, 2000), (2000, 2000), (2000, 5000), (0, 5000)]],
++        200.,
++        120.,
++        &[Some(23.04)],
++    );
++    let (a, p) = (6e6_f64, 6000.0 + 2000.0 + 6000f64.hypot(2000.0));
++    let r = 2.0 * a / p;
++    report(
++        "18.43-degree triangle",
++        &[vec![(0, 0), (6000, 0), (0, 2000)]],
++        200.,
++        120.,
++        &[Some(a * ((r - 100.0) / r).powi(2) / 1e6)],
++    );
++    report(
++        "rooms on both sides of a 45-degree wall",
++        &[
++            vec![(0, 0), (4000, 0), (4000, 1000), (1000, 4000), (0, 4000)],
++            vec![(4000, 1000), (4000, 4000), (1000, 4000)],
++        ],
++        200.,
++        120.,
++        &[None, None],
++    );
++    report(
++        "T on a 45-degree wall",
++        &[
++            vec![(0, 0), (6000, 0), (6000, 2000), (2000, 6000), (0, 6000)],
++            vec![(6000, 2000), (6000, 6000), (4000, 6000), (4000, 4000)],
++            vec![(4000, 4000), (4000, 6000), (2000, 6000)],
++        ],
++        200.,
++        120.,
++        &[None, None, None],
++    );
++    report(
++        "Y node (three rooms, no straight pair)",
++        &[
++            vec![(0, 0), (3000, -1500), (3000, 3000), (0, 3000)],
++            vec![(0, 0), (0, 3000), (-3000, 3000), (-3000, -1500)],
++            vec![(0, 0), (-3000, -1500), (-3000, -4000), (3000, -4000), (3000, -1500)],
++        ],
++        200.,
++        120.,
++        &[None, None, None],
++    );
++    report(
++        "crossing slanted rooms",
++        &[vec![(0, 0), (4000, 0), (4000, 3000), (0, 3000)], vec![(3000, 1000), (6000, 4000), (2000, 5000)]],
++        200.,
++        120.,
++        &[None, None],
++    );
++}
+diff --git a/crates/housing/tests/rot_dump.rs b/crates/housing/tests/rot_dump.rs
+new file mode 100644
+index 000000000..1a591007c
+--- /dev/null
++++ b/crates/housing/tests/rot_dump.rs
+@@ -0,0 +1,84 @@
++#![allow(clippy::unwrap_used)]
++mod common;
++use common::layouts::{Xorshift, random_layout};
++use madori_housing::*;
++
++fn rotated(house: &House, radians: f64) -> House {
++    let (sin, cos) = radians.sin_cos();
++    let mut data = house.data().clone();
++    for v in &mut data.vertices {
++        let Point { x, y } = v.at;
++        v.at = Point {
++            x: x * cos - y * sin,
++            y: x * sin + y * cos,
++        };
++    }
++    House::new(data).unwrap()
++}
++
++#[test]
++#[ignore = "probe"]
++fn rot_dump() {
++    let thicknesses = [
++        (200., 200.),
++        (200., 120.),
++        (150., 150.),
++        (120., 120.),
++        (100., 200.),
++        (123.4, 123.4),
++        (99.9, 150.3),
++    ];
++    let angle = std::env::var("ANG").map_or(30.0_f64, |a| a.parse::<f64>().unwrap()).to_radians();
++    let (s, c) = (-angle).sin_cos();
++    let back = |p: &Point| (p.x * c - p.y * s, p.x * s + p.y * c);
++    let mut rng = Xorshift(0x2545_f491_4f6c_dd1d);
++    let (mut pf, mut fl) = (0, 0);
++    for _ in 0..4000 {
++        let input = random_layout(&mut rng, &thicknesses);
++        let Ok(orig) = House::from_layout(&OperationId::new("job-1:layout"), &input) else {
++            continue;
++        };
++        let house = rotated(&orig, angle);
++        for wall in house.boundaries() {
++            if let Err(e) = wall.planform() {
++                pf += 1;
++                if pf <= 4 {
++                    let id = wall.data().id.as_str();
++                    let o = orig.boundaries().find(|w| w.data().id.as_str() == id).unwrap();
++                    println!(
++                        "PLANFORM {id} {:?}\n  unrotated {:?}\n  joints {} {}",
++                        e.as_slice()[0].reason,
++                        o.planform().unwrap().points(),
++                        o.start().boundaries().count(),
++                        o.end().boundaries().count()
++                    );
++                }
++            }
++        }
++        for room in house.rooms() {
++            if let Err(e) = room.interior() {
++                fl += 1;
++                if fl <= 3 {
++                    let id = room.data().id.as_str();
++                    let o = orig.rooms().find(|r| r.data().id.as_str() == id).unwrap();
++                    println!("NOFLOOR {id} {:?}\n  unrotated {:?}\n  input {input:?}", e.as_slice()[0].reason, o.interior().map(|i| i.outline().to_vec()));
++                }
++            }
++            if let Ok(i) = room.interior()
++                && SimplePolygon::new(i.outline().to_vec()).is_err()
++            {
++                fl += 1;
++                if fl <= 4 {
++                    let id = room.data().id.as_str();
++                    let o = orig.rooms().find(|r| r.data().id.as_str() == id).unwrap();
++                    let un: Vec<_> = i.outline().iter().map(back).collect();
++                    println!(
++                        "FLOOR {id}\n  rotated-back {un:?}\n  unrotated {:?}",
++                        o.interior().unwrap().outline()
++                    );
++                }
++            }
++        }
++    }
++    println!("pf {pf} fl {fl}");
++}
+diff --git a/crates/housing/tests/rotation_fidelity.rs b/crates/housing/tests/rotation_fidelity.rs
+new file mode 100644
+index 000000000..a1b7c1ac1
+--- /dev/null
++++ b/crates/housing/tests/rotation_fidelity.rs
+@@ -0,0 +1,102 @@
++#![allow(clippy::unwrap_used)]
++mod common;
++use common::layouts::{Xorshift, random_layout};
++use madori_housing::*;
++
++fn rotate(p: Point, (sin, cos): (f64, f64)) -> Point {
++    Point {
++        x: p.x * cos - p.y * sin,
++        y: p.x * sin + p.y * cos,
++    }
++}
++
++fn distance(p: Point, a: Point, b: Point) -> f64 {
++    let (dx, dy) = (b.x - a.x, b.y - a.y);
++    let len2 = dx * dx + dy * dy;
++    let t = if len2 == 0.0 { 0.0 } else { (((p.x - a.x) * dx + (p.y - a.y) * dy) / len2).clamp(0.0, 1.0) };
++    (p.x - a.x - t * dx).hypot(p.y - a.y - t * dy)
++}
++
++/// Plan 3.4: two results match when every point of one lies within the tolerance of the other.
++fn close(a: &[Point], b: &[Point]) -> bool {
++    let near = |p: &Point, q: &[Point]| {
++        (0..q.len()).any(|i| distance(*p, q[i], q[(i + 1) % q.len()]) <= LENGTH_TOLERANCE_MM)
++    };
++    a.iter().all(|p| near(p, b)) && b.iter().all(|p| near(p, a))
++}
++
++#[test]
++#[ignore = "probe"]
++fn rotation_fidelity() {
++    let thicknesses = [
++        (200., 200.),
++        (200., 120.),
++        (150., 150.),
++        (120., 120.),
++        (100., 200.),
++        (123.4, 123.4),
++        (99.9, 150.3),
++    ];
++    for degrees in [30.0_f64, 3f64.atan2(4.).to_degrees(), 1.0, 45.0, 89.0, 137.0] {
++        let turn = degrees.to_radians().sin_cos();
++        let mut rng = Xorshift(0x2545_f491_4f6c_dd1d);
++        let (mut rooms, mut walls, mut bad_area, mut bad_outline, mut bad_wall, mut failed) =
++            (0, 0, 0, 0, 0, 0);
++        for _ in 0..4000 {
++            let input = random_layout(&mut rng, &thicknesses);
++            let Ok(house) = House::from_layout(&OperationId::new("job-1:layout"), &input) else {
++                continue;
++            };
++            let mut data = house.data().clone();
++            for v in &mut data.vertices {
++                v.at = rotate(v.at, turn);
++            }
++            let turned = House::new(data).unwrap();
++            for (a, b) in house.rooms().zip(turned.rooms()) {
++                rooms += 1;
++                let (Ok(a), Ok(b)) = (a.interior(), b.interior()) else {
++                    failed += 1;
++                    continue;
++                };
++                if !b.area().matches_square_metres(a.area().unrounded_square_metres()) {
++                    bad_area += 1;
++                }
++                let a: Vec<_> = a.outline().iter().map(|p| rotate(*p, turn)).collect();
++                if !close(&a, b.outline()) {
++                    bad_outline += 1;
++                    if bad_outline <= 2 {
++                        println!("  OUT {a:?}\n   vs {:?}", b.outline());
++                    }
++                }
++            }
++            for (a, b) in house.boundaries().zip(turned.boundaries()) {
++                walls += 1;
++                let (Ok(a), Ok(b)) = (a.planform(), b.planform()) else {
++                    failed += 1;
++                    continue;
++                };
++                let a: Vec<_> = a.points().iter().map(|p| rotate(*p, turn)).collect();
++                if !close(&a, b.points()) {
++                    bad_wall += 1;
++                    if bad_wall <= 2 {
++                        println!("  WALL {a:?}\n   vs {:?}", b.points());
++                    }
++                }
++            }
++            let findings: Vec<_> = turned
++                .check()
++                .unwrap_err()
++                .as_slice()
++                .iter()
++                .filter(|r| !matches!(r.reason, Reason::NoEntrance {} | Reason::NotRectangle { .. }))
++                .cloned()
++                .collect();
++            if !findings.is_empty() {
++                println!("  {degrees}: {findings:?}");
++            }
++        }
++        println!(
++            "{degrees:.4}deg: rooms {rooms} walls {walls} failed {failed} area mismatch {bad_area} outline mismatch {bad_outline} planform mismatch {bad_wall}"
++        );
++    }
++}
+diff --git a/crates/housing/tests/rotation_probe.rs b/crates/housing/tests/rotation_probe.rs
+new file mode 100644
+index 000000000..e8c34be05
+--- /dev/null
++++ b/crates/housing/tests/rotation_probe.rs
+@@ -0,0 +1,97 @@
++#![allow(clippy::unwrap_used)]
++mod common;
++use common::layouts::{Xorshift, random_layout};
++use madori_housing::*;
++
++fn rotated(house: &House, radians: f64) -> House {
++    let (sin, cos) = radians.sin_cos();
++    let mut data = house.data().clone();
++    for v in &mut data.vertices {
++        let Point { x, y } = v.at;
++        v.at = Point {
++            x: x * cos - y * sin,
++            y: x * sin + y * cos,
++        };
++    }
++    House::new(data).unwrap()
++}
++
++#[test]
++#[ignore = "probe"]
++fn rotation_probe() {
++    let thicknesses = [
++        (200., 200.),
++        (200., 120.),
++        (150., 150.),
++        (120., 120.),
++        (100., 200.),
++        (123.4, 123.4),
++        (99.9, 150.3),
++    ];
++    for (label, angle) in [
++        ("30deg", 30f64.to_radians()),
++        ("atan2(3,4)", 3f64.atan2(4.)),
++        ("1deg", 1f64.to_radians()),
++        ("45deg", 45f64.to_radians()),
++    ] {
++        let mut rng = Xorshift(0x2545_f491_4f6c_dd1d);
++        let (mut accepted, mut planform, mut interior, mut findings) = (0, 0, 0, 0);
++        let mut kinds = std::collections::BTreeMap::<String, usize>::new();
++        let mut dumped = std::collections::BTreeSet::<String>::new();
++        for _ in 0..4000 {
++            let input = random_layout(&mut rng, &thicknesses);
++            let Ok(house) = House::from_layout(&OperationId::new("job-1:layout"), &input) else {
++                continue;
++            };
++            accepted += 1;
++            let house = rotated(&house, angle);
++            let mut bad = false;
++            for wall in house.boundaries() {
++                if let Err(e) = wall.planform() {
++                    bad = true;
++                    for r in e.as_slice() {
++                        *kinds.entry(format!("planform {:?}", r.reason).chars().take(40).collect()).or_default() += 1;
++                    }
++                }
++            }
++            if bad {
++                planform += 1;
++            }
++            if house.rooms().any(|r| r.interior().is_err()) {
++                interior += 1;
++            }
++            if std::env::var("PROBE_DUMP").is_ok() && label == "30deg" {
++                let errs = house.check().unwrap_err();
++                for r in errs.as_slice() {
++                    if matches!(r.reason, Reason::FloorSelfIntersecting { .. } | Reason::SelfIntersecting { .. }) {
++                        let key = format!("{:?}", std::mem::discriminant(&r.reason));
++                        if dumped.insert(key) {
++                            println!("DUMP {:?} {} {:?}\nINPUT {:?}", r.element, r.id, r.reason, input);
++                            if r.element == ElementKind::Room {
++                                let room = house.rooms().find(|x| x.data().id.as_str() == r.id).unwrap();
++                                println!("OUTLINE {:?}", room.interior().map(|i| i.outline().to_vec()));
++                            }
++                        }
++                    }
++                }
++            }
++            let errors = house.check().unwrap_err();
++            let extra: Vec<_> = errors
++                .as_slice()
++                .iter()
++                .filter(|r| r.reason != Reason::NoEntrance {})
++                .collect();
++            if !extra.is_empty() {
++                findings += 1;
++                for r in extra {
++                    let name = format!("{:?}", r.reason);
++                    let name = name.split([' ', '{', '(']).next().unwrap_or("").to_owned();
++                    *kinds.entry(format!("check {name}")).or_default() += 1;
++                }
++            }
++        }
++        println!(
++            "{label}: accepted {accepted}, layouts with planform errors {planform}, interior errors {interior}, extra check findings {findings}, kinds {kinds:?}"
++        );
++    }
++}
+diff --git a/crates/housing/tests/sweep_cases_probe.rs b/crates/housing/tests/sweep_cases_probe.rs
+new file mode 100644
+index 000000000..9d8d64fac
+--- /dev/null
++++ b/crates/housing/tests/sweep_cases_probe.rs
+@@ -0,0 +1,75 @@
++#![allow(clippy::unwrap_used)]
++//! Probe: what House::check reports for the layouts the sweep tests pin as NarrowGap / PinchedCorner.
++mod common;
++use common::layouts::layout;
++use madori_housing::*;
++use std::{collections::BTreeSet, sync::atomic::Ordering};
++
++fn rooms_of(house: &House, r: &Rejection) -> BTreeSet<String> {
++    let mut ids = BTreeSet::new();
++    let walls = |ids: &mut BTreeSet<String>, wall: &str| {
++        for room in house.rooms() {
++            if room.data().edges.iter().any(|e| e.boundary.as_str() == wall) {
++                ids.insert(room.data().id.as_str().rsplit(':').next().unwrap().to_owned());
++            }
++        }
++    };
++    match r.element {
++        ElementKind::Room => {
++            ids.insert(r.id.rsplit(':').next().unwrap().to_owned());
++        }
++        ElementKind::Wall => walls(&mut ids, &r.id),
++        ElementKind::Vertex => {
++            for b in house.boundaries() {
++                if b.data().start.as_str() == r.id || b.data().end.as_str() == r.id {
++                    walls(&mut ids, b.data().id.as_str());
++                }
++            }
++        }
++        _ => {}
++    }
++    if let Reason::OverlapsWall { other, .. } = &r.reason {
++        walls(&mut ids, other);
++    }
++    ids
++}
++
++fn show(name: &str, input: &RoomLayout) {
++    let sweep = House::from_layout(&OperationId::new("job-1:layout"), input).err();
++    SKIP_SWEEP.store(true, Ordering::Relaxed);
++    let house = House::from_layout(&OperationId::new("job-1:layout"), input).unwrap();
++    SKIP_SWEEP.store(false, Ordering::Relaxed);
++    let findings: Vec<_> = house
++        .check()
++        .err()
++        .map(|e| e.as_slice().to_vec())
++        .unwrap_or_default()
++        .into_iter()
++        .filter(|r| !matches!(r.reason, Reason::NoEntrance {}))
++        .map(|r| {
++            let reason = format!("{:?}", r.reason);
++            format!("{:?} {}", rooms_of(&house, &r), reason.chars().take(110).collect::<String>())
++        })
++        .collect();
++    println!("{name}\n  sweep: {}\n  check: {findings:?}", sweep.map_or("accepted".into(), |e| e.to_string()));
++}
++
++#[test]
++#[ignore = "probe"]
++fn sweep_cases_probe() {
++    for second in [(4005, 0, 8000, 4000), (4000, 3950, 8000, 8000), (4150, 4150, 8000, 8000)] {
++        show(&format!("facing walls {second:?}"), &layout(&[(0, 0, 4000, 4000), second]));
++    }
++    show("pinched corner", &layout(&[(0, 0, 4000, 4000), (4000, 4000, 8000, 8000)]));
++    for top in [6170, 6209] {
++        let mut input = layout(&[(0, 3550, 1100, top), (1300, 3550, 7200, 6150), (1100, 6150, 7200, 7000)]);
++        input.walls.exterior_thickness = 120.0;
++        input.walls.interior_thickness = 240.0;
++        show(&format!("staggered {top}"), &input);
++    }
++    show("setback", &layout(&[(-1000, 0, 0, 1000), (0, 10, 1000, 1020)]));
++    show(
++        "far wall covering the foot",
++        &layout(&[(0, 0, 3000, 1000), (0, 1000, 1500, 2000), (1560, 1000, 3000, 2000), (0, 2000, 3000, 3000)]),
++    );
++}
