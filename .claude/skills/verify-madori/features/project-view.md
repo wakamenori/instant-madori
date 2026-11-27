@@ -98,7 +98,7 @@ Preconditions:
 - **保留を解く。** `curl -sS -o "$D/cancel.json" -w '%{http_code}\n' -X POST "$API/patterns/$PAT/queue/cancel" -H "$J" -H "$O" -d "{\"requestId\":\"$(uuidgen)\",\"heldBy\":\"$A\"}"`。`200`。`st` の `running` が `null`、`queued` が `[]`、`hold` が `null`。片付けの前に、必ずこの状態にする。
 - **起動し直して開く。** 片付けてから起動し直し、起動の確認で新しい `WEB_PORT` を得る。`preview_navigate` で同じタブを `target: { kind: "environment-port", port: <新しい WEB_PORT>, path: "/projects/<PID>" }` に開く。前と同じ案件名、パターン名、日時、案が出る。`preview_evaluate` で `Object.keys(localStorage)` が `[]` で、画面がブラウザに保存した値を使っていないことも確かめる。
 - **戻る・進む。** `preview_act` の `click` で `locator: 'role=link[name="案件一覧"]'` を押すと、見出しが `案件一覧` になる。`preview_evaluate` で `history.back()` と `history.forward()` を順に実行し、それぞれ見出しが `新しい案件` と `案件一覧` に戻ることを確かめる。
-- **回す。** `preview_act` の `click` で `locator: 'role=button[name="3D"]'` を押す。開き直すと `間取り図` が選ばれているので、3D の手順の前には毎回押す。案が描かれている状態で、`preview_snapshot` に `save: true` を付けて撮り、`$D/before-rotate.png` に写す。`preview_act` の `drag` で、`source` に `role=img[name="住宅モデル"]`、`target` に `role=heading[name="パターン1"]` を渡す。撮り直して `$D/rotated.png` に写す。`shasum -a 256` が `before-rotate.png` と違い、絵の中でモデルの向きが変わっている。
+- **回す。** `preview_act` の `click` で `locator: 'role=button[name="3D"]'` を押す。開き直すと `間取り図` が選ばれているので、3D の手順の前には毎回押す。案が描かれている状態で、`preview_snapshot` に `save: true` を付けて撮り、`$D/before-rotate.png` に写す。`preview_act` の `drag` で、`source` に `role=img[name="住宅モデル"]`、`target` に `role=heading[name="新しい案件"]` を渡す。撮り直して `$D/rotated.png` に写す。`shasum -a 256` が `before-rotate.png` と違い、絵の中でモデルの向きが変わっている。
 - **拡大する。** `preview_evaluate` で、キャンバスの中央に `wheel` を送る。返り値の `defaultPrevented` が `true` なら、ビューアが受け取っている。撮り直して `$D/zoomed.png` に写す。`rotated.png` と比べて、モデルが大きく写っている。
 
   <!-- prettier-ignore -->
