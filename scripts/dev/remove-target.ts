@@ -1,5 +1,6 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { closeSync, lstatSync, readdirSync, realpathSync, rmSync } from "node:fs";
+import { userInfo } from "node:os";
 import { basename, join, relative } from "node:path";
 import { z } from "zod";
 import { freeBytesOnThisMac, tryLock } from "../shared/docker-slots.ts";
@@ -80,13 +81,15 @@ function psFields(column: "comm" | "args", selection: string[]) {
 }
 
 function currentHolders(root: string) {
-  const nodes = psFields("comm", ["-A"]).filter(
+  const nodes = psFields("comm", ["-U", String(userInfo().uid)]).filter(
     ({ pid, field }) => pid !== process.pid && basename(field) === "node",
   );
   if (!nodes.length) return [];
   const ids = nodes.map(({ pid }) => pid).join(",");
   const args = new Map(psFields("args", ["-p", ids]).map(({ pid, field }) => [pid, field]));
-  const result = spawnSync("lsof", ["-a", "-d", "cwd", "-p", ids, "-Fpn"], { encoding: "utf8" });
+  const result = spawnSync("lsof", ["-w", "-a", "-d", "cwd", "-p", ids, "-Fpn"], {
+    encoding: "utf8",
+  });
   // lsof also returns 1 when a selected process exits during enumeration.
   if (result.error || (result.status !== 0 && result.status !== 1) || result.stderr.trim()) {
     throw new Error("Could not inspect node working directories");
