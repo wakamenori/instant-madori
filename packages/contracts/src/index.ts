@@ -238,10 +238,13 @@ export const acceptedJobSchema = z.object({
 export type AcceptedJob = z.infer<typeof acceptedJobSchema>;
 
 export const cancelledJobSchema = acceptedJobSchema.extend({ state: z.literal("cancelled") });
+const limitedJobSchema = acceptedJobSchema.extend({ state: z.literal("limited") });
+
 export const finishedJobSchema = z.discriminatedUnion("state", [
   acceptedJobSchema.extend({ state: z.literal("completed"), revision: revisionSchema }),
   cancelledJobSchema,
   acceptedJobSchema.extend({ state: z.literal("awaiting_answer") }),
+  limitedJobSchema,
   acceptedJobSchema.extend({ state: z.literal("failed") }),
 ]);
 export type CancelledJob = z.infer<typeof cancelledJobSchema>;
@@ -261,6 +264,7 @@ export type AcceptInstructionResponse = z.infer<typeof acceptInstructionResponse
 
 export const holdingJobSchema = z.discriminatedUnion("state", [
   cancelledJobSchema,
+  limitedJobSchema,
   acceptedJobSchema.extend({ state: z.literal("failed") }),
   acceptedJobSchema.extend({
     state: z.literal("awaiting_answer"),

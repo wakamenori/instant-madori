@@ -349,21 +349,46 @@ export async function completeJob(
   return revision ? { kind: "committed" as const, revision } : { kind: "execution_lost" as const };
 }
 
-export async function failJobAndHoldQueue(db: D1, right: JobExecutionRight, now: string) {
-  const { jobId, patternId, generation, baseRevisionId, ownerId } = readJobExecutionRight(right);
-  const result = await db.first(
-    rows(
-      {
-        sql: `UPDATE jobs SET state = 'failed', updated_at = ?, ${holdsQueueOnEnd("jobs")}
-      WHERE id = ? AND pattern_id = ? AND generation = ? AND base_revision_id IS ? AND owner_id = ?
-        AND state IN (${activeJobStates}) RETURNING 1 AS found`,
-        bindings: [now, jobId, patternId, generation, baseRevisionId, ownerId],
-      },
-      foundSchema,
-      "job failure",
-    ),
+function endCondition(right: JobExecutionRight) {
+  const scope = executionCondition(right);
+  return { sql: `${scope.sql} AND j.state IN (${activeJobStates})`, bindings: scope.bindings };
+}
+
+function endWithHold(right: JobExecutionRight, state: "limited" | "failed", now: string) {
+  const active = endCondition(right);
+  return rows(
+    {
+      sql: `UPDATE jobs AS j SET state = ?, updated_at = ?, ${holdsQueueOnEnd("j")}
+          WHERE ${active.sql} RETURNING 1 AS found`,
+      bindings: [state, now, ...active.bindings],
+    },
+    foundSchema,
+    "job end",
   );
+}
+
+export async function failJobAndHoldQueue(db: D1, right: JobExecutionRight, now: string) {
+  const result = await db.first(endWithHold(right, "failed", now));
   return { kind: result === null ? ("not_recorded" as const) : ("recorded" as const) };
+}
+
+export async function limitJobAndHoldQueue(
+  db: D1,
+  right: JobExecutionRight,
+  input: { notice: { id: string; body: string }; now: string },
+) {
+  const active = endCondition(right);
+  const [, updated] = await db.batch([
+    write({
+      sql: `INSERT INTO messages (id, pattern_id, owner_id, number, body, created_at, kind, job_id)
+        SELECT ?, j.pattern_id, j.owner_id,
+          (SELECT coalesce(max(m.number), 0) + 1 FROM messages m WHERE m.pattern_id = j.pattern_id),
+          ?, ?, 'notice', j.id FROM jobs j WHERE ${active.sql}`,
+      bindings: [input.notice.id, input.notice.body, input.now, ...active.bindings],
+    }),
+    endWithHold(right, "limited", input.now),
+  ]);
+  return { kind: updated.length ? ("recorded" as const) : ("not_recorded" as const) };
 }
 
 const stopResultSchema = z.discriminatedUnion("outcome", [
