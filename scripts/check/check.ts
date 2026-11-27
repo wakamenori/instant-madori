@@ -13,15 +13,15 @@ import {
   readdirSync,
   rmSync,
 } from "node:fs";
-import { access, glob, rm } from "node:fs/promises";
+import { access, glob, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
 import { availableParallelism, tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { start, stop, type ProcessOutcome } from "../shared/processes.ts";
 import { repositoryRoot, serviceCrates } from "../shared/repository.ts";
 import { assertContainerE2eFiles } from "./layout-contract.ts";
 import { rustSkipBase } from "./rust-inputs.ts";
-import { cargoTestFlags, nodeTestFlags, resetResults } from "./test-results.ts";
+import { cargoTestFlags, nodeTestFlags, readArtifact, resetResults } from "./test-results.ts";
 
 const usage = `Usage: pnpm check [--fast | --full] [--rust]
   --fast  Autofix, TypeScript types/lint, Rust native/Wasm Clippy, local static checks.
@@ -148,6 +148,64 @@ type RunStep = (
   env?: NodeJS.ProcessEnv,
   output?: StepOutput,
 ) => Promise<void>;
+
+type TestStep = () => Promise<void>;
+
+async function runTestLanes(lanes: readonly (readonly TestStep[])[]): Promise<StepFailed[]> {
+  let stopped = false;
+  const outcomes = await Promise.allSettled(
+    lanes.map(async (steps) => {
+      const failures: StepFailed[] = [];
+      for (const step of steps) {
+        if (stopped) break;
+        try {
+          await step();
+        } catch (error) {
+          if (!(error instanceof StepFailed)) {
+            stopped = true;
+            throw error;
+          }
+          failures.push(error);
+          console.error(
+            `[check] ${error.message}. The remaining steps still run, then check fails.`,
+          );
+        }
+      }
+      return failures;
+    }),
+  );
+  return outcomes.flatMap((outcome) => {
+    if (outcome.status === "rejected") throw outcome.reason;
+    return outcome.value;
+  });
+}
+
+const wireFixture = {
+  label: "TypeScript tests (Rust wire fixture)",
+  path: "scripts/generate/geometry-schema.test.ts",
+  name: "Rust serialized optional responses are accepted by generated zod",
+};
+const wireFixturePattern = `^${wireFixture.name}$`;
+
+async function mergeWireResults(resultsDir: string, wireDir: string) {
+  const wire = await readArtifact(wireDir);
+  if (wire.length === 0) return;
+  const main = (await readArtifact(resultsDir)).filter((record) => record.suite === "typescript");
+  const merged = new Map(main.map(({ id, outcome }) => [id, outcome]));
+  const severity = { skip: 0, pass: 1, fail: 2 };
+  for (const { id, outcome } of wire) {
+    const previous = merged.get(id);
+    if (previous !== undefined && id !== wireFixture.path)
+      throw new Error(`Duplicate TypeScript test id: ${id}`);
+    if (previous === undefined || severity[outcome] > severity[previous]) merged.set(id, outcome);
+  }
+  const mergedFile = join(wireDir, "merged.jsonl");
+  await writeFile(
+    mergedFile,
+    [...merged].map(([id, outcome]) => JSON.stringify({ id, outcome }) + "\n").join(""),
+  );
+  await rename(mergedFile, join(resultsDir, "typescript.jsonl"));
+}
 
 export type CheckGates = {
   dockerStage: (stage: () => Promise<void>) => Promise<void>;
@@ -329,16 +387,6 @@ export async function runChecks(
   }
 
   const failedTests: StepFailed[] = [];
-  async function deferTestFailure(stage: Promise<void>) {
-    try {
-      await stage;
-    } catch (error) {
-      if (!(error instanceof StepFailed)) throw error;
-      failedTests.push(error);
-      console.error(`[check] ${error.message}. The remaining steps still run, then check fails.`);
-    }
-  }
-
   if (mode !== "--fast") {
     const tests: string[] = [];
     for await (const path of glob([
@@ -350,19 +398,59 @@ export async function runChecks(
     ]))
       tests.push(path);
     if (tests.length === 0) throw new Error("No TypeScript tests found");
-    if (!base) gates.rustStage("TypeScript tests");
-    await deferTestFailure(
-      run("TypeScript tests", process.execPath, [
-        ...nodeTestFlags(resultsDir, "typescript"),
-        ...(base
-          ? [
-              "--test-skip-pattern=^Rust serialized optional responses are accepted by generated zod$",
-            ]
-          : []),
-        ...tests.sort(),
-      ]),
-    );
-    if (!base) await deferTestFailure(cargo("Rust tests", cargoTestFlags(resultsDir)));
+    const typeScriptArgs = [
+      ...nodeTestFlags(resultsDir, "typescript"),
+      `--test-skip-pattern=${wireFixturePattern}`,
+      ...tests.sort(),
+    ];
+    const typeScriptTests = (output: StepOutput) =>
+      run("TypeScript tests", process.execPath, typeScriptArgs, undefined, output);
+    if (base) {
+      failedTests.push(...(await runTestLanes([[() => typeScriptTests("inherit")]])));
+    } else {
+      const wireDir = await mkdtemp(join(dirname(resultsDir), "madori-rust-wire-"));
+      console.log(
+        "\n[check] TypeScript tests and Rust tests run side by side; each prints its output when it ends",
+      );
+      let laneFailure: { error: unknown } | undefined;
+      try {
+        failedTests.push(
+          ...(await runTestLanes([
+            [() => typeScriptTests("capture")],
+            [
+              () => cargo("Rust tests", cargoTestFlags(resultsDir), "capture"),
+              () => {
+                gates.rustStage(wireFixture.label);
+                return run(
+                  wireFixture.label,
+                  process.execPath,
+                  [
+                    ...nodeTestFlags(wireDir, "typescript"),
+                    `--test-name-pattern=${wireFixturePattern}`,
+                    wireFixture.path,
+                  ],
+                  undefined,
+                  "capture",
+                );
+              },
+            ],
+          ])),
+        );
+      } catch (error) {
+        laneFailure = { error };
+      }
+      try {
+        try {
+          await mergeWireResults(resultsDir, wireDir);
+        } finally {
+          await rm(wireDir, { recursive: true, force: true });
+        }
+      } catch (error) {
+        if (!laneFailure) throw error;
+        console.error("[check] Rust wire fixture results could not be finalized:", error);
+      }
+      if (laneFailure) throw laneFailure.error;
+    }
   }
   if (mode === "--full") {
     await pnpm("Build web", "--filter", "@madori/web", "build");
@@ -382,11 +470,16 @@ export async function runChecks(
       "--containers-rollout=none",
     );
     await gates.dockerStage(async () => {
-      await deferTestFailure(
-        run("Container integration", process.execPath, [
-          ...nodeTestFlags(resultsDir, "container"),
-          "apps/worker/tests/container.e2e.ts",
-        ]),
+      failedTests.push(
+        ...(await runTestLanes([
+          [
+            () =>
+              run("Container integration", process.execPath, [
+                ...nodeTestFlags(resultsDir, "container"),
+                "apps/worker/tests/container.e2e.ts",
+              ]),
+          ],
+        ])),
       );
       await script("Prune geometry service images", "scripts/dev/prune-images.ts");
       await script("Prune Docker build cache", "scripts/dev/prune-build-cache.ts");

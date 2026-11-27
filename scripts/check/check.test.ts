@@ -20,9 +20,23 @@ import { fileURLToPath } from "node:url";
 import { after, test, type TestContext } from "node:test";
 import { minimumFreeBytes, requireFreeDisk, withDockerSlot } from "../shared/docker-slots.ts";
 import { assertStepSucceeded, runChecks, runGroup, StepFailed, type CheckGates } from "./check.ts";
-import { nodeTestFlags } from "./test-results.ts";
+import { nodeTestFlags, type TestResult } from "./test-results.ts";
 
 const ungated: CheckGates = { dockerStage: (stage) => stage(), rustStage: () => {} };
+const wireLabel = "TypeScript tests (Rust wire fixture)";
+const wirePath = "scripts/generate/geometry-schema.test.ts";
+const wireName = "Rust serialized optional responses are accepted by generated zod";
+const wireId = `${wirePath} > ${wireName}`;
+
+function writeTestRecords(args: string[], records: TestResult[]) {
+  const prefix = "--test-reporter-destination=";
+  const destination = args.find((arg) => arg.startsWith(prefix) && arg.endsWith(".jsonl"));
+  assert(destination);
+  writeFileSync(
+    destination.slice(prefix.length),
+    records.map((record) => JSON.stringify(record) + "\n").join(""),
+  );
+}
 
 type Command = string[];
 const modes = ["--fast", "default", "--full"] as const;
@@ -220,28 +234,156 @@ void test("a build failure stops full checks after a failed test stage", async (
 
 void test("a fatal test-stage error stops checks before Rust tests run", async (t) => {
   t.mock.method(console, "error", () => {});
-  const spawnError = new Error("could not start tests");
   const diskError = new Error("low disk");
-  for (const [tsFailure, gates, expected] of [
-    [spawnError, ungated, spawnError],
-    [
-      new StepFailed("TypeScript tests", "1"),
+  const steps: string[] = [];
+  await assert.rejects(
+    runTestStages(
+      "default",
+      steps,
+      { "TypeScript tests": new StepFailed("TypeScript tests", "1") },
       {
         ...ungated,
         rustStage(label: string) {
           if (label === "Rust tests") throw diskError;
         },
       },
-      diskError,
-    ],
-  ] as const) {
+    ),
+    (error) => error === diskError,
+  );
+  assert.deepEqual(steps.slice(steps.indexOf("TypeScript tests")), ["TypeScript tests"]);
+});
+
+void test(
+  "a fatal TypeScript test error lets running Rust tests finish and starts nothing after them",
+  { timeout: 5_000 },
+  async () => {
+    const rustStarted = deferred();
+    const releaseRust = deferred();
+    const spawnError = new Error("could not start tests");
+    const steps: string[] = [];
+    let settled = false;
+    const done = assert
+      .rejects(
+        runChecks(
+          "--full",
+          [],
+          async (label) => {
+            steps.push(label);
+            if (label === "TypeScript tests") {
+              await rustStarted.promise;
+              throw spawnError;
+            }
+            if (label === "Rust tests") {
+              rustStarted.resolve();
+              await releaseRust.promise;
+            }
+          },
+          ungated,
+          resultsDir,
+          true,
+        ),
+        (error) => error === spawnError,
+      )
+      .then(() => {
+        settled = true;
+      });
+    await rustStarted.promise;
+    await sleep(0);
+    try {
+      assert(!settled);
+    } finally {
+      releaseRust.resolve();
+      await done;
+    }
+    assert.deepEqual(steps.slice(steps.indexOf("TypeScript tests")), [
+      "TypeScript tests",
+      "Rust tests",
+    ]);
+    assert(!readdirSync(wasmBindingsOnly).some((path) => path.startsWith("madori-rust-wire-")));
+  },
+);
+
+void test(
+  "TypeScript and Rust tests overlap and keep late TypeScript records when the wire fixture finishes first",
+  { timeout: 5_000 },
+  async (t) => {
+    t.mock.method(console, "error", () => {});
+    const rustStarted = deferred();
+    const wireFinished = deferred();
+    const mainId = `${wirePath} > tracked zod bodies match the Rust JSON schemas`;
     const steps: string[] = [];
     await assert.rejects(
-      runTestStages("default", steps, { "TypeScript tests": tsFailure }, gates),
-      (error) => error === expected,
+      runChecks(
+        "default",
+        [],
+        async (label, _command, args, _env, output) => {
+          if (label === "TypeScript tests") {
+            steps.push("TypeScript started");
+            assert.equal(output, "capture");
+            await rustStarted.promise;
+            await wireFinished.promise;
+            await sleep(20);
+            writeTestRecords(args, [
+              { id: mainId, outcome: "pass" },
+              { id: wirePath, outcome: "pass" },
+            ]);
+            steps.push("TypeScript ended");
+            throw new StepFailed(label, "1");
+          }
+          if (label === "Rust tests") {
+            assert.equal(output, "capture");
+            steps.push("Rust started");
+            rustStarted.resolve();
+            await sleep(0);
+            steps.push("Rust ended");
+            throw new StepFailed(label, "101");
+          }
+          if (label === wireLabel) {
+            assert.equal(output, "capture");
+            assert.equal(args.at(-1), wirePath);
+            assert(args.includes(`--test-name-pattern=^${wireName}$`));
+            steps.push("Wire ran");
+            writeTestRecords(args, [
+              { id: wireId, outcome: "pass" },
+              { id: wirePath, outcome: "fail" },
+            ]);
+            wireFinished.resolve();
+          }
+        },
+        ungated,
+        resultsDir,
+        true,
+      ),
+      { message: "TypeScript tests failed (1); Rust tests failed (101)" },
     );
-    assert(!steps.includes("Rust tests"));
-  }
+    assert.deepEqual(steps, [
+      "TypeScript started",
+      "Rust started",
+      "Rust ended",
+      "Wire ran",
+      "TypeScript ended",
+    ]);
+    assert.deepEqual(readdirSync(resultsDir), ["typescript.jsonl"]);
+    assert.equal(
+      readFileSync(join(resultsDir, "typescript.jsonl"), "utf8"),
+      [
+        { id: mainId, outcome: "pass" },
+        { id: wirePath, outcome: "fail" },
+        { id: wireId, outcome: "pass" },
+      ]
+        .map((record) => JSON.stringify(record) + "\n")
+        .join(""),
+    );
+    assert(!readdirSync(wasmBindingsOnly).some((path) => path.startsWith("madori-rust-wire-")));
+  },
+);
+
+void test("the Rust wire fixture names a test that its file declares", () => {
+  const source = readFileSync(new URL(`../../${wirePath}`, import.meta.url), "utf8");
+  assert(
+    source.includes(`test(${JSON.stringify(wireName)}`),
+    `${wirePath} has no test named ${JSON.stringify(wireName)}; rename the wire fixture in check.ts with it`,
+  );
 });
 
 void test("step outcomes distinguish unsuccessful exits from spawn errors", () => {
@@ -530,11 +672,13 @@ void test("local change selection controls every Rust build and the mixed TypeSc
   async function verify(build: boolean, mode: "default" | "--full" = "default", force = false) {
     const gated: string[] = [];
     const commands = new Map<string, string[]>();
+    const outputs = new Map<string, string | undefined>();
     await runChecks(
       mode,
       [],
-      (label, _command, args) => {
+      (label, _command, args, _env, output) => {
         commands.set(label, args);
+        outputs.set(label, output);
         return Promise.resolve();
       },
       { ...ungated, rustStage: (label) => gated.push(label) },
@@ -546,16 +690,16 @@ void test("local change selection controls every Rust build and the mixed TypeSc
       "Clippy: native",
       "Clippy: Wasm",
       "Rust tests",
+      wireLabel,
     ])
       assert.equal(commands.has(label), build, label);
-    assert.equal(gated.includes("TypeScript tests"), build);
+    assert(!gated.includes("TypeScript tests"));
+    assert.equal(gated.includes(wireLabel), build);
+    assert.equal(outputs.get("TypeScript tests"), build ? "capture" : "inherit");
     const ts = commands.get("TypeScript tests");
     assert(ts);
     assert(ts.includes("apps/worker/tests/example.test.ts"));
-    assert.equal(
-      ts.some((arg) => arg.startsWith("--test-skip-pattern")),
-      !build,
-    );
+    assert(ts.includes(`--test-skip-pattern=^${wireName}$`));
     assert(commands.has("Format service Rust"));
     assert(commands.has("Unused Rust dependencies"));
   }
@@ -594,8 +738,8 @@ void test("full checks gate every Rust build immediately before running it", asy
     "Build Wasm bindings",
     "Clippy: native",
     "Clippy: Wasm",
-    "TypeScript tests",
     "Rust tests",
+    wireLabel,
     "Build geometry service",
   ]);
   for (const label of gated) assert.equal(steps[steps.indexOf("gate " + label) + 1], label);
