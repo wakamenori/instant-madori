@@ -50,6 +50,10 @@ export function createStore(db: D1, bucket: R2) {
         right: Parameters<typeof jobs.startContext>[1],
         window: Parameters<typeof jobs.startContext>[2],
       ) => jobs.startContext(db, right, window),
+      limit: (
+        right: Parameters<typeof jobs.limitJobAndHoldQueue>[1],
+        input: Parameters<typeof jobs.limitJobAndHoldQueue>[2],
+      ) => jobs.limitJobAndHoldQueue(db, right, input),
       askQuestion: (
         right: Parameters<typeof jobs.askQuestion>[1],
         input: Parameters<typeof jobs.askQuestion>[2],

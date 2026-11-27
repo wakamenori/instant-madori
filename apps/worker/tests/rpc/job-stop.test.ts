@@ -280,34 +280,29 @@ await test("Stop orders against commit on real D1 and R2", async (t) => {
     );
     assert.equal((await stop(job.jobId, requestId)).kind, "applied");
   });
-  await t.test(
-    "owner isolation, missing jobs and unwritten states leave no request record",
-    async () => {
-      const { job } = await ready();
-      const requestId = crypto.randomUUID();
-      assert.deepEqual(await stop(job.jobId, requestId, otherId), { kind: "not_found" });
-      assert.deepEqual(await stop(crypto.randomUUID(), requestId), { kind: "not_found" });
-      await db.raw.prepare("UPDATE jobs SET state = 'limited' WHERE id = ?").bind(job.jobId).run();
-      assert.deepEqual(await stop(job.jobId, requestId), { kind: "not_found" });
-      assert.equal(
-        await db.raw
-          .prepare("SELECT count(*) AS n FROM requests WHERE request_id = ?")
-          .bind(requestId)
-          .first("n"),
-        0,
-      );
-    },
-  );
+  await t.test("owner isolation and missing jobs leave no request record", async () => {
+    const { job } = await ready();
+    const requestId = crypto.randomUUID();
+    assert.deepEqual(await stop(job.jobId, requestId, otherId), { kind: "not_found" });
+    assert.deepEqual(await stop(crypto.randomUUID(), requestId), { kind: "not_found" });
+    assert.equal(
+      await db.raw
+        .prepare("SELECT count(*) AS n FROM requests WHERE request_id = ?")
+        .bind(requestId)
+        .first("n"),
+      0,
+    );
+  });
 
   await t.test(
     "every active state is stoppable and terminal states are already finished",
     async () => {
-      for (const state of ["validating", "committing", "failed", "awaiting_answer"]) {
+      for (const state of ["validating", "committing", "failed", "awaiting_answer", "limited"]) {
         const { job } = await ready();
         await db.raw.prepare("UPDATE jobs SET state = ? WHERE id = ?").bind(state, job.jobId).run();
         const result = await stop(job.jobId);
         assert(result.kind === "applied");
-        const finished = state === "failed" || state === "awaiting_answer";
+        const finished = state === "limited" || state === "failed" || state === "awaiting_answer";
         assert.equal(result.result.outcome, finished ? "already_finished" : "stopped");
         assert.equal(result.result.job.state, finished ? state : "cancelled");
       }
