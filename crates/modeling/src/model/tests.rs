@@ -1160,10 +1160,10 @@ fn paint_ignores_touching_face_with_opposite_normal() {
         &mut m.session,
         &Prism {
             outline: SimplePolygon::new(vec![
-                pt(3840., 1000.),
-                pt(3940., 1000.),
-                pt(3940., 4000.),
-                pt(3840., 4000.),
+                pt(3840., 0.),
+                pt(3940., 0.),
+                pt(3940., 5000.),
+                pt(3840., 5000.),
             ])
             .unwrap(),
             base: 0.,
@@ -1174,6 +1174,22 @@ fn paint_ignores_touching_face_with_opposite_normal() {
     .unwrap();
     m.pieces
         .insert("probe".into(), ElementId::parse(wall.as_str()).unwrap());
+    let row = &h.data().wall_colors[0];
+    let side = m
+        .entries
+        .iter()
+        .find(|e| e.element.as_str() == wall.as_str())
+        .unwrap()
+        .side_of(&row.face)
+        .unwrap();
+    let plan = side::plan_side(&h, h.boundary(&wall).unwrap(), side, row).unwrap();
+    let state = m.session.model.state();
+    let probe = state.body("probe").unwrap();
+    assert_eq!(
+        solidcraft_doc::appearance::faces_within(probe, plan.points[0].into(), LENGTH_TOLERANCE_MM)
+            .len(),
+        1
+    );
     m.paint(&h).unwrap();
     assert_blue_faces(&m, &names, 3940., 0.);
 }

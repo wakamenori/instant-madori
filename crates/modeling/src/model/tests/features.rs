@@ -334,3 +334,194 @@ fn empty_object_stops_before_a_cut_through_the_house() {
         assert_eq!(volume(&m, id), volume(&baseline, id));
     }
 }
+
+fn blue_side_add(
+    h: &House,
+    name: &str,
+    along: [f64; 2],
+    up: [f64; 2],
+    protrusion: f64,
+) -> Modifier {
+    let color = &h.data().wall_colors[0];
+    let mut modifier = notch(name, &color.wall, along, up);
+    modifier.effect = Effect::Add {
+        to: AddTo::Face {
+            face: color.face.clone(),
+        },
+        protrusion,
+    };
+    modifier
+}
+
+fn blue_plan(h: &House) -> Result<side::SidePlan, side::PlaceError> {
+    let row = &h.data().wall_colors[0];
+    let wall = h.boundary(&row.wall).unwrap();
+    let side = if wall.face(Side::Left).role() == row.face {
+        Side::Left
+    } else {
+        Side::Right
+    };
+    side::plan_side(h, wall, side, row)
+}
+
+#[test]
+fn proud_cross_paints_four_west_faces_only() {
+    let (h, wall) = blue_wall(fixture());
+    let mut rib = blue_side_add(&h, "cross", [100., 5100.], [0., 2400.], 10.);
+    let points = [
+        [100., 900.],
+        [1500., 900.],
+        [1500., 0.],
+        [1530., 0.],
+        [1530., 900.],
+        [5100., 900.],
+        [5100., 930.],
+        [1530., 930.],
+        [1530., 2400.],
+        [1500., 2400.],
+        [1500., 930.],
+        [100., 930.],
+    ]
+    .map(|[along, up]| WallPoint { along, up });
+    rib.profile = Profile {
+        start: points[0],
+        segments: points
+            .iter()
+            .cycle()
+            .skip(1)
+            .take(points.len())
+            .map(|&to| Segment::Line { to })
+            .collect(),
+    };
+    let h = modified(&h, vec![rib]);
+    let m = Model::build(&h, None).unwrap();
+    let mut out = Vec::new();
+    m.check_colors(&h, &mut out);
+    assert!(
+        out.is_empty(),
+        "Color findings: {out:?}. Room area with a protruding modifier is covered by #368."
+    );
+    let state = m.session.model.state();
+    let body = state.body(wall.as_str()).unwrap();
+    let colors = m.session.doc.face_colors(body);
+    let mut west = 0;
+    let mut east = 0;
+    for f in body.faces_at(LENGTH_TOLERANCE_MM).unwrap().iter() {
+        let color = colors
+            .iter()
+            .find(|(id, _)| *id == f.index)
+            .map(|(_, look)| look.color);
+        if f.plane_normal.is_some_and(|n| n.x < -0.999999)
+            && (f.centroid.x - 3940.).abs() < LENGTH_TOLERANCE_MM
+        {
+            assert_eq!(color, Some([0, 0, 255]));
+            west += 1;
+        } else {
+            assert_eq!(color, None);
+            if (f.centroid.x - 4060.).abs() < LENGTH_TOLERANCE_MM {
+                east += 1;
+            }
+        }
+    }
+    assert_eq!((west, east), (4, 1));
+}
+#[test]
+fn arch_cut_paints_its_curved_outline_and_detects_a_missing_fragment() {
+    let (h, wall) = blue_wall(fixture());
+    let (h, _) = furnished(h, wall.clone());
+    let h = opening(&h, "door", wall.clone(), 1000., 800., 2400., 0.);
+    let m = Model::build(&h, None).unwrap();
+    let mut out = Vec::new();
+    m.check_colors(&h, &mut out);
+    assert!(out.is_empty(), "{out:?}");
+    let plan = blue_plan(&h).unwrap();
+    assert_eq!(plan.points.len(), 2);
+    let expected_perimeter = 2. * (5000. + 2400.)
+        + 2. * (800. + 2420.)
+        + 900.
+        + 2. * 1800.
+        + std::f64::consts::PI * 450.;
+    assert!((plan.perimeter - expected_perimeter).abs() < LENGTH_TOLERANCE_MM);
+    let arch_area = 900. * 1800. + std::f64::consts::PI * 450_f64.powi(2) / 2.;
+    assert!(
+        (plan.free_area - (4200. * 2400. - arch_area)).abs() < plan.perimeter * LENGTH_TOLERANCE_MM
+    );
+    let mut partial = Model::assemble(&h, None).unwrap();
+    assign_wall_face(&mut partial, &wall, plan.points[0], [0, 0, 255]);
+    partial.check_colors(&h, &mut out);
+    assert!(
+        matches!(&out[..],[Mismatch{reason:MismatchReason::WallColor(WallColorFailure::Unpainted{expected_area,painted_area,..}),..}] if *expected_area==plan.free_area && *painted_area>0. && painted_area<expected_area),
+        "{out:?}"
+    );
+}
+#[test]
+fn pilaster_and_window_leave_the_exposed_area_on_both_pieces() {
+    let (h, wall) = blue_wall(fixture());
+    let h = opening(&h, "window", wall, 500., 1000., 1100., 900.);
+    let pilaster = blue_side_add(&h, "pilaster", [2000., 2100.], [0., 2400.], 10.);
+    let small = blue_side_add(&h, "block", [600., 900.], [100., 400.], 10.);
+    let h = modified(&h, vec![pilaster, small]);
+    let plan = blue_plan(&h).unwrap();
+    assert_eq!(plan.points.len(), 2);
+    assert!(
+        (plan.free_area - (4900. * 2400. - 1000. * 1100. - 300. * 300.)).abs()
+            < LENGTH_TOLERANCE_MM
+    );
+    let m = Model::build(&h, None).unwrap();
+    let mut out = Vec::new();
+    m.check_colors(&h, &mut out);
+    assert!(out.is_empty(), "{out:?}");
+}
+#[test]
+fn proud_add_covering_the_side_reports_no_region() {
+    let (h, _) = blue_wall(fixture());
+    let full = blue_side_add(&h, "full", [100., 5100.], [0., 2400.], 10.);
+    let h = modified(&h, vec![full]);
+    assert!(matches!(
+        blue_plan(&h),
+        Err(side::PlaceError::Color(
+            WallColorFailure::NoUncoveredRegion { .. }
+        ))
+    ));
+}
+#[test]
+fn positive_submillimeter_protrusion_is_excluded() {
+    let (h, _) = blue_wall(fixture());
+    let mut add = blue_side_add(&h, "thin", [300., 1300.], [500., 1500.], 0.0005);
+    add.from = WallEnd::End;
+    let h = modified(&h, vec![add]);
+    let plan = blue_plan(&h).unwrap();
+    assert!((plan.free_area - (5000. * 2400. - 1000. * 1000.)).abs() < LENGTH_TOLERANCE_MM);
+    let m = Model::build(&h, None).unwrap();
+    let mut out = Vec::new();
+    m.check_colors(&h, &mut out);
+    assert!(out.is_empty(), "{out:?}");
+}
+
+#[test]
+fn flush_add_restores_part_of_a_cut_on_the_painted_side() {
+    let (h, wall) = blue_wall(fixture());
+    let cut = notch("notch", &wall, [1300., 2300.], [400., 1000.]);
+    let mut patch = notch("patch", &wall, [1100., 1500.], [500., 800.]);
+    let opposite = h
+        .rooms()
+        .find(|r| r.edges().any(|e| e.from.x > 4000.))
+        .unwrap();
+    patch.effect = Effect::Add {
+        protrusion: 10.,
+        to: AddTo::Face {
+            face: FaceRole::Room {
+                room: opposite.data().id.clone(),
+            },
+        },
+    };
+    let h = modified(&h, vec![patch, cut]);
+    let plan = blue_plan(&h).unwrap();
+    assert!(
+        (plan.free_area - (5000. * 2400. - 1000. * 600. + 200. * 300.)).abs() < LENGTH_TOLERANCE_MM
+    );
+    let m = Model::build(&h, None).unwrap();
+    let mut out = Vec::new();
+    m.check_colors(&h, &mut out);
+    assert!(out.is_empty(), "{out:?}");
+}

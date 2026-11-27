@@ -47,9 +47,11 @@ impl SideFrame {
     }
 }
 
+#[derive(Debug)]
 pub(super) enum PlaceError {
     Color(WallColorFailure),
     House(Rejections),
+    Measure(String),
 }
 
 pub(super) struct SidePlan {
@@ -58,6 +60,7 @@ pub(super) struct SidePlan {
     pub height: f64,
     pub points: Vec<[f64; 3]>,
     pub free_area: f64,
+    pub perimeter: f64,
 }
 
 pub(super) fn plan_side(
@@ -82,11 +85,9 @@ pub(super) fn plan_side(
     let merged = side_spans(&outline, &frame);
     let fail = PlaceError::Color;
     let height = wall.data().wall.height;
-    let cuts = WallCuts::of(wall).map_err(PlaceError::House)?;
-    let holes: Vec<_> = cuts.holes().collect();
-    let (cells, free_area) = grid(&merged, height, &holes, &row.face).map_err(fail)?;
+    let region = elevation::side_region(house, wall, side, &merged, &row.face)?;
     let mut points = Vec::new();
-    for [along, rise] in cells {
+    for [along, rise] in region.points {
         let p = frame.world(along, rise);
         let x = p[0] + frame.normal[0] * ROOM_PROBE_MM;
         let y = p[1] + frame.normal[1] * ROOM_PROBE_MM;
@@ -116,7 +117,8 @@ pub(super) fn plan_side(
         spans: merged,
         height,
         points,
-        free_area,
+        free_area: region.area,
+        perimeter: region.perimeter,
     })
 }
 
@@ -142,38 +144,6 @@ fn side_spans(outline: &SimplePolygon, frame: &SideFrame) -> Vec<Range<f64>> {
         }
     }
     merged
-}
-
-fn grid(
-    spans: &[Range<f64>],
-    height: f64,
-    holes: &[&Elevation],
-    face: &FaceRole,
-) -> Result<(Vec<[f64; 2]>, f64), WallColorFailure> {
-    if spans.is_empty() {
-        return Err(WallColorFailure::NoSideFace { face: face.clone() });
-    }
-    let grid = cuts::WallGrid::new(spans, height, holes);
-    if grid.components.is_empty() {
-        return Err(WallColorFailure::NoUncoveredRegion { face: face.clone() });
-    }
-    let mut points = Vec::new();
-    let mut area = 0.;
-    let mut largest: f64 = 0.;
-    for component in grid.components {
-        largest = largest.max(component.clearance);
-        if component.clearance > LENGTH_TOLERANCE_MM {
-            points.push(component.point);
-            area += component.area;
-        }
-    }
-    if points.is_empty() {
-        return Err(WallColorFailure::SliverRegion {
-            face: face.clone(),
-            clearance: largest,
-        });
-    }
-    Ok((points, area))
 }
 
 pub(super) fn open_seams(
@@ -207,71 +177,6 @@ pub(super) fn open_seams(
 mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
-    fn plan(holes: &[Elevation]) -> Result<(Vec<[f64; 2]>, f64), WallColorFailure> {
-        grid(
-            std::slice::from_ref(&(0.0..100.0)),
-            40.,
-            &holes.iter().collect::<Vec<_>>(),
-            &FaceRole::Exterior {},
-        )
-    }
-    #[test]
-    fn plain_wall_has_one_central_pick() {
-        assert_eq!(plan(&[]).unwrap(), (vec![[50., 20.]], 4000.));
-    }
-    #[test]
-    fn window_leaves_one_connected_face() {
-        let hole = Elevation {
-            along: 25.0..75.,
-            rise: 10.0..30.,
-        };
-        assert_eq!(plan(&[hole]).unwrap(), (vec![[12.5, 20.]], 3000.));
-    }
-    #[test]
-    fn door_leaves_two_components() {
-        let door = Elevation {
-            along: 40.0..60.,
-            rise: 0.0..40.,
-        };
-        let (mut picks, area) = plan(&[door]).unwrap();
-        picks.sort_by(|a, b| a[0].total_cmp(&b[0]));
-        assert_eq!((picks, area), (vec![[20., 20.], [80., 20.]], 3200.));
-    }
-    #[test]
-    fn end_door_is_clamped_to_the_wall() {
-        assert_eq!(
-            plan(&[Elevation {
-                along: -10.0..30.,
-                rise: 0.0..40.
-            }])
-            .unwrap(),
-            (vec![[65., 20.]], 2800.)
-        );
-    }
-    #[test]
-    fn covered_side_reports_no_region() {
-        assert!(matches!(
-            plan(&[Elevation {
-                along: 0.0..100.,
-                rise: 0.0..40.
-            }]),
-            Err(WallColorFailure::NoUncoveredRegion { .. })
-        ));
-    }
-    #[test]
-    fn pier_at_pick_tolerance_reports_sliver() {
-        assert!(
-            matches!(plan(&[Elevation{along:0.002..100.,rise:0.0..40.}]),Err(WallColorFailure::SliverRegion{clearance,..}) if clearance==LENGTH_TOLERANCE_MM)
-        );
-    }
-    #[test]
-    fn unpickable_pier_is_excluded_from_painted_area() {
-        let hole = Elevation {
-            along: 0.0015..60.,
-            rise: 0.0..40.,
-        };
-        assert_eq!(plan(&[hole]).unwrap(), (vec![[80., 20.]], 1600.));
-    }
     #[test]
     fn mitred_outline_sets_side_extent() {
         let outline = SimplePolygon::new(

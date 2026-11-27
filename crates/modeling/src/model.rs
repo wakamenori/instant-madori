@@ -1,5 +1,6 @@
 mod check;
 mod cuts;
+mod elevation;
 use cuts::WallCuts;
 mod modifier;
 mod object;
