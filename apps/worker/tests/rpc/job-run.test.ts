@@ -690,7 +690,7 @@ await test("Job runs restore D1 execution rights across retries and lost respons
       [original.revisionId],
     );
   });
-  await t.test("a question and a mixed finish are tool errors and other calls run", async () => {
+  await t.test("a mixed finish is a tool error and other calls run", async () => {
     const f = await fixture();
     const replies: AiRequest[] = [];
     const finish = {
@@ -708,7 +708,6 @@ await test("Job runs restore D1 execution rights across retries and lost respons
       inputJson: '{"query":{"kind":"inspection"}}',
     } as const;
     const script = scriptedAi([
-      { stop: "tool_calls", parts: [finish] },
       { stop: "tool_calls", parts: [{ ...finish, id: "mixed" }, read] },
       { stop: "refusal", parts: [{ kind: "text", text: "end" }] },
     ]);
@@ -721,7 +720,7 @@ await test("Job runs restore D1 execution rights across retries and lost respons
     };
     const end = await runJob({ ...f.deps, ai }, f.job, stepEngine().steps);
     assert.deepEqual(end, { kind: "failed", reason: "ai_refused", ms: 0 });
-    const rounds = replies[2]?.conversation.rounds;
+    const rounds = replies[1]?.conversation.rounds;
     const text = (r: number) => {
       const reply = rounds?.[r]?.reply;
       assert(reply?.kind === "tool_results");
@@ -730,9 +729,8 @@ await test("Job runs restore D1 execution rights across retries and lost respons
         return item.content[0];
       });
     };
-    assert.match(JSON.stringify(text(0)), /Questions are not available/u);
-    assert.match(JSON.stringify(text(1)), /Call finish alone/u);
-    assert.match(JSON.stringify(text(1)), /House is empty/u);
+    assert.match(JSON.stringify(text(0)), /Call finish alone/u);
+    assert.match(JSON.stringify(text(0)), /House is empty/u);
   });
   for (const reason of [
     "containers_disabled",

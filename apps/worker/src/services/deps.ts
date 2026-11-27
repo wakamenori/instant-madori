@@ -81,6 +81,7 @@ export type JobWorkflowDeps = StoreDeps<
   | "failAndHoldQueue"
   | "ownedBySubject"
   | "startContext"
+  | "askQuestion"
   | "recordAi"
 > &
   StoreDeps<"snapshots", "write" | "open"> &

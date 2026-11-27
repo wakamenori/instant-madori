@@ -19,7 +19,7 @@ const jobStateRoles = {
   validating: "active",
   committing: "active",
   completed: "completed",
-  awaiting_answer: "unwritten",
+  awaiting_answer: "finished",
   cancelled: "finished",
   failed: "finished",
   limited: "unwritten",

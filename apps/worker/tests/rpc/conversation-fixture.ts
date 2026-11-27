@@ -137,10 +137,20 @@ try {
     } else {
       await db
         .prepare(
-          `INSERT INTO messages (id, pattern_id, owner_id, number, kind, body, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO messages (id, pattern_id, owner_id, number, kind, body, created_at, question_id, answer_turn)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
-        .bind(id, patternId, ownerId, number, kind, kind, now)
+        .bind(
+          id,
+          patternId,
+          ownerId,
+          number,
+          kind,
+          kind,
+          now,
+          kind === "answer" ? ids[2] : null,
+          kind === "answer" ? 1 : null,
+        )
         .run();
     }
     if (kind === "answer")

@@ -49,17 +49,16 @@ export class JobWorkflow extends WorkflowEntrypoint<Env, JobExecutionReference> 
     };
     const end = await runJob(jobWorkflowDeps(this.env, systemRuntime), job, steps);
     logEvent(
-      end.kind === "committed" || end.kind === "cancelled" ? "info" : "error",
+      end.kind === "committed" || end.kind === "cancelled" || end.kind === "asked"
+        ? "info"
+        : "error",
       "job.finished",
       {
         ...ids,
         outcome: end.kind,
         ...(end.ms === undefined ? {} : { ms: end.ms }),
-        ...(end.kind === "committed"
-          ? { revisionId: end.revisionId }
-          : end.kind === "cancelled"
-            ? {}
-            : { reason: end.reason }),
+        ...("revisionId" in end && { revisionId: end.revisionId }),
+        ...("reason" in end && { reason: end.reason }),
       },
     );
     return end;

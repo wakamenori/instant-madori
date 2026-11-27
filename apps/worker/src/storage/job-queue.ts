@@ -7,8 +7,13 @@ import { activeJobStates } from "./job-states.ts";
 import { runOnce, updateOnceStatements } from "./requests.ts";
 import type { OnceCompanion, RequestKey } from "./requests.ts";
 
-export const queueNotHeld =
-  "NOT EXISTS (SELECT 1 FROM jobs h WHERE h.pattern_id = ? AND h.holds_queue = 1)";
+/** Answers pass a queue hold. Other queued jobs wait until it is released. */
+export function claimable(q: string, m: string) {
+  return `(${m}.kind = 'answer' OR NOT EXISTS (SELECT 1 FROM jobs h WHERE h.pattern_id = ${q}.pattern_id AND h.holds_queue = 1))`;
+}
+export function inputKey(alias: string, direction: "" | " DESC" = "") {
+  return `${alias}.turn${direction}, ${alias}.number${direction}`;
+}
 
 export function holdsQueueOnEnd(t: string) {
   return `holds_queue = CASE WHEN ${t}.state IN (${activeJobStates})
@@ -25,6 +30,9 @@ export function releaseWhenLastQueuedJobStops(jobId: string, ownerId: OwnerId): 
     where: {
       sql: `holds_queue = 1 AND pattern_id = (SELECT s.pattern_id FROM jobs s
       WHERE s.id = ? AND s.owner_id = ? AND s.state = 'queued')
+      AND NOT (jobs.state = 'awaiting_answer' AND EXISTS (SELECT 1 FROM messages question
+        WHERE question.job_id = jobs.id AND question.kind = 'question'
+        AND NOT EXISTS (SELECT 1 FROM messages a WHERE a.question_id = question.id)))
       AND NOT EXISTS (SELECT 1 FROM jobs q WHERE q.pattern_id = jobs.pattern_id AND q.state = 'queued' AND q.id <> ?)`,
       bindings: [jobId, ownerId, jobId],
     },
@@ -41,8 +49,14 @@ export function releaseEmptyQueue(patternId: string, ownerId: OwnerId, messageId
 }
 
 export const queueHoldSql = `SELECT json_object('job', json_object('jobId', j.id, 'messageId', m.id,
-  'number', m.number, 'state', j.state)) AS json FROM jobs j INDEXED BY jobs_one_queue_hold_per_pattern
+  'number', m.number, 'state', j.state,
+  'question', CASE WHEN q.id IS NOT NULL THEN json_object('messageId', q.id, 'number', q.number, 'body', q.body, 'choices', json(q.choices)) END,
+  'answer', CASE WHEN aj.id IS NOT NULL THEN json_object('jobId', aj.id, 'messageId', a.id, 'number', a.number) END)) AS json
+  FROM jobs j INDEXED BY jobs_one_queue_hold_per_pattern
   CROSS JOIN messages m ON m.id = j.message_id AND m.pattern_id = j.pattern_id
+  LEFT JOIN messages q ON q.job_id = j.id AND q.kind = 'question'
+  LEFT JOIN messages a ON a.question_id = q.id
+  LEFT JOIN jobs aj ON aj.message_id = a.id AND aj.pattern_id = a.pattern_id
   WHERE j.pattern_id = ? AND j.owner_id = ? AND j.holds_queue = 1`;
 export const holdingJobIdSql =
   "SELECT id AS heldBy FROM jobs WHERE pattern_id = ? AND holds_queue = 1";
@@ -63,8 +77,8 @@ export function readStalledPatterns(db: D1, input: { unchangedSince: string; lim
         sql: `SELECT p.id AS patternId FROM patterns p
       WHERE EXISTS (SELECT 1 FROM jobs a WHERE a.pattern_id = p.id
         AND a.state IN (${activeJobStates}) AND a.updated_at < ?1)
-      OR (EXISTS (SELECT 1 FROM jobs q WHERE q.pattern_id = p.id AND q.state = 'queued' AND q.updated_at < ?1)
-        AND NOT EXISTS (SELECT 1 FROM jobs h WHERE h.pattern_id = p.id AND h.holds_queue = 1))
+      OR EXISTS (SELECT 1 FROM jobs q JOIN messages m ON m.id = q.message_id
+        WHERE q.pattern_id = p.id AND q.state = 'queued' AND q.updated_at < ?1 AND ${claimable("q", "m")})
       ORDER BY random() LIMIT ?2`,
         bindings: [input.unchangedSince, input.limit],
       },
@@ -90,7 +104,7 @@ function releaseBatch(key: RequestKey, input: QueueRelease, action: "resume" | "
     },
     result: {
       sql: `SELECT json_object('jobs', json_group_array(json_object('jobId', j.id, 'messageId', m.id,
-      'number', m.number${action === "cancel" ? ", 'state', 'cancelled'" : ""}) ORDER BY m.number))
+      'number', m.number${action === "cancel" ? ", 'state', 'cancelled'" : ""}) ORDER BY ${inputKey("m")}))
       FROM jobs j CROSS JOIN messages m ON m.id = j.message_id AND m.pattern_id = j.pattern_id
       WHERE j.pattern_id = ? AND j.owner_id = ? AND j.state = 'queued'`,
       bindings: scope,

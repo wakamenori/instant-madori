@@ -40,7 +40,8 @@ export function developmentScript({ opening: parts, rounds }: Conversation): Scr
   }
   const first = section("Current instruction").split(/\r?\n/u, 1)[0];
   const name = first?.startsWith("台本:") ? first.slice(3) : "plan";
-  if (!["plan", "unresolved", "reject-window"].includes(name)) throw new Error("unknown script");
+  if (!["plan", "unresolved", "reject-window", "question", "question-after-edit"].includes(name))
+    throw new Error("unknown script");
   const house = z
     .object({
       rooms: z.array(z.object({ id: z.string(), walls: z.array(z.string()).nonempty() })),
@@ -77,6 +78,11 @@ export function developmentScript({ opening: parts, rounds }: Conversation): Scr
       throw new Error(`Unexpected result in round ${r}`);
     return JSON.parse(content.text);
   }
+  if (name === "question" || (name === "question-after-edit" && round === 2))
+    return call("finish", {
+      answer: { kind: "question", question: "和室は必要ですか？", choices: ["必要", "不要"] },
+    });
+  if (name === "question-after-edit") return edit({ kind: "place_rooms", layout });
   if (house.rooms.length) {
     if (round > 1) {
       result(1);

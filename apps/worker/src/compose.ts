@@ -77,6 +77,7 @@ export function jobWorkflowDeps(
         complete: jobs.complete,
         failAndHoldQueue: jobs.failAndHoldQueue,
         startContext: jobs.startContext,
+        askQuestion: jobs.askQuestion,
         recordAi: jobs.recordAi,
         ownedBySubject: jobs.ownedBySubject,
       },

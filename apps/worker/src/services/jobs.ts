@@ -36,6 +36,7 @@ import type { Snapshot } from "../storage/snapshots.ts";
 export type AcceptInstructionOutcome =
   | { kind: "accepted"; acceptance: "applied" | "replayed"; job: AcceptedJob }
   | { kind: "attachment_unavailable" }
+  | { kind: "version_conflict" }
   | { kind: "invalid_message" }
   | { kind: "not_found" }
   | { kind: "request_id_reused" };
@@ -53,6 +54,7 @@ export async function acceptInstruction(
     requestId: string;
     patternId: string;
     body: string;
+    questionId?: string | undefined;
     attachmentIds?: string[];
   },
 ): Promise<AcceptInstructionOutcome> {
@@ -63,20 +65,19 @@ export async function acceptInstruction(
   ) {
     return { kind: "invalid_message" };
   }
-  const key = await requestKey(
-    ownerId,
-    requestId,
-    "instruction.accept",
-    attachmentIds.length
-      ? { patternId, body, attachmentIds: attachmentIds.join(",") }
-      : { patternId, body },
-  );
+  const key = await requestKey(ownerId, requestId, "instruction.accept", {
+    patternId,
+    body,
+    ...(input.questionId && { questionId: input.questionId }),
+    ...(attachmentIds.length && { attachmentIds: attachmentIds.join(",") }),
+  });
   const once = await store.jobs.acceptOnce(key, {
     id: runtime.newId(),
     messageId: runtime.newId(),
     patternId,
     body,
     attachmentIds,
+    ...(input.questionId && { questionId: input.questionId }),
     now: runtime.now(),
   });
   switch (once.kind) {
@@ -88,6 +89,8 @@ export async function acceptInstruction(
       if (attachmentIds.length && (await store.patterns.get({ patternId, ownerId })))
         return { kind: "attachment_unavailable" };
       return { kind: "not_found" };
+    case "not_found":
+    case "version_conflict":
     case "request_id_reused":
       return once;
   }
@@ -223,10 +226,12 @@ type JobFailureReason =
   | "invalid_name"
   | "retries_exhausted";
 type Committed = { kind: "committed"; revisionId: string };
+type Asked = { kind: "asked" };
 type Cancelled = { kind: "cancelled" };
 type NotCommitted = { kind: "not_committed"; reason: JobFailureReason };
 export type JobEnd = (
   | Committed
+  | Asked
   | Cancelled
   | { kind: "failed"; reason: JobFailureReason }
   | { kind: "not_running"; reason: JobFailureReason }
@@ -326,7 +331,7 @@ type History = {
   turn: WorkRef;
   reply: { kind: "message"; text: string } | { kind: "tool_results"; results: ToolResult[] };
 }[];
-type Interrupted = Committed | Cancelled | NotCommitted;
+type Interrupted = Committed | Asked | Cancelled | NotCommitted;
 type Started = { kind: "started"; claimedAt: string; working: Working; prefix: WorkRef };
 type Answer = ({ kind: "answered" } | { kind: "hold"; seconds: number }) & {
   turn: WorkRef;
@@ -467,7 +472,7 @@ async function ask(
   const hold = deps.testHold;
   if (
     hold &&
-    (hold.at === "first_answer" ? round === 1 : plan.kind === "finish") &&
+    (hold.at === "first_answer" ? round === 1 : plan.kind === "finish" || plan.kind === "ask") &&
     (hold.scope === "every_job" || (await deps.store.jobs.ownedBySubject(right, verifierSubject)))
   )
     return { kind: "hold", seconds: hold.seconds, ...answer };
@@ -547,6 +552,21 @@ async function converse(
     if (answer.kind === "hold") await steps.sleep(`round ${round} hold`, answer.seconds * 1000);
     const { plan, turn } = answer;
     if (plan.kind === "stop") return { kind: "not_committed", reason: plan.reason };
+    if (plan.kind === "ask")
+      return steps.do(`round ${round} ask`, storageStep, async () => {
+        const live = await current(deps, job);
+        if (live.kind !== "active") return live;
+        await deps.store.jobs.askQuestion(live.right, {
+          id: deps.runtime.newId(),
+          body: plan.answer.question,
+          choices: plan.answer.choices,
+          now: deps.runtime.now(),
+        });
+        const settled = await current(deps, job);
+        return settled.kind === "active"
+          ? { kind: "not_committed" as const, reason: "execution_lost" as const }
+          : settled;
+      });
     if (plan.kind === "nudge") {
       history.push({
         turn,
@@ -712,15 +732,17 @@ export async function runJob(
   });
   const duration = wake.ms === undefined ? {} : { ms: wake.ms };
   if (end.kind === "committed") return { kind: end.kind, revisionId: end.revisionId, ...duration };
-  if (end.kind === "cancelled") return { kind: end.kind, ...duration };
+  if (end.kind === "cancelled" || end.kind === "asked") return { kind: end.kind, ...duration };
   return { kind: end.kind, reason: end.reason, ...duration };
 }
 async function current(
   deps: JobWorkflowDeps,
   job: JobExecutionReference,
-): Promise<{ kind: "active"; right: JobExecutionRight } | Committed | Cancelled | NotCommitted> {
+): Promise<
+  { kind: "active"; right: JobExecutionRight } | Committed | Asked | Cancelled | NotCommitted
+> {
   const restored = await readCurrentJobExecution(deps, job);
-  if (restored.kind === "cancelled") return { kind: "cancelled" };
+  if (restored.kind === "asked" || restored.kind === "cancelled") return restored;
   if (restored.kind === "invalid") return { kind: "not_committed", reason: "execution_lost" };
   return restored.kind === "committed"
     ? { kind: "committed", revisionId: restored.revision.id }
@@ -733,12 +755,12 @@ async function endWithoutRevision(
   reason: JobFailureReason,
 ): Promise<JobEnd> {
   const now = await current(deps, job);
-  if (now.kind === "committed" || now.kind === "cancelled") return now;
+  if (now.kind === "asked" || now.kind === "committed" || now.kind === "cancelled") return now;
   if (now.kind === "not_committed") return { kind: "not_running", reason };
   const result = await recordJobFailure(deps, now.right);
   if (result.kind === "recorded") return { kind: "failed", reason };
   const latest = await current(deps, job);
-  return latest.kind === "cancelled" || latest.kind === "committed"
+  return latest.kind === "asked" || latest.kind === "cancelled" || latest.kind === "committed"
     ? latest
     : { kind: "not_running", reason };
 }

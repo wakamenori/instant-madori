@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import {
   openJobDatabase,
   jobMigration,
+  questionMigration,
   queueHoldMigration,
   conversationMigration,
   now,
@@ -148,6 +149,7 @@ try {
   await oldStop(c);
   await db.apply(await readFile(queueHoldMigration, "utf8"));
   await db.apply(await readFile(conversationMigration, "utf8"));
+  await db.apply(await readFile(questionMigration, "utf8"));
   const migrated = await db.raw
     .prepare("SELECT id, state, holds_queue FROM jobs ORDER BY id")
     .all();

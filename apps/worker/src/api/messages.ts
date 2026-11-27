@@ -17,6 +17,7 @@ export const messageRoutes: Route[] = [
       const patternId = param(context, "patternId");
       log["requestId"] = input.requestId;
       log["patternId"] = patternId;
+      if (input.questionId) log["questionId"] = input.questionId;
       const outcome = await acceptInstruction(deps, { ownerId: user.id, patternId, ...input });
       switch (outcome.kind) {
         case "accepted":
@@ -30,6 +31,7 @@ export const messageRoutes: Route[] = [
         case "invalid_message":
           throw new ApiFailure("invalid_request");
         case "attachment_unavailable":
+        case "version_conflict":
         case "not_found":
         case "request_id_reused":
           throw new ApiFailure(outcome.kind);
