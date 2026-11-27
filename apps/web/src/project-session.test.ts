@@ -522,3 +522,55 @@ void test("an older poll finishing after a rename preserves the newer pattern", 
   await t.waitFor(() => assert.equal(openView(session).activity.kind, "working"));
   assert.deepEqual(openView(session).pattern, saved);
 });
+
+const renameFailures: { case: string; patch: Handler; reread?: Handler; message: string }[] = [
+  {
+    case: "a server error",
+    patch: () => Response.json({ error: "internal_error" }, { status: 500 }),
+    message: "名前を変えられませんでした。",
+  },
+  {
+    case: "a rejected name",
+    patch: () => Response.json({ error: "invalid_request" }, { status: 400 }),
+    message: "名前は1〜100文字で、見える文字を含めてください。",
+  },
+  {
+    case: "a lost connection",
+    patch: () => {
+      throw new TypeError("Failed to fetch");
+    },
+    message: "通信できず名前を変えられませんでした。接続を確認してもう一度保存してください。",
+  },
+  {
+    case: "a conflict whose re-read fails",
+    patch: versionConflict,
+    reread: () => Response.json({ error: "internal_error" }, { status: 500 }),
+    message: "名前を変えられませんでした。",
+  },
+];
+
+for (const failure of renameFailures) {
+  void test(`a rename that meets ${failure.case} keeps the name and reports why`, async (t) => {
+    let reads = 0;
+    let fail = true;
+    router(t, {
+      [`GET ${projectPath}`]: (init) =>
+        ++reads > 1 && failure.reread ? failure.reread(init) : Response.json({ project }),
+      [`PATCH ${projectPath}`]: (init) =>
+        fail
+          ? failure.patch(init)
+          : Response.json({ project: { ...project, name: "北の家", version: 2 } }),
+    });
+    const session = start(t);
+    await t.waitFor(() => assert.equal(session.getView().kind, "open"));
+    assert.equal(await session.rename("project", "北の家"), false);
+    assert.deepEqual(openView(session).project, project);
+    assert.deepEqual(openView(session).names.project, {
+      kind: "failed",
+      message: failure.message,
+    });
+    fail = false;
+    assert.equal(await session.rename("project", "北の家"), true);
+    assert.deepEqual(openView(session).names.project, { kind: "idle" });
+  });
+}
