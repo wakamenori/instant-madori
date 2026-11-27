@@ -7,6 +7,7 @@ import {
   openJobDatabase,
   applyAttachmentMigrations,
   jobMigration,
+  questionMigration,
   queueHoldMigration,
   conversationMigration,
   now,
@@ -106,6 +107,7 @@ try {
     await readFile(new URL("../../migrations/0007_snapshot_format_2.sql", import.meta.url), "utf8"),
   );
   await applyAttachmentMigrations(db);
+  await db.apply(await readFile(questionMigration, "utf8"));
   const deps = { store: db.store, runtime: db.runtime, wakePattern: async () => {} };
   const accepted = await acceptInstruction(deps, {
     ownerId,

@@ -10,6 +10,7 @@ import {
   snapshotPattern,
   now,
   jobMigration,
+  questionMigration,
   queueHoldMigration,
   conversationMigration,
   aiAttemptsMigration,
@@ -49,6 +50,7 @@ try {
     await db.apply(await readFile(migration, "utf8"));
   }
   await applyAttachmentMigrations(db);
+  await db.apply(await readFile(questionMigration, "utf8"));
   const pattern = await snapshotPattern(db);
   const { ownerId, patternId } = pattern;
   const history: { revisionId: string; display: Uint8Array<ArrayBuffer> }[] = [];
