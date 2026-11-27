@@ -198,7 +198,9 @@ pub(super) fn faces(
                     face: role.clone(),
                     color: Srgb { r: 0, g: 0, b: 0 },
                 };
-                let actual = side::plan_side(h, w, side, &row).ok().unwrap();
+                let actual = side::plan_side(&Scope::new(), h, w, side, &row)
+                    .ok()
+                    .unwrap();
                 assert_eq!(actual.spans.len(), merged.len());
                 for (a, b) in actual.spans.iter().zip(&merged) {
                     assert!((a.start - b.start).abs() <= 0.001 && (a.end - b.end).abs() <= 0.001);

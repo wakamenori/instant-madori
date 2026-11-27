@@ -160,8 +160,7 @@ impl Model {
                 threshold_mm3,
             });
         }
-        let mut scratch = crate::new_session("Modifier tool");
-        scratch.param_check = ParamCheck::Strict;
+        let mut scratch = self.scope.session("Modifier tool");
         extrusion(
             &mut scratch,
             m,

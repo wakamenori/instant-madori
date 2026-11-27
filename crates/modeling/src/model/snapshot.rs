@@ -29,7 +29,7 @@ impl Error for LoadError {
 impl Model {
     pub fn load(snapshot: &str) -> Result<(House, Model), LoadError> {
         let house = House::from_json(snapshot).map_err(LoadError::House)?;
-        let model = Self::build(&house, None).map_err(LoadError::Build)?;
+        let model = Self::build(&house).map_err(LoadError::Build)?;
         Ok((house, model))
     }
 }

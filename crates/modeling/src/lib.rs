@@ -2,6 +2,8 @@
 
 pub mod commands;
 pub mod display;
+mod evaluation;
+pub use evaluation::Evaluation;
 pub mod floor_plan;
 mod model;
 mod outline;

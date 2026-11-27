@@ -12,7 +12,7 @@ pub(super) struct SideRegion {
 }
 
 struct Slab<'a> {
-    session: Session,
+    session: Counted,
     pieces: Vec<String>,
     perimeter: f64,
     face: &'a FaceRole,
@@ -36,6 +36,7 @@ fn rectangle(x: &Range<f64>, y: &Range<f64>) -> Profile<PlanePoint> {
 
 impl<'a> Slab<'a> {
     fn new(
+        scope: &Scope,
         spans: &[Range<f64>],
         height: f64,
         holes: impl Iterator<Item = &'a Elevation>,
@@ -46,8 +47,7 @@ impl<'a> Slab<'a> {
                 face: face.clone(),
             }));
         }
-        let mut session = crate::new_session("Wall elevation");
-        session.param_check = ParamCheck::Strict;
+        let session = scope.session("Wall elevation");
         let mut slab = Self {
             session,
             pieces: Vec::new(),
@@ -176,6 +176,7 @@ fn clearance_pick(mesh: &Mesh, face: usize) -> Option<([f64; 2], f64)> {
 }
 
 pub(super) fn side_region(
+    scope: &Scope,
     house: &House,
     wall: BoundaryView,
     side: Side,
@@ -183,7 +184,7 @@ pub(super) fn side_region(
     face: &FaceRole,
 ) -> Result<SideRegion, PlaceError> {
     let cuts = WallCuts::of(wall).map_err(PlaceError::House)?;
-    let mut slab = Slab::new(spans, wall.data().wall.height, cuts.holes(), face)?;
+    let mut slab = Slab::new(scope, spans, wall.data().wall.height, cuts.holes(), face)?;
     let mut flush = Vec::new();
     let mut proud = Vec::new();
     for m in house
@@ -227,6 +228,7 @@ mod tests {
 
     fn region(holes: &[Elevation]) -> Result<SideRegion, PlaceError> {
         Slab::new(
+            &Scope::new(),
             std::slice::from_ref(&(0.0..100.)),
             40.,
             holes.iter(),

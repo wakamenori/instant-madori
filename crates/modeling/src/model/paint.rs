@@ -72,7 +72,7 @@ impl Model {
             .ok_or_else(missing)?;
         let side = entry.side_of(&row.face).ok_or_else(missing)?;
         let wall = house.boundary(&row.wall).ok_or_else(missing)?;
-        let plan = plan_side(house, wall, side, row)?;
+        let plan = plan_side(&self.scope, house, wall, side, row)?;
         let mut placement = Placement {
             element: entry.element.clone(),
             by_body: BTreeMap::new(),

@@ -44,7 +44,7 @@ fn run(case: Case) -> Report {
         .into_iter()
         .enumerate()
         {
-            let mut built = match Built::new(h, method, previous[i].as_ref()) {
+            let mut built = match Built::new(h, method, previous[i].take()) {
                 Ok(b) => b,
                 Err(e) => {
                     assert!(

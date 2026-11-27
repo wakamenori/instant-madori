@@ -31,9 +31,9 @@ fn project(
     Ok(sketch)
 }
 
-fn projected_m2(projection: &Session, sketch: u64, point: Point) -> Option<f64> {
+fn projected_m2(scope: &Scope, projection: &Session, sketch: u64, point: Point) -> Option<f64> {
     // A failed feature persists in its session. Isolate each probe so later rooms can still be measured.
-    let mut probe = projection.scratch();
+    let mut probe = scope.scratch(projection);
     let args = json!({
         "sketch":sketch,
         "profiles":[{"point":[point.x,point.y]}],
@@ -94,7 +94,7 @@ impl Model {
                     )),
                 }
             }
-            let mut projection = self.session.scratch();
+            let mut projection = self.scope.scratch(&self.session);
             let sketch = match project(&mut projection, storey.base_elevation, refs, seams) {
                 Ok(id) => id,
                 Err(e) => {
@@ -123,7 +123,7 @@ impl Model {
                     out.push(report(MismatchReason::NoSeed { clearance }));
                     continue;
                 }
-                match projected_m2(&projection, sketch, seed) {
+                match projected_m2(&self.scope, &projection, sketch, seed) {
                     None => out.push(report(MismatchReason::NoRegion { seed })),
                     Some(projected_m2) if !interior.area().matches_square_metres(projected_m2) => {
                         out.push(report(MismatchReason::AreaMismatch {

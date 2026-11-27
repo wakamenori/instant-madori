@@ -11,6 +11,7 @@ pub use modifier::{HostChange, ModifierFailure};
 mod paint;
 mod side;
 mod snapshot;
+use crate::evaluation::{Counted, Evaluation, Scope};
 use crate::{
     commands::{CommandError, execute_checked},
     display::{self, BodyElements, ExportError},
@@ -20,14 +21,15 @@ use madori_housing::*;
 use serde_json::{Value, json};
 pub use snapshot::LoadError;
 use solidcraft_doc::FeatureKind;
-use solidcraft_engine::{Session, schema::ParamCheck};
+use solidcraft_engine::Session;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 const FLOOR_THICKNESS_MM: f64 = 150.;
 const CUT_MARGIN_MM: f64 = 10.;
 
 pub struct Model {
-    session: Session,
+    session: Counted,
+    scope: Scope,
     entries: Vec<Entry>,
     display_order: HashMap<ElementId, usize>,
     // A later cut on a split piece clears its `split_from`, so the pieces seen in the
@@ -390,13 +392,26 @@ fn run_extrude(session: &mut Session, args: Value) -> Result<Extrusion, CommandE
 }
 
 impl Model {
-    pub fn build(house: &House, previous: Option<&Model>) -> Result<Self, BuildError> {
-        let mut model = Self::assemble(house, previous)?;
+    pub fn build(house: &House) -> Result<Self, BuildError> {
+        Self::make(house, &[], Scope::new())
+    }
+
+    pub fn rebuild(self, house: &House) -> Result<Self, BuildError> {
+        drop(self.session);
+        Self::make(house, &self.entries, self.scope)
+    }
+
+    pub fn evaluation(&self) -> Evaluation {
+        self.scope.evaluation(&self.session)
+    }
+
+    fn make(house: &House, order: &[Entry], scope: Scope) -> Result<Self, BuildError> {
+        let mut model = Self::assemble(house, order, scope)?;
         model.paint(house)?;
         Ok(model)
     }
 
-    fn assemble(house: &House, previous: Option<&Model>) -> Result<Self, BuildError> {
+    fn assemble(house: &House, order: &[Entry], scope: Scope) -> Result<Self, BuildError> {
         let fresh: Vec<_> = sources(house).collect();
         let display_order = fresh
             .iter()
@@ -406,7 +421,7 @@ impl Model {
             .collect::<HashMap<_, _>>();
         let mut plan = Vec::new();
         let mut errors = Vec::new();
-        for source in generation_order(fresh, previous.map_or(&[], Self::entries)) {
+        for source in generation_order(fresh, order) {
             let (kind, id) = source.key();
             match (ElementId::parse(id), source.plan(house)) {
                 (Err(_), _) => errors.push(Rejection {
@@ -421,11 +436,7 @@ impl Model {
         if let Some(errors) = Rejections::from_errors(errors) {
             return Err(BuildError::House(errors));
         }
-        let mut session = crate::new_session("House");
-        session.param_check = ParamCheck::Strict;
-        if let Some(previous) = previous {
-            session.model.cache = previous.session.model.cache.clone();
-        }
+        let mut session = scope.session("House");
         let mut pieces: HashMap<String, Vec<String>> = HashMap::new();
         let mut entries = Vec::new();
         for (element, step) in plan {
@@ -510,6 +521,7 @@ impl Model {
             .collect();
         Ok(Self {
             session,
+            scope,
             entries,
             display_order,
             pieces,

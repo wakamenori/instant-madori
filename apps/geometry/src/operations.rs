@@ -48,7 +48,7 @@ pub fn apply(request: ApplyOperationsRequest) -> Result<ApplyOperationsOutcome, 
         .err()
         .map(|e| e.as_slice().to_vec())
         .unwrap_or_default();
-    let model = match Model::build(&house, None) {
+    let model = match Model::build(&house) {
         Ok(model) => model,
         Err(BuildError::House(rejections)) => {
             return Ok(ApplyOperationsOutcome::Unbuildable {

@@ -45,11 +45,15 @@ const SETTINGS: [(f64, f64); 2] = [(0.4, 300.), (0.6, 600.)];
 fn run(case: Case, method: Method, join: Join, table: bool) -> [f64; SETTINGS.len()] {
     let mut volumes = [f64::NAN; SETTINGS.len()];
     let h = case.house();
-    let mut prev = None;
+    let mut prev: Option<Model> = None;
     let mut previous_bbox = None;
     for ((pitch, eave), volume) in SETTINGS.into_iter().zip(&mut volumes) {
         let label = format!("{case:?} {method:?} {join:?}");
-        let mut m = Model::build(&h, prev.as_ref()).unwrap();
+        let mut m = match prev.take() {
+            Some(model) => model.rebuild(&h),
+            None => Model::build(&h),
+        }
+        .unwrap();
         let roofs = case.roofs(pitch, eave);
         let mut c = Cad {
             session: &mut m.session,
@@ -239,7 +243,7 @@ fn default_join(case: Case) -> Join {
 fn wide_lower(table: bool) {
     for (pitch, eave) in [(0.4, 300.), (0.6, 600.)] {
         let roofs = Case::WideLower.roofs(pitch, eave);
-        let mut m = Model::build(&Case::WideLower.house(), None).unwrap();
+        let mut m = Model::build(&Case::WideLower.house()).unwrap();
         let mut c = Cad {
             session: &mut m.session,
             count: 0,

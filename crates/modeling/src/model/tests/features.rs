@@ -72,15 +72,15 @@ fn vertices(m: &Model, id: &str) -> Vec<[f32; 3]> {
 fn arch_and_wall_shelf_follow_the_wall_and_room_chair_stays_put() {
     let h = fixture();
     let wall = shared(&h);
-    let baseline = Model::build(&h, None).unwrap();
+    let baseline = Model::build(&h).unwrap();
     let (h, request) = furnished(h, wall.clone());
-    let first = Model::build(&h, None).unwrap();
+    let first = Model::build(&h).unwrap();
     let area = 900. * 1800. + std::f64::consts::PI * 450. * 450. / 2.;
     assert!(
         (volume(&baseline, wall.as_str()) - volume(&first, wall.as_str()) - area * 120.).abs()
             < area * LENGTH_TOLERANCE_MM
     );
-    let again = Model::build(&h, None).unwrap();
+    let again = Model::build(&h).unwrap();
     assert_eq!(first.session.doc.to_json(), again.session.doc.to_json());
     assert_eq!(
         first.display().unwrap().encode().unwrap(),
@@ -88,7 +88,7 @@ fn arch_and_wall_shelf_follow_the_wall_and_room_chair_stays_put() {
     );
     assert_eq!(first.check(&h), Ok(()));
     let (new_house, _) = h.move_wall(&request).unwrap();
-    let moved = Model::build(&new_house, Some(&first)).unwrap();
+    let moved = again.rebuild(&new_house).unwrap();
     assert_eq!(moved.check(&new_house), Ok(()));
     assert!((volume(&first, wall.as_str()) - volume(&moved, wall.as_str())).abs() < 1.);
     let arch_vertices = |m: &Model| {
@@ -122,16 +122,14 @@ fn appending_one_object_only_appends_features_scoped_to_that_object() {
     let mut join = chair.solids[0].clone();
     join.plane = Plane::Xz { y: 0. };
     chair.solids.push(join);
-    let before = Model::build(&House::new(data.clone()).unwrap(), None).unwrap();
+    let before = Model::build(&House::new(data.clone()).unwrap()).unwrap();
     data.objects.push(chair);
     let h = House::new(data).unwrap();
-    let after = Model::build(&h, Some(&before)).unwrap();
-    let features = &after.session.doc.features;
     let n = before.session.doc.features.len();
-    assert_eq!(
-        serde_json::to_value(&features[..n]).unwrap(),
-        serde_json::to_value(&before.session.doc.features).unwrap()
-    );
+    let original = serde_json::to_value(&before.session.doc.features).unwrap();
+    let after = before.rebuild(&h).unwrap();
+    let features = &after.session.doc.features;
+    assert_eq!(serde_json::to_value(&features[..n]).unwrap(), original);
     let mut operations = Vec::new();
     for f in &features[n..] {
         match &f.kind {
@@ -172,7 +170,7 @@ fn junction_cut_reports_no_effect_and_reach_on_its_modifier() {
         &h,
         vec![notch("junction", &wall, [5100., 5200.], [300., 600.])],
     );
-    let m = Model::build(&h, None).unwrap();
+    let m = Model::build(&h).unwrap();
     let reasons = reasons(&m, &h, "junction");
     assert!(reasons.iter().any(
         |r| matches!(r,MismatchReason::Modifier(ModifierFailure::NoEffect{wall:w,..}) if *w==wall)
@@ -185,7 +183,7 @@ fn margin_of_pass_through_wall_cut_reaches_abutting_wall() {
     let shared = shared(&h);
     let south = id(&h, pt(-100., -100.), pt(4000., -100.));
     let h = modified(&h, vec![notch("tee", &south, [3960., 4100.], [400., 800.])]);
-    let m = Model::build(&h, None).unwrap();
+    let m = Model::build(&h).unwrap();
     assert!(reasons(&m,&h,"tee").iter().any(|r|matches!(r,MismatchReason::Modifier(ModifierFailure::Overlap{other,..}) if *other==shared)));
 }
 #[test]
@@ -208,14 +206,14 @@ fn full_height_and_door_head_notches_name_the_splitter_even_with_submillimeter_g
             &base,
             vec![notch("notch", &wall, [1000., 1800.], [bottom, top])],
         );
-        let m = Model::build(&h, None).unwrap();
+        let m = Model::build(&h).unwrap();
         assert!(reasons(&m,&h,wall.as_str()).iter().any(|r|matches!(r,MismatchReason::Modifier(ModifierFailure::SplitWall{expected:1,found:2,modifiers}) if modifiers==&[ModifierId::new("notch")])));
     }
     let h = modified(
         &h,
         vec![notch("end", &wall, [5000., 5099.9995], [0., 2400.])],
     );
-    let m = Model::build(&h, None).unwrap();
+    let m = Model::build(&h).unwrap();
     assert!(reasons(&m, &h, wall.as_str()).is_empty());
     assert!((volume(&m, wall.as_str()) - 4900. * 120. * 2400.).abs() < 1.);
 }
@@ -231,7 +229,7 @@ fn modifiers_inside_door_are_checked_after_the_opening() {
         protrusion: 0.,
     };
     let h = modified(&h, vec![add, cut]);
-    let m = Model::build(&h, None).unwrap();
+    let m = Model::build(&h).unwrap();
     assert!(reasons(&m, &h, "cut").iter().any(|r| matches!(
         r,
         MismatchReason::Modifier(ModifierFailure::NoEffect { .. })
@@ -247,8 +245,8 @@ fn duplicate_cuts_attribute_no_effect_in_housing_order() {
     b.id = ModifierId::new("b");
     let both = modified(&h, vec![a.clone(), b.clone()]);
     for mods in [vec![b.clone()], vec![b, a]] {
-        let previous = Model::build(&modified(&h, mods), None).unwrap();
-        let m = Model::build(&both, Some(&previous)).unwrap();
+        let previous = Model::build(&modified(&h, mods)).unwrap();
+        let m = previous.rebuild(&both).unwrap();
         assert!(reasons(&m, &both, "a").is_empty());
         assert!(reasons(&m, &both, "b").iter().any(|r| matches!(
             r,
@@ -265,13 +263,13 @@ fn later_cut_precedes_existing_add_on_rebuild() {
         to: AddTo::Both {},
         protrusion: 0.,
     };
-    let previous = Model::build(&modified(&h, vec![add.clone()]), None).unwrap();
+    let previous = Model::build(&modified(&h, vec![add.clone()])).unwrap();
     let h = modified(
         &h,
         vec![add, notch("cut", &wall, [1000., 1400.], [0., 1000.])],
     );
-    let fresh = Model::build(&h, None).unwrap();
-    let warm = Model::build(&h, Some(&previous)).unwrap();
+    let fresh = Model::build(&h).unwrap();
+    let warm = previous.rebuild(&h).unwrap();
     assert_eq!(volume(&fresh, wall.as_str()), volume(&warm, wall.as_str()));
     assert_eq!(
         fresh.display().unwrap().encode().unwrap(),
@@ -282,7 +280,7 @@ fn later_cut_precedes_existing_add_on_rebuild() {
 fn empty_host_skips_next_modifier_without_cutting_neighbors() {
     let h = fixture();
     let wall = shared(&h);
-    let baseline = Model::build(&h, None).unwrap();
+    let baseline = Model::build(&h).unwrap();
     let h = modified(
         &h,
         vec![
@@ -290,7 +288,7 @@ fn empty_host_skips_next_modifier_without_cutting_neighbors() {
             notch("next", &wall, [5100., 5200.], [0., 2400.]),
         ],
     );
-    let m = Model::build(&h, None).unwrap();
+    let m = Model::build(&h).unwrap();
     assert!(reasons(&m, &h, "next").contains(&MismatchReason::NotInTable {}));
     assert!(reasons(&m, &h, wall.as_str()).contains(&MismatchReason::NoBody {}));
     for w in h.boundaries().filter(|w| w.data().id != wall) {
@@ -306,7 +304,7 @@ fn empty_object_stops_before_a_cut_through_the_house() {
     let mut data = h.into_data();
     let mut chair = data.objects.pop().unwrap();
     data.objects.clear();
-    let baseline = Model::build(&House::new(data.clone()).unwrap(), None).unwrap();
+    let baseline = Model::build(&House::new(data.clone()).unwrap()).unwrap();
     let solid = |plane, depth, u, v| Solid {
         combine: Combine::Cut,
         plane,
@@ -327,7 +325,7 @@ fn empty_object_stops_before_a_cut_through_the_house() {
     ));
     data.objects.push(chair);
     let h = House::new(data).unwrap();
-    let m = Model::build(&h, None).unwrap();
+    let m = Model::build(&h).unwrap();
     assert_eq!(reasons(&m, &h, "chair"), [MismatchReason::NoBody {}]);
     for e in baseline.entries() {
         let id = e.element.as_str();
@@ -361,7 +359,7 @@ fn blue_plan(h: &House) -> Result<side::SidePlan, side::PlaceError> {
     } else {
         Side::Right
     };
-    side::plan_side(h, wall, side, row)
+    side::plan_side(&Scope::new(), h, wall, side, row)
 }
 
 #[test]
@@ -394,7 +392,7 @@ fn proud_cross_paints_four_west_faces_only() {
             .collect(),
     };
     let h = modified(&h, vec![rib]);
-    let m = Model::build(&h, None).unwrap();
+    let m = Model::build(&h).unwrap();
     let mut out = Vec::new();
     m.check_colors(&h, &mut out);
     assert!(
@@ -430,7 +428,7 @@ fn arch_cut_paints_its_curved_outline_and_detects_a_missing_fragment() {
     let (h, wall) = blue_wall(fixture());
     let (h, _) = furnished(h, wall.clone());
     let h = opening(&h, "door", wall.clone(), 1000., 800., 2400., 0.);
-    let m = Model::build(&h, None).unwrap();
+    let m = Model::build(&h).unwrap();
     let mut out = Vec::new();
     m.check_colors(&h, &mut out);
     assert!(out.is_empty(), "{out:?}");
@@ -446,7 +444,7 @@ fn arch_cut_paints_its_curved_outline_and_detects_a_missing_fragment() {
     assert!(
         (plan.free_area - (4200. * 2400. - arch_area)).abs() < plan.perimeter * LENGTH_TOLERANCE_MM
     );
-    let mut partial = Model::assemble(&h, None).unwrap();
+    let mut partial = Model::assemble(&h, &[], Scope::new()).unwrap();
     assign_wall_face(&mut partial, &wall, plan.points[0], [0, 0, 255]);
     partial.check_colors(&h, &mut out);
     assert!(
@@ -467,7 +465,7 @@ fn pilaster_and_window_leave_the_exposed_area_on_both_pieces() {
         (plan.free_area - (4900. * 2400. - 1000. * 1100. - 300. * 300.)).abs()
             < LENGTH_TOLERANCE_MM
     );
-    let m = Model::build(&h, None).unwrap();
+    let m = Model::build(&h).unwrap();
     let mut out = Vec::new();
     m.check_colors(&h, &mut out);
     assert!(out.is_empty(), "{out:?}");
@@ -492,7 +490,7 @@ fn positive_submillimeter_protrusion_is_excluded() {
     let h = modified(&h, vec![add]);
     let plan = blue_plan(&h).unwrap();
     assert!((plan.free_area - (5000. * 2400. - 1000. * 1000.)).abs() < LENGTH_TOLERANCE_MM);
-    let m = Model::build(&h, None).unwrap();
+    let m = Model::build(&h).unwrap();
     let mut out = Vec::new();
     m.check_colors(&h, &mut out);
     assert!(out.is_empty(), "{out:?}");
@@ -520,7 +518,7 @@ fn flush_add_restores_part_of_a_cut_on_the_painted_side() {
     assert!(
         (plan.free_area - (5000. * 2400. - 1000. * 600. + 200. * 300.)).abs() < LENGTH_TOLERANCE_MM
     );
-    let m = Model::build(&h, None).unwrap();
+    let m = Model::build(&h).unwrap();
     let mut out = Vec::new();
     m.check_colors(&h, &mut out);
     assert!(out.is_empty(), "{out:?}");

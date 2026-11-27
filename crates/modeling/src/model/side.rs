@@ -64,6 +64,7 @@ pub(super) struct SidePlan {
 }
 
 pub(super) fn plan_side(
+    scope: &Scope,
     house: &House,
     wall: BoundaryView,
     side: Side,
@@ -85,7 +86,7 @@ pub(super) fn plan_side(
     let merged = side_spans(&outline, &frame);
     let fail = PlaceError::Color;
     let height = wall.data().wall.height;
-    let region = elevation::side_region(house, wall, side, &merged, &row.face)?;
+    let region = elevation::side_region(scope, house, wall, side, &merged, &row.face)?;
     let mut points = Vec::new();
     for [along, rise] in region.points {
         let p = frame.world(along, rise);

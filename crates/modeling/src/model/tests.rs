@@ -109,7 +109,7 @@ fn wall_volumes(h: &House, m: &Model) -> (f64, f64) {
 #[test]
 fn two_rooms_export_and_measure() {
     let h = two_openings();
-    let mut m = Model::build(&h, None).unwrap();
+    let mut m = Model::build(&h).unwrap();
     assert_eq!(h.boundaries().count(), 7);
     let (sum, tolerance) = wall_volumes(&h, &m);
     assert!(
@@ -161,7 +161,7 @@ fn full_height_door_and_second_cut() {
         opening(&h, "window", wall.clone(), 2800., 1200., 1100., 900.),
         opening(&h, "window", wall.clone(), 200., 400., 1100., 900.),
     ] {
-        let m = Model::build(&h, None).unwrap();
+        let m = Model::build(&h).unwrap();
         let names = m.bodies_of(wall.as_str());
         assert_eq!(names.len(), 2);
         assert_eq!(m.check(&h), Ok(()));
@@ -231,7 +231,7 @@ fn openings_explain_wall_bodies() {
                 sill,
             );
         }
-        let m = Model::build(&h, None).unwrap();
+        let m = Model::build(&h).unwrap();
         assert_eq!(m.check(&h), Ok(()), "{case} {holes:?}");
         assert_eq!(m.bodies_of(wall.as_str()).len(), pieces, "{case} {holes:?}");
     }
@@ -257,7 +257,7 @@ fn colors_survive_full_height_cuts() {
             h = opening(&h, &i.to_string(), wall.clone(), distance, 900., 2400., 0.);
         }
         assert_eq!(
-            Model::build(&h, None).unwrap().check(&h),
+            Model::build(&h).unwrap().check(&h),
             Ok(()),
             "{outer} {distances:?}"
         );
@@ -270,7 +270,7 @@ fn opening_after_removed_wall_reports_findings() {
     let wall = shared(&h);
     let h = opening(&h, "whole", wall.clone(), 100., 5000., 2400., 0.);
     let h = opening(&h, "joint", wall.clone(), 0., 100., 1000., 1000.);
-    let findings = Model::build(&h, None).unwrap().check(&h).unwrap_err();
+    let findings = Model::build(&h).unwrap().check(&h).unwrap_err();
     assert!(findings.as_slice().contains(&Mismatch::element(
         ElementKind::Wall,
         wall.as_str(),
@@ -286,7 +286,7 @@ fn opening_after_removed_wall_reports_findings() {
 fn split_feature_preserves_owner() {
     let h = fixture();
     let wall = shared(&h);
-    let mut m = Model::build(&h, None).unwrap();
+    let mut m = Model::build(&h).unwrap();
     execute_checked(
         &mut m.session,
         "solid.split_body",
@@ -316,11 +316,11 @@ fn split_feature_preserves_owner() {
 #[test]
 fn rebuilding_restores_cache_and_preserves_display() {
     let h = two_openings();
-    let before = Model::build(&fixture(), None).unwrap();
-    let cold = Model::build(&h, None).unwrap();
-    let hits = before.session.model.cache.lock().unwrap().hits;
-    let warm = Model::build(&h, Some(&before)).unwrap();
-    assert!(before.session.model.cache.lock().unwrap().hits > hits);
+    let before = Model::build(&fixture()).unwrap();
+    let cold = Model::build(&h).unwrap();
+    let hits = before.evaluation().restored;
+    let warm = before.rebuild(&h).unwrap();
+    assert!(warm.evaluation().restored > hits);
     assert_eq!(warm.display().unwrap(), cold.display().unwrap());
     for e in cold.entries() {
         assert_eq!(
@@ -332,10 +332,10 @@ fn rebuilding_restores_cache_and_preserves_display() {
 #[test]
 fn display_does_not_depend_on_the_previous_order() {
     let h = two_openings();
-    let cold = Model::build(&h, None).unwrap();
-    let mut reversed = Model::build(&h, None).unwrap();
+    let cold = Model::build(&h).unwrap();
+    let mut reversed = Model::build(&h).unwrap();
     reversed.entries.reverse();
-    let warm = Model::build(&h, Some(&reversed)).unwrap();
+    let warm = reversed.rebuild(&h).unwrap();
     assert!(matches!(
         warm.entries().first().map(|e| &e.kind),
         Some(EntryKind::Floor { .. })
@@ -371,7 +371,7 @@ fn stepped_and_near_straight_walls_have_no_overlap() {
                 .y += 4100. * 2f64.to_radians().tan();
         }
         let h = House::new(data).unwrap();
-        let m = Model::build(&h, None).unwrap();
+        let m = Model::build(&h).unwrap();
         wall_volumes(&h, &m);
     }
 }
@@ -462,24 +462,71 @@ fn blue_wall(h: House) -> (House, BoundaryId) {
         wall,
     )
 }
-fn moved() -> (Model, BoundaryId) {
-    let (h, wall) = blue_wall(fixture());
-    let old = Model::build(&h, None).unwrap();
-    assert_eq!(old.check(&h), Ok(()));
+fn move_shared_wall(h: &House, wall: &BoundaryId) -> House {
     let east = h
         .rooms()
         .find(|r| r.edges().any(|e| e.from.x > 4000.))
         .unwrap();
-    let (h, _) = h
-        .move_wall(&WallMove {
-            wall: wall.clone(),
-            toward: FaceRole::Room {
-                room: east.data().id.clone(),
-            },
-            distance: 500.,
-        })
-        .unwrap();
-    (Model::build(&h, Some(&old)).unwrap(), wall)
+    h.move_wall(&WallMove {
+        wall: wall.clone(),
+        toward: FaceRole::Room {
+            room: east.data().id.clone(),
+        },
+        distance: 500.,
+    })
+    .unwrap()
+    .0
+}
+
+#[test]
+fn rebuilding_a_colored_house_reuses_work_across_edits() {
+    let (mut h, wall) = blue_wall(fixture());
+    let west = id(&h, pt(-100., -100.), pt(4000., -100.));
+    let east = id(&h, pt(4000., -100.), pt(8100., -100.));
+    let mut shared = Model::build(&h).unwrap();
+    let mut fresh = Model::build(&h).unwrap();
+    let mut fresh_total = fresh.evaluation().recomputed;
+    h = move_shared_wall(&h, &wall);
+    for edit in [
+        None,
+        Some(("shared-1", &wall, 700.)),
+        Some(("shared-2", &wall, 3000.)),
+        Some(("west", &west, 800.)),
+        Some(("east", &east, 800.)),
+    ] {
+        if let Some((key, host, distance)) = edit {
+            h = opening(&h, key, host.clone(), distance, 900., 2050., 0.);
+        }
+        shared = shared.rebuild(&h).unwrap();
+        fresh = Model::make(&h, fresh.entries(), Scope::new()).unwrap();
+        assert_eq!(
+            shared.display().unwrap().encode().unwrap(),
+            fresh.display().unwrap().encode().unwrap()
+        );
+        assert_eq!(shared.entries(), fresh.entries());
+        let findings = shared.check(&h);
+        assert_eq!(findings, fresh.check(&h));
+        assert_eq!(findings, Ok(()));
+        fresh_total += fresh.evaluation().recomputed;
+    }
+    assert!(shared.evaluation().recomputed < fresh_total);
+}
+
+#[test]
+fn room_projection_work_counts_toward_evaluation() {
+    let h = two_openings();
+    let model = Model::build(&h).unwrap();
+    let before = model.evaluation();
+    assert_eq!(model.check(&h), Ok(()));
+    assert!(model.evaluation().recomputed > before.recomputed);
+}
+
+fn moved() -> (Model, BoundaryId) {
+    let (h, wall) = blue_wall(fixture());
+    let old = Model::build(&h).unwrap();
+    assert_eq!(old.check(&h), Ok(()));
+    let h = move_shared_wall(&h, &wall);
+    (old.rebuild(&h).unwrap(), wall)
 }
 fn assert_west_triangle(vertices: [[f64; 3]; 3], x: f64) {
     assert!(vertices.iter().all(|p| (p[0] - x).abs() < 1e-6));
@@ -552,7 +599,7 @@ fn decoded_display_keeps_blue_on_west_face() {
 fn assert_door(distance: f64) {
     let (h, wall) = blue_wall(fixture());
     let h = opening(&h, "door", wall.clone(), distance, 900., 2400., 0.);
-    assert_blue_wall(&Model::build(&h, None).unwrap(), &wall, 2, 3940., 0.);
+    assert_blue_wall(&Model::build(&h).unwrap(), &wall, 2, 3940., 0.);
 }
 #[test]
 fn full_height_door_paints_both_bodies() {
@@ -564,7 +611,7 @@ fn narrow_pier_receives_blue() {
 }
 fn corrupt_table(swap: bool) -> (Mismatches, BoundaryId, FaceRole) {
     let (h, wall) = blue_wall(fixture());
-    let mut model = Model::build(&h, None).unwrap();
+    let mut model = Model::build(&h).unwrap();
     let (left, right) = model
         .entries
         .iter_mut()
@@ -635,7 +682,7 @@ fn zero_offset_side_receives_blue() {
         offsets.right = 0.;
     }
     assert_blue_wall(
-        &Model::build(&House::new(data).unwrap(), None).unwrap(),
+        &Model::build(&House::new(data).unwrap()).unwrap(),
         &wall,
         1,
         4000.,
@@ -648,7 +695,7 @@ fn elevated_storey_paints_at_its_base() {
     let mut data = h.data().clone();
     data.storeys[0].base_elevation = 3000.;
     assert_blue_wall(
-        &Model::build(&House::new(data).unwrap(), None).unwrap(),
+        &Model::build(&House::new(data).unwrap()).unwrap(),
         &wall,
         1,
         3940.,
@@ -659,13 +706,13 @@ fn elevated_storey_paints_at_its_base() {
 #[test]
 fn two_room_fixture_matches_cad() {
     let h = fixture();
-    assert_eq!(Model::build(&h, None).unwrap().check(&h), Ok(()));
+    assert_eq!(Model::build(&h).unwrap().check(&h), Ok(()));
 }
 #[test]
 fn missing_wall_entry_reports_wall_and_body() {
     let h = fixture();
     let wall = shared(&h);
-    let mut m = Model::build(&h, None).unwrap();
+    let mut m = Model::build(&h).unwrap();
     m.entries.retain(|e| e.element.as_str() != wall.as_str());
     for keep_piece in [true, false] {
         if !keep_piece {
@@ -699,7 +746,7 @@ fn thicker_shared_wall_reduces_both_rooms() {
         left: 100.,
         right: 100.,
     };
-    let m = Model::build(&House::new(data).unwrap(), None).unwrap();
+    let m = Model::build(&House::new(data).unwrap()).unwrap();
     let errors = m.check(&h).unwrap_err();
     assert_eq!(errors.as_slice().len(), 2);
     for (room, mismatch) in h.rooms().zip(errors.as_slice()) {
@@ -749,7 +796,7 @@ fn short_wall_gap_enlarges_southwest_room() {
         }
     }
     let h = House::new(data).unwrap();
-    let m = Model::build(&h, None).unwrap();
+    let m = Model::build(&h).unwrap();
     let errors = m.check(&h).unwrap_err();
     assert_eq!(errors.as_slice().len(), 1, "{errors}");
     let mismatch = &errors.as_slice()[0];
@@ -771,7 +818,7 @@ fn short_wall_gap_enlarges_southwest_room() {
 #[test]
 fn seeds_outside_the_projected_walls_report_no_region() {
     let h = fixture();
-    let m = Model::build(&h, None).unwrap();
+    let m = Model::build(&h).unwrap();
     let mut data = h.data().clone();
     for vertex in &mut data.vertices {
         vertex.at.x += 20000.;
@@ -871,7 +918,7 @@ fn furnished(house: House, wall: BoundaryId) -> (House, WallMove) {
 fn reloaded_house_moves_like_the_unsaved_one() {
     let (h, wall) = blue_wall(two_openings());
     let (house, request) = furnished(h, wall);
-    let before = Model::build(&house, None).unwrap();
+    let before = Model::build(&house).unwrap();
     let saved = house.to_json().unwrap();
     let (loaded_house, loaded) = Model::load(&saved).unwrap();
     let bytes = |model: &Model| model.display().unwrap().encode().unwrap();
@@ -882,8 +929,8 @@ fn reloaded_house_moves_like_the_unsaved_one() {
 
     let (moved, _) = house.move_wall(&request).unwrap();
     let (moved_loaded, _) = loaded_house.move_wall(&request).unwrap();
-    let unsaved = Model::build(&moved, Some(&before)).unwrap();
-    let reloaded = Model::build(&moved_loaded, Some(&loaded)).unwrap();
+    let unsaved = before.rebuild(&moved).unwrap();
+    let reloaded = loaded.rebuild(&moved_loaded).unwrap();
     let moved_bytes = bytes(&unsaved);
     assert_eq!(bytes(&reloaded), moved_bytes);
     assert_eq!(reloaded.entries(), unsaved.entries());
@@ -965,7 +1012,7 @@ fn assign_wall_face(
 #[test]
 fn color_on_opposite_face_reports_stray_color() {
     let (h, wall) = blue_wall(fixture());
-    let mut m = Model::build(&h, None).unwrap();
+    let mut m = Model::build(&h).unwrap();
     let (body, face_index) = assign_wall_face(&mut m, &wall, [4060., 2500., 1200.], [0, 0, 255]);
     let errors = m.check(&h).unwrap_err();
     assert!(errors.to_string().contains(wall.as_str()));
@@ -982,7 +1029,7 @@ fn color_on_opposite_face_reports_stray_color() {
 #[test]
 fn repainted_face_reports_found_color() {
     let (h, wall) = blue_wall(fixture());
-    let mut m = Model::build(&h, None).unwrap();
+    let mut m = Model::build(&h).unwrap();
     let found = [255, 0, 0];
     let (body, face_index) = assign_wall_face(&mut m, &wall, [3940., 2500., 1200.], found);
     let errors = m.check(&h).unwrap_err();
@@ -1005,7 +1052,7 @@ fn repainted_face_reports_found_color() {
 fn partly_painted_wall_reports_unpainted_area() {
     let (h, wall) = blue_wall(fixture());
     let h = opening(&h, "door", wall.clone(), 900., 900., 2400., 0.);
-    let mut m = Model::assemble(&h, None).unwrap();
+    let mut m = Model::assemble(&h, &[], Scope::new()).unwrap();
     let point = [3940., 2500., 1200.];
     assign_wall_face(&mut m, &wall, point, [0, 0, 255]);
     let errors = m.check(&h).unwrap_err();
@@ -1027,7 +1074,7 @@ fn partly_painted_wall_reports_unpainted_area() {
 #[test]
 fn removed_room_reports_stale_entry() {
     let h = fixture();
-    let mut m = Model::build(&h, None).unwrap();
+    let mut m = Model::build(&h).unwrap();
     m.entries.push(Entry {
         element: ElementId::parse("ghost").unwrap(),
         kind: EntryKind::Floor {
@@ -1047,7 +1094,7 @@ fn removed_room_reports_stale_entry() {
 #[test]
 fn rehosted_opening_reports_both_walls() {
     let h = two_openings();
-    let mut m = Model::build(&h, None).unwrap();
+    let mut m = Model::build(&h).unwrap();
     let (opening, host) = m
         .entries
         .iter_mut()
@@ -1076,7 +1123,7 @@ fn rehosted_opening_reports_both_walls() {
 #[test]
 fn opening_requires_an_existing_cut_feature() {
     let h = two_openings();
-    let mut m = Model::build(&h, None).unwrap();
+    let mut m = Model::build(&h).unwrap();
     let floor = h.rooms().next().unwrap();
     let extrude = m
         .session
@@ -1108,7 +1155,7 @@ fn opening_requires_an_existing_cut_feature() {
 fn sliver_room_reports_insufficient_seed_clearance() {
     let h = fixture();
     let wall = shared(&h);
-    let m = Model::build(&h, None).unwrap();
+    let m = Model::build(&h).unwrap();
     let room = h
         .rooms()
         .find(|r| r.edges().any(|e| e.from.x < 4000.))
@@ -1153,7 +1200,7 @@ fn sliver_room_reports_insufficient_seed_clearance() {
 #[test]
 fn paint_ignores_touching_face_with_opposite_normal() {
     let (h, wall) = blue_wall(fixture());
-    let mut m = Model::assemble(&h, None).unwrap();
+    let mut m = Model::assemble(&h, &[], Scope::new()).unwrap();
     let names = m.bodies_of(wall.as_str());
     assert_eq!(names.len(), 1);
     extrude(
@@ -1182,7 +1229,7 @@ fn paint_ignores_touching_face_with_opposite_normal() {
         .unwrap()
         .side_of(&row.face)
         .unwrap();
-    let plan = side::plan_side(&h, h.boundary(&wall).unwrap(), side, row).unwrap();
+    let plan = side::plan_side(&m.scope, &h, h.boundary(&wall).unwrap(), side, row).unwrap();
     let state = m.session.model.state();
     let probe = state.body("probe").unwrap();
     assert_eq!(

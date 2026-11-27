@@ -13,17 +13,16 @@ pub(super) struct Built {
     pub fragments: usize,
 }
 impl Built {
-    pub fn new(h: &House, method: Method, previous: Option<&Self>) -> Result<Self, String> {
+    pub fn new(h: &House, method: Method, previous: Option<Self>) -> Result<Self, String> {
         if matches!(method, Method::Housing) {
             let start = std::time::Instant::now();
-            let model = Model::build(
-                &{
-                    let mut data = h.data().clone();
-                    data.wall_colors.clear();
-                    House::new(data).unwrap()
-                },
-                previous.map(|p| &p.model),
-            )
+            let mut data = h.data().clone();
+            data.wall_colors.clear();
+            let house = House::new(data).unwrap();
+            let model = match previous {
+                Some(p) => p.model.rebuild(&house),
+                None => Model::build(&house),
+            }
             .map_err(|e| e.to_string())?;
             return Ok(Self {
                 model,
@@ -39,13 +38,11 @@ impl Built {
     pub fn from_rings(
         h: &House,
         rings: &BTreeMap<BoundaryId, SimplePolygon>,
-        previous: Option<&Self>,
+        previous: Option<Self>,
         method: Method,
     ) -> Result<Self, String> {
-        let mut session = crate::new_session("House");
-        if let Some(p) = previous {
-            session.model.cache = p.model.session.model.cache.clone();
-        }
+        let scope = previous.map_or_else(Scope::new, |p| p.model.scope);
+        let mut session = scope.session("House");
         let mut entries = Vec::new();
         let mut pieces = HashMap::new();
         let mut display_order = HashMap::new();
@@ -117,6 +114,7 @@ impl Built {
         let ms = c.elapsed.as_secs_f64() * 1000.;
         Ok(Self {
             model: Model {
+                scope,
                 session,
                 entries,
                 pieces,
