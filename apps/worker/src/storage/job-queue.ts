@@ -7,8 +7,10 @@ import { activeJobStates } from "./job-states.ts";
 import { runOnce, updateOnceStatements } from "./requests.ts";
 import type { OnceCompanion, RequestKey } from "./requests.ts";
 
-export const claimable =
-  "(m.kind = 'answer' OR NOT EXISTS (SELECT 1 FROM jobs h WHERE h.pattern_id = q.pattern_id AND h.holds_queue = 1))";
+/** Answers pass a queue hold. Other queued jobs wait until it is released. */
+export function claimable(q: string, m: string) {
+  return `(${m}.kind = 'answer' OR NOT EXISTS (SELECT 1 FROM jobs h WHERE h.pattern_id = ${q}.pattern_id AND h.holds_queue = 1))`;
+}
 export function inputKey(alias: string, direction: "" | " DESC" = "") {
   return `${alias}.turn${direction}, ${alias}.number${direction}`;
 }
@@ -76,7 +78,7 @@ export function readStalledPatterns(db: D1, input: { unchangedSince: string; lim
       WHERE EXISTS (SELECT 1 FROM jobs a WHERE a.pattern_id = p.id
         AND a.state IN (${activeJobStates}) AND a.updated_at < ?1)
       OR EXISTS (SELECT 1 FROM jobs q JOIN messages m ON m.id = q.message_id
-        WHERE q.pattern_id = p.id AND q.state = 'queued' AND q.updated_at < ?1 AND ${claimable})
+        WHERE q.pattern_id = p.id AND q.state = 'queued' AND q.updated_at < ?1 AND ${claimable("q", "m")})
       ORDER BY random() LIMIT ?2`,
         bindings: [input.unchangedSince, input.limit],
       },

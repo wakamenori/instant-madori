@@ -8,7 +8,7 @@ import { revisionJson } from "./revisions.ts";
 
 export const queueHeadSql = `SELECT q.id FROM jobs q CROSS JOIN messages m
             ON m.id = q.message_id AND m.pattern_id = q.pattern_id
-            WHERE q.pattern_id = ? AND q.state = 'queued' AND ${claimable} ORDER BY ${inputKey("m")} LIMIT 1`;
+            WHERE q.pattern_id = ? AND q.state = 'queued' AND ${claimable("q", "m")} ORDER BY ${inputKey("m")} LIMIT 1`;
 
 const executionSchema = z.object({
   jobId: z.uuid(),
