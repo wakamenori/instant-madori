@@ -43,7 +43,7 @@ Preconditions:
 ## Gotchas
 
 - 保留は実行中の指示が終わったときだけ決まる。待機中の指示を止めても保留にならない（[指示を止める](./stop.md)の「待機中を止める」）。実行中の指示が止まったときに待機中の指示が無ければ、保留にならない。
-- 失敗での保留を見るには、片付けてから [SKILL.md の「起動」](../SKILL.md#起動) の手順で `MADORI_DEV_CONTAINERS=0` と `MADORI_DEV_JOB_TEST_HOLD=first_answer:30` を付けて起動し直し、「二つ送る」を行う。A は待ちの後に失敗し、`queueHold.job.state` が `failed` になる。再開した B も失敗し、そのときに待機中の指示が無ければ保留にならない。
+- 失敗での保留を見るには、片付けてから [SKILL.md の「起動」](../SKILL.md#起動) の手順で `MADORI_DEV_CONTAINERS=0` と `MADORI_DEV_JOB_TEST_HOLD=first_answer:30` を付けて起動し直す。[案件](./projects.md)の「作る」をもう一度行い、`PAT` を案の無い新しいパターンに設定し直してから、「二つ送る」を行う。A は待ちの後に失敗し、`queueHold.job.state` が `failed` になる。再開した B も失敗し、そのときに待機中の指示が無ければ保留にならない。案のあるパターンでは、A は開始の段階で Container に案の要約を求めて、待たずに失敗する（[指示を送る](./instructions.md)の Gotchas）。B を送る前に A が終わるので、保留にならない。
 - 止めた A の Workflow は、待ちが終わるまで残る。再開した B が A の `job.finished` より先に動き出すのは誤りではない。
 - 再開の `409` は、保留が解けたか、別の指示の停止・失敗で保留し直したことを示す。state を読み直し、今の `queueHold.job.jobId` で送り直す。
 - 保留中は、待ちを付けた仕事も含めて何も動かない。`settle` は保留中に終わらないので、再開か取り消しの後に使う。

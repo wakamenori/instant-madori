@@ -57,7 +57,7 @@ Preconditions:
 ## Gotchas
 
 - 新しいパターンの最初の仕事は、そのパターン用の Container を冷えた状態から起こす。手元ではイメージがビルド済みなら数秒で終わるが、新しいイメージの最初の起動は1分近くかかることがあるので、`settle` は5分まで待つ。二つ目からは、休止時間（10分）の内なら同じ Container を使う。
-- [SKILL.md の「起動」](../SKILL.md#起動) の手順で `MADORI_DEV_CONTAINERS=0` を付けると、仕事は再試行せずに失敗する。案は増えず、`currentRevision` は前のまま。`$EVIDENCE/dev.log` の `job.finished` の行に `"reason":"containers_disabled"` が出る。失敗したときに待機中の指示があれば、待機列は保留になり、後の指示は動かない（[待機列の保留](./queue-hold.md)）。
+- [SKILL.md の「起動」](../SKILL.md#起動) の手順で `MADORI_DEV_CONTAINERS=0` を付けると、仕事は再試行せずに失敗する。案は増えず、`currentRevision` は前のまま。`$EVIDENCE/dev.log` の `job.finished` の行に `"reason":"containers_disabled"` が出る。案の無いパターンの仕事は、最初の往復の後に住宅を変える段階で失敗する。案のあるパターンの仕事は、開始の段階（`start job`）で Container に案の要約を求めるので、最初の往復の前に失敗する。この仕事の `job.step` の行は `start job`（`"outcome":"not_committed"`）、`record failure`、`wake pattern` の三つだけになる。失敗したときに待機中の指示があれば、待機列は保留になり、後の指示は動かない（[待機列の保留](./queue-hold.md)）。
 - 仕事の状態は `state` の `runningJob`・`queuedJobs`・`lastFinishedJob` が見せる。`lastFinishedJob` は、実行した仕事のうち、終わったもので番号が最も大きいもので、次に実行した仕事が終わると置き換わる。待機中に止めた仕事と取り消した仕事は指さない。受付の応答の `job` は受付の記録で、仕事が終わった後に送り直しても変わらない。
 - 仕事を止める手順は[指示を止める](./stop.md)にある。
 - 本文は UTF-8 で 16384 バイトまで。
