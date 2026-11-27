@@ -1,4 +1,4 @@
-import { limits } from "../../src/limits.ts";
+import { aiModels, limits } from "../../src/limits.ts";
 import { estimateAttempt } from "../../src/services/cost.ts";
 import { emptyHouseSummary, houseSummarySchema } from "@madori/contracts/geometry-internal";
 import { versionOf, prompt, conversationWindow, prefix } from "../../src/services/ai-context.ts";
@@ -50,7 +50,11 @@ await test("Job runs restore D1 execution rights across retries and lost respons
     cacheWrite1hTokens: 0,
     cacheWrite5mTokens: 0,
   };
-  const charge = 640_040; // 32,000 output tokens at 20 and ten input tokens at 4 micro-USD.
+  const prices = aiModels[limits.ai.model].microUsdPerMillionTokens;
+  const charge =
+    (fullOutput.outputTokens * prices.output + fullOutput.uncachedInputTokens * prices.input) /
+    1_000_000;
+  const outputReserve = (fullOutput.outputTokens * prices.output) / 1_000_000;
   async function pattern() {
     const result = await db.store.projects.createOnce(
       {
@@ -409,7 +413,7 @@ await test("Job runs restore D1 execution rights across retries and lost respons
     assert.equal((await claimNextJob(base, { patternId: job.patternId })).kind, "not_claimed");
   }
   await t.test(
-    "the eighth reservation preserves the last revision and holds the queue",
+    "the first reservation past the instruction cap preserves the last revision and holds the queue",
     async () => {
       const first = await fixture();
       assert.equal((await runJob(first.deps, first.job, stepEngine().steps)).kind, "committed");
@@ -444,16 +448,15 @@ await test("Job runs restore D1 execution rights across retries and lost respons
         limit: "perInstruction",
         ms: 0,
       });
-      // Six paid rounds leave $1.159760 for round seven. Seven leave $0.519720,
-      // below even the output component ($0.64) of the next reservation.
-      assert.equal(calls, 7);
-      assert(engine.attempts.includes("round 8 ai"));
+      const paidRounds = Math.floor((limits.aiCost.perInstruction - outputReserve) / charge) + 1;
+      assert.equal(calls, paidRounds);
+      assert(engine.attempts.includes(`round ${paidRounds + 1} ai`));
       const rows = await attempts(b.jobId);
       assert.deepEqual(
         rows.map((row) => row.charged),
-        Array(7).fill(charge),
+        Array(paidRounds).fill(charge),
       );
-      assert.equal(await db.store.work.read(f.right, "rounds/8.json"), null);
+      assert.equal(await db.store.work.read(f.right, `rounds/${paidRounds + 1}.json`), null);
       assert.deepEqual(await f.revisions(), previous);
       assert.deepEqual(await notices(b.jobId), [
         "この指示のAI費用が上限の5米ドルに達したため、未確定の変更を採用せずに終了しました。案は最後に確定したもののままです。",

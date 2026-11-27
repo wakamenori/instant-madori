@@ -213,7 +213,6 @@ await test("AI attempt costs on real D1", async (t) => {
         .prepare("SELECT reserved, charged FROM ai_attempts WHERE job_id = ?")
         .bind(right.reference.jobId)
         .all();
-      // 10 input, 2 output, 3 cache reads, 4 short writes and 5 long writes, rounded up.
       assert.deepEqual(
         amounts.results,
         Array(2).fill({ reserved: estimate.reserve, charged: 141 }),
