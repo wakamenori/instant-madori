@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import ts from "typescript";
 import { test } from "node:test";
 import {
   assertStagingBindings,
@@ -10,7 +12,9 @@ const bindings = {
   containers: [{ class_name: "GeometryContainer" }],
   exports: { GeometryContainer: {} },
   r2_buckets: [{ binding: "BLOBS" }],
-  d1_databases: [{ binding: "DB" }],
+  d1_databases: [
+    { binding: "DB", database_name: "test", database_id: "test-id", migrations_dir: "migrations" },
+  ],
   vars: { A: "a" },
 };
 void test("staging requires the same binding names in every category", () => {
@@ -119,3 +123,22 @@ void test("Workflow exports pass when repeated in staging and fail when omitted 
     /staging/,
   );
 });
+
+void test("the deployed Wrangler configuration satisfies the staging binding contract", () => {
+  const source = readFileSync(new URL("../../apps/worker/wrangler.jsonc", import.meta.url), "utf8");
+  assertStagingBindings(ts.parseConfigFileTextToJson("wrangler.jsonc", source).config);
+});
+
+for (const option of [
+  { migrations_dir: "alternate" },
+  { migrations_pattern: "*.sql" },
+  { migrations_table: "alternate" },
+]) {
+  void test(`staging rejects a migration override for ${Object.keys(option).join()}`, () => {
+    const staging = {
+      ...bindings,
+      d1_databases: bindings.d1_databases.map((db) => ({ ...db, ...option })),
+    };
+    assert.throws(() => assertStagingBindings({ ...bindings, env: { staging } }), /d1_databases/);
+  });
+}

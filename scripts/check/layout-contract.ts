@@ -49,7 +49,19 @@ export function assertStagingBindings(config: unknown): void {
   const staging = z
     .object({
       env: z.object({
-        staging: bindingSchema.extend(inherited.omit({ env: true }).shape).strict(),
+        staging: bindingSchema
+          .extend({
+            ...inherited.omit({ env: true }).shape,
+            d1_databases: z.array(
+              z.strictObject({
+                binding: z.string(),
+                database_name: z.string(),
+                database_id: z.string(),
+                migrations_dir: z.literal("migrations"),
+              }),
+            ),
+          })
+          .strict(),
       }),
     })
     .parse(config).env.staging;
