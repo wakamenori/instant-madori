@@ -358,7 +358,7 @@ mise exec -- node --env-file=/path/to/.env scripts/deploy/registry-retention.ts 
 
 スクリプトは、検証用の利用者の案件に、パターン「障害試験」を固定のrequest IDで作り直して（再送して）使います。次の順に試します。
 
-1. 待たせたジョブをまたぐ再デプロイ。
+1. 最初のAIの応答で待たせたジョブをまたぐ再デプロイ。
 2. 指示の再送と、そのrequest IDの別の本文・別の操作への使い回し（422）。
 3. 確定の後の停止（`already_finished`）。
 4. 待ちの間の停止（`cancelled`）。
