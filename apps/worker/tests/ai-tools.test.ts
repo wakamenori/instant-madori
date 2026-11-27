@@ -4,6 +4,7 @@ import { z } from "zod";
 import { aiTools, parseToolCall } from "@madori/contracts/ai-tools";
 import { applyOperationsRequestSchema } from "@madori/contracts/geometry-internal";
 import type { ToolSpec } from "../src/ai/round-trip.ts";
+import { limits } from "../src/limits.ts";
 
 void test("provider tool bytes meet strict schema constraints and preserve field order", () => {
   const tools: readonly ToolSpec[] = aiTools;
@@ -104,6 +105,20 @@ function paint(red: number) {
 function edit(operations: unknown[]) {
   return parseToolCall("edit_house", JSON.stringify({ operations }));
 }
+void test("the generated edit_house schema and its description match the Worker limit", () => {
+  const { maxOperations } = limits.editHouse;
+  const operation = { kind: "remove_opening", id: "o" };
+  const operations = Array.from({ length: maxOperations }, () => operation);
+  assert(edit(operations).ok);
+  const overCap = edit([...operations, operation]);
+  assert(
+    !overCap.ok,
+    "limits.editHouse.maxOperations must equal the EditHouse.operations max in crates/geometry-api/src/tools.rs; change both and run pnpm generate:geometry",
+  );
+  assert.match(overCap.error, /operations/u);
+  const tool = aiTools.find(({ name }) => name === "edit_house");
+  assert(tool?.inputSchemaJson.includes(`At most ${maxOperations} items.`));
+});
 void test("edit inputs are bounded before a Container request is built", () => {
   for (const operations of [
     [paint(256)],
