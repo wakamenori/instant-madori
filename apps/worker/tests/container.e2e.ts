@@ -15,7 +15,7 @@ import {
 } from "@madori/contracts";
 import { settleJobs } from "./support/settle-jobs.ts";
 import { geometryInternal, houseSummarySchema } from "@madori/contracts/geometry-internal";
-import { startLocalWorker, newUser } from "./support/local-worker.ts";
+import { startLocalWorker, newUser, type LocalWorker } from "./support/local-worker.ts";
 const docker = promisify(execFile);
 async function runningContainers() {
   const { stdout } = await docker("docker", [
@@ -33,34 +33,61 @@ async function runningContainers() {
       return { id, image, session };
     });
 }
+
+/**
+ * Local workerd evicts a DO 10 s after its last call closes. A job starting this
+ * long after the previous job's last DO call reaches a fresh DO.
+ */
+const doEvictionSeconds = 15;
+const acceptanceHoldSeconds = 5;
+const idleTimeoutMs = 60_000;
+
+function bootWorker(hold: `${"first" | "finish"}_answer:${number}`) {
+  return startLocalWorker({
+    containers: true,
+    entry: "tests/rpc/geometry-probe.ts",
+    readyTimeoutMs: 800_000,
+    vars: {
+      GEOMETRY_IDLE_TIMEOUT_MS: String(idleTimeoutMs),
+      JOB_TEST_HOLD: hold,
+    },
+  });
+}
+
+async function sessionOf(worker: LocalWorker) {
+  const image = worker.logEntries().find((entry) => entry["event"] === "container.started")?.[
+    "image"
+  ];
+  assert.equal(typeof image, "string");
+  const sessions = new Set(
+    (await runningContainers())
+      .filter((entry) => entry.image === image)
+      .map((entry) => entry.session),
+  );
+  assert.equal(sessions.size, 1);
+  const [session] = sessions;
+  assert(session);
+  assert.match(session, /^[0-9a-f]{16}$/);
+  return session;
+}
+
 void test(
   "real Linux container returns an artifact over Worker and DO RPC",
-  { timeout: 1_200_000 },
+  { timeout: 1_200_000, concurrency: true },
   async (t) => {
     const started = performance.now();
-    const idleTimeoutMs = 60_000;
-    const worker = await startLocalWorker({
-      containers: true,
-      entry: "tests/rpc/geometry-probe.ts",
-      readyTimeoutMs: 800_000,
-      vars: {
-        GEOMETRY_IDLE_TIMEOUT_MS: String(idleTimeoutMs),
-        // Local workerd evicts a DO 10 s after its last call closes, so with this hold a job
-        // reaches a fresh DO only if the previous job's DO call closed.
-        JOB_TEST_HOLD: "finish_answer:15",
-      },
-    });
-    t.after(() => worker.stop());
+    const main = await bootWorker(`finish_answer:${doEvictionSeconds}`);
+    t.after(() => main.stop());
     const bootMs = performance.now() - started;
-    let session: string | undefined;
-    try {
-      const preexistingIds = new Set((await runningContainers()).map(({ id }) => id));
-      const viewer = await import("../../../crates/viewer/pkg/madori_viewer.js");
-      await viewer.default({
-        module_or_path: await readFile(
-          new URL("../../../crates/viewer/pkg/madori_viewer_bg.wasm", import.meta.url),
-        ),
-      });
+    const preexistingIds = new Set((await runningContainers()).map(({ id }) => id));
+    const viewer = await import("../../../crates/viewer/pkg/madori_viewer.js");
+    await viewer.default({
+      module_or_path: await readFile(
+        new URL("../../../crates/viewer/pkg/madori_viewer_bg.wasm", import.meta.url),
+      ),
+    });
+
+    async function runMainLane(worker: LocalWorker) {
       const user = newUser("container");
       const created = await worker.call("/api/projects", {
         method: "POST",
@@ -171,19 +198,7 @@ void test(
         );
       }
       await commitAndView("cold");
-      const image = worker.logEntries().find((entry) => entry["event"] === "container.started")?.[
-        "image"
-      ];
-      assert.equal(typeof image, "string");
-      const sessions = new Set(
-        (await runningContainers())
-          .filter((entry) => entry.image === image)
-          .map((entry) => entry.session),
-      );
-      assert.equal(sessions.size, 1);
-      [session] = sessions;
-      assert(session);
-      assert.match(session, /^[0-9a-f]{16}$/);
+      const session = await sessionOf(worker);
       await commitAndView("warm");
       assert.equal(
         worker.logEntries().filter((entry) => entry["event"] === "container.started").length,
@@ -350,6 +365,17 @@ void test(
         );
         assert.deepEqual(modes, ["cold", "adopted", "cold", "adopted", "adopted"]);
       });
+      const history = await worker.call(`/api/patterns/${pattern.id}/revisions`, { as: user });
+      assert.equal(history.status, 200);
+      assert.deepEqual(revisionListResponseSchema.parse(await history.json()), {
+        revisions,
+        nextCursor: null,
+      });
+      return session;
+    }
+
+    async function runSideLane(worker: LocalWorker) {
+      const user = newUser("container-side");
       for (const script of ["reject-window", "unresolved"] as const) {
         await t.test(script, async () => {
           const created = await worker.call("/api/projects", {
@@ -401,6 +427,7 @@ void test(
           }
         });
       }
+      const session = await sessionOf(worker);
       async function probe(body: unknown, traceId: string) {
         const response = await worker.call("/api/__probe/operations", {
           method: "POST",
@@ -622,7 +649,10 @@ void test(
           assert.equal((await worker.logLine(asking.jobId, "job.finished"))["outcome"], "asked");
           const held = await state();
           const holder = held.queueHold?.job;
-          assert(holder?.state === "awaiting_answer");
+          assert(
+            holder?.state === "awaiting_answer",
+            "the question holds the queue only if the waiting instruction was accepted first",
+          );
           assert.equal(held.currentRevision, null, "the provisional edit added no revision");
           const answer = await submit("必要", holder.question.messageId);
           assert.equal(
@@ -648,34 +678,51 @@ void test(
           assert.equal(last.baseRevisionId, first.id);
         },
       );
-      const history = await worker.call(`/api/patterns/${pattern.id}/revisions`, { as: user });
-      assert.equal(history.status, 200);
-      assert.deepEqual(revisionListResponseSchema.parse(await history.json()), {
-        revisions,
-        nextCursor: null,
-      });
-    } finally {
-      await worker.stop();
+      return session;
     }
-    assert(session);
-    const filter = `label=dev.workerd.session=${session}`;
+
+    async function startSideLane() {
+      const worker = await bootWorker(`first_answer:${acceptanceHoldSeconds}`);
+      t.after(() => worker.stop());
+      try {
+        return await runSideLane(worker);
+      } finally {
+        await worker.stop();
+      }
+    }
+
+    const lanes = await Promise.allSettled([runMainLane(main), startSideLane()]);
+    await main.stop();
+
+    const sessions: string[] = [];
+    const errors: unknown[] = [];
+    for (const lane of lanes) {
+      if (lane.status === "fulfilled") sessions.push(lane.value);
+      else errors.push(lane.reason);
+    }
+    if (errors.length === 1) throw errors[0];
+    if (errors.length > 1) throw new AggregateError(errors, "Container test lanes failed");
+
     await t.test("stopping the Worker removes every container of its session", async () => {
-      const deadline = performance.now() + 30_000;
-      let remaining: string;
-      do {
-        const { stdout } = await docker("docker", [
-          "ps",
-          "--all",
-          "--quiet",
-          "--no-trunc",
-          "--filter",
-          filter,
-        ]);
-        remaining = stdout.trim();
-        if (!remaining) break;
-        await setTimeout(250);
-      } while (performance.now() < deadline);
-      assert.equal(remaining, "", `containers remain for ${filter}`);
+      for (const session of sessions) {
+        const filter = `label=dev.workerd.session=${session}`;
+        const deadline = performance.now() + 30_000;
+        let remaining: string;
+        do {
+          const { stdout } = await docker("docker", [
+            "ps",
+            "--all",
+            "--quiet",
+            "--no-trunc",
+            "--filter",
+            filter,
+          ]);
+          remaining = stdout.trim();
+          if (!remaining) break;
+          await setTimeout(250);
+        } while (performance.now() < deadline);
+        assert.equal(remaining, "", `containers remain for ${filter}`);
+      }
     });
   },
 );
