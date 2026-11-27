@@ -40,7 +40,6 @@ impl Placement<'_> {
 struct Triangle {
     vertices: [[f64; 3]; 3],
     normal: [f64; 3],
-    area: f64,
 }
 impl Triangle {
     fn faces(&self, plan: &SidePlan) -> bool {
@@ -57,7 +56,6 @@ fn triangle(mesh: &solidcraft_engine::geom::Mesh, indices: &[u32; 3]) -> Option<
     Some(Triangle {
         vertices: [a.into(), b.into(), c.into()],
         normal: cross.normalized()?.into(),
-        area: cross.len() * 0.5,
     })
 }
 impl Model {
@@ -151,6 +149,7 @@ impl Model {
                     row.wall.as_str(),
                     match error {
                         PlaceError::Color(failure) => MismatchReason::WallColor(failure),
+                        PlaceError::Measure(message) => MismatchReason::MeasureFailed { message },
                         PlaceError::House(rejections) => MismatchReason::Housing { rejections },
                     },
                 )),
@@ -179,6 +178,19 @@ impl Model {
                     tris.push(triangle(&mesh, indices));
                 }
             }
+            let infos = match body.faces_at(LENGTH_TOLERANCE_MM) {
+                Ok(infos) => infos,
+                Err(e) => {
+                    out.push(Mismatch::element(
+                        ElementKind::Wall,
+                        owner.as_str(),
+                        MismatchReason::MeasureFailed {
+                            message: e.to_string(),
+                        },
+                    ));
+                    continue;
+                }
+            };
             for (face_index, look) in colors {
                 let Some(tris) = faces.get(&face_index).filter(|t| !t.is_empty()) else {
                     out.push(stray(face_index));
@@ -202,17 +214,18 @@ impl Model {
                         found: look.color,
                     }));
                 }
-                placement.painted_area += tris.iter().flatten().map(|t| t.area).sum::<f64>();
+                if let Some(info) = infos.get(face_index) {
+                    placement.painted_area += info.area;
+                } else {
+                    out.push(stray(face_index));
+                }
             }
         }
         for placement in placements {
             let plan = &placement.plan;
-            let perimeter: f64 = plan
-                .spans
-                .iter()
-                .map(|s| 2. * (s.end - s.start + plan.height))
-                .sum();
-            if (placement.painted_area - plan.free_area).abs() > LENGTH_TOLERANCE_MM * perimeter {
+            if (placement.painted_area - plan.free_area).abs()
+                > LENGTH_TOLERANCE_MM * plan.perimeter
+            {
                 out.push(placement.error(WallColorFailure::Unpainted {
                     face: placement.row.face.clone(),
                     expected_area: plan.free_area,

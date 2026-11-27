@@ -1,8 +1,13 @@
 mod check;
 mod cuts;
+mod elevation;
 use cuts::WallCuts;
+mod modifier;
+mod object;
+mod profile;
 mod projection;
 pub use check::{Mismatch, MismatchReason, Mismatches, Subject};
+pub use modifier::{HostChange, ModifierFailure};
 mod paint;
 mod side;
 mod snapshot;
@@ -29,13 +34,22 @@ pub struct Model {
     // build's own replies are the reliable owner record.
     pieces: HashMap<String, ElementId>,
 }
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Entry {
     pub element: ElementId,
     pub kind: EntryKind,
 }
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum EntryKind {
+    Modifier {
+        modifier: ModifierId,
+        host: BoundaryId,
+        feature: u64,
+        change: HostChange,
+    },
+    Object {
+        object: ObjectId,
+    },
     Floor {
         room: RoomId,
     },
@@ -143,17 +157,22 @@ enum Source<'a> {
     Wall(BoundaryView<'a>),
     Opening(OpeningView<'a>),
     Floor(RoomView<'a>),
+    Modifier(ModifierView<'a>),
+    Object(ObjectView<'a>),
 }
 impl<'a> Source<'a> {
     fn key(&self) -> (ElementKind, &'a str) {
         match self {
             Self::Wall(w) => (ElementKind::Wall, w.data().id.as_str()),
             Self::Opening(o) => (ElementKind::Opening, o.data().id.as_str()),
+            Self::Modifier(m) => (ElementKind::Modifier, m.data().id.as_str()),
+            Self::Object(o) => (ElementKind::Object, o.data().id.as_str()),
             Self::Floor(r) => (ElementKind::Room, r.data().id.as_str()),
         }
     }
-    fn host(&self) -> Option<&str> {
+    fn host(&self) -> Option<&'a str> {
         match self {
+            Self::Modifier(m) => Some(m.data().wall.as_str()),
             Self::Opening(o) => Some(o.data().wall.as_str()),
             _ => None,
         }
@@ -174,107 +193,149 @@ struct Prism {
     base: f64,
     height: f64,
 }
-impl Source<'_> {
-    fn plan(self, house: &House) -> Result<Prism, Rejections> {
-        let (kind, id) = self.key();
+impl Prism {
+    fn opening(house: &House, o: OpeningView<'_>) -> Result<Self, Rejections> {
         let reject = |reason| Rejection {
-            element: kind,
+            element: ElementKind::Opening,
+            id: o.data().id.as_str().into(),
+            reason,
+        };
+        let base = storey_base(house, &o.wall().start().data().storey).map_err(reject)?;
+        let wall = o.wall();
+        let cuts = WallCuts::of(wall)?;
+        let elevation = cuts
+            .cut(&o.data().id)
+            .ok_or_else(|| reject(Reason::UnknownOpening {}))?;
+        let start = wall.start().data().at;
+        let end = wall.end().data().at;
+        let (dx, dy) = (end.x - start.x, end.y - start.y);
+        let length = dx.hypot(dy);
+        let (ux, uy) = (dx / length, dy / length);
+        let at = |along, offset| Point {
+            x: start.x + ux * along - uy * offset,
+            y: start.y + uy * along + ux * offset,
+        };
+        let offsets = wall.data().wall.offsets;
+        let left = offsets.left + CUT_MARGIN_MM;
+        let right = -offsets.right - CUT_MARGIN_MM;
+        let span = &elevation.along;
+        let points = vec![
+            at(span.start, right),
+            at(span.end, right),
+            at(span.end, left),
+            at(span.start, left),
+        ];
+        let rise = &elevation.rise;
+        Ok(Prism {
+            outline: SimplePolygon::new(points).map_err(reject)?,
+            base: base + rise.start,
+            height: rise.end - rise.start,
+        })
+    }
+}
+enum BuildPlan<'a> {
+    NewBody(EntryKind, Prism),
+    Opening(OpeningView<'a>, Prism),
+    Modifier(ModifierView<'a>, Profile<PlanePoint>),
+    Object(ObjectView<'a>),
+}
+impl<'a> Source<'a> {
+    fn plan(self, house: &House) -> Result<BuildPlan<'a>, Rejections> {
+        let (element, id) = self.key();
+        let reject = |reason| Rejection {
+            element,
             id: id.into(),
             reason,
         };
-        let storey = match self {
-            Self::Wall(w) => &w.start().data().storey,
-            Self::Opening(o) => &o.wall().start().data().storey,
-            Self::Floor(r) => r.storey(),
-        };
-        let base = storey_base(house, storey).map_err(reject)?;
         Ok(match self {
-            Self::Wall(w) => Prism {
-                outline: w.planform()?,
-                base,
-                height: w.data().wall.height,
-            },
-            Self::Floor(r) => Prism {
-                outline: SimplePolygon::new(r.edges().map(|e| e.from).collect()).map_err(reject)?,
-                base: base - FLOOR_THICKNESS_MM,
-                height: FLOOR_THICKNESS_MM,
-            },
-            Self::Opening(o) => {
-                let wall = o.wall();
-                let cuts = WallCuts::of(wall)?;
-                let elevation = cuts
-                    .cut(&o.data().id)
-                    .ok_or_else(|| reject(Reason::UnknownOpening {}))?;
-                let start = wall.start().data().at;
-                let end = wall.end().data().at;
-                let (dx, dy) = (end.x - start.x, end.y - start.y);
-                let length = dx.hypot(dy);
-                let (ux, uy) = (dx / length, dy / length);
-                let at = |along, offset| Point {
-                    x: start.x + ux * along - uy * offset,
-                    y: start.y + uy * along + ux * offset,
-                };
-                let offsets = wall.data().wall.offsets;
-                let left = offsets.left + CUT_MARGIN_MM;
-                let right = -offsets.right - CUT_MARGIN_MM;
-                let span = &elevation.along;
-                let points = vec![
-                    at(span.start, right),
-                    at(span.end, right),
-                    at(span.end, left),
-                    at(span.start, left),
-                ];
-                let rise = &elevation.rise;
+            Self::Wall(w) => BuildPlan::NewBody(
+                EntryKind::Wall {
+                    wall: w.data().id.clone(),
+                    left: w.face(Side::Left).role(),
+                    right: w.face(Side::Right).role(),
+                },
                 Prism {
-                    outline: SimplePolygon::new(points).map_err(reject)?,
-                    base: base + rise.start,
-                    height: rise.end - rise.start,
-                }
-            }
+                    outline: w.planform()?,
+                    base: storey_base(house, &w.start().data().storey).map_err(reject)?,
+                    height: w.data().wall.height,
+                },
+            ),
+            Self::Opening(o) => BuildPlan::Opening(o, Prism::opening(house, o)?),
+            Self::Floor(r) => BuildPlan::NewBody(
+                EntryKind::Floor {
+                    room: r.data().id.clone(),
+                },
+                Prism {
+                    outline: SimplePolygon::new(r.edges().map(|e| e.from).collect())
+                        .map_err(reject)?,
+                    base: storey_base(house, r.storey()).map_err(reject)? - FLOOR_THICKNESS_MM,
+                    height: FLOOR_THICKNESS_MM,
+                },
+            ),
+            Self::Modifier(m) => BuildPlan::Modifier(m, profile::snapped(m)?),
+            Self::Object(o) => BuildPlan::Object(o),
         })
     }
+}
+fn sources(house: &House) -> impl Iterator<Item = Source<'_>> {
+    house
+        .boundaries()
+        .map(Source::Wall)
+        .chain(house.openings().map(Source::Opening))
+        .chain(house.rooms().map(Source::Floor))
+        .chain(house.modifiers().map(Source::Modifier))
+        .chain(house.objects().map(Source::Object))
 }
 fn generation_order<'a>(mut sources: Vec<Source<'a>>, previous: &[Entry]) -> Vec<Source<'a>> {
     let rank: HashMap<_, _> = previous
         .iter()
         .enumerate()
-        .map(|(i, e)| (e.element.as_str(), (i, &e.kind)))
+        .map(|(i, e)| (e.element.as_str(), (e.kind.key().0, i)))
         .collect();
-    sources.sort_by_key(|s| {
-        let (kind, id) = s.key();
-        rank.get(id)
-            .filter(|(_, old)| {
-                matches!(
-                    (kind, old),
-                    (ElementKind::Wall, EntryKind::Wall { .. })
-                        | (ElementKind::Room, EntryKind::Floor { .. })
-                        | (ElementKind::Opening, EntryKind::Opening { .. })
-                )
-            })
-            .map_or(usize::MAX, |(i, _)| *i)
-    });
-    let mut seen = HashSet::new();
-    let mut pending: BTreeMap<BoundaryId, Vec<Source>> = BTreeMap::new();
-    let mut order = Vec::new();
-    for source in sources {
-        if let Source::Opening(o) = source
-            && !seen.contains(&o.data().wall)
-        {
-            pending
-                .entry(o.data().wall.clone())
-                .or_default()
-                .push(source);
-            continue;
-        }
-        order.push(source);
-        if let Source::Wall(w) = source {
-            seen.insert(w.data().id.clone());
-            if let Some(cuts) = pending.remove(&w.data().id) {
-                order.extend(cuts);
+    let mut prerequisites: HashMap<&str, Vec<&str>> = HashMap::new();
+    for (i, s) in sources.iter().enumerate() {
+        if let Some(host) = s.host() {
+            let deps = prerequisites.entry(s.key().1).or_default();
+            deps.push(host);
+            if let Source::Modifier(m) = s {
+                let add = matches!(m.data().effect, Effect::Add { .. });
+                for (j, other) in sources
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, p)| p.host() == Some(host))
+                {
+                    let needed = match other {
+                        Source::Opening(_) => true,
+                        Source::Modifier(p) => match (add, &p.data().effect) {
+                            (true, Effect::Cut {}) => true,
+                            (false, Effect::Add { .. }) => false,
+                            _ => j < i,
+                        },
+                        _ => false,
+                    };
+                    if needed {
+                        deps.push(other.key().1);
+                    }
+                }
             }
         }
     }
-    order.extend(pending.into_values().flatten());
+    sources.sort_by_key(|s| {
+        rank.get(s.key().1)
+            .filter(|(kind, _)| *kind == s.key().0)
+            .map_or(usize::MAX, |(_, i)| *i)
+    });
+    let mut emitted = HashSet::new();
+    let mut order = Vec::with_capacity(sources.len());
+    while let Some(i) = sources.iter().position(|s| {
+        prerequisites
+            .get(s.key().1)
+            .is_none_or(|deps| deps.iter().all(|id| emitted.contains(id)))
+    }) {
+        let source = sources.remove(i);
+        emitted.insert(source.key().1);
+        order.push(source);
+    }
     order
 }
 fn invalid_reply(cmd: &str, field: &str) -> CommandError {
@@ -305,6 +366,15 @@ fn extrude(session: &mut Session, p: &Prism, mut args: Value) -> Result<Extrusio
     execute_checked(session, "sketch.finish", &json!({}))?;
     args["sketch"] = json!(sketch);
     args["distance"] = json!(p.height);
+    run_extrude(session, args)
+}
+impl Extrusion {
+    fn update(self, pieces: &mut Vec<String>) {
+        pieces.retain(|p| !self.removed.contains(p));
+        pieces.extend(self.created);
+    }
+}
+fn run_extrude(session: &mut Session, args: Value) -> Result<Extrusion, CommandError> {
     let cmd = "solid.extrude";
     let reply = execute_checked(session, cmd, &args)?;
     let names = |field: &str| {
@@ -327,12 +397,7 @@ impl Model {
     }
 
     fn assemble(house: &House, previous: Option<&Model>) -> Result<Self, BuildError> {
-        let fresh: Vec<_> = house
-            .boundaries()
-            .map(Source::Wall)
-            .chain(house.openings().map(Source::Opening))
-            .chain(house.rooms().map(Source::Floor))
-            .collect();
+        let fresh: Vec<_> = sources(house).collect();
         let display_order = fresh
             .iter()
             .filter(|s| s.host().is_none())
@@ -350,7 +415,7 @@ impl Model {
                     reason: Reason::InvalidId {},
                 }),
                 (_, Err(e)) => errors.extend_from_slice(e.as_slice()),
-                (Ok(element), Ok(prism)) => plan.push((source, element, prism)),
+                (Ok(element), Ok(prism)) => plan.push((element, prism)),
             }
         }
         if let Some(errors) = Rejections::from_errors(errors) {
@@ -361,50 +426,66 @@ impl Model {
         if let Some(previous) = previous {
             session.model.cache = previous.session.model.cache.clone();
         }
-        let mut pieces: HashMap<BoundaryId, Vec<String>> = HashMap::new();
+        let mut pieces: HashMap<String, Vec<String>> = HashMap::new();
         let mut entries = Vec::new();
-        for (source, element, prism) in plan {
+        for (element, step) in plan {
             let error = |source| BuildError::Command {
                 element: element.clone(),
                 source,
             };
-            let args = match source {
-                Source::Opening(o) => {
-                    let Some(targets) = pieces.get(&o.data().wall).filter(|t| !t.is_empty()) else {
+            let kind = match step {
+                BuildPlan::Modifier(m, profile) => {
+                    let Some(targets) = pieces
+                        .get_mut(m.data().wall.as_str())
+                        .filter(|p| !p.is_empty())
+                    else {
                         continue;
                     };
-                    json!({"operation":"cut","targets":targets})
+                    modifier::apply(&mut session, m, &profile, targets).map_err(error)?
                 }
-                _ => json!({"operation":"new","body_name":element.as_str()}),
-            };
-            let reply = extrude(&mut session, &prism, args).map_err(error)?;
-            if source.host().is_none() && reply.created != [element.as_str()] {
-                return Err(BuildError::UnexpectedBodies {
-                    element,
-                    created: reply.created,
-                });
-            }
-            let kind = match source {
-                Source::Wall(w) => {
-                    pieces.insert(w.data().id.clone(), reply.created);
-                    EntryKind::Wall {
-                        wall: w.data().id.clone(),
-                        left: w.face(Side::Left).role(),
-                        right: w.face(Side::Right).role(),
+                BuildPlan::Object(o) => {
+                    let owned = object::assemble(&mut session, o, &element)?;
+                    pieces.insert(element.as_str().into(), owned);
+                    EntryKind::Object {
+                        object: o.data().id.clone(),
                     }
                 }
-                Source::Floor(r) => EntryKind::Floor {
-                    room: r.data().id.clone(),
-                },
-                Source::Opening(o) => {
-                    let targets = pieces.entry(o.data().wall.clone()).or_default();
-                    targets.retain(|b| !reply.removed.contains(b));
-                    targets.extend(reply.created);
+                BuildPlan::Opening(o, prism) => {
+                    let Some(targets) = pieces
+                        .get_mut(o.data().wall.as_str())
+                        .filter(|p| !p.is_empty())
+                    else {
+                        continue;
+                    };
+                    let reply = extrude(
+                        &mut session,
+                        &prism,
+                        json!({"operation":"cut","targets":targets}),
+                    )
+                    .map_err(error)?;
+                    let cut = reply.feature;
+                    reply.update(targets);
                     EntryKind::Opening {
                         opening: o.data().id.clone(),
                         host: o.data().wall.clone(),
-                        cut: reply.feature,
+                        cut,
                     }
+                }
+                BuildPlan::NewBody(kind, prism) => {
+                    let reply = extrude(
+                        &mut session,
+                        &prism,
+                        json!({"operation":"new","body_name":element.as_str()}),
+                    )
+                    .map_err(error)?;
+                    if reply.created != [element.as_str()] {
+                        return Err(BuildError::UnexpectedBodies {
+                            element,
+                            created: reply.created,
+                        });
+                    }
+                    pieces.insert(element.as_str().into(), reply.created);
+                    kind
                 }
             };
             entries.push(Entry { element, kind });
@@ -419,16 +500,12 @@ impl Model {
             .collect();
         let pieces = entries
             .iter()
-            .filter_map(|e| match &e.kind {
-                EntryKind::Wall { wall, .. } => Some((wall, &e.element)),
-                _ => None,
-            })
-            .flat_map(|(wall, element)| {
+            .flat_map(|e| {
                 pieces
-                    .get(wall)
+                    .get(e.element.as_str())
                     .into_iter()
                     .flatten()
-                    .map(move |name| (name.clone(), element.clone()))
+                    .map(move |name| (name.clone(), e.element.clone()))
             })
             .collect();
         Ok(Self {
@@ -449,7 +526,10 @@ impl Model {
         let mut current = name;
         for _ in 0..=state.bodies.len() {
             if let Some(e) = self.entry(current)
-                && !matches!(e.kind, EntryKind::Opening { .. })
+                && !matches!(
+                    e.kind,
+                    EntryKind::Opening { .. } | EntryKind::Modifier { .. }
+                )
             {
                 return Some(&e.element);
             }

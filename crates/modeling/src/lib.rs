@@ -7,8 +7,8 @@ mod model;
 mod outline;
 pub mod sample;
 pub use model::{
-    BuildError, Entry, EntryKind, LoadError, Mismatch, MismatchReason, Mismatches, Model, Subject,
-    WallColorFailure,
+    BuildError, Entry, EntryKind, HostChange, LoadError, Mismatch, MismatchReason, Mismatches,
+    Model, ModifierFailure, Subject, WallColorFailure,
 };
 
 use solidcraft_doc::Document;

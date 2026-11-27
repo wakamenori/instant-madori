@@ -1,7 +1,7 @@
 use crate::bundle::Part;
 use madori_housing::{
-    BoundaryId, ElementKind, FaceRole, LayoutRejections, OpeningId, OpeningSpec, Point, Rejection,
-    Rejections, RoomId, RoomLayout, Srgb, StoreyId, WallColor, WallMove,
+    BoundaryId, ElementKind, FaceRole, LayoutRejections, ModifierId, OpeningId, OpeningSpec, Point,
+    Rejection, Rejections, RoomId, RoomLayout, Srgb, StoreyId, WallColor, WallMove,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -197,11 +197,43 @@ pub enum MismatchReason {
     ProjectionFailed {
         message: String,
     },
+    MeasureFailed {
+        message: String,
+    },
     Housing {
         rejections: Rejections,
     },
+    Modifier {
+        failure: ModifierMismatch,
+    },
     WallColor {
         failure: WallColorMismatch,
+    },
+}
+#[derive(Serialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ModifierMismatch {
+    NoEffect {
+        wall: BoundaryId,
+        volume_change_mm3: f64,
+        threshold_mm3: f64,
+    },
+    Overlap {
+        wall: BoundaryId,
+        other: BoundaryId,
+        along: [f64; 2],
+        up: [f64; 2],
+    },
+    CoversOpening {
+        wall: BoundaryId,
+        opening: OpeningId,
+        along: [f64; 2],
+        up: [f64; 2],
+    },
+    SplitWall {
+        expected: u32,
+        found: u32,
+        modifiers: Vec<ModifierId>,
     },
 }
 #[derive(Serialize, JsonSchema)]

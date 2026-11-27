@@ -1,5 +1,7 @@
 use madori_geometry_api::apply::*;
-use madori_modeling::{Mismatch, MismatchReason as SourceReason, Subject, WallColorFailure};
+use madori_modeling::{
+    Mismatch, MismatchReason as SourceReason, ModifierFailure, Subject, WallColorFailure,
+};
 
 pub fn mismatch(m: Mismatch) -> Result<ModelMismatch, String> {
     let subject = match m.subject {
@@ -30,7 +32,11 @@ pub fn mismatch(m: Mismatch) -> Result<ModelMismatch, String> {
         SourceReason::NoRegion { seed } => MismatchReason::NoRegion { seed },
         SourceReason::NoSeed { clearance } => MismatchReason::NoSeed { clearance },
         SourceReason::ProjectionFailed { message } => MismatchReason::ProjectionFailed { message },
+        SourceReason::MeasureFailed { message } => MismatchReason::MeasureFailed { message },
         SourceReason::Housing { rejections } => MismatchReason::Housing { rejections },
+        SourceReason::Modifier(failure) => MismatchReason::Modifier {
+            failure: modifier(failure)?,
+        },
         SourceReason::WallColor(failure) => MismatchReason::WallColor {
             failure: wall_color(failure)?,
         },
@@ -96,6 +102,51 @@ fn wall_color(f: WallColorFailure) -> Result<WallColorMismatch, String> {
             face,
             expected_area,
             painted_area,
+        },
+    })
+}
+
+fn modifier(f: ModifierFailure) -> Result<ModifierMismatch, String> {
+    Ok(match f {
+        ModifierFailure::NoEffect {
+            wall,
+            volume_change_mm3,
+            threshold_mm3,
+        } => ModifierMismatch::NoEffect {
+            wall,
+            volume_change_mm3,
+            threshold_mm3,
+        },
+        ModifierFailure::Overlap {
+            wall,
+            other,
+            along,
+            up,
+        } => ModifierMismatch::Overlap {
+            wall,
+            other,
+            along,
+            up,
+        },
+        ModifierFailure::CoversOpening {
+            wall,
+            opening,
+            along,
+            up,
+        } => ModifierMismatch::CoversOpening {
+            wall,
+            opening,
+            along,
+            up,
+        },
+        ModifierFailure::SplitWall {
+            expected,
+            found,
+            modifiers,
+        } => ModifierMismatch::SplitWall {
+            expected: u32::try_from(expected).map_err(|e| e.to_string())?,
+            found: u32::try_from(found).map_err(|e| e.to_string())?,
+            modifiers,
         },
     })
 }

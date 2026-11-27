@@ -73,7 +73,7 @@ impl Region {
             rooms,
             openings: h
                 .openings()
-                .map(|o| Source::Opening(o).plan(h).map_err(|e| e.to_string()))
+                .map(|o| Prism::opening(h, o).map_err(|e| e.to_string()))
                 .collect::<Result<_, _>>()?,
             base,
             top: base + level.data().height,

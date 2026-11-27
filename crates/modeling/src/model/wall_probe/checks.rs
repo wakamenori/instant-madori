@@ -84,7 +84,7 @@ pub(super) fn opening_neighbour(h: &House, built: &Built) -> f64 {
     let mut session = Session::default();
     let mut worst: f64 = 0.;
     for o in h.openings() {
-        let p = Source::Opening(o).plan(h).unwrap();
+        let p = Prism::opening(h, o).unwrap();
         let solid = extrude(&mut session, &p, json!({"operation":"new"})).unwrap();
         let state = session.model.state();
         let walls = built.model.session.model.state();

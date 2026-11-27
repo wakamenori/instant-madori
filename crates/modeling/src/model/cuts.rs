@@ -4,6 +4,7 @@ use std::ops::Range;
 /// Opening cuts in the wall frame, shared by the CAD bodies, paint and room projections.
 pub(super) struct WallCuts {
     holes: Vec<(OpeningId, Elevation)>,
+    pub(super) extent: Range<f64>,
     pieces: usize,
     open: Vec<Range<f64>>,
 }
@@ -50,6 +51,7 @@ impl WallCuts {
         );
         Self {
             holes,
+            extent,
             pieces: grid.components.len(),
             open: grid.open,
         }
