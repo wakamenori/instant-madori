@@ -9,7 +9,7 @@
 - `instruction-run`：仕事が終わると、パターンの状態の `runningJob` と `queuedJobs` が空になり、今の案が「台本の案」になり、`lastFinishedJob` がその仕事になる。会話の最後に、その仕事の AI の説明が付く。
 - `instruction-view`：できた案を開くと、住宅の表示データと、平面図のある階の一覧（`x-floor-plan-storeys`）が返る。
 - `instruction-chain`：二つ目の指示の案は、一つ目の案を編集元に持つ。仕事一件につき案は一件。二つ目の指示の番号は、一つ目の説明の後の `3` になる。
-- `instruction-script`：1行目が `台本:unresolved` の指示は、確定を止める検査が直らないまま4回 `finish` して `failed` で終わり、案は増えない。知らない台本の名前でも `failed` で終わり、案は増えない。
+- `instruction-script`：1行目が `台本:unresolved` の指示は、確定を止める検査が直らないまま4回 `finish` して上限到達（`limited`）で終わり、案は増えない。会話には、検査の指摘が直らなかったことを伝えるお知らせが、その指示の `jobId` で入る。知らない台本の名前では `failed` で終わり、案は増えない。
 - `instruction-invalid`：空白だけの本文は拒まれる。
 - `instruction-attach`：自分の資産の ID を `attachmentIds` に並べて送ると `202`。会話の行の `attachmentIds` が、送った順に小文字の資産 ID を返す。受付の応答と `state` のジョブは添付を持たない。
 - `instruction-attach-replay`：同じ `requestId`・本文・添付で送り直すと同じ仕事が返り、添付の行は増えない。同じ `requestId` で添付の順を変えると `422` で `request_id_reused`。
@@ -36,7 +36,7 @@ Preconditions:
 - **説明を読む。** `curl -sS -o "$D/messages-1.json" -w '%{http_code}\n' "$API/patterns/$PAT/messages"`。`200` で、`jq -c '[.messages[] | {number, kind, body}]' "$D/messages-1.json"` が二件を新しい順に出す。一件目は番号 `2`、種類 `explanation`、本文 `LDKの外壁に玄関ドアと窓を設けました。` に続けて空行、`仮置きした条件`、`・平屋を想定しました。`。二件目は番号 `1` の `instruction`。説明の `jobId` と `revision.id` は、`accept.json` の `job.jobId` と `$REV1`。
 - **二つ目を送る。** 新しい `requestId` と本文 `窓を大きくしたい` で、出力先を `"$D/accept-2.json"` にして送る。`202` で、`job.number` が `3`。`settle state-2` が成功し、`$D/state-2.json` の `currentRevision.number` が `2`、`currentRevision.baseRevisionId` が `$REV1`。
 - **案の一覧。** `curl -sS -o "$D/revisions.json" -w '%{http_code}\n' "$API/patterns/$PAT/revisions"`。`200` で、`revisions` が二件。番号は `2`、`1` の順で、どちらの `name` も `台本の案`。会話を読み直すと、番号 `4` の説明の本文が `LDKの壁の色を変更しました。` で始まる。`nextCursor` が `null`。
-- **台本を選ぶ。** 新しい `requestId` で本文を `"台本:unresolved\n確かめる"` にし、出力先を `"$D/script-unresolved.json"` にして送る。`202`。`settle state-script-unresolved` が成功し、`lastFinishedJob.state` が `failed`、`currentRevision.number` が `2` のまま、`queueHold` が `null`。`$EVIDENCE/dev.log` のこの仕事の `job.finished` の行に `"reason":"checks_unresolved"` が出て、`job.step` の `round 2 finish` から `round 5 finish` までの四行が `"outcome":"blocked"`。本文を `"台本:nothing\n確かめる"` にして同じく送ると、`failed` で終わり、`job.finished` の理由は `ai_rejected`。どちらも案は増えない。
+- **台本を選ぶ。** 新しい `requestId` で本文を `"台本:unresolved\n確かめる"` にし、出力先を `"$D/script-unresolved.json"` にして送る。`202`。`settle state-script-unresolved` が成功し、`lastFinishedJob.state` が `limited`、`currentRevision.number` が `2` のまま、`queueHold` が `null`。`$EVIDENCE/dev.log` のこの仕事の `job.finished` の行に `"outcome":"limited"` と `"limit":"checkFixes"` が出て、`"level":"info"` である。`job.step` の `round 2 finish` から `round 5 finish` までの四行が `"outcome":"blocked"` で、続く `record limit` の行が `"outcome":"limited"`。`curl -sS "$API/patterns/$PAT/messages" >| "$D/messages-unresolved.json"` の新しい順の先頭が、`kind` が `notice`、`jobId` が `script-unresolved.json` の `job.jobId` で、`body` に `確定を止める検査の指摘が、AIが3回直しても解消しなかったため` を含む。本文を `"台本:nothing\n確かめる"` にして同じく送ると、`failed` で終わり、`job.finished` の理由は `ai_rejected`。どちらも案は増えない。
 - **空白だけの本文。** 新しい `requestId` で `"body":"   "` を送り、出力先を `"$D/blank.json"` にする。`400` で、本文が `{"error":"invalid_request"}`。
 
 添付を確かめる手順は、上の手順と同じ回のパターン `$PAT` を使い、Bash の呼び出しごとに次の三つを定義する。
