@@ -1621,6 +1621,22 @@
                           {
                             "properties": {
                               "kind": {
+                                "const": "measure_failed",
+                                "type": "string"
+                              },
+                              "message": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "message"
+                            ],
+                            "type": "object"
+                          },
+                          {
+                            "properties": {
+                              "kind": {
                                 "const": "housing",
                                 "type": "string"
                               },
@@ -3021,6 +3037,165 @@
                             "required": [
                               "kind",
                               "rejections"
+                            ],
+                            "type": "object"
+                          },
+                          {
+                            "properties": {
+                              "failure": {
+                                "discriminator": {
+                                  "propertyName": "kind"
+                                },
+                                "oneOf": [
+                                  {
+                                    "properties": {
+                                      "kind": {
+                                        "const": "no_effect",
+                                        "type": "string"
+                                      },
+                                      "threshold_mm3": {
+                                        "format": "double",
+                                        "type": "number"
+                                      },
+                                      "volume_change_mm3": {
+                                        "format": "double",
+                                        "type": "number"
+                                      },
+                                      "wall": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "wall",
+                                      "volume_change_mm3",
+                                      "threshold_mm3"
+                                    ],
+                                    "type": "object"
+                                  },
+                                  {
+                                    "properties": {
+                                      "along": {
+                                        "items": {
+                                          "format": "double",
+                                          "type": "number"
+                                        },
+                                        "maxItems": 2,
+                                        "minItems": 2,
+                                        "type": "array"
+                                      },
+                                      "kind": {
+                                        "const": "overlap",
+                                        "type": "string"
+                                      },
+                                      "other": {
+                                        "type": "string"
+                                      },
+                                      "up": {
+                                        "items": {
+                                          "format": "double",
+                                          "type": "number"
+                                        },
+                                        "maxItems": 2,
+                                        "minItems": 2,
+                                        "type": "array"
+                                      },
+                                      "wall": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "wall",
+                                      "other",
+                                      "along",
+                                      "up"
+                                    ],
+                                    "type": "object"
+                                  },
+                                  {
+                                    "properties": {
+                                      "along": {
+                                        "items": {
+                                          "format": "double",
+                                          "type": "number"
+                                        },
+                                        "maxItems": 2,
+                                        "minItems": 2,
+                                        "type": "array"
+                                      },
+                                      "kind": {
+                                        "const": "covers_opening",
+                                        "type": "string"
+                                      },
+                                      "opening": {
+                                        "type": "string"
+                                      },
+                                      "up": {
+                                        "items": {
+                                          "format": "double",
+                                          "type": "number"
+                                        },
+                                        "maxItems": 2,
+                                        "minItems": 2,
+                                        "type": "array"
+                                      },
+                                      "wall": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "wall",
+                                      "opening",
+                                      "along",
+                                      "up"
+                                    ],
+                                    "type": "object"
+                                  },
+                                  {
+                                    "properties": {
+                                      "expected": {
+                                        "format": "uint32",
+                                        "maximum": 4294967295,
+                                        "minimum": 0,
+                                        "type": "integer"
+                                      },
+                                      "found": {
+                                        "format": "uint32",
+                                        "maximum": 4294967295,
+                                        "minimum": 0,
+                                        "type": "integer"
+                                      },
+                                      "kind": {
+                                        "const": "split_wall",
+                                        "type": "string"
+                                      },
+                                      "modifiers": {
+                                        "items": {
+                                          "type": "string"
+                                        },
+                                        "type": "array"
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "expected",
+                                      "found",
+                                      "modifiers"
+                                    ],
+                                    "type": "object"
+                                  }
+                                ]
+                              },
+                              "kind": {
+                                "const": "modifier",
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "failure"
                             ],
                             "type": "object"
                           },

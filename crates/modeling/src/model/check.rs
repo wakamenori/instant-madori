@@ -51,10 +51,14 @@ pub enum MismatchReason {
     ProjectionFailed {
         message: String,
     },
+    MeasureFailed {
+        message: String,
+    },
     Housing {
         rejections: Rejections,
     },
     WallColor(WallColorFailure),
+    Modifier(ModifierFailure),
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Mismatches(Vec<Mismatch>);
@@ -76,10 +80,12 @@ impl std::fmt::Display for Mismatches {
 }
 impl std::error::Error for Mismatches {}
 impl EntryKind {
-    fn key(&self) -> (ElementKind, &str) {
+    pub(super) fn key(&self) -> (ElementKind, &str) {
         match self {
             Self::Wall { wall, .. } => (ElementKind::Wall, wall.as_str()),
             Self::Opening { opening, .. } => (ElementKind::Opening, opening.as_str()),
+            Self::Object { object } => (ElementKind::Object, object.as_str()),
+            Self::Modifier { modifier, .. } => (ElementKind::Modifier, modifier.as_str()),
             Self::Floor { room } => (ElementKind::Room, room.as_str()),
         }
     }
@@ -112,13 +118,8 @@ impl Model {
         }
     }
     fn correspondence(&self, house: &House, out: &mut Vec<Mismatch>) {
-        let sources = house
-            .boundaries()
-            .map(Source::Wall)
-            .chain(house.openings().map(Source::Opening))
-            .chain(house.rooms().map(Source::Floor));
         let mut present = Vec::new();
-        for source in sources {
+        for source in sources(house) {
             let key = source.key();
             present.push(key);
             let mut report = |reason| out.push(Mismatch::element(key.0, key.1, reason));
@@ -144,6 +145,24 @@ impl Model {
                 ) {
                     report(MismatchReason::CutMissing { cut: *cut });
                 }
+            } else if let (Source::Modifier(m), EntryKind::Modifier { host, change, .. }) =
+                (source, &entry.kind)
+            {
+                if host != &m.data().wall {
+                    report(MismatchReason::HostMismatch {
+                        recorded: host.clone(),
+                        expected: m.data().wall.clone(),
+                    });
+                }
+                if let Err(e) = self.check_modifier(house, m, change, out) {
+                    out.push(Mismatch::element(
+                        key.0,
+                        key.1,
+                        MismatchReason::MeasureFailed {
+                            message: e.to_string(),
+                        },
+                    ));
+                }
             } else {
                 let bodies = self.bodies_of(entry.element.as_str());
                 let expected = match source {
@@ -156,10 +175,58 @@ impl Model {
                     },
                     _ => 1,
                 };
-                match bodies.len() {
-                    0 => report(MismatchReason::NoBody {}),
-                    n if n == expected => {}
-                    _ => report(MismatchReason::Split { bodies }),
+                if bodies.is_empty() {
+                    report(MismatchReason::NoBody {});
+                    continue;
+                }
+                if let Source::Object(_) = source {
+                    continue;
+                }
+                let found = if let Source::Wall(_) = source {
+                    let state = self.session.model.state();
+                    let count = bodies
+                        .iter()
+                        .filter_map(|p| state.body(p))
+                        .try_fold(0, |n, b| b.body.lumps().map(|l| n + l.len()));
+                    match count {
+                        Ok(n) => n,
+                        Err(e) => {
+                            report(MismatchReason::MeasureFailed {
+                                message: e.to_string(),
+                            });
+                            continue;
+                        }
+                    }
+                } else {
+                    bodies.len()
+                };
+                if found != expected {
+                    let modifiers = self
+                        .entries
+                        .iter()
+                        .filter_map(|e| match &e.kind {
+                            EntryKind::Modifier {
+                                modifier,
+                                host,
+                                change,
+                                ..
+                            } if host.as_str() == key.1
+                                && change.lumps_before != change.lumps_after =>
+                            {
+                                Some(modifier.clone())
+                            }
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>();
+                    if modifiers.is_empty() {
+                        report(MismatchReason::Split { bodies });
+                    } else {
+                        report(MismatchReason::Modifier(ModifierFailure::SplitWall {
+                            expected,
+                            found,
+                            modifiers,
+                        }));
+                    }
                 }
             }
         }

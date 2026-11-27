@@ -791,9 +791,7 @@ fn seeds_outside_the_projected_walls_report_no_region() {
     }
 }
 
-#[test]
-fn reloaded_house_moves_like_the_unsaved_one() {
-    let (house, wall) = blue_wall(two_openings());
+fn furnished(house: House, wall: BoundaryId) -> (House, WallMove) {
     let mut data = house.into_data();
     let request = WallMove {
         wall: wall.clone(),
@@ -867,7 +865,12 @@ fn reloaded_house_moves_like_the_unsaved_one() {
         });
     }
 
-    let house = House::new(data).unwrap();
+    (House::new(data).unwrap(), request)
+}
+#[test]
+fn reloaded_house_moves_like_the_unsaved_one() {
+    let (h, wall) = blue_wall(two_openings());
+    let (house, request) = furnished(h, wall);
     let before = Model::build(&house, None).unwrap();
     let saved = house.to_json().unwrap();
     let (loaded_house, loaded) = Model::load(&saved).unwrap();
@@ -1174,3 +1177,5 @@ fn paint_ignores_touching_face_with_opposite_normal() {
     m.paint(&h).unwrap();
     assert_blue_faces(&m, &names, 3940., 0.);
 }
+
+mod features;

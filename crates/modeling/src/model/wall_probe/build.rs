@@ -86,7 +86,7 @@ impl Built {
             });
         }
         for o in h.openings() {
-            let p = Source::Opening(o).plan(h).map_err(|e| e.to_string())?;
+            let p = Prism::opening(h, o).map_err(|e| e.to_string())?;
             let host = o.data().wall.as_str();
             let targets: Vec<_> = pieces
                 .iter()
