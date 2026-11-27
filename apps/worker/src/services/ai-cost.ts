@@ -1,51 +1,48 @@
-import type { JobExecutionReference, JobExecutionRight } from "../storage/job-execution.ts";
+import type { JobExecutionRight } from "../storage/job-execution.ts";
 import type { AiCostDeps } from "./deps.ts";
-import type { AiRequest, Usage } from "../ai/round-trip.ts";
+import type { Ai, AiRequest, AiResult } from "../ai/round-trip.ts";
 import type { limits } from "../limits.ts";
-import {
-  estimateAttempt,
-  settleAttempt,
-  type AttemptEstimate,
-  type AttemptCharge,
-} from "./cost.ts";
+import { estimateAttempt, settleAttempt } from "./cost.ts";
 
-interface ReservedAttempt {
-  readonly id: string;
-  readonly job: JobExecutionReference;
-  readonly estimate: AttemptEstimate;
-}
+export type AiCostLimit = keyof typeof limits.aiCost;
+type AiFailure = Extract<AiResult, { kind: "failed" }>;
+const settlesAtZero = { no_provider: true, script_ended: true, rejected: true } satisfies Record<
+  AiFailure["reason"],
+  boolean
+>;
 
-export async function reserveAttemptCost(
-  deps: AiCostDeps,
-  input: { right: JobExecutionRight; request: AiRequest },
-): Promise<
-  | { kind: "reserved"; attempt: ReservedAttempt }
-  | { kind: "limited"; limit: keyof typeof limits.aiCost }
-  | { kind: "execution_lost" }
-> {
-  const estimate = estimateAttempt(input.request);
-  const id = deps.runtime.newId();
-  const result = await deps.store.aiCost.reserve(input.right, {
-    attemptId: id,
+export async function meteredRoundTrip(
+  deps: AiCostDeps & { ai: Ai },
+  right: JobExecutionRight,
+  request: AiRequest,
+): Promise<AiResult | { kind: "limited"; limit: AiCostLimit } | { kind: "execution_lost" }> {
+  const estimate = estimateAttempt(request);
+  const attemptId = deps.runtime.newId();
+  const result = await deps.store.aiCost.reserve(right, {
+    attemptId,
     reserve: estimate.reserve,
     estimatedInputTokens: estimate.inputTokens,
     estimatedOutputTokens: estimate.outputTokens,
     now: deps.runtime.now(),
   });
   if (result.kind !== "reserved") return result;
-  return { kind: "reserved", attempt: { id, job: input.right.reference, estimate } };
-}
-
-export async function settleAttemptCost(
-  deps: AiCostDeps,
-  { attempt, usage }: { attempt: ReservedAttempt; usage: Usage },
-): Promise<AttemptCharge> {
-  const charge = settleAttempt(attempt.estimate, usage);
-  await deps.store.aiCost.settle(attempt.job, {
-    attemptId: attempt.id,
-    charge: charge.amount,
+  const response = await deps.ai.roundTrip(request);
+  if (response.kind === "failed" && !settlesAtZero[response.reason]) return response;
+  const usage =
+    response.kind === "ok"
+      ? response.assistant.usage
+      : {
+          uncachedInputTokens: 0,
+          outputTokens: 0,
+          cacheReadTokens: 0,
+          cacheWrite5mTokens: 0,
+          cacheWrite1hTokens: 0,
+        };
+  await deps.store.aiCost.settle(right.reference, {
+    attemptId,
+    charge: settleAttempt(estimate, usage).amount,
     usage,
     now: deps.runtime.now(),
   });
-  return charge;
+  return response;
 }

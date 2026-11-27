@@ -22,11 +22,8 @@ const jobStateRoles = {
   awaiting_answer: "finished",
   cancelled: "finished",
   failed: "finished",
-  limited: "unwritten",
-} as const satisfies Record<
-  JobState,
-  "waiting" | "active" | "completed" | "finished" | "unwritten"
->;
+  limited: "finished",
+} as const satisfies Record<JobState, "waiting" | "active" | "completed" | "finished">;
 
 function statesWithRoles(...roles: (typeof jobStateRoles)[JobState][]) {
   return jobStateSchema.options
@@ -38,4 +35,4 @@ function statesWithRoles(...roles: (typeof jobStateRoles)[JobState][]) {
 export const activeJobStates = statesWithRoles("active");
 export const stoppableJobStates = statesWithRoles("waiting", "active");
 export const finishedJobStates = statesWithRoles("completed", "finished");
-export const holdingJobStates = statesWithRoles("finished", "unwritten");
+export const holdingJobStates = statesWithRoles("finished");

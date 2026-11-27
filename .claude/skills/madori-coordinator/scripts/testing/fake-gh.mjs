@@ -18,6 +18,15 @@ const actions = "repos/{owner}/{repo}/actions/";
 const runsSha = argv[1]?.match(/head_sha=([0-9a-f]{40})&per_page=100$/)?.[1];
 const jobsId = argv[1]?.match(/runs\/(\d+)\/jobs$/)?.[1];
 if (
+  argv[3]?.startsWith("query=") &&
+  (matches("api", "graphql", "-f", argv[3]) ||
+    (matches("api", "graphql", "-f", argv[3], "-f", argv[5]) && argv[5].startsWith("cursor=")))
+) {
+  const cursor = argv[5]?.slice("cursor=".length) ?? "";
+  const page = state.graphql?.[cursor];
+  if (!page) missing();
+  console.log(JSON.stringify({ data: { repository: { issues: page } } }));
+} else if (
   matches("api", actions + `workflows/deploy-staging.yml/runs?head_sha=${runsSha}&per_page=100`)
 ) {
   console.log(JSON.stringify({ workflow_runs: state.runs?.[runsSha] ?? [] }));
