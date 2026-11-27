@@ -1,7 +1,16 @@
+import { nameSchema } from "@madori/contracts";
+import { invalidNameMessage } from "./failure.ts";
 import { FloorPlanViewport } from "./floor-plan/floor-plan-viewport.tsx";
 import { ConversationLog, InstructionForm } from "./conversation-view.tsx";
 import { useEffect, useState, useSyncExternalStore } from "react";
-import { createProjectSession, type ProjectView, type RevisionView } from "./project-session.ts";
+import {
+  createProjectSession,
+  type NameTarget,
+  type NameStatus,
+  type ProjectSession,
+  type ProjectView,
+  type RevisionView,
+} from "./project-session.ts";
 import { RouteLink } from "./navigation.tsx";
 import { projectsRoute, type ProjectId } from "./route.ts";
 import { formatDateTime } from "./format-date-time.ts";
@@ -22,6 +31,80 @@ function activityText(activity: Extract<ProjectView, { kind: "open" }>["activity
       return null;
   }
 }
+function NameEditor({
+  target,
+  name,
+  status,
+  rename,
+}: {
+  target: NameTarget;
+  name: string;
+  status: NameStatus;
+  rename: ProjectSession["rename"];
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const [notice, setNotice] = useState<"none" | "invalid" | "server">("none");
+  const label = target === "project" ? "案件名" : "パターン名";
+  const saving = status.kind === "saving";
+
+  async function save(value: string) {
+    const parsed = nameSchema.safeParse(value);
+    if (!parsed.success) {
+      setNotice("invalid");
+      return;
+    }
+    setNotice("server");
+    if (await rename(target, parsed.data)) setDraft(null);
+  }
+
+  return (
+    <>
+      {target === "project" ? <h1>{name}</h1> : <p>パターン「{name}」</p>}
+      {draft === null ? (
+        <button
+          disabled={saving}
+          onClick={() => {
+            setNotice("none");
+            setDraft(name);
+          }}
+        >
+          {label}を変える
+        </button>
+      ) : (
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            void save(draft);
+          }}
+        >
+          <label>
+            {label}
+            <input
+              value={draft}
+              disabled={saving}
+              onChange={(event) => setDraft(event.target.value)}
+            />
+          </label>
+          <button type="submit" disabled={saving}>
+            保存
+          </button>
+          <button type="button" onClick={() => setDraft(null)}>
+            やめる
+          </button>
+          {notice === "invalid" && <p role="alert">{invalidNameMessage}</p>}
+          {notice === "server" && status.kind === "failed" && <p role="alert">{status.message}</p>}
+          {notice === "server" && status.kind === "conflict" && (
+            <p role="alert">
+              ほかの画面で{label}が「{status.latestName}
+              」に変わっていたため、最新を読み直しました。この名前にするなら、もう一度保存してください。
+            </p>
+          )}
+        </form>
+      )}
+    </>
+  );
+}
+
 export function ProjectScreen({ projectId }: { projectId: ProjectId }) {
   const [session] = useState(() => createProjectSession(projectId));
   useEffect(() => session.start(), [session]);
@@ -36,7 +119,18 @@ export function ProjectScreen({ projectId }: { projectId: ProjectId }) {
       {view.kind === "open" && (
         <div className="project-layout">
           <section>
-            <h1>{view.pattern.name}</h1>
+            <NameEditor
+              target="project"
+              name={view.project.name}
+              status={view.names.project}
+              rename={session.rename}
+            />
+            <NameEditor
+              target="pattern"
+              name={view.pattern.name}
+              status={view.names.pattern}
+              rename={session.rename}
+            />
             <p>
               <time dateTime={view.pattern.createdAt}>
                 {formatDateTime(view.pattern.createdAt)}

@@ -8,9 +8,18 @@ import {
   type OutboxEntry,
   type ServerRows,
 } from "./conversation.ts";
-import type { Pattern, HoldingJob, PatternStateResponse, Revision } from "@madori/contracts";
+import type {
+  Project,
+  Pattern,
+  HoldingJob,
+  PatternStateResponse,
+  Revision,
+} from "@madori/contracts";
 import {
   ApiError,
+  getProject,
+  renameProject,
+  renamePattern,
   listPatterns,
   listMessages,
   sendInstruction,
@@ -18,7 +27,7 @@ import {
   fetchRevisionView,
   fetchFloorPlan,
 } from "./api.ts";
-import { failureMessage, sendFailureMessage } from "./failure.ts";
+import { failureMessage, renameFailureMessage, sendFailureMessage } from "./failure.ts";
 import type { ProjectId } from "./route.ts";
 type Activity =
   | { kind: "working"; queued: number }
@@ -39,13 +48,26 @@ export function summarizeActivity({
 export type PlanSlot =
   { kind: "ready"; plan: FloorPlan } | { kind: "absent" } | { kind: "rejected" };
 export type RevisionView = { revision: Revision; display: Uint8Array; plan: PlanSlot };
+export type NameTarget = "project" | "pattern";
+export type NameStatus =
+  | { kind: "idle" }
+  | { kind: "saving" }
+  | { kind: "conflict"; latestName: string }
+  | { kind: "failed"; message: string };
+
+function newer<T extends { version: number }>(current: T | undefined, incoming: T): T {
+  return current && current.version >= incoming.version ? current : incoming;
+}
+
 export type ProjectView =
   | { kind: "opening" }
   | { kind: "failed"; message: string }
   | { kind: "not_found" }
   | {
       kind: "open";
+      project: Project;
       pattern: Pattern;
+      names: Record<NameTarget, NameStatus>;
       activity: Activity;
       shown: RevisionView | null;
       problem: string | null;
@@ -85,6 +107,7 @@ export type ProjectSession = {
   readonly start: () => () => void;
   readonly subscribe: (listener: () => void) => () => void;
   readonly getView: () => ProjectView;
+  readonly rename: (target: NameTarget, name: string) => Promise<boolean>;
   readonly send: (body: InstructionBody) => void;
   readonly resend: (requestId: string) => void;
   readonly retry: () => void;
@@ -138,6 +161,11 @@ export function createProjectSession(
   let state: PatternStateResponse | null = null;
   let rows: ServerRows = new Map();
   let outbox: Outbox = [];
+  let project: Project | undefined;
+  let names: Record<NameTarget, NameStatus> = {
+    project: { kind: "idle" },
+    pattern: { kind: "idle" },
+  };
   let pattern: Pattern | undefined;
   let rereadRequested = true;
   let active: { controller: AbortController; latch: ReturnType<typeof wakeLatch> } | null = null;
@@ -146,8 +174,25 @@ export function createProjectSession(
     view = next;
     for (const listener of listeners) listener();
   }
-  function publishOutbox() {
-    if (view.kind === "open") publish({ ...view, timeline: buildTimeline(rows, outbox, state) });
+  function publishOpen(
+    shown = view.kind === "open" ? view.shown : null,
+    problem = view.kind === "open" ? view.problem : null,
+  ) {
+    if (project && pattern && state)
+      publish({
+        kind: "open",
+        project,
+        pattern,
+        names,
+        shown,
+        problem,
+        activity: summarizeActivity(state),
+        timeline: buildTimeline(rows, outbox, state),
+      });
+  }
+  function setNameStatus(target: NameTarget, status: NameStatus) {
+    names = { ...names, [target]: status };
+    publishOpen();
   }
   async function poll(signal: AbortSignal, latch: ReturnType<typeof wakeLatch>) {
     let rowsSig: string | undefined;
@@ -155,6 +200,11 @@ export function createProjectSession(
     while (!signal.aborted) {
       let interval: number | null = 1000;
       try {
+        if (!project) {
+          const record = await getProject(projectId, signal);
+          signal.throwIfAborted();
+          project = record;
+        }
         if (!pattern) {
           const patterns = await listPatterns(projectId, signal);
           signal.throwIfAborted();
@@ -162,6 +212,7 @@ export function createProjectSession(
           if (!pattern) throw new ApiError("unexpected_response");
         }
         let latest = await readPatternState(pattern.id, signal);
+        let polledPattern = latest.pattern;
         const sig = signature(latest);
         let updated = rows;
         signal.throwIfAborted();
@@ -169,7 +220,10 @@ export function createProjectSession(
           rereadRequested = false;
           const page = await listMessages(pattern.id, null, signal);
           updated = mergeRows(rows, page.messages);
-          if (updated.size > rows.size) latest = await readPatternState(pattern.id, signal);
+          if (updated.size > rows.size) {
+            latest = await readPatternState(pattern.id, signal);
+            polledPattern = newer(polledPattern, latest.pattern);
+          }
         }
         const shown = await loadRevision(
           latest.currentRevision,
@@ -177,18 +231,12 @@ export function createProjectSession(
           signal,
         );
         signal.throwIfAborted();
+        pattern = newer(pattern, polledPattern);
         state = latest;
         rows = updated;
         rowsSig = sig;
         const activity = summarizeActivity(state);
-        publish({
-          kind: "open",
-          pattern,
-          shown,
-          activity,
-          problem: null,
-          timeline: buildTimeline(rows, outbox, state),
-        });
+        publishOpen(shown, null);
         backoff = 1000;
         if (
           (activity.kind === "idle" || activity.kind === "held") &&
@@ -204,7 +252,8 @@ export function createProjectSession(
         }
         rereadRequested = true;
         const message = failureMessage(error);
-        publish(view.kind === "open" ? { ...view, problem: message } : { kind: "failed", message });
+        if (view.kind === "open") publishOpen(view.shown, message);
+        else publish({ kind: "failed", message });
         interval = backoff;
         backoff = Math.min(backoff * 2, 30000);
       }
@@ -214,7 +263,7 @@ export function createProjectSession(
 
   function setDelivery(requestId: string, delivery: OutboxEntry["delivery"]) {
     outbox = outbox.map((e) => (e.requestId === requestId ? { ...e, delivery } : e));
-    publishOutbox();
+    publishOpen();
   }
   let delivering = false;
   async function drain() {
@@ -258,6 +307,9 @@ export function createProjectSession(
         () => {
           if (active?.controller !== controller) return;
           active = null;
+          for (const target of ["project", "pattern"] as const) {
+            if (names[target].kind === "saving") names = { ...names, [target]: { kind: "idle" } };
+          }
           outbox = outbox.map((e) =>
             e.delivery.kind === "sending"
               ? {
@@ -269,7 +321,7 @@ export function createProjectSession(
                 }
               : e,
           );
-          publishOutbox();
+          publishOpen();
         },
         { once: true },
       );
@@ -282,6 +334,55 @@ export function createProjectSession(
       };
     },
     getView: () => view,
+    async rename(target, name) {
+      if (!active || view.kind !== "open" || names[target].kind === "saving") return false;
+      const record = view[target];
+      const lifetime = active.controller.signal;
+      const signal = AbortSignal.any([lifetime, AbortSignal.timeout(deps.sendTimeoutMs ?? 15000)]);
+      const body = {
+        requestId: deps.newRequestId?.() ?? crypto.randomUUID(),
+        version: record.version,
+        name,
+      };
+      setNameStatus(target, { kind: "saving" });
+      try {
+        try {
+          if (target === "project") {
+            const saved = await renameProject(record.id, body, signal);
+            signal.throwIfAborted();
+            project = newer(project, saved);
+          } else {
+            const saved = await renamePattern(record.id, body, signal);
+            signal.throwIfAborted();
+            pattern = newer(pattern, saved);
+          }
+        } catch (error) {
+          if (!(error instanceof ApiError && error.code === "version_conflict")) throw error;
+          let latestName: string;
+          if (target === "project") {
+            const latest = await getProject(record.id, signal);
+            signal.throwIfAborted();
+            project = newer(project, latest);
+            latestName = project.name;
+          } else {
+            const latest = await readPatternState(record.id, signal);
+            signal.throwIfAborted();
+            pattern = newer(pattern, latest.pattern);
+            latestName = pattern.name;
+          }
+          if (latestName !== name.trim()) {
+            setNameStatus(target, { kind: "conflict", latestName });
+            return false;
+          }
+        }
+        setNameStatus(target, { kind: "idle" });
+        return true;
+      } catch (error) {
+        if (!lifetime.aborted)
+          setNameStatus(target, { kind: "failed", message: renameFailureMessage(error) });
+        return false;
+      }
+    },
     send(body) {
       if (!active || view.kind !== "open") return;
       outbox = [
@@ -293,7 +394,7 @@ export function createProjectSession(
           delivery: { kind: "sending" },
         },
       ];
-      publishOutbox();
+      publishOpen();
       void drain();
     },
     resend(requestId) {
