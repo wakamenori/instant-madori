@@ -2,7 +2,16 @@ import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import type { AiModelId } from "../limits.ts";
 import { receivedTurn } from "./round-trip.ts";
-import type { Ai, AiRequest, AiResult, AssistantPart, Conversation, Usage } from "./round-trip.ts";
+import type {
+  Ai,
+  AiRequest,
+  AiResult,
+  AssistantPart,
+  Conversation,
+  ProviderErrorType,
+  ProviderRefusal,
+  Usage,
+} from "./round-trip.ts";
 
 export interface AnthropicSettings {
   readonly apiKey: string;
@@ -118,7 +127,6 @@ function buildRequest(model: AiModelId, request: AiRequest): Anthropic.MessageSt
       name,
       description,
       input_schema: toolInputSchema.parse(JSON.parse(inputSchemaJson)),
-      strict: true,
     })),
     tool_choice: { type: "auto" },
     output_config: { effort },
@@ -202,13 +210,47 @@ function mapResponse(origin: string, raw: unknown): AiResult {
   };
 }
 
+const refusalTypes = new Set<string>([
+  "invalid_request_error",
+  "authentication_error",
+  "billing_error",
+  "permission_error",
+  "not_found_error",
+  "request_too_large",
+] satisfies Exclude<ProviderErrorType, "other">[]);
+
+function isRefusalType(type: string | null): type is Exclude<ProviderErrorType, "other"> {
+  return type !== null && refusalTypes.has(type);
+}
+
+function requestIdOf(value: string | null | undefined): `req_${string}` | null {
+  return value && /^req_[a-z0-9_-]{1,100}$/iu.test(value) ? (value as `req_${string}`) : null;
+}
+
+function refusal(
+  status: number,
+  { type, requestID }: { type: string | null; requestID: string | null | undefined },
+): ProviderRefusal {
+  return {
+    status,
+    errorType: isRefusalType(type) ? type : "other",
+    requestId: requestIdOf(requestID),
+  };
+}
+
 function classifyError(error: unknown, streamRequestId: string | null | undefined): AiResult {
   const apiError = error instanceof Anthropic.APIError ? error : undefined;
   const status: unknown = apiError?.status;
-  if (status === 401 || status === 403) {
-    return { kind: "failed", reason: "no_provider", detail: "Anthropic credentials rejected" };
+  if (apiError && (status === 401 || status === 403)) {
+    return {
+      kind: "failed",
+      reason: "no_provider",
+      detail: "Anthropic credentials rejected",
+      provider: refusal(status, apiError),
+    };
   }
   if (
+    apiError &&
     typeof status === "number" &&
     status >= 300 &&
     status < 500 &&
@@ -218,10 +260,11 @@ function classifyError(error: unknown, streamRequestId: string | null | undefine
       kind: "failed",
       reason: "rejected",
       detail: `Anthropic request rejected (HTTP ${status})`,
+      provider: refusal(status, apiError),
     };
   }
 
-  const requestId = apiError?.requestID ?? streamRequestId;
+  const requestId = requestIdOf(apiError?.requestID ?? streamRequestId);
   const type =
     error instanceof Anthropic.APIConnectionTimeoutError
       ? "timeout"
@@ -233,8 +276,7 @@ function classifyError(error: unknown, streamRequestId: string | null | undefine
             ? "api"
             : "stream";
   const http = typeof status === "number" ? ` HTTP ${status}` : "";
-  const id =
-    requestId && /^req_[a-z0-9_-]{1,100}$/iu.test(requestId) ? ` request-id ${requestId}` : "";
+  const id = requestId ? ` request-id ${requestId}` : "";
   throw new Error(`Anthropic attempt interrupted (${type}${http}${id})`);
 }
 

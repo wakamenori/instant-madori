@@ -65,12 +65,18 @@ export async function meteredRoundTrip(
       usage,
       now: deps.runtime.now(),
     });
+    const refused = response.kind === "failed" && "provider" in response && response.provider;
     logEvent("info", "ai.attempt", {
       ...fields,
       ...usage,
       aiMs,
       outcome: "settled",
       chargedMicroUsd: charged,
+      ...(refused && {
+        providerStatus: refused.status,
+        providerError: refused.errorType,
+        ...(refused.requestId && { providerRequestId: refused.requestId }),
+      }),
     });
     return response;
   } catch (error) {

@@ -23,6 +23,9 @@ const attemptLog = z.object({
   cacheWrite5mTokens: z.number().optional(),
   cacheWrite1hTokens: z.number().optional(),
   error: z.string().optional(),
+  providerStatus: z.number().optional(),
+  providerError: z.string().optional(),
+  providerRequestId: z.string().optional(),
 });
 
 await test("Workflow retries reserve a separate D1 attempt before every provider request", async (t) => {
@@ -155,5 +158,53 @@ await test("Workflow retries reserve a separate D1 attempt before every provider
         .all()
     ).results,
     [{ charged: 93_401 }],
+  );
+
+  const { reference: refusedJob } = await (await snapshotPattern(db)).claim();
+  const refusing = anthropicAi({
+    model: "claude-opus-5-5",
+    apiKey: "fake-test-key",
+    fetch: () =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            type: "error",
+            error: { type: "invalid_request_error", message: "private provider message" },
+          }),
+          { status: 400, headers: { "request-id": "req_011Refused" } },
+        ),
+      ),
+  });
+  logs.length = 0;
+  const refused = await runJob(
+    {
+      ...deps,
+      ai: { forNewJob: () => Promise.resolve(refusing), continuing: () => refusing },
+    },
+    refusedJob,
+    stepEngine().steps,
+  );
+  assert.equal(refused.kind === "failed" && refused.reason, "ai_rejected");
+  assert.deepEqual(
+    logs.map((line) =>
+      attemptLog
+        .pick({
+          outcome: true,
+          chargedMicroUsd: true,
+          providerStatus: true,
+          providerError: true,
+          providerRequestId: true,
+        })
+        .parse(line),
+    ),
+    [
+      {
+        outcome: "settled",
+        chargedMicroUsd: 0,
+        providerStatus: 400,
+        providerError: "invalid_request_error",
+        providerRequestId: "req_011Refused",
+      },
+    ],
   );
 });

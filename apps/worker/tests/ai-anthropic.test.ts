@@ -58,7 +58,7 @@ const toolBlocks = [
   ]),
 ];
 
-await test("streams a strict tool round and echoes stored thinking blocks in order", async () => {
+await test("streams a tool round without strict tools and echoes stored thinking blocks in order", async () => {
   const sent: Request[] = [];
   const ai = anthropicAi({
     apiKey: key,
@@ -95,7 +95,6 @@ await test("streams a strict tool round and echoes stored thinking blocks in ord
       name,
       description,
       input_schema: JSON.parse(inputSchemaJson) as unknown,
-      strict: true,
     })),
     tool_choice: { type: "auto" },
     output_config: { effort: "medium" },
@@ -244,11 +243,15 @@ await test("rejects a prior turn from another model without sending a request", 
 });
 
 await test("rejects HTTP errors and redirects before inference", async (t) => {
-  for (const [status, reason] of [
-    [307, "rejected"],
-    [400, "rejected"],
-    [401, "no_provider"],
-    [403, "no_provider"],
+  const grammarTooLarge = JSON.stringify({
+    type: "error",
+    error: { type: "invalid_request_error", message: "The compiled grammar is too large" },
+  });
+  for (const [status, reason, body, errorType] of [
+    [307, "rejected", "ignored response", "other"],
+    [400, "rejected", grammarTooLarge, "invalid_request_error"],
+    [401, "no_provider", "ignored response", "other"],
+    [403, "no_provider", "ignored response", "other"],
   ] as const) {
     await t.test(`HTTP ${status}`, async () => {
       let requests = 0;
@@ -259,15 +262,22 @@ await test("rejects HTTP errors and redirects before inference", async (t) => {
           requests++;
           assert.equal(init?.redirect, "manual");
           return Promise.resolve(
-            new Response("ignored response", {
+            new Response(body, {
               status,
-              headers: { location: "/other" },
+              headers: { location: "/other", "request-id": "req_011Test" },
             }),
           );
         },
       });
       const response = await ai.roundTrip(request);
-      assert.equal(response.kind === "failed" && response.reason, reason);
+      assert(response.kind === "failed");
+      assert.equal(response.reason, reason);
+      assert.deepEqual("provider" in response && response.provider, {
+        status,
+        errorType,
+        requestId: "req_011Test",
+      });
+      assert.doesNotMatch(JSON.stringify(response), /compiled grammar/u);
       assert.equal(requests, 1);
     });
   }

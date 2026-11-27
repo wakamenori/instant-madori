@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { JobLimit } from "./limits.ts";
 import type { HttpMethod, RoutePath } from "./api/http.ts";
 import type { GeometryResult } from "./geometry/geometry-protocol.ts";
+import type { ProviderErrorType } from "./ai/round-trip.ts";
 
 const errorDescription: unique symbol = Symbol("ErrorDescription");
 const errorDescriptionSchema = z.string().brand(errorDescription);
@@ -92,6 +93,9 @@ export interface LogFields {
   cacheWrite1hTokens?: number;
   chargedMicroUsd?: number;
   reservedMicroUsd?: number;
+  providerStatus?: number;
+  providerError?: ProviderErrorType;
+  providerRequestId?: `req_${string}`;
   saveMs?: number;
   checkMs?: number;
   geometryMs?: number;
@@ -164,6 +168,9 @@ const logKeys = {
   cacheWrite1hTokens: "number",
   chargedMicroUsd: "number",
   reservedMicroUsd: "number",
+  providerStatus: "number",
+  providerError: "string",
+  providerRequestId: "string",
   saveMs: "number",
   checkMs: "number",
   geometryMs: "number",
