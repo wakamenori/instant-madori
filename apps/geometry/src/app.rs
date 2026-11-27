@@ -8,10 +8,7 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{MethodFilter, on},
 };
-use madori_geometry_api::{
-    DISPLAY_CONTENT_TYPE, ERROR, ErrorBody, ErrorCode, Health, MAX_DISPLAY_BYTES, Method, headers,
-    routes,
-};
+use madori_geometry_api::{ERROR, ErrorBody, ErrorCode, Health, Method, headers, routes};
 use std::{sync::Arc, time::Instant};
 use tokio::sync::Semaphore;
 #[derive(Clone)]
@@ -136,10 +133,6 @@ pub fn router(state: AppState) -> Router {
             register(routes::SUMMARIZE_HOUSE.route, summarize_house),
         )
         .route(
-            routes::SAMPLE_DISPLAY.path,
-            register(routes::SAMPLE_DISPLAY, sample_display),
-        )
-        .route(
             routes::APPLY_OPERATIONS.route.path,
             register(routes::APPLY_OPERATIONS.route, apply_operations),
         )
@@ -212,29 +205,6 @@ async fn run_blocking<T: Send + 'static>(
 }
 fn build_failure(error: &str, trace: Option<&str>) -> serde_json::Value {
     serde_json::json!({"level":"error", "event":"geometry.build_failed", "traceId":trace, "error":error})
-}
-async fn sample_display(
-    State(state): State<AppState>,
-    trace: Option<Extension<TraceId>>,
-) -> Result<Response, ServiceError> {
-    let bytes = run_blocking(
-        &state,
-        trace.as_ref().map(|trace| trace.0.0.as_str()),
-        || {
-            let model = madori_modeling::sample::display().map_err(|e| e.to_string())?;
-            let bytes = model.encode().map_err(|e| e.to_string())?;
-            if bytes.len() > MAX_DISPLAY_BYTES as usize {
-                return Err(format!(
-                    "Display artifact exceeds {} bytes: {}",
-                    MAX_DISPLAY_BYTES,
-                    bytes.len()
-                ));
-            }
-            Ok(bytes)
-        },
-    )
-    .await?;
-    Ok(([("content-type", DISPLAY_CONTENT_TYPE)], bytes).into_response())
 }
 async fn log_request(request: Request, next: Next) -> Response {
     let started = Instant::now();
@@ -316,8 +286,8 @@ mod tests {
         for (method, path, authenticated, status, error) in [
             ("POST", "/healthz", false, 405, ErrorCode::MethodNotAllowed),
             (
-                "POST",
-                "/v1/sample/display",
+                "GET",
+                routes::SUMMARIZE_HOUSE.route.path,
                 true,
                 405,
                 ErrorCode::MethodNotAllowed,
@@ -327,8 +297,8 @@ mod tests {
             ("GET", "/%FF", true, 404, ErrorCode::NotFound),
             ("GET", "/missing", false, 401, ErrorCode::Unauthorized),
             (
-                "POST",
-                "/v1/sample/display",
+                "GET",
+                routes::SUMMARIZE_HOUSE.route.path,
                 false,
                 401,
                 ErrorCode::Unauthorized,
@@ -461,11 +431,11 @@ mod tests {
     }
     #[tokio::test]
     async fn methods_and_fallbacks_require_auth() -> Result<(), Box<dyn std::error::Error>> {
-        for path in ["/v1/sample/display", "/v1/", "/missing"] {
+        for path in [routes::SUMMARIZE_HOUSE.route.path, "/v1/", "/missing"] {
             let res = app()?
                 .oneshot(
                     Request::builder()
-                        .method("POST")
+                        .method("GET")
                         .uri(path)
                         .body(Body::empty())?,
                 )
@@ -527,8 +497,18 @@ mod tests {
             }
         }
         for (path, token, trace, status) in [
-            ("/v1/sample/display", "Bearer test-token", "trace-1", 200),
-            ("/v1/sample/display", "Bearer test-token", "bad trace", 400),
+            (
+                routes::SUMMARIZE_HOUSE.route.path,
+                "Bearer test-token",
+                "trace-1",
+                200,
+            ),
+            (
+                routes::SUMMARIZE_HOUSE.route.path,
+                "Bearer test-token",
+                "bad trace",
+                400,
+            ),
             ("/v1/missing", "", "", 401),
             ("/missing", "", "", 401),
             ("/v1/", "", "", 401),
@@ -536,21 +516,15 @@ mod tests {
             let res = app()?
                 .oneshot(
                     Request::builder()
+                        .method("POST")
                         .uri(path)
                         .header("authorization", token)
                         .header(headers::TRACE_ID, trace)
-                        .body(Body::empty())?,
+                        .header("content-type", "application/json")
+                        .body(Body::from(r#"{"snapshot":{"kind":"empty"}}"#))?,
                 )
                 .await?;
             assert_eq!(res.status(), status);
-            if status == 200 {
-                assert_eq!(res.headers()["content-type"], DISPLAY_CONTENT_TYPE);
-                let bytes = to_bytes(res.into_body(), MAX_DISPLAY_BYTES as usize).await?;
-                assert_eq!(
-                    madori_display::DisplayModel::decode(&bytes)?.bodies().len(),
-                    4
-                );
-            }
         }
         Ok(())
     }

@@ -122,7 +122,7 @@ Dockerは使用中のcache mountを0バイトと報告するため、その実�
 
 既定の台本は、空のパターンでは一部屋のLDKに外壁のドアと窓と壁の色を作り、案のあるパターンでは壁の色を一つ変えます。画面はドラッグでの回転と、スクロールでの拡大・縮小に対応します。ブラウザでは、WebGPUのアダプタがあるChromiumで描画を確かめ、合成したポインタイベントでの回転と、ホイールイベントでの拡大を確かめました。縮小、実際のマウス・トラックパッドでの操作感、Chromium以外のブラウザは確かめていません。WebGPUを利用できるブラウザが必要です。初回のamd64イメージのビルドには数分かかります。
 
-Rustサービスだけを反復する場合は `MADORI_INTERNAL_TOKEN=local cargo run -p madori-geometry` で起動します。`http://127.0.0.1:3001/healthz` は認証不要、`/v1/sample/display` は `authorization: Bearer local` が必要です。このプロセスをWorkerが呼ぶことはありません。
+Rustサービスだけを反復する場合は `MADORI_INTERNAL_TOKEN=local cargo run -p madori-geometry` で起動します。`http://127.0.0.1:3001/healthz` は認証不要です。`/v1/house/operations` など、`/v1/` の住宅ルートには `authorization: Bearer local` が必要です。このプロセスをWorkerが呼ぶことはありません。
 
 5分ごとのCron Triggerが、受付または実行権の取得から5分を超えたジョブのパターンDOを起こします。保留中の待機列は再開しません。ローカルでは次のコマンドで同じ定期処理を呼べます（`auto` ではWorkerのポートに置き換えます）。
 
@@ -332,7 +332,7 @@ stagingのD1に新しいマイグレーションを適用するのは、mainの�
 
 マイグレーションをstagingで試すときは、先にそのマイグレーションだけをmainへマージしてデプロイの成功を待ち、ブランチにmainを取り込んでからデプロイします。マイグレーションは前の版のWorkerと両立する形で書くので、先にマージしても動いているWorkerは壊れません。手動の実行は指定したrefのworkflowを使います。この検査が入る前に分かれたブランチは、mainを取り込んでからデプロイします。
 
-手元で同じ疎通確認を行うには、上記のservice tokenの二つの値を入れた `.env` のパスを指定します。値をコマンドや出力に表示する必要はありません。成功すると `Staging smoke passed: <Origin>` が出ます。
+手元で同じ疎通確認を行うには、`pnpm setup` でビューアのWasmを用意し、上記のservice tokenの二つの値を入れた `.env` のパスを指定します。スクリプトはWasmで表示データを読み、各要素IDが確定した案に属することを選択APIで確かめます。成功すると `Staging smoke passed: <Origin>` が出ます。
 
 ```sh
 mise exec -- node --env-file=/path/to/.env scripts/check/staging-smoke.ts

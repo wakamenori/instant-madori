@@ -16,5 +16,4 @@ serde_json.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
-madori-display.workspace = true
 tower.workspace = true

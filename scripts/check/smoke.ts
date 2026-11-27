@@ -1,6 +1,8 @@
 import { randomBytes } from "node:crypto";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { z } from "zod";
+import { callGeometry, type Send } from "../../apps/worker/src/geometry/geometry-protocol.ts";
 import { repositoryRoot } from "../shared/repository.ts";
 import { freePort, ready, start, stop } from "../shared/processes.ts";
 
@@ -68,23 +70,72 @@ try {
   );
   const viewer = await import("../../crates/viewer/pkg/madori_viewer.js");
   await viewer.default({ module_or_path: wasmBytes });
-  const displayUrl = `http://127.0.0.1:${geometryPort}/v1/sample/display`;
-  assert.equal((await fetch(displayUrl)).status, 401);
-  const display = await fetch(displayUrl, { headers: { authorization: `Bearer ${token}` } });
-  assert.equal(display.status, 200);
-  const summary = viewer.describe_display(new Uint8Array(await display.arrayBuffer()));
-  assert.equal(summary.bodies, 4);
-  assert.deepEqual(summary.elements, [
-    "sample:slab",
-    "sample:wall-north",
-    "sample:wall-west",
-    "sample:wall-east",
-  ]);
-  summary.free();
+  const send =
+    (headers: Record<string, string>): Send =>
+    async (request) => ({
+      kind: "response",
+      response: await fetch(`http://127.0.0.1:${geometryPort}${request.path}`, {
+        method: request.method,
+        headers: request.contentType
+          ? { ...headers, "content-type": request.contentType }
+          : headers,
+        body: request.body ?? null,
+        signal: AbortSignal.timeout(request.timeoutMs),
+      }),
+      start: "warm",
+      ms: 0,
+    });
+  const placeRoom = (send: Send) =>
+    callGeometry(send, "applyOperations", {
+      traceId: "smoke",
+      body: {
+        job_id: "smoke",
+        operation_id: "place",
+        generation: 1,
+        snapshot: { kind: "empty" },
+        operations: [
+          {
+            kind: "place_rooms",
+            layout: {
+              walls: { exterior_thickness: 200, interior_thickness: 100, height: 2800 },
+              rooms: [
+                { name: "room", usage: "living", min: { x: 0, y: 0 }, max: { x: 4000, y: 3000 } },
+              ],
+            },
+          },
+        ],
+      },
+    });
+  assert.deepEqual(await placeRoom(send({})), {
+    kind: "failed",
+    reason: "unauthorized",
+    status: 401,
+  });
+  const result = await placeRoom(send({ authorization: `Bearer ${token}` }));
+  assert.equal(result.kind, "ok");
+  assert.equal(result.value.kind, "applied");
+  const housePart = result.value.parts.find((part) => part.artifact.kind === "house");
+  const display = result.value.parts.find((part) => part.artifact.kind === "display");
+  assert.ok(housePart);
+  assert.ok(display);
+  const ids = z.array(z.object({ id: z.string() }));
+  const { house } = z
+    .object({ house: z.object({ boundaries: ids, rooms: ids }) })
+    .parse(JSON.parse(new TextDecoder().decode(housePart.bytes)));
+  const summary = viewer.describe_display(display.bytes);
+  try {
+    assert.ok(summary.bodies > 0);
+    assert.deepEqual(
+      new Set(summary.elements),
+      new Set([...house.boundaries, ...house.rooms].map((element) => element.id)),
+    );
+  } finally {
+    summary.free();
+  }
   assert.throws(() => viewer.describe_display(new Uint8Array([0])));
   if (interrupted) throw new Error("Smoke check interrupted");
   console.log(
-    "Smoke passed: native engine startup, Worker routes, static assets, Wasm delivery, native-to-Wasm display decoding and authentication failure.",
+    "Smoke passed: native engine startup, Worker routes, static assets, Wasm delivery, and authenticated house operations with viewer decoding of housing element IDs.",
   );
 } finally {
   await stop(processes);
