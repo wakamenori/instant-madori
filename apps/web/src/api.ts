@@ -1,6 +1,9 @@
 import { parseFloorPlan, type FloorPlan } from "./floor-plan/plan-svg.ts";
 import {
   messageListResponseSchema,
+  stopJobResponseSchema,
+  resumeQueueResponseSchema,
+  cancelQueueResponseSchema,
   acceptInstructionResponseSchema,
   projectListResponseSchema,
   projectResponseSchema,
@@ -19,6 +22,8 @@ import type {
   AcceptInstructionRequest,
   CreateProjectRequest,
   RenameRequest,
+  StopJobRequest,
+  ReleaseQueueRequest,
 } from "@madori/contracts";
 
 export class ApiError extends Error {
@@ -35,7 +40,12 @@ async function request<T>(
   decode: (response: Response) => Promise<T>,
   write?: {
     method: "POST" | "PATCH";
-    body: CreateProjectRequest | AcceptInstructionRequest | RenameRequest;
+    body:
+      | CreateProjectRequest
+      | AcceptInstructionRequest
+      | RenameRequest
+      | StopJobRequest
+      | ReleaseQueueRequest;
   },
 ): Promise<T> {
   signal.throwIfAborted();
@@ -186,6 +196,45 @@ export function sendInstruction(
       const result = acceptInstructionResponseSchema.safeParse(await jsonBody(response));
       if (!result.success) throw new ApiError("unexpected_response");
       return result.data.job;
+    },
+    { method: "POST", body },
+  );
+}
+
+export function stopJob(jobId: string, body: StopJobRequest, signal: AbortSignal) {
+  return request(
+    `/api/jobs/${jobId}/stop`,
+    signal,
+    async (response) => {
+      const result = stopJobResponseSchema.safeParse(await jsonBody(response));
+      if (!result.success) throw new ApiError("unexpected_response");
+      return result.data;
+    },
+    { method: "POST", body },
+  );
+}
+
+export function resumeQueue(patternId: string, body: ReleaseQueueRequest, signal: AbortSignal) {
+  return request(
+    `/api/patterns/${patternId}/queue/resume`,
+    signal,
+    async (response) => {
+      const result = resumeQueueResponseSchema.safeParse(await jsonBody(response));
+      if (!result.success) throw new ApiError("unexpected_response");
+      return result.data;
+    },
+    { method: "POST", body },
+  );
+}
+
+export function cancelQueue(patternId: string, body: ReleaseQueueRequest, signal: AbortSignal) {
+  return request(
+    `/api/patterns/${patternId}/queue/cancel`,
+    signal,
+    async (response) => {
+      const result = cancelQueueResponseSchema.safeParse(await jsonBody(response));
+      if (!result.success) throw new ApiError("unexpected_response");
+      return result.data;
     },
     { method: "POST", body },
   );
