@@ -8,6 +8,7 @@
     "build": "wrangler deploy --dry-run --containers-rollout=none --outdir dist"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "catalog:",
     "@madori/contracts": "workspace:*",
     "jose": "catalog:",
     "zod": "catalog:"

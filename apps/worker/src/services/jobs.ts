@@ -310,7 +310,6 @@ export async function sweepStalledPatterns(deps: StalledPatternSweepDeps) {
 
 const jobLimits = {
   maxCallsPerRound: 8,
-  maxOutputTokens: 32000,
   toolResultMaxBytes: 32768,
 };
 const storageStep = {
@@ -395,7 +394,10 @@ async function startJob(
       summary = response.value;
       checks = new TextDecoder().decode(await file.checks.read());
     }
-    const built = await prefix(deps.ai.model, { ...context, summary, checks });
+    const ai = await deps.ai.forNewJob(() =>
+      deps.store.jobs.ownedBySubject(live.right, verifierSubject),
+    );
+    const built = await prefix(ai.model, { ...context, summary, checks });
     kept = await deps.store.work.keep(live.right, "prefix.json", JSON.stringify(built));
   }
   const recorded = await deps.store.jobs.recordAi(
@@ -443,15 +445,19 @@ async function ask(
       })),
     );
     const time = Date.parse(deps.runtime.now());
-    const response = await meteredRoundTrip(deps, right, {
-      conversation: {
-        system: initial.system,
-        tools: initial.tools,
-        opening: initial.opening,
-        rounds,
+    const response = await meteredRoundTrip(
+      { ...deps, ai: deps.ai.continuing(initial.model) },
+      right,
+      {
+        conversation: {
+          system: initial.system,
+          tools: initial.tools,
+          opening: initial.opening,
+          rounds,
+        },
+        maxOutputTokens: limits.ai.maxOutputTokens,
       },
-      maxOutputTokens: jobLimits.maxOutputTokens,
-    });
+    );
     timings.aiMs = Date.parse(deps.runtime.now()) - time;
     if (response.kind === "limited") return endLimited(deps, right, response.limit);
     if (response.kind === "execution_lost") return afterExecutionLost(deps, job);
@@ -461,6 +467,7 @@ async function ask(
         reason: (
           {
             rejected: "ai_rejected",
+            unusable: "ai_rejected",
             script_ended: "ai_script_ended",
             no_provider: "ai_unavailable",
           } as const

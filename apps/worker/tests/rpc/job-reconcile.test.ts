@@ -65,7 +65,13 @@ await test("Pattern reconciliation on D1", async (t) => {
       runtime,
       jobRuns,
       turns: turnCodec,
-      ai: editingAi,
+      ai: {
+        forNewJob: () => Promise.resolve(editingAi),
+        continuing: (model: string) => {
+          assert.equal(model, editingAi.model);
+          return editingAi;
+        },
+      },
       testHold: null,
       wakePattern: async () => {},
       geometry: () => ({

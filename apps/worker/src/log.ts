@@ -43,6 +43,7 @@ export interface LogFields {
   generation?: number;
   step?: JobStepName;
   attempt?: number;
+  attemptId?: string;
   outcome?:
     | "started"
     | "edited"
@@ -70,7 +71,10 @@ export interface LogFields {
     | "idle"
     | "claimed"
     | "stalled"
-    | "running";
+    | "running"
+    | "settled"
+    | "unsettled"
+    | "execution_lost";
   revisionId?: string;
   instanceStatus?: string;
   found?: number;
@@ -81,6 +85,13 @@ export interface LogFields {
   bytes?: number;
   geometryStart?: Extract<GeometryResult<unknown>, { kind: "ok" }>["start"];
   aiMs?: number;
+  uncachedInputTokens?: number;
+  outputTokens?: number;
+  cacheReadTokens?: number;
+  cacheWrite5mTokens?: number;
+  cacheWrite1hTokens?: number;
+  chargedMicroUsd?: number;
+  reservedMicroUsd?: number;
   saveMs?: number;
   checkMs?: number;
   geometryMs?: number;
@@ -134,6 +145,7 @@ const logKeys = {
   generation: "number",
   step: "string",
   attempt: "number",
+  attemptId: "string",
   outcome: "string",
   revisionId: "string",
   instanceStatus: "string",
@@ -145,6 +157,13 @@ const logKeys = {
   bytes: "number",
   geometryStart: "string",
   aiMs: "number",
+  uncachedInputTokens: "number",
+  outputTokens: "number",
+  cacheReadTokens: "number",
+  cacheWrite5mTokens: "number",
+  cacheWrite1hTokens: "number",
+  chargedMicroUsd: "number",
+  reservedMicroUsd: "number",
   saveMs: "number",
   checkMs: "number",
   geometryMs: "number",

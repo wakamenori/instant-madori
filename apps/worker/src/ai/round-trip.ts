@@ -1,3 +1,5 @@
+import type { OutputTokenLimit } from "../limits.ts";
+
 /**
  * Every type here is plain data that a Workflow step can return. JSON the model reads or writes
  * travels as text, because `unknown` or a recursive JSON type fails `Rpc.Serializable`.
@@ -66,7 +68,7 @@ export interface Conversation {
 
 export interface AiRequest {
   readonly conversation: Conversation;
-  readonly maxOutputTokens: number;
+  readonly maxOutputTokens: OutputTokenLimit;
 }
 
 export type StopReason = "end" | "tool_calls" | "output_limit" | "refusal";
@@ -85,11 +87,10 @@ export interface AiResponse {
   readonly stop: StopReason;
 }
 
-interface AiFailure {
-  readonly kind: "failed";
-  readonly reason: "rejected" | "script_ended" | "no_provider";
-  readonly detail: string;
-}
+type AiFailure = { readonly kind: "failed"; readonly detail: string } & (
+  | { readonly reason: "rejected" | "script_ended" | "no_provider" }
+  | { readonly reason: "unusable"; readonly usage: Usage }
+);
 
 export type AiResult = AiResponse | AiFailure;
 

@@ -8,6 +8,20 @@ export function microUsd(value: number): MicroUsd {
   return value as MicroUsd;
 }
 
+declare const outputTokenLimitBrand: unique symbol;
+export type OutputTokenLimit = number & { readonly [outputTokenLimitBrand]: true };
+
+function isOutputTokenLimit(value: number): value is OutputTokenLimit {
+  return Number.isSafeInteger(value) && value > 0;
+}
+
+export function outputTokenLimit(value: number): OutputTokenLimit {
+  if (!isOutputTokenLimit(value)) {
+    throw new RangeError("Output token limit must be a positive safe integer");
+  }
+  return value;
+}
+
 export type PriceCategory = "input" | "cacheWrite5m" | "cacheWrite1h" | "cacheRead" | "output";
 
 interface AiModelSpec {
@@ -40,7 +54,7 @@ export const aiModels = {
 
 export type AiModelId = keyof typeof aiModels;
 
-const ai = { model: "claude-opus-5-5" } as const;
+const ai = { model: "claude-opus-5-5", maxOutputTokens: outputTokenLimit(16_000) } as const;
 const aiImage = aiModels[ai.model].image;
 
 export const limits = {
@@ -63,7 +77,7 @@ export const limits = {
   },
 } as const satisfies {
   aiCost: { monthly: MicroUsd; perInstruction: MicroUsd };
-  ai: { model: AiModelId };
+  ai: { model: AiModelId; maxOutputTokens: OutputTokenLimit };
   assets: { maxBytes: number; maxEdgePx: number; maxPerInstruction: number };
   editHouse: { maxOperations: number };
   jobRun: { rounds: number; checkFixes: number };
