@@ -4,6 +4,8 @@ import { test, type TestContext } from "node:test";
 import {
   displayContentType,
   floorPlanStoreysHeader,
+  renameRequestSchema,
+  type RenameRequest,
   type PatternStateResponse,
 } from "@madori/contracts";
 import { createProject } from "./api.ts";
@@ -60,6 +62,8 @@ void test("held, running, queued and idle activity have descending precedence", 
   assert.deepEqual(summarizeActivity(state), { kind: "idle" });
 });
 
+const projectPath = `/api/projects/${project.id}`;
+const patternPath = `/api/patterns/${pattern.id}`;
 const patternsPath = `GET /api/projects/${project.id}/patterns`;
 const statePath = `GET /api/patterns/${pattern.id}/state`;
 const messagesPath = `/api/patterns/${pattern.id}/messages`;
@@ -82,6 +86,7 @@ type Handler = (init: RequestInit) => Response | Promise<Response>;
 function router(t: TestContext, overrides: Record<string, Handler>) {
   const paths: string[] = [];
   const routes: Record<string, Handler> = {
+    [`GET ${projectPath}`]: () => Response.json({ project }),
     [patternsPath]: () => Response.json({ patterns: [pattern] }),
     [statePath]: () => Response.json({ ...state, currentRevision: null }),
     [`GET ${messagesPath}`]: () => Response.json({ messages: [], nextCursor: null }),
@@ -409,4 +414,111 @@ void test("a rejected plan keeps its model and is reused on the next poll", asyn
   assert.equal(view.problem, null);
   assert.equal(polls, 2);
   assert.equal(paths.filter((p) => p.includes("/revisions/")).length, 2);
+});
+
+function renameBody(init: RequestInit) {
+  assert.ok(typeof init.body === "string");
+  return renameRequestSchema.parse(JSON.parse(init.body));
+}
+
+function versionConflict() {
+  return Response.json({ error: "version_conflict" }, { status: 409 });
+}
+
+void test("project rename updates the name and sends the saved version on the next rename", async (t) => {
+  const requests: RenameRequest[] = [];
+  router(t, {
+    [`PATCH ${projectPath}`]: (init) => {
+      const request = renameBody(init);
+      requests.push(request);
+      return Response.json({
+        project: { ...project, name: request.name, version: request.version + 1 },
+      });
+    },
+  });
+  const session = start(t);
+  await t.waitFor(() => assert.equal(session.getView().kind, "open"));
+  assert.equal(await session.rename("project", "北の家"), true);
+  assert.deepEqual(openView(session).project, { ...project, name: "北の家", version: 2 });
+  assert.equal(await session.rename("project", "南の家"), true);
+  assert.deepEqual(
+    requests.map(({ name, version }) => ({ name, version })),
+    [
+      { name: "北の家", version: 1 },
+      { name: "南の家", version: 2 },
+    ],
+  );
+  assert.notEqual(requests[0]?.requestId, requests[1]?.requestId);
+});
+
+for (const target of ["project", "pattern"] as const) {
+  void test(`${target} rename re-reads a conflict and sends the latest version on retry`, async (t) => {
+    const record = target === "project" ? project : pattern;
+    const latest = { ...record, name: "別の名前", version: 4 };
+    const requests: RenameRequest[] = [];
+    const paths = router(t, {
+      [`GET ${projectPath}`]: () =>
+        Response.json({ project: target === "project" && requests.length ? latest : project }),
+      [statePath]: () =>
+        Response.json({
+          ...state,
+          currentRevision: null,
+          pattern: target === "pattern" && requests.length ? latest : pattern,
+        }),
+      [`PATCH ${target === "project" ? projectPath : patternPath}`]: (init) => {
+        const request = renameBody(init);
+        requests.push(request);
+        if (requests.length === 1) return versionConflict();
+        return Response.json({ [target]: { ...latest, name: request.name, version: 5 } });
+      },
+    });
+    const session = start(t);
+    await t.waitFor(() => assert.equal(session.getView().kind, "open"));
+    assert.equal(await session.rename(target, "自分の案"), false);
+    assert.equal(paths.at(-1), target === "project" ? `GET ${projectPath}` : statePath);
+    assert.deepEqual(openView(session)[target], latest);
+    assert.deepEqual(openView(session).names[target], { kind: "conflict", latestName: "別の名前" });
+    assert.equal(await session.rename(target, "自分の案"), true);
+    assert.deepEqual(
+      requests.map(({ version }) => version),
+      [1, 4],
+    );
+    assert.deepEqual(openView(session).names[target], { kind: "idle" });
+  });
+}
+
+void test("a conflict with the requested name already saved counts as success", async (t) => {
+  let reads = 0;
+  const saved = { ...project, name: "中庭", version: 3 };
+  router(t, {
+    [`GET ${projectPath}`]: () => Response.json({ project: ++reads === 1 ? project : saved }),
+    [`PATCH ${projectPath}`]: versionConflict,
+  });
+  const session = start(t);
+  await t.waitFor(() => assert.equal(session.getView().kind, "open"));
+  assert.equal(await session.rename("project", " 中庭 "), true);
+  assert.deepEqual(openView(session).project, saved);
+  assert.deepEqual(openView(session).names.project, { kind: "idle" });
+});
+
+void test("an older poll finishing after a rename preserves the newer pattern", async (t) => {
+  let finishPoll!: (response: Response) => void;
+  const pending = new Promise<Response>((resolve) => {
+    finishPoll = resolve;
+  });
+  let reads = 0;
+  const saved = { ...pattern, name: "平屋", version: 2 };
+  router(t, {
+    [statePath]: () =>
+      ++reads === 1 ? Response.json({ ...state, currentRevision: null }) : pending,
+    [`PATCH ${patternPath}`]: () => Response.json({ pattern: saved }),
+  });
+  const session = start(t);
+  await t.waitFor(() => assert.equal(session.getView().kind, "open"));
+  session.retry();
+  await t.waitFor(() => assert.equal(reads, 2));
+  assert.equal(await session.rename("pattern", saved.name), true);
+  finishPoll(Response.json({ ...state, currentRevision: null, runningJob: job }));
+  await t.waitFor(() => assert.equal(openView(session).activity.kind, "working"));
+  assert.deepEqual(openView(session).pattern, saved);
 });

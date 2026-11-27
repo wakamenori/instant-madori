@@ -3,6 +3,8 @@ import {
   messageListResponseSchema,
   acceptInstructionResponseSchema,
   projectListResponseSchema,
+  projectResponseSchema,
+  patternResponseSchema,
   patternListResponseSchema,
   apiErrorSchema,
   createProjectResponseSchema,
@@ -16,6 +18,7 @@ import type {
   ApiErrorCode,
   AcceptInstructionRequest,
   CreateProjectRequest,
+  RenameRequest,
 } from "@madori/contracts";
 
 export class ApiError extends Error {
@@ -30,17 +33,20 @@ async function request<T>(
   path: string,
   signal: AbortSignal,
   decode: (response: Response) => Promise<T>,
-  body?: CreateProjectRequest | AcceptInstructionRequest,
+  write?: {
+    method: "POST" | "PATCH";
+    body: CreateProjectRequest | AcceptInstructionRequest | RenameRequest;
+  },
 ): Promise<T> {
   signal.throwIfAborted();
   try {
     const init: RequestInit =
-      body === undefined
+      write === undefined
         ? {}
         : {
-            method: "POST",
+            method: write.method,
             headers: { "content-type": "application/json" },
-            body: JSON.stringify(body),
+            body: JSON.stringify(write.body),
           };
     const response = await fetch(path, { ...init, signal });
     if (!response.ok) {
@@ -71,7 +77,7 @@ export function createProject(body: CreateProjectRequest, signal: AbortSignal) {
       if (!result.success) throw new ApiError("unexpected_response");
       return result.data;
     },
-    body,
+    { method: "POST", body },
   );
 }
 
@@ -83,6 +89,33 @@ export function listProjects(cursor: string | null, signal: AbortSignal) {
     if (!result.success) throw new ApiError("unexpected_response");
     return result.data;
   });
+}
+
+async function decodeProject(response: Response) {
+  const result = projectResponseSchema.safeParse(await jsonBody(response));
+  if (!result.success) throw new ApiError("unexpected_response");
+  return result.data.project;
+}
+
+export function getProject(projectId: string, signal: AbortSignal) {
+  return request(`/api/projects/${projectId}`, signal, decodeProject);
+}
+
+export function renameProject(projectId: string, body: RenameRequest, signal: AbortSignal) {
+  return request(`/api/projects/${projectId}`, signal, decodeProject, { method: "PATCH", body });
+}
+
+export function renamePattern(patternId: string, body: RenameRequest, signal: AbortSignal) {
+  return request(
+    `/api/patterns/${patternId}`,
+    signal,
+    async (response) => {
+      const result = patternResponseSchema.safeParse(await jsonBody(response));
+      if (!result.success) throw new ApiError("unexpected_response");
+      return result.data.pattern;
+    },
+    { method: "PATCH", body },
+  );
 }
 
 export function listPatterns(projectId: string, signal: AbortSignal) {
@@ -154,6 +187,6 @@ export function sendInstruction(
       if (!result.success) throw new ApiError("unexpected_response");
       return result.data.job;
     },
-    body,
+    { method: "POST", body },
   );
 }
