@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { z } from "zod";
 import { anthropicAi } from "../../src/ai/anthropic.ts";
+import type { Ai } from "../../src/ai/round-trip.ts";
+import { selectAi } from "../../src/ai/select.ts";
+import { verifierSubject } from "../../src/identity.ts";
 import { turnCodec } from "../../src/ai/turns.ts";
 import { runJob } from "../../src/services/jobs.ts";
 import { contentBlock, recordedStream, sse } from "../support/anthropic-sse.ts";
@@ -35,11 +38,14 @@ await test("Workflow retries reserve a separate D1 attempt before every provider
   const { claim } = await snapshotPattern(db);
   const { reference: job } = await claim();
   const counts: number[] = [];
+  const maxTokens: unknown[] = [];
 
   const ai = anthropicAi({
     model: "claude-opus-5-5",
     apiKey: "fake-test-key",
-    async fetch() {
+    async fetch(_input, init) {
+      const body = z.string().parse(init?.body);
+      maxTokens.push(z.object({ max_tokens: z.number() }).parse(JSON.parse(body)).max_tokens);
       const count = await db.raw
         .prepare("SELECT count(*) AS attempts FROM ai_attempts WHERE job_id = ?")
         .bind(job.jobId)
@@ -86,6 +92,7 @@ await test("Workflow retries reserve a separate D1 attempt before every provider
 
   assert.equal(outcome.kind === "failed" && outcome.reason, "ai_refused");
   assert.deepEqual(counts, [1, 2, 3]);
+  assert.deepEqual(maxTokens, [16_000, 16_000, 16_000]);
   assert.equal(engine.attempts.filter((step) => step === "round 1 ai").length, 3);
 
   const attempts = await db.raw
@@ -207,4 +214,45 @@ await test("Workflow retries reserve a separate D1 attempt before every provider
       },
     ],
   );
+});
+
+await test("staging keeps only the smoke verifier's jobs on the scripted AI", async (t) => {
+  const db = await openJobDatabase();
+  t.after(() => db.dispose());
+  await applyJobMigrations(db);
+  const roster = selectAi({ ENVIRONMENT: "staging", ANTHROPIC_API_KEY: "fake-test-key" });
+  const unavailable: Ai = {
+    model: "unused",
+    roundTrip: () => Promise.resolve({ kind: "failed", reason: "no_provider", detail: "no call" }),
+  };
+  const deps = {
+    store: db.store,
+    runtime: db.runtime,
+    turns: turnCodec,
+    ai: {
+      forNewJob: (isSmokeVerifier: () => Promise<boolean>) => roster.forNewJob(isSmokeVerifier),
+      continuing: () => unavailable,
+    },
+    geometry: () => assert.fail("an empty pattern starts without geometry"),
+    testHold: null,
+    wakePattern: async () => {},
+  };
+  async function recordedModel(subject?: string) {
+    const { ownerId, claim } = await snapshotPattern(db);
+    if (subject)
+      await db.raw
+        .prepare("UPDATE users SET access_subject = ? WHERE id = ?")
+        .bind(subject, ownerId)
+        .run();
+    const { reference: job } = await claim();
+    const outcome = await runJob(deps, job, stepEngine().steps);
+    assert.equal(outcome.kind === "failed" && outcome.reason, "ai_unavailable");
+    return db.raw
+      .prepare("SELECT ai_model FROM jobs WHERE id = ?")
+      .bind(job.jobId)
+      .first<string>("ai_model");
+  }
+
+  assert.equal(await recordedModel(), "claude-opus-5-5");
+  assert.equal(await recordedModel(verifierSubject), "scripted");
 });
