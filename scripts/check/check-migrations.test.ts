@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
+
+import { parse } from "yaml";
+import { z } from "zod";
 
 const script = fileURLToPath(new URL("./check-migrations.ts", import.meta.url));
 const migrationsPath = "apps/worker/migrations/";
@@ -38,8 +41,8 @@ function repository(t: TestContext) {
     git,
     write,
     commit,
-    check: (base?: string) =>
-      spawnSync(process.execPath, [script], {
+    check: (base?: string, ...args: string[]) =>
+      spawnSync(process.execPath, [script, ...args], {
         cwd,
         encoding: "utf8",
         env: { ...process.env, MADORI_MIGRATION_BASE: base },
@@ -313,4 +316,161 @@ void test("requires a numeric migration filename", (t) => {
   const result = repo.check();
   assert.equal(result.status, 1);
   assert.match(result.stderr, /unnumbered.sql.*must start with a number/);
+});
+
+const added = `${migrationsPath}0003_new.sql`;
+
+function assertUndeployed(repo: ReturnType<typeof repository>, base: string) {
+  const result = repo.check(base, "--branch-deploy");
+  assert.equal(result.status, 1, result.stderr);
+  assert.equal(
+    result.stderr.trimEnd(),
+    `${added}: not in the last successful main deploy ${base}. Staging D1 records migrations by file name, so a branch deploy may carry only migrations that main has deployed. Merge the migration to main, wait for its deploy, then deploy a branch that includes it.`,
+  );
+}
+
+void test("a branch can deploy migrations identical to the last successful main deploy", (t) => {
+  const repo = repository(t);
+  const base = repo.git("rev-parse", "main");
+  const result = repo.check(base, "--branch-deploy");
+  assert.equal(result.status, 0, result.stderr);
+  assert.ok(result.stdout.includes(base));
+  assert.match(result.stdout, /2 migration files/);
+});
+
+void test("a branch cannot deploy its new migration even after rewriting it", (t) => {
+  const repo = repository(t);
+  const base = repo.git("rev-parse", "main");
+  for (const content of ["SELECT 1;\n", "SELECT 2;\n"]) {
+    repo.write(added, content);
+    repo.commit();
+    assertUndeployed(repo, base);
+  }
+});
+
+void test("a branch deploy compares raw bytes even when Git normalizes line endings", (t) => {
+  const repo = repository(t);
+  const base = repo.git("rev-parse", "main");
+  repo.write(".gitattributes", "*.sql text eol=lf\n");
+  repo.write(existing, "SELECT 1;\r\n");
+  const result = repo.check(base, "--branch-deploy");
+  assert.equal(result.status, 1, result.stderr);
+  assert.equal(
+    result.stderr.trimEnd(),
+    `${existing}: differs from the last successful main deploy ${base}. Staging D1 records migrations by file name, so it would never apply this content.`,
+  );
+});
+
+void test("a branch behind the deployed main commit may omit a deployed migration", (t) => {
+  const repo = repository(t);
+  repo.git("switch", "main");
+  repo.write(added);
+  repo.commit();
+  const base = repo.git("rev-parse", "HEAD");
+  repo.git("switch", "feature");
+  const result = repo.check(base, "--branch-deploy");
+  assert.equal(result.status, 0, result.stderr);
+});
+
+void test("a migration on origin/main becomes eligible once main deploys it", (t) => {
+  const repo = repository(t);
+  const before = repo.git("rev-parse", "main");
+  repo.git("switch", "main");
+  repo.write(added);
+  repo.commit();
+  repo.git("update-ref", "refs/remotes/origin/main", "HEAD");
+  const after = repo.git("rev-parse", "HEAD");
+  repo.git("switch", "feature");
+  repo.git("merge", "--ff-only", "main");
+  assertUndeployed(repo, before);
+  const result = repo.check(after, "--branch-deploy");
+  assert.equal(result.status, 0, result.stderr);
+});
+
+void test("a diverged branch can deploy matching worker migrations despite metrics changes", (t) => {
+  const repo = repository(t);
+  repo.git("switch", "main");
+  repo.write("unrelated.txt");
+  repo.commit();
+  const base = repo.git("rev-parse", "HEAD");
+  repo.git("switch", "feature");
+  mkdirSync(join(repo.cwd, "metrics/l1/migrations"), { recursive: true });
+  repo.write("metrics/l1/migrations/0001_metrics.sql");
+  repo.commit();
+  const result = repo.check(base, "--branch-deploy");
+  assert.equal(result.status, 0, result.stderr);
+});
+
+void test("a branch deploy checks untracked migrations even when Git ignores them", (t) => {
+  const repo = repository(t);
+  repo.write(".gitignore", added + "\n");
+  repo.write(added);
+  assertUndeployed(repo, repo.git("rev-parse", "main"));
+});
+
+for (const [base, message] of [
+  ["", /no successful main deploy/],
+  ["0".repeat(40), /no successful main deploy/],
+  ["main", /must be a full commit SHA/],
+  ["f".repeat(40), /does not name a commit/],
+] as const) {
+  void test(`a branch deploy rejects base "${base}"`, (t) => {
+    const result = repository(t).check(base, "--branch-deploy");
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, message);
+  });
+}
+
+void test("unknown migration check arguments print usage", (t) => {
+  const repo = repository(t);
+  for (const args of [["--other"], ["--branch-deploy", "extra"]]) {
+    const result = repo.check("", ...args);
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, /Usage: .*check-migrations\.ts \[--branch-deploy\]/);
+  }
+});
+
+void test("staging checks branch migrations immediately after looking up the deploy base", () => {
+  const source = readFileSync(
+    new URL("../../.github/workflows/deploy-staging.yml", import.meta.url),
+    "utf8",
+  );
+  const step = z.object({
+    id: z.string().optional(),
+    uses: z.string().optional(),
+    if: z.string().optional(),
+    run: z.string().optional(),
+    env: z.record(z.string(), z.string()).optional(),
+    name: z.string().optional(),
+  });
+  const {
+    jobs: {
+      deploy: { steps },
+    },
+  } = z
+    .object({
+      jobs: z.object({ deploy: z.object({ steps: z.array(step) }) }),
+    })
+    .parse(parse(source));
+  const checkout = steps.findIndex((s) => s.uses?.startsWith("actions/checkout@"));
+  assert.ok(checkout >= 0);
+  const base = steps[checkout + 1];
+  assert.equal(base?.id, "migration-base");
+  assert.equal(base.if, undefined);
+  const guard = steps[checkout + 2];
+  assert.equal(guard?.run, "node scripts/check/check-migrations.ts --branch-deploy");
+  assert.equal(guard.if, "github.ref != 'refs/heads/main'");
+  assert.equal(guard.env?.["MADORI_MIGRATION_BASE"], "${{ steps.migration-base.outputs.sha }}");
+  const full = steps.findIndex((s) => s.run === "pnpm check --full");
+  for (const index of [
+    steps.findIndex((s) => s.run?.includes("RUNNER_TOOL_CACHE")),
+    steps.findIndex((s) => s.run?.startsWith("pnpm install")),
+    full,
+    steps.findIndex((s) => s.name === "Migrate and deploy"),
+  ])
+    assert.ok(index > checkout + 2);
+  assert.equal(
+    steps[full]?.env?.["MADORI_MIGRATION_BASE"],
+    "${{ github.ref == 'refs/heads/main' && steps.migration-base.outputs.sha || '' }}",
+  );
 });
