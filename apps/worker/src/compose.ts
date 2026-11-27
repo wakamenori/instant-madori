@@ -68,7 +68,7 @@ export function jobWorkflowDeps(
   env: Pick<Env, "DB" | "BLOBS" | "GEOMETRY" | "PATTERNS" | "ENVIRONMENT" | "JOB_TEST_HOLD">,
   runtime: Runtime,
 ): JobWorkflowDeps {
-  const { jobs, snapshots, work } = createStore(d1(env.DB), r2(env.BLOBS));
+  const { jobs, snapshots, work, aiCost } = createStore(d1(env.DB), r2(env.BLOBS));
   return {
     store: {
       jobs: {
@@ -77,10 +77,12 @@ export function jobWorkflowDeps(
         complete: jobs.complete,
         failAndHoldQueue: jobs.failAndHoldQueue,
         startContext: jobs.startContext,
+        limit: jobs.limit,
         askQuestion: jobs.askQuestion,
         recordAi: jobs.recordAi,
         ownedBySubject: jobs.ownedBySubject,
       },
+      aiCost,
       snapshots,
       work,
     },

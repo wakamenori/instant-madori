@@ -1,3 +1,4 @@
+import { meteredRoundTrip, type AiCostLimit } from "./ai-cost.ts";
 import { limits } from "../limits.ts";
 import { verifierSubject } from "../identity.ts";
 import type { Conversation } from "../ai/round-trip.ts";
@@ -9,6 +10,7 @@ import {
   planRound,
   explanationBody,
   v1Notice,
+  limitNotices,
   elements,
   toolText,
   type Working,
@@ -227,12 +229,14 @@ type JobFailureReason =
   | "retries_exhausted";
 type Committed = { kind: "committed"; revisionId: string };
 type Asked = { kind: "asked" };
+type Limited = { kind: "limited"; limit: AiCostLimit | null };
 type Cancelled = { kind: "cancelled" };
 type NotCommitted = { kind: "not_committed"; reason: JobFailureReason };
 export type JobEnd = (
   | Committed
   | Asked
   | Cancelled
+  | Limited
   | { kind: "failed"; reason: JobFailureReason }
   | { kind: "not_running"; reason: JobFailureReason }
 ) & { ms?: number };
@@ -331,7 +335,7 @@ type History = {
   turn: WorkRef;
   reply: { kind: "message"; text: string } | { kind: "tool_results"; results: ToolResult[] };
 }[];
-type Interrupted = Committed | Asked | Cancelled | NotCommitted;
+type Interrupted = Committed | Asked | Cancelled | Limited | NotCommitted;
 type Started = { kind: "started"; claimedAt: string; working: Working; prefix: WorkRef };
 type Answer = ({ kind: "answered" } | { kind: "hold"; seconds: number }) & {
   turn: WorkRef;
@@ -443,7 +447,7 @@ async function ask(
       })),
     );
     const time = Date.parse(deps.runtime.now());
-    const response = await deps.ai.roundTrip({
+    const response = await meteredRoundTrip(deps, right, {
       conversation: {
         system: initial.system,
         tools: initial.tools,
@@ -453,6 +457,8 @@ async function ask(
       maxOutputTokens: jobLimits.maxOutputTokens,
     });
     timings.aiMs = Date.parse(deps.runtime.now()) - time;
+    if (response.kind === "limited") return endLimited(deps, right, response.limit);
+    if (response.kind === "execution_lost") return afterExecutionLost(deps, job);
     if (response.kind === "failed")
       return {
         kind: "not_committed",
@@ -731,6 +737,7 @@ export async function runJob(
     };
   });
   const duration = wake.ms === undefined ? {} : { ms: wake.ms };
+  if (end.kind === "limited") return { kind: end.kind, limit: end.limit, ...duration };
   if (end.kind === "committed") return { kind: end.kind, revisionId: end.revisionId, ...duration };
   if (end.kind === "cancelled" || end.kind === "asked") return { kind: end.kind, ...duration };
   return { kind: end.kind, reason: end.reason, ...duration };
@@ -738,15 +745,36 @@ export async function runJob(
 async function current(
   deps: JobWorkflowDeps,
   job: JobExecutionReference,
-): Promise<
-  { kind: "active"; right: JobExecutionRight } | Committed | Asked | Cancelled | NotCommitted
-> {
+): Promise<{ kind: "active"; right: JobExecutionRight } | Interrupted> {
   const restored = await readCurrentJobExecution(deps, job);
+  if (restored.kind === "limited") return { kind: "limited", limit: null };
   if (restored.kind === "asked" || restored.kind === "cancelled") return restored;
   if (restored.kind === "invalid") return { kind: "not_committed", reason: "execution_lost" };
   return restored.kind === "committed"
     ? { kind: "committed", revisionId: restored.revision.id }
     : { kind: "active", right: restored.right };
+}
+
+async function afterExecutionLost(
+  deps: JobWorkflowDeps,
+  job: JobExecutionReference,
+): Promise<Interrupted> {
+  const live = await current(deps, job);
+  return live.kind === "active" ? { kind: "not_committed", reason: "execution_lost" } : live;
+}
+
+async function endLimited(
+  deps: JobWorkflowDeps,
+  right: JobExecutionRight,
+  limit: AiCostLimit,
+): Promise<Interrupted> {
+  const result = await deps.store.jobs.limit(right, {
+    notice: { id: deps.runtime.newId(), body: limitNotices[limit] },
+    now: deps.runtime.now(),
+  });
+  return result.kind === "recorded"
+    ? { kind: "limited", limit }
+    : afterExecutionLost(deps, right.reference);
 }
 
 async function endWithoutRevision(
@@ -755,12 +783,10 @@ async function endWithoutRevision(
   reason: JobFailureReason,
 ): Promise<JobEnd> {
   const now = await current(deps, job);
-  if (now.kind === "asked" || now.kind === "committed" || now.kind === "cancelled") return now;
   if (now.kind === "not_committed") return { kind: "not_running", reason };
+  if (now.kind !== "active") return now;
   const result = await recordJobFailure(deps, now.right);
   if (result.kind === "recorded") return { kind: "failed", reason };
-  const latest = await current(deps, job);
-  return latest.kind === "asked" || latest.kind === "cancelled" || latest.kind === "committed"
-    ? latest
-    : { kind: "not_running", reason };
+  const latest = await afterExecutionLost(deps, job);
+  return latest.kind === "not_committed" ? { kind: "not_running", reason } : latest;
 }
