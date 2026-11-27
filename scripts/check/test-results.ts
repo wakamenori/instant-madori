@@ -196,29 +196,30 @@ if (import.meta.main) {
   const [destination, workspaceRoot, exe, ...args] = process.argv.slice(2);
   if (!destination || !workspaceRoot || !exe)
     throw new Error("Expected a destination, workspace root and test executable");
-  const record = basename(dirname(exe)) === "deps";
-  const child = spawn(exe, args, { stdio: ["inherit", record ? "pipe" : "inherit", "inherit"] });
+  if (basename(dirname(exe)) !== "deps")
+    throw new Error(
+      `Test executable outside deps is not recorded: ${exe}. Rust doc-tests and example tests run outside deps; move the code into a #[test], or mark a doc-test code block no_run, ignore or text.`,
+    );
+  const child = spawn(exe, args, { stdio: ["inherit", "pipe", "inherit"] });
   const chunks: Buffer[] = [];
-  child.stdout?.pipe(process.stdout, { end: false });
-  child.stdout?.on("data", (chunk: Buffer) => chunks.push(chunk));
+  child.stdout.pipe(process.stdout, { end: false });
+  child.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
   const [code, signal] = (await once(child, "close")) as [number | null, NodeJS.Signals | null];
-  if (record) {
-    const pkg = process.env.CARGO_PKG_NAME;
-    if (!pkg) throw new Error("Missing CARGO_PKG_NAME");
-    const manifestDir = process.env.CARGO_MANIFEST_DIR;
-    if (!manifestDir) throw new Error("Missing CARGO_MANIFEST_DIR");
-    const binary = rustBinaryId(
-      await readFile(exe + ".d", "utf8"),
-      exe,
-      workspaceRoot,
-      manifestDir,
-      pkg,
-    );
-    await appendFile(
-      destination,
-      parseLibtest(binary, Buffer.concat(chunks).toString(), code).map(line).join(""),
-    );
-  }
+  const pkg = process.env.CARGO_PKG_NAME;
+  if (!pkg) throw new Error("Missing CARGO_PKG_NAME");
+  const manifestDir = process.env.CARGO_MANIFEST_DIR;
+  if (!manifestDir) throw new Error("Missing CARGO_MANIFEST_DIR");
+  const binary = rustBinaryId(
+    await readFile(exe + ".d", "utf8"),
+    exe,
+    workspaceRoot,
+    manifestDir,
+    pkg,
+  );
+  await appendFile(
+    destination,
+    parseLibtest(binary, Buffer.concat(chunks).toString(), code).map(line).join(""),
+  );
   if (signal) process.kill(process.pid, signal);
   else process.exitCode = code ?? 1;
 }
