@@ -12,7 +12,7 @@
 
 ## How to get to it (user POV)
 
-- 画面はまだ無い。`GET` と `POST` の `/api/projects/<id>/patterns`、`PATCH /api/patterns/<id>`、`GET /api/patterns/<id>/state` を使う。
+- 案件画面は最初のパターンを開き、その名前を変えられる（[案件名とパターン名を変える](./names.md)）。パターンを足す・一覧する画面はまだ無い。API は `GET` と `POST` の `/api/projects/<id>/patterns`、`PATCH /api/patterns/<id>`、`GET /api/patterns/<id>/state` を使う。
 
 ## Driving it with curl
 
