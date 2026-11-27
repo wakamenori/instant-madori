@@ -1,6 +1,7 @@
+import { FloorPlanViewport } from "./floor-plan/floor-plan-viewport.tsx";
 import { ConversationLog, InstructionForm } from "./conversation-view.tsx";
 import { useEffect, useState, useSyncExternalStore } from "react";
-import { createProjectSession, type ProjectView } from "./project-session.ts";
+import { createProjectSession, type ProjectView, type RevisionView } from "./project-session.ts";
 import { RouteLink } from "./navigation.tsx";
 import { projectsRoute, type ProjectId } from "./route.ts";
 import { formatDateTime } from "./format-date-time.ts";
@@ -55,7 +56,7 @@ export function ProjectScreen({ projectId }: { projectId: ProjectId }) {
                 {view.problem} <button onClick={session.retry}>再試行</button>
               </p>
             )}
-            <ModelViewport label="住宅モデル" display={view.shown?.display ?? null} />
+            <RevisionViews shown={view.shown} />
           </section>
           <section className="conversation-pane" aria-label="会話">
             <ConversationLog timeline={view.timeline} onResend={session.resend} />
@@ -68,6 +69,31 @@ export function ProjectScreen({ projectId }: { projectId: ProjectId }) {
           {view.message} <button onClick={session.retry}>再試行</button>
         </p>
       )}
+    </>
+  );
+}
+
+function RevisionViews({ shown }: { shown: RevisionView | null }) {
+  const [choice, setChoice] = useState<"plan" | "model" | null>(null);
+  const planActive = (choice ?? (shown?.plan.kind === "ready" ? "plan" : "model")) === "plan";
+  return (
+    <>
+      <div className="view-switch" role="group" aria-label="表示の切り替え">
+        <button aria-pressed={planActive} onClick={() => setChoice("plan")}>
+          間取り図
+        </button>
+        <button aria-pressed={!planActive} onClick={() => setChoice("model")}>
+          3D
+        </button>
+      </div>
+      <div className="views">
+        <div className="view-panel" inert={!planActive} data-active={planActive}>
+          <FloorPlanViewport slot={shown?.plan ?? null} />
+        </div>
+        <div className="view-panel" inert={planActive} data-active={!planActive}>
+          <ModelViewport label="住宅モデル" display={shown?.display ?? null} />
+        </div>
+      </div>
     </>
   );
 }

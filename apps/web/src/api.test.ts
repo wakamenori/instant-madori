@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { displayContentType } from "@madori/contracts";
 import assert from "node:assert/strict";
 import { test, mock } from "node:test";
@@ -86,17 +87,20 @@ void test("revision views require an ordered list of distinct storeys", async (t
 });
 
 void test("floor plans request an encoded storey and require a matching revision and SVG type", async (t) => {
-  const svg = "<svg/>";
+  const svg = readFileSync(new URL("./floor-plan/verification-1.svg", import.meta.url), "utf8");
+  let body = svg;
   const mockFetch = t.mock.method(globalThis, "fetch", (path: string) => {
-    assert.equal(path, "/api/revisions/R/floor-plan?storey=floor%3A1");
+    assert.equal(path, "/api/revisions/R/floor-plan?storey=a5e84c0db7%3As1");
     return Promise.resolve(
-      new Response(svg, {
+      new Response(body, {
         headers: { "content-type": "image/svg+xml", "x-revision-id": "R" },
       }),
     );
   });
-  const fetchPlan = () => fetchFloorPlan("R", "floor:1", new AbortController().signal);
-  assert.equal(await fetchPlan(), svg);
+  const fetchPlan = () => fetchFloorPlan("R", "a5e84c0db7:s1", new AbortController().signal);
+  assert.equal((await fetchPlan())?.selectable.size, 9);
+  body = svg.replace("</svg>", "<script/></svg>");
+  assert.equal(await fetchPlan(), null);
   for (const headers of [
     { "content-type": "image/svg+xml", "x-revision-id": "other" },
     { "content-type": "text/html", "x-revision-id": "R" },

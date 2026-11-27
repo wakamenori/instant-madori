@@ -39,12 +39,12 @@ const state: PatternStateResponse = {
   lastFinishedJob: null,
 };
 const signal = new AbortController().signal;
-function display(id: string) {
-  return new Response(new Uint8Array([3]), {
+function display(id: string, storeys = "", byte = 3) {
+  return new Response(new Uint8Array([byte]), {
     headers: {
       "content-type": displayContentType,
       "x-revision-id": id,
-      [floorPlanStoreysHeader]: "",
+      [floorPlanStoreysHeader]: storeys,
     },
   });
 }
@@ -133,7 +133,12 @@ void test("the created project opens its first pattern and polls through queued 
   });
   t.after(session.start());
   await t.waitFor(() => assert.ok(openView(session).shown?.revision.id === next.id));
-  assert.deepEqual(openView(session).shown, { revision: next, display: new Uint8Array([3]) });
+  assert.deepEqual(openView(session).shown, {
+    revision: next,
+    display: new Uint8Array([3]),
+    plan: { kind: "absent" },
+  });
+  assert.ok(!paths.some((path) => path.includes("floor-plan")));
   assert.deepEqual(waits, [1000, 1000]);
   assert.equal(paths.filter((p) => p === `GET /api/revisions/${revision.id}/view`).length, 1);
 });
@@ -344,4 +349,64 @@ void test("stopping marks queued sends unsent and a restart can resend before th
     assert.ok(entry?.kind === "local" && entry.delivery.kind === "accepted");
   });
   assert.equal(posts, 2);
+});
+
+function floorPlanResponse(id: string, room: string) {
+  const svg = `<svg class="floor-plan" data-storey-id="s1" viewBox="0 0 1 1"><text>${room}</text></svg>`;
+  return new Response(svg, { headers: { "content-type": "image/svg+xml", "x-revision-id": id } });
+}
+for (const failure of ["wrong revision", "transport"] as const) {
+  void test(`a plan with ${failure} preserves the previous pair until both views arrive`, async (t) => {
+    let current = revision;
+    let recover = false;
+    router(t, {
+      [statePath]: () => Response.json({ ...state, currentRevision: current }),
+      [`GET /api/revisions/${revision.id}/view`]: () => display(revision.id, "s1,s2"),
+      [`GET /api/revisions/${revision.id}/floor-plan?storey=s1`]: () =>
+        floorPlanResponse(revision.id, "A"),
+      [`GET /api/revisions/${next.id}/view`]: () => display(next.id, "s1,s2", 4),
+      [`GET /api/revisions/${next.id}/floor-plan?storey=s1`]: () => {
+        if (recover) return floorPlanResponse(next.id, "B");
+        if (failure === "transport") throw new TypeError("offline");
+        return floorPlanResponse(revision.id, "A");
+      },
+    });
+    const session = start(t);
+    await t.waitFor(() => assert.equal(openView(session).shown?.revision.id, revision.id));
+    const first = openView(session).shown;
+    assert.ok(first?.plan.kind === "ready");
+    assert.match(JSON.stringify(first.plan.plan.root), /"A"/);
+    current = next;
+    session.retry();
+    await t.waitFor(() => assert.ok(openView(session).problem));
+    assert.equal(openView(session).shown, first);
+    recover = true;
+    session.retry();
+    await t.waitFor(() => assert.equal(openView(session).shown?.revision.id, next.id));
+    const second = openView(session).shown;
+    assert.ok(second?.plan.kind === "ready");
+    assert.deepEqual(second.display, new Uint8Array([4]));
+    assert.match(JSON.stringify(second.plan.plan.root), /"B"/);
+    assert.equal(openView(session).problem, null);
+  });
+}
+void test("a rejected plan keeps its model and is reused on the next poll", async (t) => {
+  let polls = 0;
+  const paths = router(t, {
+    [statePath]: () => Response.json({ ...state, runningJob: ++polls === 1 ? job : null }),
+    [`GET /api/revisions/${revision.id}/view`]: () => display(revision.id, "s1,s2"),
+    [`GET /api/revisions/${revision.id}/floor-plan?storey=s1`]: () =>
+      floorPlanResponse(revision.id, "<script/>"),
+  });
+  const session = start(t, { wait: () => Promise.resolve() });
+  await t.waitFor(() => assert.equal(openView(session).activity.kind, "idle"));
+  const view = openView(session);
+  assert.deepEqual(view.shown, {
+    revision,
+    display: new Uint8Array([3]),
+    plan: { kind: "rejected" },
+  });
+  assert.equal(view.problem, null);
+  assert.equal(polls, 2);
+  assert.equal(paths.filter((p) => p.includes("/revisions/")).length, 2);
 });
