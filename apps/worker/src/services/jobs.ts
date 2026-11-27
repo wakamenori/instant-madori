@@ -307,8 +307,6 @@ export async function sweepStalledPatterns(deps: StalledPatternSweepDeps) {
 }
 
 const jobLimits = {
-  maxRounds: 24,
-  maxBlockedFinishes: 3,
   maxCallsPerRound: 8,
   maxOutputTokens: 32000,
   toolResultMaxBytes: 32768,
@@ -544,7 +542,7 @@ async function converse(
   let working = start.working;
   let blocked = 0;
   const history: History = [];
-  for (let round = 1; round <= jobLimits.maxRounds; round++) {
+  for (let round = 1; round <= limits.jobRun.rounds; round++) {
     const answer = await steps.do(`round ${round} ai`, aiStep, () =>
       ask(deps, job, start, history, round),
     );
@@ -691,7 +689,7 @@ async function converse(
       if (gate.kind !== "blocked" && gate.kind !== "refused") return gate;
       if (gate.kind === "blocked") {
         working = { kind: "edited", snapshot: gate.snapshot };
-        if (++blocked > jobLimits.maxBlockedFinishes)
+        if (++blocked > limits.jobRun.checkFixes)
           return { kind: "not_committed", reason: "checks_unresolved" };
       }
       results.push(gate.result);

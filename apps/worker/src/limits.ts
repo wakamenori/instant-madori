@@ -56,8 +56,17 @@ export const limits = {
     maxPerInstruction: 3,
     maxEdgePx: aiImage.downscaleEdgePx,
   },
+  // The Worker checks this via the edit_house schema generated from crates/geometry-api/src/tools.rs.
+  // A test keeps them in sync. Provisional pending the staging measurement (#103).
+  editHouse: { maxOperations: 32 },
+  jobRun: {
+    rounds: 24, // AI round trips per job.
+    checkFixes: 3, // Send blocking findings back this many times before the next blocked finish ends the job.
+  },
 } as const satisfies {
   aiCost: { monthly: MicroUsd; perInstruction: MicroUsd };
   ai: { model: AiModelId };
   assets: { maxBytes: number; maxEdgePx: number; maxPerInstruction: number };
+  editHouse: { maxOperations: number };
+  jobRun: { rounds: number; checkFixes: number };
 };

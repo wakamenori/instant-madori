@@ -6,6 +6,7 @@ import { completeJob } from "../../src/services/jobs.ts";
 import { scriptedAi } from "../../src/ai/scripted.ts";
 import type { Ai, AiRequest } from "../../src/ai/round-trip.ts";
 import { aiToolSchemaVersion } from "@madori/contracts/ai-tools";
+import { limits } from "../../src/limits.ts";
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -602,16 +603,72 @@ await test("Job runs restore D1 execution rights across retries and lost respons
       [".g1.r1.c1", ".g1.r1.c2", ".g1.r1.c2"].map((s) => f.job.jobId + s),
     );
   });
+  await t.test("an over-cap batch is a tool error and never reaches the Container", async () => {
+    const f = await fixture();
+    const { maxOperations } = limits.editHouse;
+    const call = (id: string, length: number) => ({
+      kind: "tool_call" as const,
+      name: "edit_house",
+      id,
+      inputJson: JSON.stringify({
+        operations: Array.from({ length }, () => ({ kind: "remove_opening", id: "o" })),
+      }),
+    });
+    const script = scriptedAi([
+      { stop: "tool_calls", parts: [call("big", maxOperations + 1)] },
+      { stop: "tool_calls", parts: [call("fits", maxOperations)] },
+      { stop: "refusal", parts: [{ kind: "text", text: "end" }] },
+    ]);
+    const requests: { request: AiRequest; calls: number; summaries: number }[] = [];
+    const ai: Ai = {
+      model: script.model,
+      roundTrip(request) {
+        requests.push({ request, calls: f.calls.length, summaries: f.summaries.length });
+        return script.roundTrip(request);
+      },
+    };
+    const engine = stepEngine();
+    await runJob({ ...f.deps, ai }, f.job, engine.steps);
+
+    const second = requests[1];
+    assert(second);
+    assert.equal(second.calls, 0);
+    assert.equal(second.summaries, 0);
+    const reply = second.request.conversation.rounds[0]?.reply;
+    assert(reply?.kind === "tool_results");
+    assert.equal(reply.results.length, 1);
+    const result = reply.results[0];
+    assert(result);
+    assert.equal(result.callId, "big");
+    assert.equal(result.isError, true);
+    const content = result.content[0];
+    assert(content?.kind === "text");
+    assert.match(content.text, new RegExp(`\\b${maxOperations}\\b`, "u"));
+    assert(!engine.attempts.includes("round 1 call 1 edit_house"));
+
+    assert.equal(requests[2]?.calls, 1);
+    assert.deepEqual(f.calls, [`${f.job.jobId}.g1.r2.c1`]);
+  });
   await t.test("a call-less turn is nudged until the round limit", async () => {
     const f = await fixture();
-    const ai = scriptedAi(() => ({ stop: "end", parts: [{ kind: "text", text: "draft" }] }));
+    const script = scriptedAi(() => ({ stop: "end", parts: [{ kind: "text", text: "draft" }] }));
+    let calls = 0;
+    const ai: Ai = {
+      model: script.model,
+      roundTrip(request) {
+        calls++;
+        return script.roundTrip(request);
+      },
+    };
     const engine = stepEngine();
     assert.deepEqual(await runJob({ ...f.deps, ai }, f.job, engine.steps), {
       kind: "failed",
       reason: "round_limit",
       ms: 0,
     });
-    assert(engine.cache.has("round 24 ai"));
+    assert.equal(calls, limits.jobRun.rounds);
+    assert(engine.cache.has(`round ${limits.jobRun.rounds} ai`));
+    assert(!engine.attempts.includes(`round ${limits.jobRun.rounds + 1} ai`));
     assert.equal(await f.snapshots(), 0);
   });
   await t.test("a v1 base starts empty and commits the notice before the explanation", async () => {
@@ -684,7 +741,10 @@ await test("Job runs restore D1 execution rights across retries and lost respons
       ms: 0,
     });
     assert.deepEqual(f.calls, [f.job.jobId + ".g1.r1.check"]);
-    assert.equal(engine.attempts.filter((n) => n.endsWith(" finish")).length, 4);
+    assert.equal(
+      engine.attempts.filter((n) => n.endsWith(" finish")).length,
+      limits.jobRun.checkFixes + 1,
+    );
     assert.deepEqual(
       (await f.revisions())?.revisions.map((r) => r.id),
       [original.revisionId],
