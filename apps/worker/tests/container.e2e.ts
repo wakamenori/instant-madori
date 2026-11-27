@@ -591,6 +591,63 @@ void test(
           assert.equal(revisionListResponseSchema.parse(await history.json()).revisions.length, 2);
         },
       );
+      await t.test(
+        "asking after an edit discards it and the answer commits before the waiting instruction",
+        async () => {
+          const created = await worker.call("/api/projects", {
+            method: "POST",
+            as: user,
+            body: { requestId: crypto.randomUUID() },
+          });
+          const {
+            pattern: { id },
+          } = createProjectResponseSchema.parse(await created.json());
+          const path = `/api/patterns/${id}`;
+          async function submit(body: string, questionId?: string) {
+            const response = await worker.call(path + "/messages", {
+              method: "POST",
+              as: user,
+              body: { requestId: crypto.randomUUID(), body, questionId },
+            });
+            assert.equal(response.status, 202);
+            return acceptInstructionResponseSchema.parse(await response.json()).job;
+          }
+          async function state() {
+            return patternStateResponseSchema.parse(
+              await (await worker.call(path + "/state", { as: user })).json(),
+            );
+          }
+          const asking = await submit("台本:question-after-edit");
+          const waiting = await submit("壁の色を変えて");
+          assert.equal((await worker.logLine(asking.jobId, "job.finished"))["outcome"], "asked");
+          const held = await state();
+          const holder = held.queueHold?.job;
+          assert(holder?.state === "awaiting_answer");
+          assert.equal(held.currentRevision, null, "the provisional edit added no revision");
+          const answer = await submit("必要", holder.question.messageId);
+          assert.equal(
+            (await worker.logLine(answer.jobId, "job.finished"))["outcome"],
+            "committed",
+          );
+          const answered = await state();
+          const first = answered.currentRevision;
+          assert(first);
+          assert.equal(first.number, 1);
+          assert.equal(first.baseRevisionId, null);
+          assert.equal(answered.queueHold?.job.jobId, asking.jobId);
+          assert.deepEqual(answered.queuedJobs, [waiting]);
+          const resumed = await worker.call(path + "/queue/resume", {
+            as: user,
+            method: "POST",
+            body: { requestId: crypto.randomUUID(), heldBy: asking.jobId },
+          });
+          assert.equal(resumed.status, 200);
+          const last = (await settleJobs(worker, user, id, [waiting.jobId], 300_000))
+            .currentRevision;
+          assert.equal(last?.number, 2);
+          assert.equal(last.baseRevisionId, first.id);
+        },
+      );
       const history = await worker.call(`/api/patterns/${pattern.id}/revisions`, { as: user });
       assert.equal(history.status, 200);
       assert.deepEqual(revisionListResponseSchema.parse(await history.json()), {
