@@ -56,12 +56,10 @@ export const limits = {
     maxPerInstruction: 3,
     maxEdgePx: aiImage.downscaleEdgePx,
   },
-  // The Worker checks this via the edit_house schema generated from crates/geometry-api/src/tools.rs.
-  // A test keeps them in sync. Provisional pending the staging measurement (#103).
   editHouse: { maxOperations: 32 },
   jobRun: {
-    rounds: 24, // AI round trips per job.
-    checkFixes: 3, // Send blocking findings back this many times before the next blocked finish ends the job.
+    rounds: 24,
+    checkFixes: 3,
   },
 } as const satisfies {
   aiCost: { monthly: MicroUsd; perInstruction: MicroUsd };
@@ -71,5 +69,4 @@ export const limits = {
   jobRun: { rounds: number; checkFixes: number };
 };
 
-/** Every cap that ends a job as `limited`. */
 export type JobLimit = keyof typeof limits.aiCost | keyof typeof limits.jobRun;

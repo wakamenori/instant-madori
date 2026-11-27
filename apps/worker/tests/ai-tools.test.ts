@@ -111,7 +111,10 @@ void test("the generated edit_house schema and its description match the Worker 
   const operations = Array.from({ length: maxOperations }, () => operation);
   assert(edit(operations).ok);
   const overCap = edit([...operations, operation]);
-  assert(!overCap.ok, "edit_house must reject one operation above the Worker limit");
+  assert(
+    !overCap.ok,
+    "limits.editHouse.maxOperations must equal the EditHouse.operations max in crates/geometry-api/src/tools.rs; change both and run pnpm generate:geometry",
+  );
   assert.match(overCap.error, /operations/u);
   const tool = aiTools.find(({ name }) => name === "edit_house");
   assert(tool?.inputSchemaJson.includes(`At most ${maxOperations} items.`));

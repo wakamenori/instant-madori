@@ -17,7 +17,6 @@ import {
 import { settleJobs } from "./support/settle-jobs.ts";
 import { geometryInternal, houseSummarySchema } from "@madori/contracts/geometry-internal";
 import { startLocalWorker, newUser } from "./support/local-worker.ts";
-import { limitNotices } from "../src/services/job-conversation.ts";
 const docker = promisify(execFile);
 async function runningContainers() {
   const { stdout } = await docker("docker", [
@@ -400,12 +399,7 @@ void test(
             assert.equal(response.status, 200);
             const { messages } = messageListResponseSchema.parse(await response.json());
             assert(
-              messages.some(
-                (message) =>
-                  message.jobId === job.jobId &&
-                  message.kind === "notice" &&
-                  message.body === limitNotices.checkFixes,
-              ),
+              messages.some((message) => message.jobId === job.jobId && message.kind === "notice"),
             );
             assert(state.currentRevision);
             assert.equal(

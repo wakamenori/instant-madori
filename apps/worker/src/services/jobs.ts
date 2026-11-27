@@ -13,6 +13,7 @@ import {
   limitNotices,
   elements,
   toolText,
+  type Working,
   type RoundPlan,
 } from "./job-conversation.ts";
 import { z } from "zod";
@@ -331,7 +332,6 @@ type History = {
   reply: { kind: "message"; text: string } | { kind: "tool_results"; results: ToolResult[] };
 }[];
 type Interrupted = Committed | Asked | Cancelled | Limited | NotCommitted;
-type Working = { kind: "empty"; v1Base: boolean } | { kind: "edited" | "base"; snapshot: Snapshot };
 type Started = { kind: "started"; claimedAt: string; working: Working; prefix: WorkRef };
 type Answer = ({ kind: "answered" } | { kind: "hold"; seconds: number }) & {
   turn: WorkRef;
@@ -549,8 +549,6 @@ async function converse(
   const recordLimit = (limit: keyof typeof limits.jobRun) =>
     steps.do("record limit", storageStep, async (): Promise<Interrupted> => {
       const live = await current(deps, job);
-      // A cost limit returns from `ask` before converse reaches a run cap, so a
-      // limited row here was written by this step; a retry keeps the kind.
       if (live.kind === "limited") return { kind: "limited", limit };
       if (live.kind !== "active") return live;
       return endLimited(deps, live.right, limit);

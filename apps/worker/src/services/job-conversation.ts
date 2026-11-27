@@ -1,7 +1,11 @@
 import { parseToolCall, type AiToolCall, type FinishInput } from "@madori/contracts/ai-tools";
 import { z } from "zod";
 import type { AiResponse } from "../ai/round-trip.ts";
+import type { Snapshot } from "../storage/snapshots.ts";
 import { limits, type JobLimit } from "../limits.ts";
+
+export type Working =
+  { kind: "empty"; v1Base: boolean } | { kind: "edited" | "base"; snapshot: Snapshot };
 
 export const limitNotices = {
   perInstruction: `この指示のAI費用が上限の${limits.aiCost.perInstruction / 1_000_000}米ドルに達したため、未確定の変更を採用せずに終了しました。案は最後に確定したもののままです。`,
