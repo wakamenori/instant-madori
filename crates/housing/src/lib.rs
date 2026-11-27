@@ -4,6 +4,7 @@ mod check;
 mod color;
 mod data;
 mod error;
+mod expected_floor;
 mod house;
 mod id;
 mod joint;
@@ -20,6 +21,7 @@ mod wall_move;
 
 pub use data::*;
 pub use error::*;
+pub use expected_floor::{Bulge, ExpectedFloor};
 pub use house::{BoundaryView, EdgeView, Face, House, RoomView, StoreyView, VertexView};
 pub use id::{
     BoundaryId, ModifierId, ObjectId, OpeningId, OperationId, RoomId, StoreyId, VertexId,

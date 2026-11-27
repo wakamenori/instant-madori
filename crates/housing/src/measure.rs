@@ -24,6 +24,29 @@ impl Area {
     pub fn unrounded_square_metres(self) -> f64 {
         self.square_millimetres / 1e6
     }
+    pub(crate) fn square_millimetres(self) -> f64 {
+        self.square_millimetres
+    }
+    pub(crate) fn subtract_coverage(self, square_millimetres: f64, clips: Area) -> Self {
+        Self {
+            square_millimetres: self.square_millimetres - square_millimetres,
+            perimeter: self.perimeter + clips.perimeter,
+        }
+    }
+    /// Outer rings contribute positive area and clockwise holes subtract area.
+    pub fn from_rings<'a>(rings: impl IntoIterator<Item = &'a [Point]>) -> Option<Self> {
+        let mut area = Self::ZERO;
+        for ring in rings {
+            let origin = *ring.first()?;
+            let mut twice = 0.0;
+            for (&a, &b) in ring.iter().zip(ring.iter().cycle().skip(1)) {
+                twice += a.delta_from(origin).cross(b.delta_from(origin));
+                area.perimeter += b.delta_from(a).length();
+            }
+            area.square_millimetres += twice / 2.0;
+        }
+        (area.square_millimetres.is_finite() && area.perimeter.is_finite()).then_some(area)
+    }
     /// Allow one length tolerance along the entire measured perimeter.
     pub fn matches_square_metres(self, expected: f64) -> bool {
         (self.square_millimetres - expected * 1e6).abs() <= LENGTH_TOLERANCE_MM * self.perimeter
@@ -94,6 +117,9 @@ impl Interior {
     }
     pub fn area(&self) -> Area {
         self.area
+    }
+    pub fn contains(&self, point: Point) -> bool {
+        crate::planform::contains(&self.outline, point)
     }
 }
 
@@ -220,20 +246,8 @@ fn contour(corners: &[Corner]) -> Option<Interior> {
         };
         outline.remove(i);
     }
-    let origin = *outline.first()?;
-    let mut twice = 0.0;
-    let mut perimeter = 0.0;
-    for (&a, &b) in outline.iter().zip(outline.iter().cycle().skip(1)) {
-        twice += a.delta_from(origin).cross(b.delta_from(origin));
-        perimeter += b.delta_from(a).length();
-    }
-    (twice.is_finite() && perimeter.is_finite()).then_some(Interior {
-        outline,
-        area: Area {
-            square_millimetres: twice / 2.0,
-            perimeter,
-        },
-    })
+    let area = Area::from_rings([outline.as_slice()])?;
+    Some(Interior { outline, area })
 }
 
 fn no_floor(element: ElementKind, id: &str) -> Rejection {
