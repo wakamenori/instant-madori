@@ -15,7 +15,7 @@
 
 ## How to get to it (user POV)
 
-- 画面には再開と取り消しの操作がまだ無い。案件画面は、保留を `待機中の指示（N件）が保留されています。` と表示する（[案件画面で案を見る](./project-view.md)）。保留は `GET /api/patterns/<id>/state` の `queueHold`（`{ job: { jobId, messageId, number, state } }` か `null`）で読む。再開は `POST /api/patterns/<id>/queue/resume`、取り消しは `POST /api/patterns/<id>/queue/cancel` に、`{"requestId":"<uuid>","heldBy":"<queueHold.job.jobId>"}` を送る。
+- 案件画面は、保留の理由（例 `指示を止めたため、待機中の指示（N件）を保留しています。`）と `再開する`・`取り消す` を状態の欄に出す（[指示の状態と操作](./status.md)）。API では、保留は `GET /api/patterns/<id>/state` の `queueHold`（`{ job: { jobId, messageId, number, state } }` か `null`）で読む。再開は `POST /api/patterns/<id>/queue/resume`、取り消しは `POST /api/patterns/<id>/queue/cancel` に、`{"requestId":"<uuid>","heldBy":"<queueHold.job.jobId>"}` を送る。
 
 ## Driving it with curl
 

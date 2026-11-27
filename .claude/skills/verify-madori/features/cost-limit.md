@@ -12,8 +12,8 @@ AIの費用が一指示の上限（5米ドル）か、サービス全体の今�
 
 ## How to get to it (user POV)
 
-- 利用者は、案件画面の指示欄か `POST /api/patterns/<id>/messages` で指示を送る（[指示を送る](./instructions.md)）。上限到達の結果は、`GET /api/patterns/<id>/state` の `lastFinishedJob` と `queueHold`、`GET /api/patterns/<id>/messages` のお知らせ、案件画面の会話で読む。画面には上限到達専用の表示はまだ無い。
-- 今月の上限は、ローカルの D1 の `ai_attempts` に今月の行を足して埋める。台本のAIは利用量を0で返すので、一指示の上限には画面から届かない。一指示の上限は試験だけが確かめる。
+- 利用者は、案件画面の指示欄か `POST /api/patterns/<id>/messages` で指示を送る（[指示を送る](./instructions.md)）。上限到達の結果は、`GET /api/patterns/<id>/state` の `lastFinishedJob` と `queueHold`、`GET /api/patterns/<id>/messages` のお知らせ、案件画面の会話で読む。案件画面の状態の欄は、待機中の指示があれば `上限に達して指示を終了したため、待機中の指示（N件）を保留しています。` と `再開する`・`取り消す`、無ければ `最後の指示は上限に達したため終了しました。途中の変更は採用していません。` を出す（[指示の状態と操作](./status.md)）。お知らせは、上限に達した指示の直下に並ぶ。
+- 今月の上限は、ローカルの D1 の `ai_attempts` に今月の行を足して埋める。台本のAIは利用量を0で返すので、ローカルのアプリでは、一指示の上限にも、一指示の上限と月額の予約の競合にも届かない。どちらも試験だけが確かめる。
 
 ## Driving it with curl
 
@@ -34,7 +34,7 @@ Preconditions:
 - **止めて保留にする。** `stop stop-s "$S" "$(uuidgen)"` で `200`、`outcome` が `stopped`。`state held-s` の `queueHold.job.jobId` が `$S` で `state` が `cancelled`。
 - **再開して上限に当てる。** `curl -sS -o "$D/resume-s.json" -w '%{http_code}\n' -X POST "$API/patterns/$PAT/queue/resume" -H "$J" -H "$O" -d "{\"requestId\":\"$(uuidgen)\",\"heldBy\":\"$S\"}"` で `200`。`idle limited-1` が成功する。`$D/limited-1.json` の `lastFinishedJob.jobId` が `$A` で `lastFinishedJob.state` が `limited`、`queueHold.job.jobId` が `$A` で `queueHold.job.state` が `limited`、`queuedJobs[0].jobId` が `$B`。案の件数は `R0` のまま。`d1 "SELECT count(*) AS n FROM ai_attempts WHERE job_id = '$A'"` が `0`（AIを呼んでいない）。`grep "\"jobId\":\"$A\"" "$EVIDENCE/dev.log" | grep '"event":"job.finished"'` の行に `"outcome":"limited"` と `"limit":"monthly"` が出て、`"level":"info"` である。
 - **会話のお知らせを読む。** `curl -sS "$API/patterns/$PAT/messages" >| "$D/messages.json"`。新しい順の先頭が `kind` が `notice`、`jobId` が `$A` で、`body` に `今月のサービス全体のAI費用が上限の100米ドルに達したため` を含む。
-- **画面で読む。** T3 のプレビューで案件画面（`/projects/<案件 ID>`）を開く。会話に「お知らせ」として同じ本文が出て、`[role="status"]` に `待機中の指示（1件）が保留されています。` が出る。スクリーンショットを残す。
+- **画面で読む。** T3 のプレビューで案件画面（`/projects/<案件 ID>`）を開く。会話の `窓を大きくしたい` の直下に「お知らせ」として同じ本文が出て、`保留中` の `収納を増やしたい` はその下に来る。`[role="status"]` に `上限に達して指示を終了したため、待機中の指示（1件）を保留しています。` が出る。スクリーンショットを残す。
 - **上限到達の指示を止める。** `stop stop-a "$A" "$(uuidgen)"`。`200` で、`outcome` が `already_finished`、`job.state` が `limited`。
 - **再開しても上限に当たる。** `curl -sS -o "$D/resume-a.json" -w '%{http_code}\n' -X POST "$API/patterns/$PAT/queue/resume" -H "$J" -H "$O" -d "{\"requestId\":\"$(uuidgen)\",\"heldBy\":\"$A\"}"` で `200`。`idle resumed-1` が成功し、`lastFinishedJob.jobId` が `$B` で `state` が `limited`、`queueHold` が `null`（B の後に待機中の指示が無い）。案の件数は `R0` のまま。
 - **埋めた行を消す。** `d1 "DELETE FROM ai_attempts WHERE id = 'verify-month-fill'"`。続けて `send after 和室を足したい` で送った指示は、上限到達で終わらない。`idle after-1`（60秒の待ちを含む）の後、`lastFinishedJob.jobId` がその指示で、`state` が `limited` 以外（Container を無効にしていれば `failed`）。
