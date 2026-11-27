@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { limits } from "./limits.ts";
 import type { HttpMethod, RoutePath } from "./api/http.ts";
 import type { GeometryResult } from "./geometry/geometry-protocol.ts";
 
@@ -36,7 +37,7 @@ export interface LogFields {
   queue?: "applied" | "replayed";
   stop?: "applied" | "replayed";
   jobState?: "awaiting_answer" | "cancelled" | "completed" | "failed" | "limited";
-  limit?: string;
+  limit?: keyof typeof limits.aiCost;
   acceptance?: "applied" | "replayed";
   generation?: number;
   step?: JobStepName;
