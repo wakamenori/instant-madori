@@ -6,7 +6,8 @@ import { z } from "zod";
 type MessageKind = ConversationMessage["kind"];
 export const prompt = {
   system:
-    "Edit the working single-storey house to meet the user's instruction. The opening contains the current plan summary, earlier conversation if any, the current instruction, and inspection findings if available, in that order. Copy element IDs exactly. Use read_house for details when the summary is insufficient. Resolve blocking findings, then call finish alone with a named plan and explanation in Japanese. In assumptions list every provisional condition the plan relies on and anything you assumed that the user did not say.",
+    "Edit the working single-storey house to meet the user's instruction. The opening contains the current plan summary, earlier conversation if any, the current instruction, and inspection findings if available, in that order. Copy element IDs exactly. Use read_house for details when the summary is insufficient. Resolve blocking findings, then call finish alone with a named plan and explanation in Japanese. In assumptions list every provisional condition the plan relies on and anything you assumed that the user did not say. If you need an answer before continuing, call finish alone with a question and choices.",
+  choices: "\nChoices: {choices}",
   order: ["summary", "conversation", "instruction", "checks"] as const,
   labels: {
     summary: "Current plan summary",
@@ -35,20 +36,32 @@ export const conversationWindow = {
   budgetBytes: prompt.conversationBytes,
   entryOverheadBytes: Math.max(
     ...Object.values(prompt.speakers).map(
-      (s) => new TextEncoder().encode(header(Number.MAX_SAFE_INTEGER, s) + prompt.separator).length,
+      (s) =>
+        new TextEncoder().encode(
+          header(Number.MAX_SAFE_INTEGER, s) +
+            prompt.separator +
+            prompt.choices.replace("{choices}", ""),
+        ).length,
     ),
   ),
 };
 interface OpeningInput {
   summary: HouseSummary;
-  messages: Pick<ConversationMessage, "number" | "kind" | "body">[];
+  messages: (Pick<ConversationMessage, "number" | "kind" | "body"> & {
+    choices?: string[] | null;
+  })[];
   total: number;
   instruction: string;
   checks: string | null;
 }
 function opening(input: OpeningInput) {
   const omitted = input.total - input.messages.length;
-  const entries = input.messages.map((m) => header(m.number, prompt.speakers[m.kind]) + m.body);
+  const entries = input.messages.map(
+    (m) =>
+      header(m.number, prompt.speakers[m.kind]) +
+      m.body +
+      (m.choices ? prompt.choices.replace("{choices}", () => JSON.stringify(m.choices)) : ""),
+  );
   if (omitted > 0) entries.unshift(prompt.omitted.replace("{n}", String(omitted)));
   const bodies = {
     summary: JSON.stringify(input.summary),

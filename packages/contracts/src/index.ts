@@ -219,6 +219,7 @@ export const instructionBodySchema = z
 export const acceptInstructionRequestSchema = z.strictObject({
   requestId: requestIdSchema,
   body: instructionBodySchema,
+  questionId: idSchema.transform((id) => id.toLowerCase()).optional(),
   attachmentIds: z
     .array(idSchema.transform((id) => id.toLowerCase()))
     .refine((ids) => new Set(ids).size === ids.length, "attachment IDs must be distinct")
@@ -240,6 +241,7 @@ export const cancelledJobSchema = acceptedJobSchema.extend({ state: z.literal("c
 export const finishedJobSchema = z.discriminatedUnion("state", [
   acceptedJobSchema.extend({ state: z.literal("completed"), revision: revisionSchema }),
   cancelledJobSchema,
+  acceptedJobSchema.extend({ state: z.literal("awaiting_answer") }),
   acceptedJobSchema.extend({ state: z.literal("failed") }),
 ]);
 export type CancelledJob = z.infer<typeof cancelledJobSchema>;
@@ -257,12 +259,22 @@ export const acceptInstructionResponseSchema = z.object({ job: acceptedJobSchema
 
 export type AcceptInstructionResponse = z.infer<typeof acceptInstructionResponseSchema>;
 
-/** The job whose stop or failure holds its pattern's queue (plan 2.4). Widen with limited (5.2) and awaiting_answer (6.2). */
-export const holdingJobSchema = acceptedJobSchema.extend({
-  state: z.enum(["cancelled", "failed"]),
-});
+export const holdingJobSchema = z.discriminatedUnion("state", [
+  cancelledJobSchema,
+  acceptedJobSchema.extend({ state: z.literal("failed") }),
+  acceptedJobSchema.extend({
+    state: z.literal("awaiting_answer"),
+    question: z.object({
+      messageId: idSchema,
+      number: z.int().positive(),
+      body: z.string(),
+      choices: z.array(z.string()),
+    }),
+    answer: acceptedJobSchema.nullable(),
+  }),
+]);
 export type HoldingJob = z.infer<typeof holdingJobSchema>;
-/** Present while the queue is held. Every job in `queuedJobs` waits for resume or cancel. */
+/** Present while the queue is held. Queued answers can run during the hold. */
 export const queueHoldSchema = z.object({ job: holdingJobSchema });
 export type QueueHold = z.infer<typeof queueHoldSchema>;
 

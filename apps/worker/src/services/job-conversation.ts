@@ -25,6 +25,7 @@ export type RoundPlan =
   | { kind: "stop"; reason: "ai_refused" | "ai_output_limit" }
   | { kind: "nudge" }
   | { kind: "calls"; calls: Call[] }
+  | { kind: "ask"; answer: Extract<FinishInput["answer"], { kind: "question" }> }
   | { kind: "finish"; id: string; answer: PlanAnswer };
 export function planRound(response: AiResponse, limit: number): RoundPlan {
   if (response.stop === "output_limit" || response.stop === "refusal")
@@ -45,8 +46,7 @@ export function planRound(response: AiResponse, limit: number): RoundPlan {
       continue;
     } else if (calls.length !== 1) error = "Call finish alone after you have seen every result.";
     else if (parsed.call.input.answer.kind === "question")
-      error =
-        "Questions are not available yet. Assume what you need, list it in assumptions, and finish with a plan.";
+      return { kind: "ask", answer: parsed.call.input.answer };
     else return { kind: "finish", id, answer: parsed.call.input.answer };
     planned.push({ id, call: { name: "invalid", error } });
   }

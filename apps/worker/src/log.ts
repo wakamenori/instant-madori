@@ -11,6 +11,7 @@ export type JobStepName =
   | "start job"
   | `round ${number} ai`
   | `round ${number} call ${number} ${"edit_house" | "read_house"}`
+  | `round ${number} ask`
   | `round ${number} finish`
   | "commit revision"
   | "record failure"
@@ -29,11 +30,12 @@ export interface LogFields {
   patternId?: string;
   heldBy?: string;
   jobId?: string;
+  questionId?: string;
   messageId?: string;
   messageNumber?: number;
   queue?: "applied" | "replayed";
   stop?: "applied" | "replayed";
-  jobState?: "cancelled" | "completed" | "failed";
+  jobState?: "awaiting_answer" | "cancelled" | "completed" | "failed";
   acceptance?: "applied" | "replayed";
   generation?: number;
   step?: JobStepName;
@@ -47,6 +49,7 @@ export interface LogFields {
     | "read"
     | "refused"
     | "saved"
+    | "asked"
     | "committed"
     | "cancelled"
     | "hold"
@@ -118,6 +121,7 @@ const logKeys = {
   patternId: "string",
   heldBy: "string",
   jobId: "string",
+  questionId: "string",
   messageId: "string",
   messageNumber: "number",
   queue: "string",

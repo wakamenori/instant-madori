@@ -3,7 +3,10 @@ import { test } from "node:test";
 import { openJobDatabase, applyJobMigrations, now } from "./jobs-support.ts";
 import { acceptInstruction, claimNextJob } from "../../src/services/jobs.ts";
 import { requestKey } from "../../src/services/requests.ts";
-import { queueHoldSql, queueNotHeld, holdingJobIdSql } from "../../src/storage/job-queue.ts";
+import { prefix, conversationWindow } from "../../src/services/ai-context.ts";
+import { emptyHouseSummary, houseSummarySchema } from "@madori/contracts/geometry-internal";
+import { insertInputJobSql } from "../../src/storage/jobs.ts";
+import { queueHoldSql, holdingJobIdSql } from "../../src/storage/job-queue.ts";
 
 await test("Queue holds on real D1", async (t) => {
   const db = await openJobDatabase();
@@ -71,6 +74,109 @@ await test("Queue holds on real D1", async (t) => {
       holder: () => db.store.jobs.holdingJob(patternId),
     };
   }
+  await t.test(
+    "answers continue the asking turn across retries, recovery and queue release",
+    async () => {
+      const { patternId, a, b, right, holder, release } = await setup();
+      const scope = { ownerId, patternId };
+      const jobs = db.store.jobs;
+      const question = { id: crypto.randomUUID(), body: "色は？", choices: ["赤", "青"], now };
+      await jobs.askQuestion(right, question);
+      await jobs.askQuestion(right, { ...question, id: crypto.randomUUID() });
+      assert.deepEqual(await jobs.restore(right.reference), { kind: "asked" });
+      assert.deepEqual(await holder(), { heldBy: a.jobId });
+      const answer = await acceptInstruction(deps, {
+        ...scope,
+        requestId: crypto.randomUUID(),
+        body: "青",
+        questionId: question.id,
+      });
+      assert(answer.kind === "accepted");
+      assert.deepEqual((await db.store.revisions.state(scope))?.queuedJobs, [answer.job, b]);
+      const stalled = await jobs.stalledPatterns({ unchangedSince: "2026-11-16", limit: 100 });
+      assert(
+        stalled.includes(patternId),
+        "the held pattern with an old queued answer needs a wake",
+      );
+      const claim = await jobs.claim({ patternId, now });
+      assert(claim.kind === "claimed");
+      assert.equal(claim.right.reference.jobId, answer.job.jobId);
+      const window = conversationWindow;
+      const context = await jobs.startContext(claim.right, window);
+      assert.deepEqual(
+        context?.messages.map((m) => [m.number, m.choices]),
+        [
+          [a.number, null],
+          [3, question.choices],
+        ],
+      );
+      assert(context);
+      const opening = await prefix("test", {
+        ...context,
+        summary: houseSummarySchema.parse(emptyHouseSummary),
+        checks: null,
+      });
+      assert(
+        opening.opening.some((part) => part.text.includes('色は？\nChoices: ["赤","青"]')),
+        "the AI sees both the question and its choices",
+      );
+      const followUp = { ...question, id: crypto.randomUUID() };
+      await jobs.askQuestion(claim.right, followUp);
+      await jobs.askQuestion(right, question);
+      assert.deepEqual(
+        await holder(),
+        { heldBy: answer.job.jobId },
+        "stale execution cannot take back the hold",
+      );
+      assert.equal(
+        (await db.store.revisions.state(scope))?.lastFinishedJob?.jobId,
+        answer.job.jobId,
+      );
+      const duplicate = (id: string | null) =>
+        db.raw
+          .prepare(
+            `INSERT INTO messages
+      (id,pattern_id,owner_id,number,kind,body,created_at,question_id,answer_turn)
+      VALUES(?,?,?,99,'answer','red',?,?,1)`,
+          )
+          .bind(crypto.randomUUID(), patternId, ownerId, now, id)
+          .run();
+      await assert.rejects(duplicate(null), /CHECK constraint/);
+      await assert.rejects(duplicate(question.id), /UNIQUE constraint/);
+      const explanationId = crypto.randomUUID();
+      await db.raw
+        .prepare(
+          `INSERT INTO messages (id,pattern_id,owner_id,number,kind,body,created_at,job_id)
+        VALUES(?,?,?,99,'explanation','summary',?,?)`,
+        )
+        .bind(explanationId, patternId, ownerId, now, a.jobId)
+        .run();
+      const ignored = await db.raw
+        .prepare(insertInputJobSql)
+        .bind(crypto.randomUUID(), now, now, explanationId, patternId, ownerId)
+        .run();
+      assert.equal(ignored.meta.changes, 0, "a job can only be created for a user input");
+      await release("resume", crypto.randomUUID(), ownerId, answer.job.jobId);
+      const closed = await acceptInstruction(deps, {
+        ...scope,
+        requestId: crypto.randomUUID(),
+        body: "赤",
+        questionId: followUp.id,
+      });
+      assert.equal(closed.kind, "version_conflict", "resume closed the unanswered question");
+      const later = await jobs.claim({ patternId, now });
+      assert(later.kind === "claimed");
+      assert.equal(later.right.reference.jobId, b.jobId);
+      const laterContext = await jobs.startContext(later.right, window);
+      assert(laterContext?.messages.some((m) => m.number === answer.job.number && m.body === "青"));
+      await jobs.failAndHoldQueue(later.right, now);
+      assert.equal(
+        (await db.store.revisions.state(scope))?.lastFinishedJob?.jobId,
+        b.jobId,
+        "finished jobs use turn order",
+      );
+    },
+  );
   await t.test("stop holds once until the last waiting job is stopped", async () => {
     const { a, b, patternId, holder } = await setup();
     const c = await accept(patternId);
@@ -102,7 +208,6 @@ await test("Queue holds on real D1", async (t) => {
       for (const [sql, bindings] of [
         [queueHoldSql, [patternId, ownerId]],
         [holdingJobIdSql, [patternId]],
-        [`SELECT ${queueNotHeld}`, [patternId]],
       ] as const) {
         const plan = await db.raw
           .prepare(`EXPLAIN QUERY PLAN ${sql}`)

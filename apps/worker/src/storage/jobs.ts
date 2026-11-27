@@ -1,6 +1,11 @@
 import { ownsAllAttachments, insertAttachments } from "./attachments.ts";
 import { activeJobStates, stoppableJobStates, finishedJobStates } from "./job-states.ts";
-import { holdsQueueOnEnd, releaseWhenLastQueuedJobStops, releaseEmptyQueue } from "./job-queue.ts";
+import {
+  inputKey,
+  holdsQueueOnEnd,
+  releaseWhenLastQueuedJobStops,
+  releaseEmptyQueue,
+} from "./job-queue.ts";
 import { z } from "zod";
 import { foundSchema, jsonRows, rows, write } from "./d1.ts";
 import type { D1 } from "./d1.ts";
@@ -39,28 +44,44 @@ export interface NewInstruction {
   messageId: string;
   patternId: string;
   body: string;
+  questionId?: string;
   attachmentIds: readonly string[];
   now: string;
 }
 
+export const insertInputJobSql = `INSERT INTO jobs
+  (id, pattern_id, owner_id, message_id, state, generation, base_revision_id, created_at, updated_at)
+  SELECT ?, m.pattern_id, m.owner_id, m.id, 'queued', 0, NULL, ?, ?
+  FROM messages m WHERE m.id = ? AND m.pattern_id = ? AND m.owner_id = ? AND m.kind IN ('instruction', 'answer')`;
+
 export async function acceptInstructionOnce(db: D1, key: RequestKey, input: NewInstruction) {
   const owned = ownsAllAttachments(input.attachmentIds);
+  const questionId = input.questionId ?? null;
+  const questionJoin = `LEFT JOIN messages question ON question.pattern_id = p.id AND question.kind = 'question' AND question.id = ?
+    LEFT JOIN jobs asking ON asking.id = question.job_id
+    LEFT JOIN messages root ON root.id = asking.message_id`;
+  const open = `asking.state = 'awaiting_answer' AND asking.holds_queue = 1 AND NOT EXISTS
+    (SELECT 1 FROM messages a WHERE a.question_id = question.id)`;
   const batch = createOnceStatements(key, input.now, {
     table: "jobs",
     id: input.id,
     statements: [
       {
-        sql: `INSERT INTO messages (id, pattern_id, owner_id, number, body, created_at)
+        sql: `INSERT INTO messages (id, pattern_id, owner_id, number, body, created_at, kind, question_id, answer_turn)
           SELECT ?, p.id, p.owner_id,
             (SELECT coalesce(max(m.number), 0) + 1 FROM messages m WHERE m.pattern_id = p.id),
-            ?, ? FROM patterns p WHERE p.id = ? AND p.owner_id = ? AND ${owned.sql}`,
+            ?, ?, ?, question.id, root.turn FROM patterns p ${questionJoin}
+            WHERE p.id = ? AND p.owner_id = ? AND ${owned.sql} AND (? IS NULL OR (${open}))`,
         bindings: [
           input.messageId,
           input.body,
           input.now,
+          input.questionId ? "answer" : "instruction",
+          questionId,
           input.patternId,
           key.ownerId,
           ...owned.bindings,
+          questionId,
         ],
       },
       insertAttachments({
@@ -71,10 +92,7 @@ export async function acceptInstructionOnce(db: D1, key: RequestKey, input: NewI
       }),
       releaseEmptyQueue(input.patternId, key.ownerId, input.messageId),
       {
-        sql: `INSERT INTO jobs
-          (id, pattern_id, owner_id, message_id, state, generation, base_revision_id, created_at, updated_at)
-          SELECT ?, m.pattern_id, m.owner_id, m.id, 'queued', 0, NULL, ?, ?
-          FROM messages m WHERE m.id = ? AND m.pattern_id = ? AND m.owner_id = ?`,
+        sql: insertInputJobSql,
         bindings: [input.id, input.now, input.now, input.messageId, input.patternId, key.ownerId],
       },
     ],
@@ -85,7 +103,21 @@ export async function acceptInstructionOnce(db: D1, key: RequestKey, input: NewI
       bindings: [input.id, key.ownerId],
     },
   });
-  return runOnce(db, acceptanceSchema, batch);
+  const once = await runOnce(db, acceptanceSchema, batch);
+  if (once.kind !== "not_applied" || !input.questionId) return once;
+  const question = await db.first(
+    rows(
+      {
+        sql: `SELECT CASE WHEN ${open} THEN 1 ELSE 0 END AS available FROM patterns p ${questionJoin}
+      WHERE p.id = ? AND p.owner_id = ? AND question.id IS NOT NULL`,
+        bindings: [input.questionId, input.patternId, key.ownerId],
+      },
+      z.object({ available: z.literal([0, 1]) }),
+      "question availability",
+    ),
+  );
+  if (!question) return { kind: "not_found" as const };
+  return question.available ? once : { kind: "version_conflict" as const };
 }
 
 function executionCondition(right: JobExecutionRight) {
@@ -107,6 +139,32 @@ function activeCondition(right: JobExecutionRight) {
   };
 }
 
+export async function askQuestion(
+  db: D1,
+  right: JobExecutionRight,
+  input: { id: string; body: string; choices: string[]; now: string },
+) {
+  const active = activeCondition(right);
+  const choices = z.array(z.string()).parse(input.choices);
+  await db.batch([
+    write({
+      sql: `UPDATE jobs SET holds_queue = 0 WHERE holds_queue = 1 AND pattern_id IN
+      (SELECT j.pattern_id FROM jobs j WHERE ${active.sql})`,
+      bindings: active.bindings,
+    }),
+    write({
+      sql: `INSERT INTO messages (id, pattern_id, owner_id, number, body, created_at, kind, job_id, choices)
+      SELECT ?, j.pattern_id, j.owner_id, (SELECT coalesce(max(m.number), 0) + 1 FROM messages m WHERE m.pattern_id = j.pattern_id),
+      ?, ?, 'question', j.id, ? FROM jobs j WHERE ${active.sql}`,
+      bindings: [input.id, input.body, input.now, JSON.stringify(choices), ...active.bindings],
+    }),
+    write({
+      sql: `UPDATE jobs AS j SET state = 'awaiting_answer', holds_queue = 1, updated_at = ? WHERE ${active.sql}`,
+      bindings: [input.now, ...active.bindings],
+    }),
+  ]);
+}
+
 export async function startContext(
   db: D1,
   right: JobExecutionRight,
@@ -117,25 +175,25 @@ export async function startContext(
     jsonRows(
       {
         sql: `WITH context AS (
-          SELECT j.pattern_id, j.owner_id, m.id, m.number, m.body, j.updated_at,
+          SELECT j.pattern_id, j.owner_id, m.id, m.number, m.turn, m.body, j.updated_at,
             CASE WHEN s.id IS NULL THEN NULL ELSE ${snapshotJson("s")} END AS base
           FROM jobs j JOIN messages m ON m.id = j.message_id AND m.pattern_id = j.pattern_id
           LEFT JOIN revisions r ON r.id = j.base_revision_id AND r.pattern_id = j.pattern_id
           LEFT JOIN snapshots s ON s.id = r.snapshot_id AND s.owner_id = j.owner_id
           WHERE ${active.sql}
         ), earlier AS (
-          SELECT m.number, m.kind, m.body,
-            sum(length(CAST(m.body AS BLOB)) + ?) OVER (ORDER BY m.number DESC) AS cost
+          SELECT m.number, m.kind, m.body, m.choices,
+            sum(length(CAST(m.body AS BLOB)) + coalesce(length(CAST(m.choices AS BLOB)), 0) + ?) OVER (ORDER BY m.number DESC) AS cost
           FROM messages m JOIN context c ON m.pattern_id = c.pattern_id AND m.owner_id = c.owner_id
-          WHERE m.id <> c.id AND (m.number < c.number OR m.kind NOT IN ('instruction', 'answer'))
+          WHERE m.id <> c.id AND ((${inputKey("m")}) < (${inputKey("c")}) OR m.kind NOT IN ('instruction', 'answer'))
         ), recent AS (
-          SELECT number, kind, body FROM earlier WHERE cost <= ?
+          SELECT number, kind, body, choices FROM earlier WHERE cost <= ?
         )
         SELECT json_object(
           'instruction', body, 'claimedAt', updated_at, 'base', json(base),
           'total', (SELECT count(*) FROM earlier),
           'messages', (SELECT json_group_array(json_object(
-            'number', number, 'kind', kind, 'body', body) ORDER BY number) FROM recent)
+            'number', number, 'kind', kind, 'body', body, 'choices', json(choices)) ORDER BY number) FROM recent)
         ) AS json FROM context`,
         bindings: [...active.bindings, window.entryOverheadBytes, window.budgetBytes],
       },
@@ -146,6 +204,7 @@ export async function startContext(
             number: z.int().positive(),
             kind: z.union(conversationMessageSchema.options.map((s) => s.shape.kind)),
             body: z.string(),
+            choices: z.array(z.string()).nullable(),
           }),
         ),
         instruction: z.string(),

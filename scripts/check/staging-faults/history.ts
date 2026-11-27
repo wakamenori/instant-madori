@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import {
+  type FinishedJob,
   displayContentType,
   patternStateResponseSchema,
   revisionListResponseSchema,
@@ -19,7 +20,7 @@ export interface Snapshot {
   history: readonly Committed[];
   lastFinished: {
     jobId: string;
-    state: "completed" | "cancelled" | "failed";
+    state: FinishedJob["state"];
     revisionId: string | null;
   } | null;
   busy: { running: string | null; queued: readonly string[]; heldBy: string | null };

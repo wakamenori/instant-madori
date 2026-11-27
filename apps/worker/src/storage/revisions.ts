@@ -1,4 +1,4 @@
-import { queueHoldSql } from "./job-queue.ts";
+import { inputKey, queueHoldSql } from "./job-queue.ts";
 import { activeJobStates, finishedJobStates } from "./job-states.ts";
 import type { OwnerId } from "../owner.ts";
 import { foundSchema, jsonRows, rows } from "./d1.ts";
@@ -42,7 +42,7 @@ export const queuedJobsSql = `SELECT json_object('jobId', j.id, 'messageId', m.i
   'number', m.number) AS json
   FROM jobs j CROSS JOIN messages m ON m.id = j.message_id AND m.pattern_id = j.pattern_id
   WHERE j.pattern_id = ? AND j.owner_id = ? AND j.state = 'queued'
-  ORDER BY m.number`;
+  ORDER BY ${inputKey("m")}`;
 
 export const runningJobSql = `SELECT json_object('jobId', j.id, 'messageId', m.id,
   'number', m.number) AS json
@@ -51,11 +51,11 @@ export const runningJobSql = `SELECT json_object('jobId', j.id, 'messageId', m.i
   WHERE j.pattern_id = ? AND j.owner_id = ? AND j.state IN (${activeJobStates})`;
 
 export const lastFinishedJobSql = `SELECT ${finishedJobJson("j", "m", "r")} AS json
-  FROM messages m INDEXED BY messages_inputs CROSS JOIN jobs j ON j.message_id = m.id AND j.pattern_id = m.pattern_id
+  FROM messages m INDEXED BY messages_inputs_by_turn CROSS JOIN jobs j ON j.message_id = m.id AND j.pattern_id = m.pattern_id
   LEFT JOIN revisions r ON r.job_id = j.id AND r.pattern_id = j.pattern_id
   WHERE m.pattern_id = ? AND m.owner_id = ? AND m.kind IN ('instruction', 'answer') AND j.state IN (${finishedJobStates})
     AND j.generation > 0
-  ORDER BY m.number DESC LIMIT 1`;
+  ORDER BY ${inputKey("m", " DESC")} LIMIT 1`;
 
 export async function getPatternState(
   db: D1,

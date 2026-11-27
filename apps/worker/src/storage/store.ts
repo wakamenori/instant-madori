@@ -50,6 +50,10 @@ export function createStore(db: D1, bucket: R2) {
         right: Parameters<typeof jobs.startContext>[1],
         window: Parameters<typeof jobs.startContext>[2],
       ) => jobs.startContext(db, right, window),
+      askQuestion: (
+        right: Parameters<typeof jobs.askQuestion>[1],
+        input: Parameters<typeof jobs.askQuestion>[2],
+      ) => jobs.askQuestion(db, right, input),
       recordAi: (
         right: Parameters<typeof jobs.recordAi>[1],
         versions: Parameters<typeof jobs.recordAi>[2],

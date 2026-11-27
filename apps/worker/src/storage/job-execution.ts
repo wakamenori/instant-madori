@@ -1,4 +1,4 @@
-import { queueNotHeld } from "./job-queue.ts";
+import { claimable, inputKey } from "./job-queue.ts";
 import { activeJobStates } from "./job-states.ts";
 import { z } from "zod";
 import { revisionSchema } from "@madori/contracts";
@@ -8,7 +8,7 @@ import { revisionJson } from "./revisions.ts";
 
 export const queueHeadSql = `SELECT q.id FROM jobs q CROSS JOIN messages m
             ON m.id = q.message_id AND m.pattern_id = q.pattern_id
-            WHERE q.pattern_id = ? AND q.state = 'queued' ORDER BY m.number LIMIT 1`;
+            WHERE q.pattern_id = ? AND q.state = 'queued' AND ${claimable} ORDER BY ${inputKey("m")} LIMIT 1`;
 
 const executionSchema = z.object({
   jobId: z.uuid(),
@@ -54,10 +54,9 @@ class JobExecutionRight {
           AND id = (${queueHeadSql})
           AND NOT EXISTS (SELECT 1 FROM jobs a WHERE a.pattern_id = ?
             AND a.state IN (${activeJobStates}))
-          AND ${queueNotHeld}
         RETURNING id AS jobId, pattern_id AS patternId, owner_id AS ownerId,
           generation, base_revision_id AS baseRevisionId`,
-          bindings: [now, patternId, patternId, patternId, patternId],
+          bindings: [now, patternId, patternId, patternId],
         },
         executionSchema,
         "job execution",
@@ -79,17 +78,18 @@ class JobExecutionRight {
         'revision', CASE WHEN r.id IS NULL THEN NULL ELSE ${revisionJson("r")} END) AS json
         FROM jobs j LEFT JOIN revisions r ON r.job_id = j.id AND r.pattern_id = j.pattern_id
         WHERE j.id = ? AND j.pattern_id = ? AND j.generation = ?
-          AND j.state IN ('running', 'completed', 'cancelled')`,
+          AND j.state IN ('running', 'completed', 'cancelled', 'awaiting_answer')`,
           bindings: [jobId, patternId, generation],
         },
         executionSchema.extend({
-          state: z.enum(["running", "completed", "cancelled"]),
+          state: z.enum(["running", "completed", "cancelled", "awaiting_answer"]),
           revision: revisionSchema.nullable(),
         }),
         "current job execution",
       ),
     );
     if (row === null) return { kind: "invalid" as const };
+    if (row.state === "awaiting_answer") return { kind: "asked" as const };
     if (row.state === "cancelled") return { kind: "cancelled" as const };
     if (row.state === "completed") {
       if (row.revision === null) return { kind: "invalid" as const };
