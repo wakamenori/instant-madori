@@ -10,6 +10,7 @@ import {
   createProjectRequestSchema,
   displayContentType,
   patternStateResponseSchema,
+  pickRequestSchema,
   renameRequestSchema,
 } from "../../packages/contracts/src/index.ts";
 import type {
@@ -24,6 +25,7 @@ import { smokeStaging, stagingTarget } from "./staging-smoke.ts";
 
 const origin = "https://staging.test";
 const token = { clientId: "id", clientSecret: "secret" };
+const displayElements = ["room-1", "wall-1"];
 const initialProject = {
   id: "a78de589-a71c-435c-975a-b18539827552",
   name: "Staging smoke",
@@ -43,13 +45,19 @@ function stagingServer(
   {
     heldBy,
     outcome = "completed",
-  }: { heldBy?: string; outcome?: "completed" | "failed" | "cancelled" | "pending" } = {},
+    elements = displayElements,
+  }: {
+    heldBy?: string;
+    outcome?: "completed" | "failed" | "cancelled" | "pending";
+    elements?: string[];
+  } = {},
 ) {
   let project = { ...initialProject };
   const creations = new Map<string, string>();
   const renames = new Set<string>();
   const messages: string[] = [];
   const mutations: string[] = [];
+  const picks: { revisionId: string; element: string }[] = [];
   const revisions: Revision[] = [];
   let runningJob: AcceptedJob | null = null;
   let lastFinishedJob: FinishedJob | null = null;
@@ -159,6 +167,17 @@ function stagingServer(
             "x-floor-plan-storeys": "s1",
           },
         });
+      } else if (
+        url.pathname === `/api/revisions/${revisions.at(-1)?.id}/pick` &&
+        method === "POST"
+      ) {
+        const revision = revisions.at(-1);
+        assert.ok(revision);
+        assert.ok(typeof init?.body === "string");
+        const { element } = pickRequestSchema.parse(JSON.parse(init.body));
+        assert.ok(displayElements.includes(element));
+        picks.push({ revisionId: revision.id, element });
+        response = new Response(null, { status: 200 });
       } else if (url.pathname.endsWith("/patterns")) {
         assert.notEqual(url.pathname, `/api/projects/${project.id}/patterns`);
         response = Response.json({ error: "not_found" }, { status: 404 });
@@ -169,8 +188,15 @@ function stagingServer(
     return rewrite(url.pathname, method, response);
   };
   const run = (jobTimeoutMs = 2_000) =>
-    smokeStaging({ origin, jobTimeoutMs }, token, { fetcher, pollIntervalMs: 1 });
-  return { run, creations, renames, messages, mutations, revisions, current: () => project };
+    smokeStaging({ origin, jobTimeoutMs }, token, {
+      fetcher,
+      pollIntervalMs: 1,
+      describeDisplay: (bytes) => {
+        assert.deepEqual(bytes, new Uint8Array([1, 2, 3]));
+        return Promise.resolve(elements);
+      },
+    });
+  return { run, creations, renames, messages, mutations, picks, revisions, current: () => project };
 }
 
 void test("successive smoke runs reuse one project and add a fresh revision to its fixed pattern", async () => {
@@ -185,6 +211,12 @@ void test("successive smoke runs reuse one project and add a fresh revision to i
     [pattern.id, pattern.id],
   );
   assert.deepEqual(server.mutations, ["message", "message"]);
+  assert.deepEqual(
+    server.picks,
+    server.revisions.flatMap(({ id }) =>
+      displayElements.map((element) => ({ revisionId: id, element })),
+    ),
+  );
   assert.equal(server.current().version, 3);
 });
 
@@ -256,6 +288,14 @@ void test("a non-200 view, wrong display media type, or empty view body fails", 
     );
     await assert.rejects(server.run(), failure);
   }
+});
+
+void test("a display without housing element IDs or with an unknown ID fails", async () => {
+  await assert.rejects(stagingServer(undefined, { elements: [] }).run(), /housing element IDs/);
+  const server = stagingServer((path, _method, response) =>
+    path.endsWith("/pick") ? Response.json({ error: "not_found" }, { status: 404 }) : response,
+  );
+  await assert.rejects(server.run(), /is in the revision's house/);
 });
 
 function rewriteState(change: (state: PatternStateResponse) => PatternStateResponse): Rewrite {

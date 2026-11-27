@@ -332,7 +332,7 @@ stagingのD1に新しいマイグレーションを適用するのは、mainの�
 
 マイグレーションをstagingで試すときは、先にそのマイグレーションだけをmainへマージしてデプロイの成功を待ち、ブランチにmainを取り込んでからデプロイします。マイグレーションは前の版のWorkerと両立する形で書くので、先にマージしても動いているWorkerは壊れません。手動の実行は指定したrefのworkflowを使います。この検査が入る前に分かれたブランチは、mainを取り込んでからデプロイします。
 
-手元で同じ疎通確認を行うには、上記のservice tokenの二つの値を入れた `.env` のパスを指定します。値をコマンドや出力に表示する必要はありません。成功すると `Staging smoke passed: <Origin>` が出ます。
+手元で同じ疎通確認を行うには、`pnpm setup` でビューアのWasmを用意し、上記のservice tokenの二つの値を入れた `.env` のパスを指定します。スクリプトはWasmで表示データを読み、各要素IDが確定した案に属することを選択APIで確かめます。成功すると `Staging smoke passed: <Origin>` が出ます。
 
 ```sh
 mise exec -- node --env-file=/path/to/.env scripts/check/staging-smoke.ts
