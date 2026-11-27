@@ -50,10 +50,80 @@ debug = 0
 incremental = false
 
 # Rust tests spend most of their time in SolidCraft geometry and in housing's exact arithmetic.
-# "*" covers every non-member package; housing is a workspace member, so it needs its own table.
+# Optimize every non-proc-macro package under third_party/solidcraft. Other dependencies stay at 0:
+# the tests barely run them, and optimizing them (cadmpeg above all) lengthens a cold build.
 # Housing at 1 runs its tests as fast as at 2 and rebuilds as fast as at 0.
 # Only opt-level changes, so debug assertions and overflow checks stay on in tests.
-[profile.dev.package."*"]
+[profile.dev.package.craft-plugin]
+opt-level = 2
+
+[profile.dev.package.solidcore]
+opt-level = 2
+
+[profile.dev.package.solidcore-cadir]
+opt-level = 2
+
+[profile.dev.package.solidcore-convert]
+opt-level = 2
+
+[profile.dev.package.solidcore-ops]
+opt-level = 2
+
+[profile.dev.package.solidcore-record]
+opt-level = 2
+
+[profile.dev.package.solidcore-step]
+opt-level = 2
+
+[profile.dev.package.solidcore-tess]
+opt-level = 2
+
+[profile.dev.package.solidcraft-color]
+opt-level = 2
+
+[profile.dev.package.solidcraft-control]
+opt-level = 2
+
+[profile.dev.package.solidcraft-develop]
+opt-level = 2
+
+[profile.dev.package.solidcraft-doc]
+opt-level = 2
+
+[profile.dev.package.solidcraft-engine]
+opt-level = 2
+
+[profile.dev.package.solidcraft-format]
+opt-level = 2
+
+[profile.dev.package.solidcraft-geom]
+opt-level = 2
+
+[profile.dev.package.solidcraft-io]
+opt-level = 2
+
+[profile.dev.package.solidcraft-kernel]
+opt-level = 2
+
+[profile.dev.package.solidcraft-profile]
+opt-level = 2
+
+[profile.dev.package.solidcraft-render]
+opt-level = 2
+
+[profile.dev.package.solidcraft-sketch]
+opt-level = 2
+
+[profile.dev.package.solidcraft-smlib]
+opt-level = 2
+
+[profile.dev.package.solidcraft-ui-text]
+opt-level = 2
+
+[profile.dev.package.solidcraft-viewport]
+opt-level = 2
+
+[profile.dev.package.solidcraft-viewport-gpu]
 opt-level = 2
 
 [profile.dev.package.madori-housing]
