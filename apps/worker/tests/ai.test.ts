@@ -1,3 +1,4 @@
+import { emptyHouseSummary } from "@madori/contracts/geometry-internal";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { turnCodec } from "../src/ai/turns.ts";
@@ -29,7 +30,10 @@ const script: ScriptStep[] = [
 const opening: Conversation = {
   system: "You edit single-storey house plans.",
   tools: [{ name: "add_room", description: "Add a room.", inputSchemaJson: '{"type":"object"}' }],
-  opening: [{ kind: "text", text: "LDKを加えて" }],
+  opening: [
+    { kind: "text", text: "Current plan summary\n" + JSON.stringify(emptyHouseSummary) },
+    { kind: "text", text: "Current instruction\nLDKを加えて" },
+  ],
   rounds: [],
 };
 

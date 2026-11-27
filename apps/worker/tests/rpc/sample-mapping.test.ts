@@ -7,6 +7,9 @@ function renderWithRejection(error: unknown) {
   const geometry = geometryClient((name) => {
     assert.equal(name, "pattern:pattern-1");
     return {
+      summarizeHouse() {
+        throw new Error("Unexpected summarizeHouse");
+      },
       sampleDisplay() {
         throw new Error("Unexpected applyOperations");
       },

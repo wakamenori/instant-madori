@@ -9,6 +9,9 @@ use xml::{
     Value::{self, Id, Number, Token},
 };
 
+pub fn interior_corners(outline: &[Point]) -> Vec<Point> {
+    Ring::from_interior(outline).0
+}
 #[derive(Debug)]
 pub struct StoreyPlan {
     pub storey: StoreyId,

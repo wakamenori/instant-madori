@@ -18,7 +18,7 @@
 
 Preconditions:
 
-- 「終わった後に止める」には Container が必要。
+- 「終わった後に止める」には Container が必要。ほかの手順は、案の無いパターンなら Container を無効にしても確かめられる。Container を無効にして起動したら、[案件](./projects.md)の「作る」をもう一度行い、`PAT` を案の無い新しいパターンにする。案のあるパターンの仕事は、開始の段階で Container に案の要約を求めるので、Container が無いと待ちに入る前に失敗し、「実行中を止める」時間が無い（[指示を送る](./instructions.md)の Gotchas）。
 - SKILL.md の「起動」の `pnpm dev` を、`MADORI_DEV_JOB_TEST_HOLD=first_answer:30` を付けて起動している。仕事は実行権を取り、台本のAIの最初の応答を受け取った後、住宅を変える前に30秒待つ。待ちを付けずに動いていたら、片付けてから、SKILL.md の「起動」の三行を、`perl` の行の先頭に `MADORI_DEV_JOB_TEST_HOLD=first_answer:30 ` を足して実行し直す。`dev.pgid` を書く行も実行する。抜くと、片付けが前のプロセスグループを指したままになる。
 - [案件](./projects.md)の「作る」を済ませ、`PAT=$(jq -r .pattern.id "$EVIDENCE/projects/create.json")` を設定している。
 - `. "$EVIDENCE/dev.env"` で `API` と `O` を読み込み、`J='content-type: application/json'` と `D="$EVIDENCE/stop"` を設定し、`$D` がある。

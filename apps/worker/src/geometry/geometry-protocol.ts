@@ -292,6 +292,7 @@ export function createGeometryCaller<
   return call;
 }
 export const routeTimeouts = {
+  summarizeHouse: 10_000,
   applyOperations: 60_000,
   health: 2_000,
   sampleDisplay: 30_000,

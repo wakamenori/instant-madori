@@ -46,8 +46,10 @@ export function createStore(db: D1, bucket: R2) {
       ) => queue.cancelQueueOnce(db, key, input),
     },
     jobs: {
-      startContext: (right: Parameters<typeof jobs.startContext>[1]) =>
-        jobs.startContext(db, right),
+      startContext: (
+        right: Parameters<typeof jobs.startContext>[1],
+        window: Parameters<typeof jobs.startContext>[2],
+      ) => jobs.startContext(db, right, window),
       recordAi: (
         right: Parameters<typeof jobs.recordAi>[1],
         versions: Parameters<typeof jobs.recordAi>[2],

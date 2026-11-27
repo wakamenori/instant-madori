@@ -1,4 +1,7 @@
-import type { ApplyOperationsRequest } from "@madori/contracts/geometry-internal";
+import type {
+  ApplyOperationsRequest,
+  SummarizeHouseRequest,
+} from "@madori/contracts/geometry-internal";
 import type { GeometryApi } from "./geometry-client.ts";
 import { DurableObject } from "cloudflare:workers";
 import { z } from "zod";
@@ -102,6 +105,9 @@ export class GeometryContainer extends DurableObject<Env> implements GeometryApi
   }
   override alarm() {
     return this.#gateway.alarm();
+  }
+  summarizeHouse(call: GeometryCall, body: SummarizeHouseRequest) {
+    return this.#gateway.run((send) => callGeometry(send, "summarizeHouse", { ...call, body }));
   }
   applyOperations(call: GeometryCall, body: ApplyOperationsRequest) {
     return this.#gateway.run((send) => callGeometry(send, "applyOperations", { ...call, body }));

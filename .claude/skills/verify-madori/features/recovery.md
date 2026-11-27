@@ -17,10 +17,10 @@
 
 Preconditions:
 
-- 仕事は待ちの間に住宅を変えないので、Container は不要。Container の要る地図と同じ回で確かめないなら、[SKILL.md の「起動」](../SKILL.md#起動)の手順で `MADORI_DEV_CONTAINERS=0` を付けて起動する。
+- 案の無いパターンの仕事は、待ちの間に住宅を変えず、Container を呼ばない。このパターンで確かめるなら、Container は不要。Container の要る地図と同じ回で確かめないなら、[SKILL.md の「起動」](../SKILL.md#起動)の手順で `MADORI_DEV_CONTAINERS=0` を付けて起動する。案のあるパターンの仕事は、開始の段階で Container に案の要約を求めるので、Container を無効にすると待ちに入る前に失敗する（[指示を送る](./instructions.md)の Gotchas）。
 - SKILL.md の「起動」の `pnpm dev` を、`MADORI_DEV_JOB_TEST_HOLD=first_answer:420` を付けて起動している。仕事は実行権を取り、台本のAIの最初の応答を受け取った後、住宅を変える前に7分待つ。待ちを付けずに動いていたら、片付けてから、SKILL.md の「起動」の三行を、`perl` の行の先頭に `MADORI_DEV_JOB_TEST_HOLD=first_answer:420 ` を足して実行し直す。`dev.pgid` を書く行も実行する。
 - 起動の確認は一つ目（`/api/me`）だけを行う。二つ目は指示を最後まで流すので、7分の待ちで時間切れになる。
-- [案件](./projects.md)の「作る」を済ませ、`PAT=$(jq -r .pattern.id "$EVIDENCE/projects/create.json")` を設定している。
+- [案件](./projects.md)の「作る」を済ませ、`PAT=$(jq -r .pattern.id "$EVIDENCE/projects/create.json")` を設定している。Container を無効にして起動したら、この回で「作る」をもう一度行い、`PAT` を案の無い新しいパターンにする。
 - [指示を止める](./stop.md)の `J`・`O`・`API`・`send`・`stop`・`state` を、`D="$EVIDENCE/recovery"` にして定義し、`$D` がある。
 - `state pre` の `runningJob` が `null` で、`queuedJobs` が `[]`。ほかの機能の手順で残った指示があると、A はその後ろで待機中のままになり、どの手順も進まない。残っていたら、[指示を止める](./stop.md)の `stop` で止める。
 

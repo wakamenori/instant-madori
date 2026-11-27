@@ -14,7 +14,7 @@ import {
   patternStateResponseSchema,
 } from "@madori/contracts";
 import { settleJobs } from "./support/settle-jobs.ts";
-import { geometryInternal } from "@madori/contracts/geometry-internal";
+import { geometryInternal, houseSummarySchema } from "@madori/contracts/geometry-internal";
 import { startLocalWorker, newUser } from "./support/local-worker.ts";
 const docker = promisify(execFile);
 async function runningContainers() {
@@ -448,7 +448,8 @@ void test(
         );
       });
       await t.test("a room placement returns display bodies with housing IDs", async () => {
-        const result = await probe(placement, crypto.randomUUID());
+        const traceId = crypto.randomUUID();
+        const result = await probe(placement, traceId);
         const { value } = z
           .object({
             kind: z.literal("ok"),
@@ -475,6 +476,25 @@ void test(
         const { house } = z
           .object({ house: z.object({ boundaries: ids, rooms: ids }) })
           .parse(JSON.parse(part("house").toString()));
+        const response = await worker.call("/api/__probe/summary", {
+          method: "POST",
+          body: {
+            patternId: `probe-${traceId}`,
+            traceId,
+            body: { snapshot: { kind: "house", json: part("house").toString() } },
+          },
+        });
+        const plan = z
+          .object({ kind: z.literal("ok"), value: houseSummarySchema })
+          .parse(await response.json()).value;
+        assert.deepEqual(
+          plan.rooms.map((r) => r.id),
+          house.rooms.map((r) => r.id),
+        );
+        assert.deepEqual(
+          plan.walls.map((w) => w.id),
+          house.boundaries.map((w) => w.id),
+        );
         const summary = viewer.describe_display(part("display"));
         try {
           assert.deepEqual(

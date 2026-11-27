@@ -1,4 +1,6 @@
 import type {
+  HouseSummary,
+  SummarizeHouseRequest,
   ApplyOperationsOutcome,
   ApplyOperationsRequest,
 } from "@madori/contracts/geometry-internal";
@@ -9,6 +11,10 @@ import type {
   DisplayArtifact,
 } from "./geometry-protocol.ts";
 export interface GeometryApi {
+  summarizeHouse(
+    call: GeometryCall,
+    request: SummarizeHouseRequest,
+  ): Promise<GeometryResult<HouseSummary>>;
   applyOperations(
     call: GeometryCall,
     request: ApplyOperationsRequest,
@@ -20,6 +26,8 @@ export function geometryClient(
   getByName: (name: string) => GeometryApi,
 ): (key: GeometryInstance) => GeometryApi {
   return (key) => ({
+    summarizeHouse: (call, request) =>
+      rpcGeometry(() => getByName(`pattern:${key.patternId}`).summarizeHouse(call, request)),
     applyOperations: (call, request) =>
       rpcGeometry(() => getByName(`pattern:${key.patternId}`).applyOperations(call, request)),
     sampleDisplay: (call) =>

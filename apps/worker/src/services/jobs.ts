@@ -3,9 +3,9 @@ import { verifierSubject } from "../identity.ts";
 import type { Conversation } from "../ai/round-trip.ts";
 import type { JobWorkPath } from "../storage/job-work.ts";
 import type { EditHouseInput } from "@madori/contracts/ai-tools";
+import { emptyHouseSummary, houseSummarySchema } from "@madori/contracts/geometry-internal";
+import { prefix, prefixSchema, conversationWindow } from "./ai-context.ts";
 import {
-  prefix,
-  prefixSchema,
   planRound,
   explanationBody,
   v1Notice,
@@ -15,7 +15,7 @@ import {
   type RoundPlan,
 } from "./job-conversation.ts";
 import { z } from "zod";
-import { applyHouseOperations } from "./geometry.ts";
+import { applyHouseOperations, summarizeHouse } from "./geometry.ts";
 import type { GeometryFailure } from "./geometry.ts";
 import type {
   JobSteps,
@@ -316,7 +316,7 @@ const aiStep = {
   retries: { limit: 2, delay: 10000, backoff: "exponential" },
   timeout: 600000,
 } as const;
-const editStep = {
+const geometryStep = {
   retries: { limit: 3, delay: 5000, backoff: "exponential" },
   timeout: 180000,
 } as const;
@@ -368,19 +368,31 @@ async function startJob(
 ): Promise<Started | Interrupted> {
   const live = await current(deps, job);
   if (live.kind !== "active") return live;
-  const context = await deps.store.jobs.startContext(live.right);
+  let kept = await deps.store.work.read(live.right, "prefix.json");
+  const context = await deps.store.jobs.startContext(live.right, conversationWindow);
   if (!context) return { kind: "not_committed", reason: "execution_lost" };
   const base = context.base;
   const working: Working =
     base?.formatVersion === 2
       ? { kind: "base", snapshot: base }
       : { kind: "empty", v1Base: base !== null };
-  const built = await prefix(
-    deps.ai.model,
-    context.instruction,
-    working.kind === "base" ? await houseText(deps, working.snapshot) : null,
-  );
-  const kept = await deps.store.work.keep(live.right, "prefix.json", JSON.stringify(built));
+  if (!kept) {
+    let summary = houseSummarySchema.parse(emptyHouseSummary);
+    let checks = null;
+    if (working.kind === "base") {
+      const file = await files(deps, working.snapshot);
+      const json = new TextDecoder().decode(await file.data.read());
+      const response = await summarizeHouse(deps, job.patternId, job.jobId, {
+        snapshot: { kind: "house", json },
+      });
+      if (response.kind === "retry") throw new Error(response.reason);
+      if (response.kind === "failed") return { kind: "not_committed", reason: response.reason };
+      summary = response.value;
+      checks = new TextDecoder().decode(await file.checks.read());
+    }
+    const built = await prefix(deps.ai.model, { ...context, summary, checks });
+    kept = await deps.store.work.keep(live.right, "prefix.json", JSON.stringify(built));
+  }
   const recorded = await deps.store.jobs.recordAi(
     live.right,
     prefixSchema.parse(JSON.parse(kept.text)),
@@ -554,7 +566,7 @@ async function converse(
         if (call.name === "edit_house") {
           const edit = await steps.do(
             `round ${round} call ${i + 1} edit_house`,
-            editStep,
+            geometryStep,
             async () => {
               const live = await current(deps, job);
               if (live.kind !== "active") return live;
@@ -604,7 +616,7 @@ async function converse(
       }
     } else {
       const before = working;
-      const gate = await steps.do(`round ${round} finish`, editStep, async () => {
+      const gate = await steps.do(`round ${round} finish`, geometryStep, async () => {
         const live = await current(deps, job);
         if (live.kind !== "active") return live;
         const time = Date.parse(deps.runtime.now());
@@ -677,7 +689,7 @@ export async function runJob(
   let settled: Interrupted;
   let claimedAt: string | null = null;
   try {
-    const start = await steps.do("start job", storageStep, () => startJob(deps, job));
+    const start = await steps.do("start job", geometryStep, () => startJob(deps, job));
     if (start.kind === "started") {
       claimedAt = start.claimedAt;
       settled = await converse(deps, job, steps, start);
