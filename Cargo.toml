@@ -49,6 +49,16 @@ debug = 0
 # CARGO_INCREMENTAL overrides this, and the flag is part of each unit's hash. False keeps unset and =0 runs on one artifact set.
 incremental = false
 
+# Rust tests spend most of their time in SolidCraft geometry and in housing's exact arithmetic.
+# "*" covers every non-member package; housing is a workspace member, so it needs its own table.
+# Housing at 1 runs its tests as fast as at 2 and rebuilds as fast as at 0.
+# Only opt-level changes, so debug assertions and overflow checks stay on in tests.
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.dev.package.madori-housing]
+opt-level = 1
+
 [profile.release]
 lto = "thin"
 
