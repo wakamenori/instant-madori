@@ -1,9 +1,10 @@
+import { scriptedAi } from "../../src/ai/scripted.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Usage } from "../../src/ai/round-trip.ts";
 import { limits, microUsd } from "../../src/limits.ts";
-import { estimateAttempt, settleAttempt } from "../../src/services/cost.ts";
-import { reserveAttemptCost, settleAttemptCost } from "../../src/services/ai-cost.ts";
+import { estimateAttempt } from "../../src/services/cost.ts";
+import { meteredRoundTrip } from "../../src/services/ai-cost.ts";
 import { acceptInstruction, claimNextJob, stopJob } from "../../src/services/jobs.ts";
 import type { JobExecutionRight } from "../../src/storage/job-execution.ts";
 import type { Store } from "../../src/storage/store.ts";
@@ -195,21 +196,28 @@ await test("AI attempt costs on real D1", async (t) => {
     async () => {
       const right = await runningJob();
       const request = {
-        conversation: { system: "hello", tools: [], opening: [], rounds: [] },
+        conversation: {
+          system: "hello",
+          tools: [],
+          opening: [{ kind: "text" as const, text: "hello" }],
+          rounds: [],
+        },
         maxOutputTokens: 100,
       };
       const estimate = estimateAttempt(request);
-      const first = await reserveAttemptCost(deps, { right, request });
-      const second = await reserveAttemptCost(deps, { right, request });
-      assert(first.kind === "reserved" && second.kind === "reserved");
-      assert.notEqual(first.attempt.id, second.attempt.id);
-      assert.deepEqual(first.attempt.estimate, estimate);
-      assert.deepEqual(await reserve(right, cap - 2 * estimate.reserve, now), reserved);
-      assert.deepEqual(await reserve(right, 1, now), jobLimit);
-      const charge = await settleAttemptCost(deps, { attempt: first.attempt, usage });
-      assert.deepEqual(charge, settleAttempt(estimate, usage));
-      assert.deepEqual(await reserve(right, estimate.reserve - charge.amount, now), reserved);
-      assert.deepEqual(await reserve(right, 1, now), jobLimit);
+      const ai = scriptedAi([{ stop: "end", parts: [{ kind: "text", text: "answer" }], usage }]);
+      for (let call = 0; call < 2; call++) {
+        assert.equal((await meteredRoundTrip({ ...deps, ai }, right, request)).kind, "ok");
+      }
+      const amounts = await db.raw
+        .prepare("SELECT reserved, charged FROM ai_attempts WHERE job_id = ?")
+        .bind(right.reference.jobId)
+        .all();
+      // 10 input, 2 output, 3 cache reads, 4 short writes and 5 long writes, rounded up.
+      assert.deepEqual(
+        amounts.results,
+        Array(2).fill({ reserved: estimate.reserve, charged: 141 }),
+      );
     },
   );
 });
