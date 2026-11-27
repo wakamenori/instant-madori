@@ -397,21 +397,27 @@ void test("hourly and eight active hour windows count releases, owner gaps and m
   const skill = ".claude/skills/madori-coordinator/SKILL.md";
   const repo = join(import.meta.dirname, "../..");
   const policy = readFileSync(join(repo, skill), "utf8");
-  const verification = out.prepare("SELECT effective,revision FROM verification_policy").get();
-  assert.ok(verification);
-  const rule = "検証は、head ごとに検証役一人で行う。";
-  assert.ok(policy.includes(rule));
-  const revision = String(verification.revision);
-  const introduced = execFileSync("git", ["show", "--format=", revision, "--", skill], {
-    encoding: "utf8",
-    cwd: repo,
-  });
-  assert.ok(introduced.split("\n").some((line) => line.startsWith("+") && line.includes(rule)));
-  const commitTime = execFileSync("git", ["show", "-s", "--format=%cI", revision], {
-    cwd: repo,
-    encoding: "utf8",
-  });
-  assert.equal(verification.effective, new Date(commitTime.trim()).toISOString());
+  for (const [table, rule] of Object.entries({
+    verification_policy: "検証は、head ごとに検証役一人で行う。",
+    dispatch_policy: "「開発基盤」には一つまで",
+  })) {
+    const record = out.prepare(`SELECT effective,revision FROM ${table}`).get();
+    assert.ok(typeof record?.revision === "string", table);
+    assert.ok(policy.includes(rule), table);
+    const introduced = execFileSync("git", ["show", "--format=", record.revision, "--", skill], {
+      encoding: "utf8",
+      cwd: repo,
+    });
+    assert.ok(
+      introduced.split("\n").some((line) => line.startsWith("+") && line.includes(rule)),
+      table,
+    );
+    const commitTime = execFileSync("git", ["show", "-s", "--format=%cI", record.revision], {
+      cwd: repo,
+      encoding: "utf8",
+    });
+    assert.equal(record.effective, new Date(commitTime.trim()).toISOString(), table);
+  }
   const capacity = Number(
     out.prepare("SELECT capacity FROM owner_limit ORDER BY effective DESC LIMIT 1").get()?.capacity,
   );
