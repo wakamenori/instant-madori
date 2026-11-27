@@ -5,7 +5,6 @@ pub mod display;
 pub mod floor_plan;
 mod model;
 mod outline;
-pub mod sample;
 pub use model::{
     BuildError, Entry, EntryKind, HostChange, LoadError, Mismatch, MismatchReason, Mismatches,
     Model, ModifierFailure, Subject, WallColorFailure,

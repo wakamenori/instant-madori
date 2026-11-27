@@ -149,9 +149,6 @@ await test("Job runs restore D1 execution rights across retries and lost respons
               ms: 1,
             });
           },
-          sampleDisplay() {
-            throw new Error("Unexpected sampleDisplay");
-          },
           applyOperations(call, request) {
             assert.equal(call.traceId, accepted.jobId);
             calls.push(request.operation_id);
@@ -375,9 +372,6 @@ await test("Job runs restore D1 execution rights across retries and lost respons
       {
         ...f.deps,
         geometry: () => ({
-          sampleDisplay() {
-            throw new Error("Unexpected sampleDisplay");
-          },
           summarizeHouse() {
             throw new Error("Unexpected summarizeHouse");
           },

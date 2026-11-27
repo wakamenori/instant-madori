@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import { geometryInternal } from "../../packages/contracts/src/generated/geometry-internal.ts";
 import { summarize } from "./summary.ts";
 import { parseLogRows } from "./workers-logs.ts";
 import golden from "./verification-03.summary.json" with { type: "json" };
@@ -23,22 +24,28 @@ await test("replays the full verification-3 summary", () => {
 });
 
 await test("leaves the first request after a cold start out of warm handling", () => {
-  const display = { event: "geometry.request", service: "geometry", route: "/v1/sample/display" };
+  const display = {
+    event: "geometry.request",
+    service: "geometry",
+    route: geometryInternal.routes.applyOperations.path,
+  };
   const summary = summarize([
     { t: 1, service: "worker", event: "container.started", traceId: "cold" },
     { t: 2, service: "worker", event: "container.ready", traceId: "cold", mode: "cold", ms: 300 },
     { ...display, t: 3, traceId: "cold", ms: 557, vmHwmKib: 10 },
     { ...display, t: 4, traceId: "next", ms: 29, vmHwmKib: 10 },
+    { ...display, t: 5, route: geometryInternal.routes.health.path, ms: 1, vmHwmKib: 10 },
   ]);
   assert.deepEqual(summary.coldReadyMs, { n: 1, min: 300, median: 300, max: 300 });
   assert.deepEqual(summary.warmContainerHandlerMs, { n: 1, min: 29, median: 29, max: 29 });
+  assert.equal(summary.counts.containerDisplayLines, 2);
 });
 
 await test("counts untraced displays before or simultaneous with a start", () => {
   const display = {
     event: "geometry.request",
     service: "geometry",
-    route: "/v1/sample/display",
+    route: geometryInternal.routes.applyOperations.path,
     ms: 9,
     vmHwmKib: 10,
   };
@@ -60,7 +67,7 @@ await test("preserves unavailable geometry measurements as null", () => {
       t: 1,
       service: "geometry",
       event: "geometry.request",
-      route: "/v1/sample/display",
+      route: geometryInternal.routes.applyOperations.path,
       traceId: null,
       ms: 3,
       vmHwmKib: null,

@@ -122,7 +122,7 @@ Dockerは使用中のcache mountを0バイトと報告するため、その実�
 
 既定の台本は、空のパターンでは一部屋のLDKに外壁のドアと窓と壁の色を作り、案のあるパターンでは壁の色を一つ変えます。画面はドラッグでの回転と、スクロールでの拡大・縮小に対応します。ブラウザでは、WebGPUのアダプタがあるChromiumで描画を確かめ、合成したポインタイベントでの回転と、ホイールイベントでの拡大を確かめました。縮小、実際のマウス・トラックパッドでの操作感、Chromium以外のブラウザは確かめていません。WebGPUを利用できるブラウザが必要です。初回のamd64イメージのビルドには数分かかります。
 
-Rustサービスだけを反復する場合は `MADORI_INTERNAL_TOKEN=local cargo run -p madori-geometry` で起動します。`http://127.0.0.1:3001/healthz` は認証不要、`/v1/sample/display` は `authorization: Bearer local` が必要です。このプロセスをWorkerが呼ぶことはありません。
+Rustサービスだけを反復する場合は `MADORI_INTERNAL_TOKEN=local cargo run -p madori-geometry` で起動します。`http://127.0.0.1:3001/healthz` は認証不要です。`/v1/house/operations` など、`/v1/` の住宅ルートには `authorization: Bearer local` が必要です。このプロセスをWorkerが呼ぶことはありません。
 
 5分ごとのCron Triggerが、受付または実行権の取得から5分を超えたジョブのパターンDOを起こします。保留中の待機列は再開しません。ローカルでは次のコマンドで同じ定期処理を呼べます（`auto` ではWorkerのポートに置き換えます）。
 

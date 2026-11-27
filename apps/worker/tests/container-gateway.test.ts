@@ -134,7 +134,7 @@ function fixture() {
   const make = () => new ContainerGateway(container, store, settings, environment);
   const call = {
     method: "GET",
-    path: "/v1/sample/display",
+    path: "/v1/house/summary",
     traceId: "trace-1",
     timeoutMs: 500,
   } as const;

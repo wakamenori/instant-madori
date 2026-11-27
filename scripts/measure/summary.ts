@@ -15,12 +15,12 @@ export function summarize(rows: readonly LogRow[]) {
   const events = readEvents(rows);
   const api = events.filter((e) => e.kind === "api");
   const geometry = events.filter((e) => e.kind === "geometry");
-  const display = geometry.filter((e) => e.route === geometryInternal.routes.sampleDisplay.path);
+  const handled = geometry.filter((e) => e.route !== geometryInternal.routes.health.path);
   const containers = events.filter((e) => e.kind === "container");
   const coldReady = containers.filter((e) => e.name === "container.ready" && e.mode === "cold");
   // The Worker no longer logs api.request geometryStart; container.ready carries the same traces.
   const coldTraces = new Set(coldReady.map((e) => e.traceId));
-  const warm = display.filter((e) => e.traceId === null || !coldTraces.has(e.traceId));
+  const warm = handled.filter((e) => e.traceId === null || !coldTraces.has(e.traceId));
   const starts = containers.filter((e) => e.name === "container.started").map((e) => e.t);
   const groups = new Map<number | null, number[]>();
   let startIndex = 0;
@@ -58,7 +58,7 @@ export function summarize(rows: readonly LogRow[]) {
       })),
     counts: {
       apiRequests: api.length,
-      containerDisplayLines: display.length,
+      containerDisplayLines: handled.length,
       failedApiRequests: api.filter((e) => e.status !== 200).length,
     },
     containerEvents: events

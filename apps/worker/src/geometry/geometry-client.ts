@@ -4,12 +4,7 @@ import type {
   ApplyOperationsOutcome,
   ApplyOperationsRequest,
 } from "@madori/contracts/geometry-internal";
-import type {
-  WithPartBytes,
-  GeometryCall,
-  GeometryResult,
-  DisplayArtifact,
-} from "./geometry-protocol.ts";
+import type { WithPartBytes, GeometryCall, GeometryResult } from "./geometry-protocol.ts";
 export interface GeometryApi {
   summarizeHouse(
     call: GeometryCall,
@@ -19,7 +14,6 @@ export interface GeometryApi {
     call: GeometryCall,
     request: ApplyOperationsRequest,
   ): Promise<GeometryResult<WithPartBytes<ApplyOperationsOutcome>>>;
-  sampleDisplay(call: GeometryCall): Promise<GeometryResult<DisplayArtifact>>;
 }
 export type GeometryInstance = { kind: "pattern"; patternId: string };
 export function geometryClient(
@@ -30,8 +24,6 @@ export function geometryClient(
       rpcGeometry(() => getByName(`pattern:${key.patternId}`).summarizeHouse(call, request)),
     applyOperations: (call, request) =>
       rpcGeometry(() => getByName(`pattern:${key.patternId}`).applyOperations(call, request)),
-    sampleDisplay: (call) =>
-      rpcGeometry(() => getByName(`pattern:${key.patternId}`).sampleDisplay(call)),
   });
 }
 async function rpcGeometry<T>(call: () => Promise<GeometryResult<T>>): Promise<GeometryResult<T>> {
