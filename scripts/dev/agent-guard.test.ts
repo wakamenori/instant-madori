@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, resolve } from "node:path";
 import { test } from "node:test";
@@ -113,17 +113,17 @@ esac
       { mode: 0o755 },
     );
     const session = { cwd, session_id: "verifier-1" };
+    const guard = resolve(cwd, "agent-guard.ts");
+    copyFileSync(resolve(import.meta.dirname, "agent-guard.ts"), guard);
+    const env = { ...process.env, PATH: cwd + delimiter + (process.env.PATH ?? "") };
+    Reflect.deleteProperty(env, "NODE_PATH");
     function run(event: string, fields: Record<string, unknown>) {
-      const result = spawnSync(
-        process.execPath,
-        [resolve(import.meta.dirname, "agent-guard.ts"), event],
-        {
-          cwd,
-          env: { ...process.env, PATH: cwd + delimiter + (process.env.PATH ?? "") },
-          input: JSON.stringify({ ...session, ...fields }),
-          encoding: "utf8",
-        },
-      );
+      const result = spawnSync(process.execPath, [guard, event], {
+        cwd,
+        env,
+        input: JSON.stringify({ ...session, ...fields }),
+        encoding: "utf8",
+      });
       assert.equal(result.status, 0);
       assert.equal(result.stderr, "");
       return result.stdout;
