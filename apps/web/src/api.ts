@@ -1,3 +1,4 @@
+import { parseFloorPlan, type FloorPlan } from "./floor-plan/plan-svg.ts";
 import {
   messageListResponseSchema,
   acceptInstructionResponseSchema,
@@ -117,7 +118,7 @@ export function fetchFloorPlan(
   revisionId: string,
   storey: string,
   signal: AbortSignal,
-): Promise<string> {
+): Promise<FloorPlan | null> {
   return request(
     `/api/revisions/${revisionId}/floor-plan?${new URLSearchParams({ storey })}`,
     signal,
@@ -127,7 +128,7 @@ export function fetchFloorPlan(
         response.headers.get("x-revision-id") !== revisionId
       )
         throw new ApiError("unexpected_response");
-      return response.text();
+      return parseFloorPlan(await response.text(), storey);
     },
   );
 }

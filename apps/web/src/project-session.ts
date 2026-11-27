@@ -1,3 +1,4 @@
+import type { FloorPlan } from "./floor-plan/plan-svg.ts";
 import {
   buildTimeline,
   mergeRows,
@@ -15,6 +16,7 @@ import {
   sendInstruction,
   readPatternState,
   fetchRevisionView,
+  fetchFloorPlan,
 } from "./api.ts";
 import { failureMessage, sendFailureMessage } from "./failure.ts";
 import type { ProjectId } from "./route.ts";
@@ -34,7 +36,9 @@ export function summarizeActivity({
   if (queued) return { kind: "queued", count: queued };
   return { kind: "idle" };
 }
-type RevisionView = { revision: Revision; display: Uint8Array };
+export type PlanSlot =
+  { kind: "ready"; plan: FloorPlan } | { kind: "absent" } | { kind: "rejected" };
+export type RevisionView = { revision: Revision; display: Uint8Array; plan: PlanSlot };
 export type ProjectView =
   | { kind: "opening" }
   | { kind: "failed"; message: string }
@@ -68,11 +72,12 @@ async function loadRevision(
   signal: AbortSignal,
 ): Promise<RevisionView | null> {
   if (!revision) return null;
-  const display =
-    previous?.revision.id === revision.id
-      ? previous.display
-      : (await fetchRevisionView(revision.id, signal)).display;
-  return { revision, display };
+  if (previous?.revision.id === revision.id) return { ...previous, revision };
+  const { display, storeys } = await fetchRevisionView(revision.id, signal);
+  const storey = storeys[0];
+  if (storey === undefined) return { revision, display, plan: { kind: "absent" } };
+  const plan = await fetchFloorPlan(revision.id, storey, signal);
+  return { revision, display, plan: plan ? { kind: "ready", plan } : { kind: "rejected" } };
 }
 
 type Dependencies = { wait?: typeof delay; newRequestId?: () => string; sendTimeoutMs?: number };

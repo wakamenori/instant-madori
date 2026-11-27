@@ -142,3 +142,56 @@ main:has(.project-layout) {
 .instruction-form button {
   justify-self: end;
 }
+
+.view-switch,
+.plan-controls {
+  display: flex;
+  gap: 0.4rem;
+}
+.view-switch {
+  margin-bottom: 0.75rem;
+}
+.plan-controls {
+  top: auto;
+  bottom: 0.75rem;
+}
+.view-switch [aria-pressed="true"] {
+  background: #234a3b;
+  color: white;
+}
+.views {
+  display: grid;
+}
+.view-panel {
+  grid-area: 1/1;
+  min-width: 0;
+}
+.view-panel[data-active="false"] {
+  visibility: hidden;
+}
+.plan-container {
+  position: relative;
+}
+.plan-frame {
+  touch-action: none;
+  cursor: grab;
+  user-select: none;
+}
+.plan-frame svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.floor-plan [data-element-id] {
+  cursor: pointer;
+}
+.floor-plan .room.selected .room-floor {
+  fill: #d4e9df;
+}
+.floor-plan path.wall.selected {
+  fill: #18764d;
+}
+.floor-plan .element-dimensions,
+.floor-plan .openings {
+  pointer-events: none;
+}
