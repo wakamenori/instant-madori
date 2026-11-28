@@ -144,8 +144,21 @@ export function ProjectScreen({ projectId }: { projectId: ProjectId }) {
             <RevisionViews shown={view.shown} />
           </section>
           <section className="conversation-pane" aria-label="会話">
-            <ConversationLog timeline={view.timeline} onResend={session.resend} />
-            <InstructionForm onSend={session.send} hint={instructionHint(view.status.now)} />
+            <ConversationLog
+              timeline={view.timeline}
+              onResend={session.resend}
+              images={session.assetImages}
+            />
+            <InstructionForm
+              onSend={session.send}
+              hint={instructionHint(view.status.now)}
+              drafts={view.drafts}
+              attachNotice={view.attachNotice}
+              preparingAttachments={view.preparingAttachments}
+              onAttach={session.attach}
+              onDetach={session.detach}
+              onRetryAttachment={session.retryAttachment}
+            />
           </section>
         </div>
       )}

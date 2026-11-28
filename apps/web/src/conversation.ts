@@ -38,6 +38,7 @@ export type OutboxEntry = {
   readonly body: InstructionBody;
   readonly seq: number;
   readonly questionId: string | null;
+  readonly attachmentIds: readonly string[];
   readonly generation: number;
   readonly delivery: PendingDelivery | { kind: "accepted"; job: AcceptedJob };
 };
@@ -57,6 +58,7 @@ export type TimelineEntry =
       requestId: string;
       body: string;
       questionId: string | null;
+      attachmentIds: readonly string[];
       delivery: LocalDelivery;
     };
 
@@ -132,8 +134,8 @@ export function buildTimeline(
       },
     });
   const pending: { seq: number; entry: TimelineEntry }[] = [];
-  for (const { requestId, body, seq, questionId, delivery } of outbox) {
-    const local = { kind: "local", requestId, body, questionId } as const;
+  for (const { requestId, body, seq, questionId, attachmentIds, delivery } of outbox) {
+    const local = { kind: "local", requestId, body, questionId, attachmentIds } as const;
     if (delivery.kind === "accepted") {
       const { messageId, jobId, number } = delivery.job;
       if (!rows.has(messageId))
