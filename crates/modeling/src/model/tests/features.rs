@@ -829,3 +829,36 @@ fn houses_built_one_after_another_project_their_own_bulges() {
     }
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
+
+#[test]
+fn area_mismatch_reports_the_measured_floor_area() {
+    let input = fixture();
+    let bulge = |protrusion| {
+        modified(
+            &input,
+            vec![floor_add(
+                "bulge",
+                &shared(&input),
+                AddTo::Both {},
+                [2000., 2600.],
+                [900., 2000.],
+                protrusion,
+            )],
+        )
+    };
+    let expected = bulge(20.);
+    let model = Model::build(&bulge(21.), None).unwrap();
+    let assessment = model.assess(&expected);
+    for room in expected.rooms() {
+        let id = &room.data().id;
+        assert!(assessment.mismatches().iter().any(|mismatch| matches!(
+            (&mismatch.subject, &mismatch.reason),
+            (Subject::Element { id: found, .. }, MismatchReason::AreaMismatch { .. })
+                if found == id.as_str()
+        )));
+        assert_eq!(
+            assessment.room_area(id).unwrap().unrounded_square_metres() * 1e6,
+            19_687_400.,
+        );
+    }
+}
