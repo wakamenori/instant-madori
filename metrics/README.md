@@ -473,3 +473,5 @@ T3はプロジェクトの最初のスレッドから、GitHubは2026年11月1�
 事故防止の狙いは `prevention_signal` で workflow と専用 step 名に結ぶ。`mart_prevention_catch` はマージ以降に開始した run でその step の結論が failure になったとき、同じ run と head の再試行を1件にまとめる。`mart_prevention` はこの件数を改善別に出す。step の失敗は検出の代理指標で、外部サービスの失敗も含み得る。汎用の試験実行 step は個別の検査と結べないので登録しない。
 
 事故防止は比較期間を設けず、次に同じ狙いの改善が入るまで追う。`checked_runs` が0件なら検出数は NULL になる。`main_runs` と `main_failures` で、main で同じ検査を実行した回数と失敗数を確認できる。main でその検査を走らせていない期間の再発は判定できない。
+
+<!-- Docs-only CI probe for #737. This PR is never merged. -->
