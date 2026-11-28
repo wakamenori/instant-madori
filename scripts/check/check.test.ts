@@ -1005,33 +1005,35 @@ void test("full checks stop before container integration and pruning when disk f
   );
 });
 
-void test("rejects a foreign cargo before starting work", (t) => {
-  const directory = mkdtempSync(join(tmpdir(), "foreign-cargo-"));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
-  const log = join(directory, "calls");
-  writeFileSync(
-    join(directory, "cargo"),
-    '#!/bin/sh\necho "$@" >> "$LOG"\necho "cargo 1.100.0 (Homebrew)"\n',
-    { mode: 0o755 },
-  );
-  const result = spawnSync(
-    process.execPath,
-    [fileURLToPath(new URL("./check.ts", import.meta.url)), "--fast"],
-    {
-      encoding: "utf8",
-      env: {
-        PATH: directory + ":/usr/bin:/bin",
-        HOME: directory,
-        CARGO_HOME: directory,
-        TMPDIR: directory,
-        LOG: log,
+void test("rejects a foreign cargo before starting work, including docs mode", (t) => {
+  for (const mode of ["--fast", "--docs"]) {
+    const directory = mkdtempSync(join(tmpdir(), "foreign-cargo-"));
+    t.after(() => rmSync(directory, { recursive: true, force: true }));
+    const log = join(directory, "calls");
+    writeFileSync(
+      join(directory, "cargo"),
+      '#!/bin/sh\necho "$@" >> "$LOG"\necho "cargo 1.100.0 (Homebrew)"\n',
+      { mode: 0o755 },
+    );
+    const result = spawnSync(
+      process.execPath,
+      [fileURLToPath(new URL("./check.ts", import.meta.url)), mode],
+      {
+        encoding: "utf8",
+        env: {
+          PATH: directory + ":/usr/bin:/bin",
+          HOME: directory,
+          CARGO_HOME: directory,
+          TMPDIR: directory,
+          LOG: log,
+        },
       },
-    },
-  );
-  assert.equal(result.status, 1);
-  assert(result.stderr.includes("[rustup] cargo on PATH is"), result.stderr);
-  assert(!result.stdout.includes("[check] Format service files"));
-  assert.equal(readFileSync(log, "utf8"), "--version\n");
+    );
+    assert.equal(result.status, 1, mode);
+    assert(result.stderr.includes("[rustup] cargo on PATH is"), result.stderr);
+    assert.doesNotMatch(result.stdout, /\[check\] Format/u, mode);
+    assert.equal(readFileSync(log, "utf8"), "--version\n", mode);
+  }
 });
 
 void test("shows usage without cargo", (t) => {
@@ -1056,31 +1058,6 @@ void test("docs mode rejects Rust and other check modes in the same invocation",
     assert.equal(result.status, 1, result.stderr);
     assert.match(result.stderr, /Usage: pnpm check.*--docs/u);
   }
-});
-
-void test("docs mode does not invoke cargo", (t) => {
-  const directory = mkdtempSync(join(tmpdir(), "docs-no-cargo-"));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
-  const log = join(directory, "calls");
-  writeFileSync(log, "");
-  writeFileSync(join(directory, "cargo"), '#!/bin/sh\necho "$@" >> "$LOG"\n', { mode: 0o755 });
-  const result = spawnSync(
-    process.execPath,
-    [fileURLToPath(new URL("./check.ts", import.meta.url)), "--docs"],
-    {
-      encoding: "utf8",
-      env: {
-        PATH: directory,
-        TMPDIR: directory,
-        LOG: log,
-        MADORI_TEST_RESULTS_DIR: join(directory, "results"),
-      },
-    },
-  );
-  assert.equal(result.status, 1, result.stderr);
-  assert.match(result.stderr, /spawn pnpm ENOENT/u);
-  assert.doesNotMatch(result.stderr, /\[rustup\]/u);
-  assert.equal(readFileSync(log, "utf8"), "");
 });
 
 function setCi(t: TestContext, value?: string) {

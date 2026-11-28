@@ -598,7 +598,7 @@ async function main() {
   }
   const mode = requested ?? "default";
   process.chdir(fileURLToPath(repositoryRoot));
-  if (mode !== "--docs" && !checkRustupCargo()) return;
+  if (!checkRustupCargo()) return;
 
   const logDirectory = mkdtempSync(join(tmpdir(), "madori-check-logs-"));
   let nextLog = 0;
