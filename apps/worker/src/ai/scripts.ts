@@ -40,7 +40,16 @@ export function developmentScript({ opening: parts, rounds }: Conversation): Scr
   }
   const first = section("Current instruction").split(/\r?\n/u, 1)[0];
   const name = first?.startsWith("台本:") ? first.slice(3) : "plan";
-  if (!["plan", "unresolved", "reject-window", "question", "question-after-edit"].includes(name))
+  if (
+    ![
+      "plan",
+      "unresolved",
+      "joint-window",
+      "reject-window",
+      "question",
+      "question-after-edit",
+    ].includes(name)
+  )
     throw new Error("unknown script");
   const house = z
     .object({
@@ -84,6 +93,31 @@ export function developmentScript({ opening: parts, rounds }: Conversation): Scr
     });
   if (name === "question-after-edit") return edit({ kind: "place_rooms", layout });
   if (house.rooms.length) {
+    if (name === "joint-window") {
+      if (round === 1) {
+        const wall = firstItem(house.rooms).walls[2];
+        if (!wall) throw new Error("Expected a third boundary");
+        return edit(opening(wall, false, 0));
+      }
+      const { operations, inspection } = z
+        .object({
+          operations: z
+            .array(z.object({ kind: z.literal("opening_attached"), opening: z.string() }))
+            .nonempty(),
+          inspection: z.object({
+            housing: z.array(z.object({ id: z.string(), reason: z.object({ kind: z.string() }) })),
+          }),
+        })
+        .parse(result(1));
+      const { opening: id } = firstItem(operations);
+      if (
+        !inspection.housing.some(
+          (finding) => finding.reason.kind === "overlaps_joint" && finding.id === id,
+        )
+      )
+        throw new Error("Expected a joint finding for the attached window");
+      return finish();
+    }
     if (round > 1) {
       result(1);
       return finish();

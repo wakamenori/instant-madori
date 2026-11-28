@@ -437,7 +437,7 @@ void test(
 
     async function runSideLane(worker: LocalWorker) {
       const user = newUser("container-side");
-      for (const script of ["reject-window", "unresolved"] as const) {
+      for (const script of ["reject-window", "unresolved", "joint-window"] as const) {
         await t.test(script, async () => {
           const created = await worker.call("/api/projects", {
             as: user,
@@ -455,7 +455,7 @@ void test(
             return acceptInstructionResponseSchema.parse(await accepted.json()).job;
           }
           const base =
-            script === "unresolved"
+            script !== "reject-window"
               ? await settleJobs(worker, user, own.id, [(await send("plan")).jobId], 300000)
               : null;
           const job = await send(script);
