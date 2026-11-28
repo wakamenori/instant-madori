@@ -14,6 +14,8 @@
         "scripts/check/check-licenses.ts",
         "scripts/check/check-secrets.ts",
         "scripts/check/check-sql.ts",
+        "scripts/check/markdown-reads.ts",
+        "scripts/check/record-markdown-reads.ts",
         "scripts/check/test-results.ts",
         "scripts/check/smoke.ts",
         "scripts/check/staging-smoke.ts",

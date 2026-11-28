@@ -23,7 +23,7 @@ jobs:
         env:
           BASE: ${{ github.event.pull_request.base.sha || 'origin/main' }}
         run: |
-          flag=$(git diff --name-only "$BASE...HEAD" | node scripts/check/ci-mode.ts)
+          flag=$(git diff --no-renames --name-only -z "$BASE...HEAD" | node scripts/check/ci-mode.ts)
           echo "flag=$flag" >> "$GITHUB_OUTPUT"
   check:
     needs: mode
@@ -45,6 +45,7 @@ jobs:
           ln -s "$cache/tools" .tools
       - run: pnpm install --frozen-lockfile
       - run: pnpm setup
+        if: ${{ needs.mode.outputs.flag != '--docs' }}
       - name: pnpm check ${{ needs.mode.outputs.flag }}
         run: pnpm check ${FLAG:+"$FLAG"}
         env:
