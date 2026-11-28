@@ -85,6 +85,224 @@ fn courtyard_door_is_not_an_exterior_entrance() {
 fn errors(h: &House) -> Vec<Rejection> {
     h.check().unwrap_err().as_slice().to_vec()
 }
+
+fn corner_house() -> House {
+    let h = build(&layout(&[(0., 0., 4000., 3000.)], 200., 120.)).unwrap();
+    door(&h, "entrance", &wall(&h, (0., 3000.), (4000., 3000.)), 500.)
+}
+
+fn tee_house() -> House {
+    let h = build(&layout(
+        &[(0., 0., 2000., 3000.), (2000., 0., 4000., 3000.)],
+        200.,
+        120.,
+    ))
+    .unwrap();
+    let h = door(&h, "west", &wall(&h, (0., 3000.), (2000., 3000.)), 500.);
+    door(&h, "east", &wall(&h, (2000., 3000.), (4000., 3000.)), 500.)
+}
+
+fn window(wall: BoundaryId, from: WallEnd, distance: f64, width: f64) -> OpeningSpec {
+    OpeningSpec {
+        wall,
+        from,
+        distance,
+        width,
+        height: 900.,
+        sill: 800.,
+        fitting: Fitting::Window {},
+    }
+}
+
+fn door_spec(wall: BoundaryId, from: WallEnd, distance: f64) -> OpeningSpec {
+    OpeningSpec {
+        height: 2000.,
+        sill: 0.,
+        fitting: Fitting::Door {
+            hinge: WallEnd::Start,
+            opens_to: Side::Left,
+        },
+        ..window(wall, from, distance, 900.)
+    }
+}
+
+fn assert_joint(h: &House, id: &OpeningId, ends: &[WallEnd], min_distance: f64, max_reach: f64) {
+    let opening = h.opening(id).unwrap().data();
+    let wall = h.boundary(&opening.wall).unwrap().data();
+    let vertices = ends
+        .iter()
+        .map(|end| match end {
+            WallEnd::Start => wall.start.as_str().into(),
+            WallEnd::End => wall.end.as_str().into(),
+        })
+        .collect();
+    assert_eq!(
+        errors(h),
+        vec![Rejection {
+            element: ElementKind::Opening,
+            id: id.as_str().into(),
+            reason: Reason::OverlapsJoint {
+                wall: opening.wall.as_str().into(),
+                vertices,
+                from: opening.from,
+                min_distance,
+                max_reach,
+                max_width: max_reach - min_distance,
+            },
+        }]
+    );
+}
+
+#[test]
+fn joint_corner_window_blocks_confirmation_until_moved() {
+    let h = corner_house();
+    let mut spec = window(wall(&h, (0., 0.), (4000., 0.)), WallEnd::Start, 0., 900.);
+    let (h, id) = h
+        .attach_opening(&OperationId::new("window"), &spec)
+        .unwrap();
+    assert_joint(&h, &id, &[WallEnd::Start], 100., 3900.);
+    spec.distance = 100.;
+    assert_eq!(h.change_opening(&id, &spec).unwrap().check(), Ok(()));
+}
+
+#[test]
+fn joint_tee_stem_door_uses_through_wall_thickness() {
+    let h = tee_house();
+    let spec = door_spec(wall(&h, (2000., 0.), (2000., 3000.)), WallEnd::Start, 0.);
+    let (h, id) = h.attach_opening(&OperationId::new("stem"), &spec).unwrap();
+    assert_joint(&h, &id, &[WallEnd::Start], 100., 2900.);
+}
+
+#[test]
+fn joint_tee_through_halves_use_stem_thickness_from_either_end() {
+    let h = tee_house();
+    for (wall, from) in [
+        (wall(&h, (2000., 0.), (4000., 0.)), WallEnd::Start),
+        (wall(&h, (0., 0.), (2000., 0.)), WallEnd::End),
+    ] {
+        let (house, id) = h
+            .attach_opening(&OperationId::new("window"), &window(wall, from, 0., 900.))
+            .unwrap();
+        assert_joint(&house, &id, &[from], 60., 1900.);
+    }
+}
+
+#[test]
+fn joint_straight_continuation_allows_windows_at_the_split() {
+    let h = corner_house();
+    let west = wall(&h, (0., 0.), (4000., 0.));
+    let mut data = h.into_data();
+    let split = VertexId::new("split");
+    data.vertices.push(Vertex {
+        id: split.clone(),
+        storey: data.storeys[0].id.clone(),
+        at: Point { x: 2000., y: 0. },
+    });
+    let west_row = data.boundaries.iter_mut().find(|w| w.id == west).unwrap();
+    let east = BoundaryId::new("east");
+    let mut east_row = west_row.clone();
+    east_row.id = east.clone();
+    east_row.start = split.clone();
+    west_row.end = split;
+    data.boundaries.push(east_row);
+    let edges = &mut data.rooms[0].edges;
+    let index = edges.iter().position(|e| e.boundary == west).unwrap();
+    edges.insert(
+        index + 1,
+        Edge {
+            boundary: east.clone(),
+            direction: Direction::Forward,
+        },
+    );
+    let h = House::new(data).unwrap();
+    for (wall, from) in [(west, WallEnd::End), (east, WallEnd::Start)] {
+        let (house, _) = h
+            .attach_opening(&OperationId::new("window"), &window(wall, from, 0., 900.))
+            .unwrap();
+        assert_eq!(house.check(), Ok(()));
+    }
+}
+
+#[test]
+fn joint_tolerance_applies_to_both_jambs_in_the_openings_frame() {
+    let h = corner_house();
+    let wall = wall(&h, (0., 0.), (4000., 0.));
+    let mut spec = window(wall, WallEnd::Start, 99.9995, 900.);
+    let (h, id) = h
+        .attach_opening(&OperationId::new("window"), &spec)
+        .unwrap();
+    assert_eq!(h.check(), Ok(()));
+    spec.distance = 99.998;
+    assert_joint(
+        &h.change_opening(&id, &spec).unwrap(),
+        &id,
+        &[WallEnd::Start],
+        100.,
+        3900.,
+    );
+    spec.distance = 100. - 0.0009;
+    assert_eq!(h.change_opening(&id, &spec).unwrap().check(), Ok(()));
+    spec.from = WallEnd::End;
+    spec.distance = 4000. - spec.distance - spec.width;
+    assert_eq!(h.change_opening(&id, &spec).unwrap().check(), Ok(()));
+    spec.distance = 4000. - 99.998 - spec.width;
+    assert_joint(
+        &h.change_opening(&id, &spec).unwrap(),
+        &id,
+        &[WallEnd::Start],
+        100.,
+        3900.,
+    );
+}
+
+#[test]
+fn joint_rejects_a_window_thinner_than_the_tolerance() {
+    let h = tee_house();
+    let spec = window(
+        wall(&h, (2000., 0.), (4000., 0.)),
+        WallEnd::Start,
+        40.,
+        0.0005,
+    );
+    let (h, id) = h
+        .attach_opening(&OperationId::new("window"), &spec)
+        .unwrap();
+    assert_joint(&h, &id, &[WallEnd::Start], 60., 1900.);
+}
+
+#[test]
+fn joint_reports_both_ends_in_one_finding_in_boundary_order() {
+    let h = corner_house();
+    let spec = window(wall(&h, (0., 0.), (4000., 0.)), WallEnd::End, 0., 4000.);
+    let (h, id) = h
+        .attach_opening(&OperationId::new("window"), &spec)
+        .unwrap();
+    assert_joint(&h, &id, &[WallEnd::Start, WallEnd::End], 100., 3900.);
+}
+
+#[test]
+fn joint_reach_includes_a_wall_at_the_next_vertex() {
+    let h = build(&layout(
+        &[
+            (0., -3000., 3000., 0.),
+            (-3000., -3000., 0., 50.),
+            (0., 0., 3000., 3000.),
+        ],
+        200.,
+        100.,
+    ))
+    .unwrap();
+    let h = door(&h, "south", &wall(&h, (0., -3000.), (3000., -3000.)), 500.);
+    let h = door(&h, "west", &wall(&h, (-3000., -3000.), (-3000., 50.)), 500.);
+    let mut spec = door_spec(wall(&h, (3000., 0.), (0., 0.)), WallEnd::End, 50.);
+    let (h, id) = h
+        .attach_opening(&OperationId::new("crossing"), &spec)
+        .unwrap();
+    assert_joint(&h, &id, &[WallEnd::End], 100., 2900.);
+    spec.distance = 100.;
+    assert_eq!(h.change_opening(&id, &spec).unwrap().check(), Ok(()));
+}
+
 fn document(reason: Reason) -> Rejection {
     Rejection {
         element: ElementKind::Document,

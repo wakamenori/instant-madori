@@ -21,6 +21,141 @@ pub(super) fn opening_fit(h: &House) -> Vec<Rejection> {
     }
     errors
 }
+
+pub(super) fn opening_joints(h: &House) -> Vec<Rejection> {
+    let planforms: Vec<_> = h
+        .boundaries()
+        .filter_map(|wall| wall.planform().ok().map(|polygon| (wall, polygon)))
+        .collect();
+    let mut errors = Vec::new();
+    for opening in h.openings() {
+        let wall = opening.wall;
+        let length = wall.length();
+        let (start_reach, end_reach) = joint_reaches(wall, length, &planforms);
+        let o = opening.data();
+        let (min_distance, max_reach) = match o.from {
+            WallEnd::Start => (start_reach, length - end_reach),
+            WallEnd::End => (end_reach, length - start_reach),
+        };
+        let near_overlaps = o.distance < min_distance - TOL;
+        let far_overlaps = o.distance + o.width > max_reach + TOL;
+        let (start_overlaps, end_overlaps) = match o.from {
+            WallEnd::Start => (near_overlaps, far_overlaps),
+            WallEnd::End => (far_overlaps, near_overlaps),
+        };
+        let vertices = [(start_overlaps, wall.start()), (end_overlaps, wall.end())]
+            .into_iter()
+            .filter(|(overlaps, _)| *overlaps)
+            .map(|(_, vertex)| vertex.data().id.as_str().into())
+            .collect::<Vec<_>>();
+        if !vertices.is_empty() {
+            errors.push(finding(
+                ElementKind::Opening,
+                o.id.as_str(),
+                Reason::OverlapsJoint {
+                    wall: o.wall.as_str().into(),
+                    vertices,
+                    from: o.from,
+                    min_distance,
+                    max_reach,
+                    max_width: (max_reach - min_distance).max(0.),
+                },
+            ));
+        }
+    }
+    errors
+}
+
+fn joint_reaches(
+    wall: BoundaryView<'_>,
+    length: f64,
+    planforms: &[(BoundaryView<'_>, SimplePolygon)],
+) -> (f64, f64) {
+    let start = wall.start().data();
+    let axis = wall.end().data().at.delta_from(start.at).unit();
+    let normal = axis.left();
+    let offsets = &wall.data().wall.offsets;
+    let mut intervals = Vec::new();
+    for (other, polygon) in planforms {
+        if other.data().id == wall.data().id || other.start().data().storey != start.storey {
+            continue;
+        }
+        let points: Vec<_> = polygon
+            .points()
+            .iter()
+            .map(|p| {
+                let delta = p.delta_from(start.at);
+                WallCoordinates {
+                    along: delta.dot(axis),
+                    cross: delta.dot(normal),
+                }
+            })
+            .collect();
+        let clipped = clip_side(&points, -offsets.right - TOL, |cross, limit| cross >= limit);
+        let clipped = clip_side(&clipped, offsets.left + TOL, |cross, limit| cross <= limit);
+        if let Some(first) = clipped.first() {
+            intervals.push(
+                clipped
+                    .iter()
+                    .skip(1)
+                    .fold((first.along, first.along), |(low, high), p| {
+                        (low.min(p.along), high.max(p.along))
+                    }),
+            );
+        }
+    }
+    let start_reach = connected_reach(&mut intervals, length);
+    for (low, high) in &mut intervals {
+        (*low, *high) = (length - *high, length - *low);
+    }
+    (start_reach, connected_reach(&mut intervals, length))
+}
+
+#[derive(Clone, Copy)]
+struct WallCoordinates {
+    along: f64,
+    cross: f64,
+}
+
+fn clip_side(
+    polygon: &[WallCoordinates],
+    limit: f64,
+    inside: impl Fn(f64, f64) -> bool,
+) -> Vec<WallCoordinates> {
+    let Some(&last) = polygon.last() else {
+        return Vec::new();
+    };
+    let mut clipped = Vec::new();
+    let mut previous = last;
+    for &current in polygon {
+        let current_inside = inside(current.cross, limit);
+        if current_inside != inside(previous.cross, limit) {
+            let t = (limit - previous.cross) / (current.cross - previous.cross);
+            clipped.push(WallCoordinates {
+                along: previous.along + t * (current.along - previous.along),
+                cross: limit,
+            });
+        }
+        if current_inside {
+            clipped.push(current);
+        }
+        previous = current;
+    }
+    clipped
+}
+
+fn connected_reach(intervals: &mut [(f64, f64)], length: f64) -> f64 {
+    intervals.sort_unstable_by(|a, b| a.0.total_cmp(&b.0));
+    let mut reach: f64 = 0.;
+    for &(low, high) in intervals.iter() {
+        if low > reach + TOL {
+            break;
+        }
+        reach = reach.max(high);
+    }
+    reach.clamp(0., length)
+}
+
 fn clears(o: &Opening) -> bool {
     o.sill <= TOL
         && o.width >= PASSAGE_WIDTH_MM - TOL

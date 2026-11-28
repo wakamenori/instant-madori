@@ -1,4 +1,4 @@
-use crate::{FaceRole, Point, Side};
+use crate::{FaceRole, Point, Side, WallEnd};
 use schemars::JsonSchema;
 use serde::Serialize;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema)]
@@ -218,6 +218,14 @@ pub enum Reason {
         other: String,
         along: f64,
         up: f64,
+    },
+    OverlapsJoint {
+        wall: String,
+        vertices: Vec<String>,
+        from: WallEnd,
+        min_distance: f64,
+        max_reach: f64,
+        max_width: f64,
     },
     SelfIntersecting {
         at: Point,

@@ -1,6 +1,8 @@
 // Runs the Worker in workerd through `wrangler dev`, against a fresh local D1 database
 // migrated with the real migration files, so tests exercise the deployed code path.
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { createRequire } from "node:module";
 import type { ChildProcess } from "node:child_process";
 import { get } from "node:http";
 import { createInterface } from "node:readline";
@@ -10,6 +12,7 @@ import { join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import { fileURLToPath } from "node:url";
 import { accessAssertionHeader } from "@madori/contracts";
+import { z } from "zod";
 import {
   createAccessKey,
   formatEnvFile,
@@ -30,6 +33,7 @@ import type { ProcessOutcome } from "../../../../scripts/shared/processes.ts";
 
 const workerDirectory = fileURLToPath(new URL("../../", import.meta.url));
 const wrangler = join(workerDirectory, "node_modules/wrangler/bin/wrangler.js");
+const wranglerConfig = join(workerDirectory, "wrangler.jsonc");
 
 /**
  * Leads Wrangler's process group and stops Wrangler when its stdin pipe closes, which also
@@ -227,24 +231,122 @@ async function failAfterCleanup(
   throw error;
 }
 
+const templateRoot = join(workerDirectory, "node_modules/.cache/madori-d1-template");
+const packageVersion = z.object({ version: z.string() });
+
+async function templateKey(): Promise<string> {
+  const workerRequire = createRequire(join(workerDirectory, "package.json"));
+  const wranglerPackage = workerRequire.resolve("wrangler/package.json");
+  const miniflarePackage = createRequire(wranglerPackage).resolve("miniflare/package.json");
+  const workerdPackage = createRequire(miniflarePackage).resolve("workerd/package.json");
+  const version = async (path: string) =>
+    packageVersion.parse(JSON.parse(await readFile(path, "utf8"))).version;
+  const migrations = join(workerDirectory, "migrations");
+  const files = (await readdir(migrations)).sort();
+  return createHash("sha256")
+    .update(
+      JSON.stringify([
+        1,
+        await version(wranglerPackage),
+        await version(miniflarePackage),
+        await version(workerdPackage),
+        process.env.CLOUDFLARE_ENV ?? null,
+        (await readFile(wranglerConfig)).toString("base64"),
+        await Promise.all(
+          files.map(async (name) => [
+            name,
+            (await readFile(join(migrations, name))).toString("base64"),
+          ]),
+        ),
+      ]),
+    )
+    .digest("hex")
+    .slice(0, 16);
+}
+
+let template: Promise<string> | undefined;
+function migratedTemplate(): Promise<string> {
+  template ??= (async () => {
+    const final = join(templateRoot, await templateKey());
+    const state = join(final, "state");
+    try {
+      await readdir(state);
+      return state;
+    } catch (error) {
+      if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
+    }
+    await mkdir(templateRoot, { recursive: true });
+    const building = await mkdtemp(`${final}.building-`);
+    const removeBuild = () => rm(building, { recursive: true, force: true });
+    try {
+      await migrate(join(building, "state"));
+    } catch (error) {
+      return failAfterCleanup(() => error, removeBuild);
+    }
+    try {
+      await rename(building, final);
+    } catch (error) {
+      if (!(
+        error instanceof Error &&
+        "code" in error &&
+        (error.code === "ENOTEMPTY" || error.code === "EEXIST")
+      ))
+        return failAfterCleanup(() => error, removeBuild);
+      await removeBuild();
+    }
+    return state;
+  })();
+  return template;
+}
+
+async function copyMigratedState(state: string) {
+  await cp(await migratedTemplate(), state, { recursive: true, errorOnExist: true, force: false });
+}
+
+interface D1Binding {
+  prepare(query: string): unknown;
+  batch(statements: unknown[]): Promise<unknown>;
+}
+
 /** A fresh local D1 database with every migration applied, in a temporary directory. */
 export async function migratedDatabase() {
   const directory = await mkdtemp(join(tmpdir(), "madori-d1-test-"));
-  const remove = () => rm(directory, { recursive: true, force: true });
   const state = join(directory, "state");
+  let proxy: { dispose(): Promise<void> } | undefined;
+  let removing: Promise<void> | undefined;
+  const remove = () => {
+    removing ??= (async () => {
+      const problems = await cleanupSteps([
+        () => proxy?.dispose(),
+        () => rm(directory, { recursive: true, force: true }),
+      ]);
+      if (problems.length > 0) throw new AggregateError(problems, "D1 cleanup failed");
+    })();
+    return removing;
+  };
+  let db: D1Binding;
+  let split: (sql: string) => string[];
   try {
-    await migrate(state);
+    await copyMigratedState(state);
+    const { getTestPlatformProxy } = await import("../rpc/platform-proxy.ts");
+    ({ unstable_splitSqlQuery: split } = await import("wrangler"));
+    const opened = await getTestPlatformProxy<{ DB?: D1Binding }>({
+      configPath: wranglerConfig,
+      persist: { path: join(state, "v3") },
+      remoteBindings: false,
+    });
+    proxy = opened;
+    if (!opened.env.DB) throw new Error("wrangler.jsonc has no DB binding");
+    db = opened.env.DB;
   } catch (error) {
     return failAfterCleanup(() => error, remove);
   }
   return {
-    state,
-    /**
-     * Runs SQL directly. Rejects with D1's own error text (e.g. "FOREIGN KEY constraint
-     * failed"), so tests can assert which constraint stopped the statement.
-     */
-    execute: (sql: string) =>
-      runWrangler(["d1", "execute", "DB", "--local", "--persist-to", state, "--command", sql]),
+    async execute(sql: string) {
+      const statements = split(sql).filter((statement) => statement.trim().length > 0);
+      if (statements.length === 0) throw new Error("No SQL statements");
+      await db.batch(statements.map((statement) => db.prepare(statement)));
+    },
     remove,
   };
 }
@@ -298,7 +400,7 @@ export async function startLocalWorker({
     // fell through to static assets (for example without `run_worker_first`), only tests
     // that use `navigate()` would see this HTML; fetch-based `call()` still reaches the Worker.
     await writeFile(join(assets, "index.html"), testSpaHtml);
-    await migrate(state);
+    await copyMigratedState(state);
 
     resumeWorker = async () => {
       const started = startWrangler(

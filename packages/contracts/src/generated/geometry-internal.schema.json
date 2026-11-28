@@ -1364,6 +1364,52 @@
                           },
                           {
                             "properties": {
+                              "from": {
+                                "enum": [
+                                  "start",
+                                  "end"
+                                ],
+                                "type": "string"
+                              },
+                              "kind": {
+                                "const": "overlaps_joint",
+                                "type": "string"
+                              },
+                              "max_reach": {
+                                "format": "double",
+                                "type": "number"
+                              },
+                              "max_width": {
+                                "format": "double",
+                                "type": "number"
+                              },
+                              "min_distance": {
+                                "format": "double",
+                                "type": "number"
+                              },
+                              "vertices": {
+                                "items": {
+                                  "type": "string"
+                                },
+                                "type": "array"
+                              },
+                              "wall": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "wall",
+                              "vertices",
+                              "from",
+                              "min_distance",
+                              "max_reach",
+                              "max_width"
+                            ],
+                            "type": "object"
+                          },
+                          {
+                            "properties": {
                               "at": {
                                 "properties": {
                                   "x": {
@@ -3022,6 +3068,52 @@
                                             "other",
                                             "along",
                                             "up"
+                                          ],
+                                          "type": "object"
+                                        },
+                                        {
+                                          "properties": {
+                                            "from": {
+                                              "enum": [
+                                                "start",
+                                                "end"
+                                              ],
+                                              "type": "string"
+                                            },
+                                            "kind": {
+                                              "const": "overlaps_joint",
+                                              "type": "string"
+                                            },
+                                            "max_reach": {
+                                              "format": "double",
+                                              "type": "number"
+                                            },
+                                            "max_width": {
+                                              "format": "double",
+                                              "type": "number"
+                                            },
+                                            "min_distance": {
+                                              "format": "double",
+                                              "type": "number"
+                                            },
+                                            "vertices": {
+                                              "items": {
+                                                "type": "string"
+                                              },
+                                              "type": "array"
+                                            },
+                                            "wall": {
+                                              "type": "string"
+                                            }
+                                          },
+                                          "required": [
+                                            "kind",
+                                            "wall",
+                                            "vertices",
+                                            "from",
+                                            "min_distance",
+                                            "max_reach",
+                                            "max_width"
                                           ],
                                           "type": "object"
                                         },
@@ -5526,6 +5618,52 @@
                               },
                               {
                                 "properties": {
+                                  "from": {
+                                    "enum": [
+                                      "start",
+                                      "end"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "kind": {
+                                    "const": "overlaps_joint",
+                                    "type": "string"
+                                  },
+                                  "max_reach": {
+                                    "format": "double",
+                                    "type": "number"
+                                  },
+                                  "max_width": {
+                                    "format": "double",
+                                    "type": "number"
+                                  },
+                                  "min_distance": {
+                                    "format": "double",
+                                    "type": "number"
+                                  },
+                                  "vertices": {
+                                    "items": {
+                                      "type": "string"
+                                    },
+                                    "type": "array"
+                                  },
+                                  "wall": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "wall",
+                                  "vertices",
+                                  "from",
+                                  "min_distance",
+                                  "max_reach",
+                                  "max_width"
+                                ],
+                                "type": "object"
+                              },
+                              {
+                                "properties": {
                                   "at": {
                                     "properties": {
                                       "x": {
@@ -6909,6 +7047,52 @@
                                   "other",
                                   "along",
                                   "up"
+                                ],
+                                "type": "object"
+                              },
+                              {
+                                "properties": {
+                                  "from": {
+                                    "enum": [
+                                      "start",
+                                      "end"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "kind": {
+                                    "const": "overlaps_joint",
+                                    "type": "string"
+                                  },
+                                  "max_reach": {
+                                    "format": "double",
+                                    "type": "number"
+                                  },
+                                  "max_width": {
+                                    "format": "double",
+                                    "type": "number"
+                                  },
+                                  "min_distance": {
+                                    "format": "double",
+                                    "type": "number"
+                                  },
+                                  "vertices": {
+                                    "items": {
+                                      "type": "string"
+                                    },
+                                    "type": "array"
+                                  },
+                                  "wall": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "wall",
+                                  "vertices",
+                                  "from",
+                                  "min_distance",
+                                  "max_reach",
+                                  "max_width"
                                 ],
                                 "type": "object"
                               },
@@ -8583,6 +8767,52 @@
                           "other",
                           "along",
                           "up"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "properties": {
+                          "from": {
+                            "enum": [
+                              "start",
+                              "end"
+                            ],
+                            "type": "string"
+                          },
+                          "kind": {
+                            "const": "overlaps_joint",
+                            "type": "string"
+                          },
+                          "max_reach": {
+                            "format": "double",
+                            "type": "number"
+                          },
+                          "max_width": {
+                            "format": "double",
+                            "type": "number"
+                          },
+                          "min_distance": {
+                            "format": "double",
+                            "type": "number"
+                          },
+                          "vertices": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "wall": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "wall",
+                          "vertices",
+                          "from",
+                          "min_distance",
+                          "max_reach",
+                          "max_width"
                         ],
                         "type": "object"
                       },

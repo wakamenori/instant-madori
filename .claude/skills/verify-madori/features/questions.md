@@ -16,7 +16,7 @@ AIが案の代わりに質問と選択肢で応答すると、その指示は案
 
 ## How to get to it (user POV)
 
-- 画面には回答の操作がまだ無い（#113）。案件画面は、質問の保留を `待機中の指示（N件）が保留されています。` と表示する。質問は `GET /api/patterns/<id>/state` の `queueHold.job.question`（`{ messageId, number, body, choices }`）で読む。回答は `POST /api/patterns/<id>/messages` に `{"requestId":"<uuid>","body":"<回答>","questionId":"<question.messageId>"}` を送る。
+- 案件画面は、質問の保留を `AIが質問しています。選択肢を選ぶか、回答を書いて送ってください。` と表示し、質問の本文、選択肢のボタン、回答欄を状態の欄に出す（[指示の状態と操作](./status.md)）。API では、質問は `GET /api/patterns/<id>/state` の `queueHold.job.question`（`{ messageId, number, body, choices }`）で読む。回答は `POST /api/patterns/<id>/messages` に `{"requestId":"<uuid>","body":"<回答>","questionId":"<question.messageId>"}` を送る。
 - 台本のAIは、指示の一行目が `台本:question` なら最初の往復で `和室は必要ですか？`（選択肢 `必要`・`不要`）と質問する。`台本:question-after-edit` は、部屋を置いてから次の往復で同じ質問をする。
 
 ## Driving it with curl

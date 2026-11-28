@@ -43,6 +43,10 @@ const RULES: &[Rule] = &[
     },
     Rule {
         layer: Layer::Connections,
+        run: connections::opening_joints,
+    },
+    Rule {
+        layer: Layer::Connections,
         run: connections::passages,
     },
     Rule {
