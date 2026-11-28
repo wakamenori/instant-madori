@@ -281,6 +281,21 @@ await test("rejects HTTP errors and redirects before inference", async (t) => {
       assert.equal(requests, 1);
     });
   }
+  await t.test("a request ID outside the documented form is not kept", async () => {
+    const ai = anthropicAi({
+      apiKey: key,
+      model,
+      fetch: () =>
+        Promise.resolve(
+          new Response(grammarTooLarge, {
+            status: 400,
+            headers: { "request-id": "req_011 injected; secret=1" },
+          }),
+        ),
+    });
+    const response = await ai.roundTrip(request);
+    assert.equal("provider" in response && response.provider?.requestId, null);
+  });
 });
 
 await test("interrupted attempts throw safely and make exactly one request", async (t) => {

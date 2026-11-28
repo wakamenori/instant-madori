@@ -155,6 +155,18 @@ void test("invalid envelopes and invisible or control-containing plan names are 
     assert.match(result.error, /answer.name:/);
   }
   assert(parseToolCall("read_house", '{"query":{"kind":"inspection"}}').ok);
+  const ids = (list: string[]) => JSON.stringify({ query: { kind: "elements", ids: list } });
+  assert(parseToolCall("read_house", ids(["wall.1"])).ok);
+  for (const input of [
+    ids([]),
+    ids(Array.from({ length: 33 }, (_, i) => `wall.${i}`)),
+    ids(["wall 1"]),
+    ids(["x".repeat(65)]),
+    '{"query":{"kind":"inspection","ids":["wall.1"]}}',
+    '{"query":{"kind":"walls"}}',
+    '{"query":{"kind":"inspection"},"extra":true}',
+  ])
+    assert.equal(parseToolCall("read_house", input).ok, false, input.slice(0, 80));
   assert(
     parseToolCall(
       "finish",
