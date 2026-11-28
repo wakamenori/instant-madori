@@ -5,7 +5,7 @@ export function failureMessage(error: unknown): string {
   return "読み込みに失敗しました。";
 }
 
-function isConnectionFailure(error: unknown) {
+export function isConnectionFailure(error: unknown) {
   return (
     (error instanceof ApiError && error.code === "network") ||
     (error instanceof DOMException && error.name === "TimeoutError")

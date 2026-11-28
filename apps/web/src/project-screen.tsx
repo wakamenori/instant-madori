@@ -8,29 +8,15 @@ import {
   type NameTarget,
   type NameStatus,
   type ProjectSession,
-  type ProjectView,
   type RevisionView,
 } from "./project-session.ts";
 import { RouteLink } from "./navigation.tsx";
 import { projectsRoute, type ProjectId } from "./route.ts";
 import { formatDateTime } from "./format-date-time.ts";
 import { ModelViewport } from "./viewer/model-viewport.tsx";
+import { isWorking } from "./pattern-status.ts";
+import { instructionHint, StatusPanel } from "./status-panel.tsx";
 
-function activityText(activity: Extract<ProjectView, { kind: "open" }>["activity"]) {
-  switch (activity.kind) {
-    case "working":
-      return (
-        "指示を実行しています…" +
-        (activity.queued ? `待機中の指示が${activity.queued}件あります。` : "")
-      );
-    case "held":
-      return `待機中の指示（${activity.queued}件）が保留されています。`;
-    case "queued":
-      return `順番を待っています（${activity.count}件）…`;
-    case "idle":
-      return null;
-  }
-}
 function NameEditor({
   target,
   name,
@@ -109,8 +95,7 @@ export function ProjectScreen({ projectId }: { projectId: ProjectId }) {
   const [session] = useState(() => createProjectSession(projectId));
   useEffect(() => session.start(), [session]);
   const view = useSyncExternalStore(session.subscribe, session.getView);
-  const editing =
-    view.kind === "open" && (view.activity.kind === "working" || view.activity.kind === "queued");
+  const editing = view.kind === "open" && isWorking(view.status.now);
   return (
     <>
       <RouteLink to={projectsRoute}>案件一覧</RouteLink>
@@ -144,7 +129,13 @@ export function ProjectScreen({ projectId }: { projectId: ProjectId }) {
                   ? "AIが最初の案を編集中です。"
                   : "まだ案がありません。"}
             </p>
-            {view.activity.kind !== "idle" && <p role="status">{activityText(view.activity)}</p>}
+            <StatusPanel
+              view={view.status}
+              inputInFlight={view.inputInFlight}
+              onAct={session.act}
+              onAnswer={session.answer}
+              onRetry={session.retryOperation}
+            />
             {view.problem && (
               <p role="alert">
                 {view.problem} <button onClick={session.retry}>再試行</button>
@@ -154,7 +145,7 @@ export function ProjectScreen({ projectId }: { projectId: ProjectId }) {
           </section>
           <section className="conversation-pane" aria-label="会話">
             <ConversationLog timeline={view.timeline} onResend={session.resend} />
-            <InstructionForm onSend={session.send} />
+            <InstructionForm onSend={session.send} hint={instructionHint(view.status.now)} />
           </section>
         </div>
       )}

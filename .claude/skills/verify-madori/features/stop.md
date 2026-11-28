@@ -12,7 +12,7 @@
 
 ## How to get to it (user POV)
 
-- 画面には停止の操作がまだ無い。案件画面は、実行中と待機中の指示を表示する（[案件画面で案を見る](./project-view.md)）。停止は `POST /api/jobs/<jobId>/stop` に `{"requestId":"<uuid>"}` を送る。`jobId` は受付の応答の `job.jobId`。結果は停止の応答で読む。実行中に止めた指示は、`GET /api/patterns/<id>/state` の `lastFinishedJob` にも出る。待機中に止めた指示は実行していないので、`lastFinishedJob` に出ない。
+- 案件画面では、状態の欄の `止める` で実行中の指示を止める（[指示の状態と操作](./status.md)）。待機中の指示を一件ずつ止める操作は、画面にはまだ無い（#243）。API では、停止は `POST /api/jobs/<jobId>/stop` に `{"requestId":"<uuid>"}` を送る。`jobId` は受付の応答の `job.jobId`。結果は停止の応答で読む。実行中に止めた指示は、`GET /api/patterns/<id>/state` の `lastFinishedJob` にも出る。待機中に止めた指示は実行していないので、`lastFinishedJob` に出ない。
 
 ## Driving it with curl
 
