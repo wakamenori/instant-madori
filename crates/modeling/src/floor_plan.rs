@@ -1,7 +1,8 @@
 mod shape;
 mod xml;
 
-use madori_housing::{House, Point, Rejection, Rejections, StoreyId, TATAMI_SQUARE_METRES};
+use crate::{Assessment, model::RoomFloor};
+use madori_housing::{Point, Rejection, Rejections, StoreyId, TATAMI_SQUARE_METRES};
 use shape::*;
 use xml::{
     Attr::*,
@@ -35,8 +36,18 @@ struct RoomShape<'a> {
     name: &'a str,
     area: String,
     tatami: String,
-    outline: Ring,
+    parts: Vec<RoomPart>,
+    underlay: Option<Ring>,
     label: Label,
+}
+struct RoomPart {
+    outer: Ring,
+    holes: Vec<Ring>,
+}
+impl RoomPart {
+    fn rings(&self) -> impl Iterator<Item = &Ring> {
+        std::iter::once(&self.outer).chain(&self.holes)
+    }
 }
 #[derive(Clone, Copy)]
 struct Extent {
@@ -68,28 +79,59 @@ struct Scene<'a> {
     openings: Vec<OpeningShape<'a>>,
 }
 impl<'a> Scene<'a> {
-    fn build(house: &'a House, storey: &StoreyId, errors: &mut Vec<Rejection>) -> Self {
+    fn build(assessment: &Assessment<'a>, storey: &StoreyId, errors: &mut Vec<Rejection>) -> Self {
+        let house = assessment.house;
         let mut rooms = Vec::new();
         for room in house.rooms().filter(|r| r.storey() == storey) {
-            match room.interior() {
-                Ok(interior) => {
-                    let outline = Ring::from_interior(interior.outline());
-                    let text = interior.area().text();
-                    let area = format!("{} m²", text.square_metres);
-                    let tatami = format!("{}畳", text.tatami);
-                    let name = &room.data().name;
-                    let label = Label::new(&outline, [name, &area, &tatami]);
-                    rooms.push(RoomShape {
-                        id: room.data().id.as_str(),
-                        name,
-                        area,
-                        tatami,
-                        outline,
-                        label,
-                    });
+            let id = &room.data().id;
+            let (parts, underlay, area) = match assessment.floors.get(id) {
+                Some(RoomFloor::Housing(interior)) => (
+                    vec![RoomPart {
+                        outer: Ring::from_interior(interior.outline()),
+                        holes: Vec::new(),
+                    }],
+                    None,
+                    interior.area(),
+                ),
+                Some(RoomFloor::Projected {
+                    interior,
+                    parts,
+                    area,
+                }) => (
+                    parts
+                        .iter()
+                        .map(|part| RoomPart {
+                            outer: Ring::from_interior(&part.outer),
+                            holes: part.holes.iter().map(|h| Ring::from_interior(h)).collect(),
+                        })
+                        .collect(),
+                    Some(Ring::from_interior(interior.outline())),
+                    *area,
+                ),
+                Some(RoomFloor::Rejected(e)) => {
+                    errors.extend_from_slice(e.as_slice());
+                    continue;
                 }
-                Err(e) => errors.extend_from_slice(e.as_slice()),
-            }
+                None => continue,
+            };
+            let text = area.text();
+            let area = format!("{} m²", text.square_metres);
+            let tatami = format!("{}畳", text.tatami);
+            let name = &room.data().name;
+            let Some(largest) = parts.first() else {
+                continue;
+            };
+            let rings: Vec<_> = largest.rings().map(|ring| ring.0.as_slice()).collect();
+            let label = Label::new(&rings, [name, &area, &tatami]);
+            rooms.push(RoomShape {
+                id: id.as_str(),
+                name,
+                area,
+                tatami,
+                parts,
+                underlay,
+                label,
+            });
         }
         let mut walls = Vec::new();
         for wall in house
@@ -116,7 +158,14 @@ impl<'a> Scene<'a> {
     fn extent(&self) -> Extent {
         let origin = Point { x: 0., y: 0. };
         self.wall_extent
-            .or_else(|| Extent::from_points(self.rooms.iter().flat_map(|room| &room.outline.0)))
+            .or_else(|| {
+                Extent::from_points(
+                    self.rooms
+                        .iter()
+                        .flat_map(|room| &room.parts)
+                        .flat_map(|part| &part.outer.0),
+                )
+            })
             .unwrap_or(Extent {
                 min: origin,
                 max: origin,
@@ -125,13 +174,14 @@ impl<'a> Scene<'a> {
 }
 
 /// Draws one plan in house storey order and reports geometry errors across all storeys.
-pub fn render(house: &House) -> Result<Vec<StoreyPlan>, Rejections> {
+pub fn render(assessment: &Assessment<'_>) -> Result<Vec<StoreyPlan>, Rejections> {
     let mut errors = Vec::new();
-    let scenes: Vec<_> = house
+    let scenes: Vec<_> = assessment
+        .house
         .storeys()
         .map(|s| {
             let id = &s.data().id;
-            (id, Scene::build(house, id, &mut errors))
+            (id, Scene::build(assessment, id, &mut errors))
         })
         .collect();
     if let Some(e) = Rejections::from_errors(errors) {
@@ -157,23 +207,28 @@ fn line(svg: &mut Svg, a: Point, b: Point) {
         &[(X1, a.x()), (Y1, a.y()), (X2, b.x()), (Y2, b.y())],
     )
 }
-fn draw_room(svg: &mut Svg, room: &RoomShape) {
-    svg.open(Tag::G, &[(Class, Token("room")), (Element, Id(room.id))]);
-    let points: Vec<_> = room
-        .outline
-        .0
-        .iter()
-        .copied()
-        .map(ScreenPoint::from)
-        .collect();
+fn polygon(svg: &mut Svg, ring: &Ring, class: &'static str, fill: &'static str) {
+    let points: Vec<_> = ring.0.iter().copied().map(ScreenPoint::from).collect();
     svg.leaf(
         Tag::Polygon,
         &[
-            (Class, Token("room-floor")),
+            (Class, Token(class)),
             (Points, Value::Points(&points)),
-            (Fill, Token("#f7f5ef")),
+            (Fill, Token(fill)),
         ],
     );
+}
+fn draw_room(svg: &mut Svg, room: &RoomShape) {
+    if let Some(ring) = &room.underlay {
+        polygon(svg, ring, "wall-bulge", INK);
+    }
+    svg.open(Tag::G, &[(Class, Token("room")), (Element, Id(room.id))]);
+    for part in &room.parts {
+        polygon(svg, &part.outer, "room-floor", "#f7f5ef");
+        for hole in &part.holes {
+            polygon(svg, hole, "wall-bulge", INK);
+        }
+    }
     let Label { at, font } = room.label;
     svg.open(
         Tag::Text,
@@ -389,7 +444,11 @@ fn draw(id: &StoreyId, scene: &Scene) -> FloorPlanSvg {
         hidden_dimensions(
             &mut svg,
             room.id,
-            room.outline.edges().map(|axis| Dimension::new(axis, 250.)),
+            room.parts
+                .iter()
+                .flat_map(RoomPart::rings)
+                .flat_map(Ring::edges)
+                .map(|axis| Dimension::new(axis, 250.)),
         )
     }
     for wall in &scene.walls {

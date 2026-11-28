@@ -191,6 +191,10 @@ pub enum MismatchReason {
     NoRegion {
         seed: Point,
     },
+    MissingBulge {
+        modifier: ModifierId,
+        seed: Point,
+    },
     NoSeed {
         clearance: f64,
     },

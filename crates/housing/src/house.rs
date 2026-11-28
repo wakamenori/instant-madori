@@ -184,7 +184,7 @@ impl Face<'_> {
 
 #[derive(Clone, Copy, Debug)]
 pub struct RoomView<'a> {
-    house: &'a House,
+    pub(crate) house: &'a House,
     data: &'a Room,
     storey: &'a StoreyId,
 }

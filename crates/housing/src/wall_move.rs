@@ -450,15 +450,15 @@ impl House {
                     },
                 ));
             }
-            match room.interior() {
+            match room.expected_floor() {
                 Err(e) => errors.extend_from_slice(e.as_slice()),
-                Ok(interior) => rooms.push(RoomAreaChange {
+                Ok(floor) => rooms.push(RoomAreaChange {
                     room: room.data().id.clone(),
                     before: self
                         .room(&room.data().id)
-                        .and_then(|r| r.interior().ok())
-                        .map(|i| i.area()),
-                    after: interior.area(),
+                        .and_then(|r| r.expected_floor().ok())
+                        .map(|floor| floor.area()),
+                    after: floor.area(),
                 }),
             }
         }

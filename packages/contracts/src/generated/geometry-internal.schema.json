@@ -1633,6 +1633,40 @@
                           },
                           {
                             "properties": {
+                              "kind": {
+                                "const": "missing_bulge",
+                                "type": "string"
+                              },
+                              "modifier": {
+                                "type": "string"
+                              },
+                              "seed": {
+                                "properties": {
+                                  "x": {
+                                    "format": "double",
+                                    "type": "number"
+                                  },
+                                  "y": {
+                                    "format": "double",
+                                    "type": "number"
+                                  }
+                                },
+                                "required": [
+                                  "x",
+                                  "y"
+                                ],
+                                "type": "object"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "modifier",
+                              "seed"
+                            ],
+                            "type": "object"
+                          },
+                          {
+                            "properties": {
                               "clearance": {
                                 "format": "double",
                                 "type": "number"

@@ -70,6 +70,10 @@ upstreamの更新で`crates/viewport-gpu`が変わったら、次の三つを確
 
 upstreamが、使うときまで表を作らない仕組みを持ったら、その更新を取り込むときにこの独自変更を外し、`solidcraft.json`の`localPatches`から`crates/viewport-gpu/src/view.rs`を消す。upstreamへの提案は、運用者の了解を得てから行う。提案するときは、デスクトップがどこで表を前もって送るかをupstreamと決める。
 
+### `crates/doc`の投影のキャッシュがメッシュを保持する
+
+`crates/doc/src/project.rs` の投影キャッシュでは、キーに使う表示メッシュをエントリが保持する。同じプロセスで住宅を続けて作ると、前の住宅のメッシュが解放された後に次の住宅のメッシュが同じアドレスに置かれ、形状サービスが前の住宅の投影を返すことがあった。エントリを追い出すまで、そのキーに使ったメッシュは解放されない（最大64件）。これはupstreamでも起こり得る不具合なので、今後upstreamに修正を提案する。upstreamの更新で `project.rs` が変わったら、`houses_built_one_after_another_project_their_own_bulges` が引き続き通ることを確かめる。upstreamで同じ方法でキャッシュを修正したら、この独自変更を外す。
+
 ## 更新手順
 
 1. 現在の作業をコミットし、更新用のブランチを作る。

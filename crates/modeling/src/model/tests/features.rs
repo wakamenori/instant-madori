@@ -525,3 +525,340 @@ fn flush_add_restores_part_of_a_cut_on_the_painted_side() {
     m.check_colors(&h, &mut out);
     assert!(out.is_empty(), "{out:?}");
 }
+
+fn floor_add(
+    name: &str,
+    wall: &BoundaryId,
+    to: AddTo,
+    along: [f64; 2],
+    up: [f64; 2],
+    protrusion: f64,
+) -> Modifier {
+    let mut add = notch(name, wall, along, up);
+    add.effect = Effect::Add { to, protrusion };
+    add
+}
+
+fn assert_floor_areas(house: &House, square_mm: [f64; 2]) {
+    let model = Model::build(house, None).unwrap();
+    let assessment = model.assess(house);
+    assert!(
+        assessment.mismatches().is_empty(),
+        "{:?}",
+        assessment.mismatches()
+    );
+    for (room, expected) in house.rooms().zip(square_mm) {
+        assert_eq!(
+            assessment
+                .room_area(&room.data().id)
+                .unwrap()
+                .unrounded_square_metres(),
+            expected / 1e6
+        );
+    }
+}
+
+#[test]
+fn both_faces_follow_mid_height_and_full_height_adds_without_changing_room_boundaries() {
+    let input = fixture();
+    for up in [[900., 2000.], [0., 2400.]] {
+        let house = modified(
+            &input,
+            vec![floor_add(
+                "bulge",
+                &shared(&input),
+                AddTo::Both {},
+                [2000., 2600.],
+                up,
+                20.,
+            )],
+        );
+        assert_floor_areas(&house, [19_688_000.; 2]);
+        assert!(
+            house
+                .rooms()
+                .map(|room| &room.data().id)
+                .eq(input.rooms().map(|room| &room.data().id))
+        );
+        for (room, original) in house.rooms().zip(input.rooms()) {
+            assert!(
+                room.edges()
+                    .map(|edge| &edge.boundary.data().id)
+                    .eq(original.edges().map(|edge| &edge.boundary.data().id))
+            );
+        }
+    }
+}
+
+#[test]
+fn unchanged_floors_keep_the_housing_area() {
+    let house = fixture();
+    let model = Model::build(&house, None).unwrap();
+    let assessment = model.assess(&house);
+    assert!(assessment.mismatches().is_empty());
+    for room in house.rooms() {
+        let area = assessment.room_area(&room.data().id).unwrap();
+        assert_eq!(area, room.interior().unwrap().area());
+    }
+}
+
+#[test]
+fn add_to_one_face_only_changes_its_floor() {
+    let input = fixture();
+    let face = FaceRole::Room {
+        room: input.data().rooms[0].id.clone(),
+    };
+    let house = modified(
+        &input,
+        vec![floor_add(
+            "bulge",
+            &shared(&input),
+            AddTo::Face { face },
+            [2000., 2600.],
+            [900., 2000.],
+            20.,
+        )],
+    );
+    assert_floor_areas(&house, [19_688_000., 19_700_000.]);
+}
+
+#[test]
+fn projection_finds_floor_when_the_housing_seed_is_covered() {
+    let input = fixture();
+    let house = modified(
+        &input,
+        vec![floor_add(
+            "bulge",
+            &shared(&input),
+            AddTo::Both {},
+            [100., 3100.],
+            [900., 2000.],
+            2500.,
+        )],
+    );
+    assert_floor_areas(&house, [12_200_000.; 2]);
+}
+
+#[test]
+fn projection_counts_overlapping_adds_at_different_heights_once() {
+    let input = fixture();
+    let face = AddTo::Face {
+        face: FaceRole::Room {
+            room: input.data().rooms[0].id.clone(),
+        },
+    };
+    let house = modified(
+        &input,
+        vec![
+            floor_add(
+                "low",
+                &shared(&input),
+                face.clone(),
+                [300., 700.],
+                [300., 600.],
+                500.,
+            ),
+            floor_add(
+                "high",
+                &id(&input, pt(-100., -100.), pt(4000., -100.)),
+                face,
+                [3500., 3800.],
+                [1200., 1500.],
+                500.,
+            ),
+        ],
+    );
+    assert_floor_areas(&house, [19_428_000., 19_700_000.]);
+}
+
+#[test]
+fn projection_includes_add_that_reaches_the_next_room_above_a_partition() {
+    let input = fixture();
+    let shared = shared(&input);
+    let face = FaceRole::Room {
+        room: input.data().rooms[0].id.clone(),
+    };
+    let mut bridge = floor_add(
+        "bridge",
+        &exterior(&input),
+        AddTo::Face { face },
+        [2000., 2500.],
+        [1200., 1500.],
+        4500.,
+    );
+    if input.boundary(&bridge.wall).unwrap().start().data().at != pt(-100., -100.) {
+        bridge.from = WallEnd::End;
+    }
+    let mut data = input.into_data();
+    data.boundaries
+        .iter_mut()
+        .find(|wall| wall.id == shared)
+        .unwrap()
+        .wall
+        .height = 800.;
+    data.modifiers.push(bridge);
+    assert_floor_areas(&House::new(data).unwrap(), [17_730_000., 19_480_000.]);
+}
+
+#[test]
+fn assessment_detects_a_moved_or_missing_bulge() {
+    let input = fixture();
+    let room = &input.data().rooms[0].id;
+    let face = FaceRole::Room { room: room.clone() };
+    let bulge = |along| {
+        modified(
+            &input,
+            vec![floor_add(
+                "bulge",
+                &shared(&input),
+                AddTo::Face { face: face.clone() },
+                along,
+                [0., 2400.],
+                20.,
+            )],
+        )
+    };
+    let intended = bulge([2000., 2500.]);
+    let moved = Model::build(&bulge([3000., 3500.]), None).unwrap();
+    assert!(matches!(
+        reasons(&moved, &intended, room.as_str()).as_slice(),
+        [MismatchReason::MissingBulge { modifier, .. }] if modifier.as_str() == "bulge"
+    ));
+    let missing = Model::build(&input, None).unwrap();
+    let findings = reasons(&missing, &intended, room.as_str());
+    assert!(findings.iter().any(|reason| matches!(
+        reason,
+        MismatchReason::AreaMismatch {
+            expected_m2: 19.69,
+            projected_m2: 19.7,
+            ..
+        }
+    )));
+}
+
+#[test]
+fn a_bulge_that_spans_the_room_draws_both_floor_parts() {
+    let input = fixture();
+    let face = FaceRole::Room {
+        room: input.data().rooms[0].id.clone(),
+    };
+    let house = modified(
+        &input,
+        vec![floor_add(
+            "divider",
+            &exterior(&input),
+            AddTo::Face { face },
+            [2000., 2500.],
+            [900., 1200.],
+            3940.,
+        )],
+    );
+    let model = Model::build(&house, None).unwrap();
+    let assessment = model.assess(&house);
+    assert!(
+        assessment.mismatches().is_empty(),
+        "{:?}",
+        assessment.mismatches()
+    );
+    assert_eq!(
+        assessment
+            .room_area(&house.data().rooms[0].id)
+            .unwrap()
+            .unrounded_square_metres(),
+        17.73,
+    );
+    let plans = crate::floor_plan::render(&assessment).unwrap();
+    assert_eq!(
+        plans[0]
+            .svg
+            .as_str()
+            .matches("class=\"room-floor\"")
+            .count(),
+        3
+    );
+}
+
+#[test]
+fn houses_built_one_after_another_project_their_own_bulges() {
+    let input = fixture();
+    let bulge = |along| {
+        modified(
+            &input,
+            vec![floor_add(
+                "bulge",
+                &shared(&input),
+                AddTo::Both {},
+                along,
+                [900., 2000.],
+                20.,
+            )],
+        )
+    };
+    let intended = bulge([2000., 2600.]);
+    let mut wrong = Vec::new();
+    for round in 0..8 {
+        for (along, square_mm) in [
+            ([2000., 2600.], 19_688_000.),
+            ([1500., 2700.], 19_676_000.),
+            ([2000., 2600.], 19_688_000.),
+        ] {
+            let house = bulge(along);
+            let model = Model::build(&house, None).unwrap();
+            let assessment = model.assess(&house);
+            let areas: Vec<_> = house
+                .rooms()
+                .map(|room| assessment.room_area(&room.data().id).unwrap())
+                .map(|area| area.unrounded_square_metres() * 1e6)
+                .collect();
+            if areas != [square_mm; 2] || !assessment.mismatches().is_empty() {
+                wrong.push(format!("round {round} along {along:?}: {areas:?}"));
+            }
+        }
+        let moved = Model::build(&bulge([2400., 3000.]), None).unwrap();
+        let missing = moved
+            .assess(&intended)
+            .mismatches()
+            .iter()
+            .filter(|m| matches!(m.reason, MismatchReason::MissingBulge { .. }))
+            .count();
+        if missing != 2 {
+            wrong.push(format!(
+                "round {round}: {missing} missing_bulge for the moved bulge"
+            ));
+        }
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+#[test]
+fn area_mismatch_reports_the_measured_floor_area() {
+    let input = fixture();
+    let bulge = |protrusion| {
+        modified(
+            &input,
+            vec![floor_add(
+                "bulge",
+                &shared(&input),
+                AddTo::Both {},
+                [2000., 2600.],
+                [900., 2000.],
+                protrusion,
+            )],
+        )
+    };
+    let expected = bulge(20.);
+    let model = Model::build(&bulge(21.), None).unwrap();
+    let assessment = model.assess(&expected);
+    for room in expected.rooms() {
+        let id = &room.data().id;
+        assert!(assessment.mismatches().iter().any(|mismatch| matches!(
+            (&mismatch.subject, &mismatch.reason),
+            (Subject::Element { id: found, .. }, MismatchReason::AreaMismatch { .. })
+                if found == id.as_str()
+        )));
+        assert_eq!(
+            assessment.room_area(id).unwrap().unrounded_square_metres() * 1e6,
+            19_687_400.,
+        );
+    }
+}
