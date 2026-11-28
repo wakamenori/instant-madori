@@ -23,12 +23,15 @@ import {
   readPatternState,
   fetchRevisionView,
   fetchFloorPlan,
+  fetchAsset,
+  uploadAsset,
 } from "./api.ts";
 import {
   failureMessage,
   isConnectionFailure,
   renameFailureMessage,
   sendFailureMessage,
+  uploadFailure,
 } from "./failure.ts";
 import {
   describeStatus,
@@ -38,6 +41,9 @@ import {
   type Receipt,
   type StatusView,
 } from "./pattern-status.ts";
+import { attachmentLimits, type AttachmentDraft } from "./attachments.ts";
+import { createAssetImages, type AssetImages } from "./asset-images.ts";
+import { prepareImage, type PreparedImage } from "./prepare-image.ts";
 import type { ProjectId } from "./route.ts";
 
 type OperationRequest = { action: Action; requestId: string; closedQuestion: boolean };
@@ -108,6 +114,9 @@ export type ProjectView =
       shown: RevisionView | null;
       problem: string | null;
       timeline: readonly TimelineEntry[];
+      drafts: readonly AttachmentDraft[];
+      attachNotice: string | null;
+      preparingAttachments: boolean;
     };
 function delay(ms: number, signal: AbortSignal): Promise<void> {
   signal.throwIfAborted();
@@ -138,13 +147,28 @@ async function loadRevision(
   return { revision, display, plan: plan ? { kind: "ready", plan } : { kind: "rejected" } };
 }
 
-type Dependencies = { wait?: typeof delay; newRequestId?: () => string; sendTimeoutMs?: number };
+type Dependencies = {
+  wait?: typeof delay;
+  newRequestId?: () => string;
+  sendTimeoutMs?: number;
+  uploadTimeoutMs?: number;
+  prepareImage?: (file: Blob) => Promise<PreparedImage>;
+};
+type ActiveSession = {
+  controller: AbortController;
+  latch: ReturnType<typeof wakeLatch>;
+  files: Blob[];
+};
 export type ProjectSession = {
   readonly start: () => () => void;
   readonly subscribe: (listener: () => void) => () => void;
   readonly getView: () => ProjectView;
   readonly rename: (target: NameTarget, name: string) => Promise<boolean>;
-  readonly send: (body: InstructionBody) => void;
+  readonly send: (body: InstructionBody) => boolean;
+  readonly attach: (files: readonly Blob[]) => void;
+  readonly detach: (key: string) => void;
+  readonly retryAttachment: (key: string) => void;
+  readonly assetImages: AssetImages;
   readonly answer: (question: OpenQuestion, body: InstructionBody) => void;
   readonly resend: (requestId: string) => void;
   readonly act: (action: Action) => void;
@@ -203,6 +227,10 @@ export function createProjectSession(
   let state: PatternStateResponse | null = null;
   let rows: ServerRows = new Map();
   let outbox: Outbox = [];
+  let drafts: readonly AttachmentDraft[] = [];
+  let attachNotice: string | null = null;
+  const uploads = new Map<string, AbortController>();
+  let assetImages = createAssetImages(fetchAsset);
   let project: Project | undefined;
   let names: Record<NameTarget, NameStatus> = {
     project: { kind: "idle" },
@@ -215,7 +243,7 @@ export function createProjectSession(
   let operation: Operation | null = null;
   let lastResult: OperationResult | null = null;
   const newRequestId = deps.newRequestId ?? (() => crypto.randomUUID());
-  let active: { controller: AbortController; latch: ReturnType<typeof wakeLatch> } | null = null;
+  let active: ActiveSession | null = null;
 
   function publish(next: ProjectView) {
     view = next;
@@ -248,6 +276,9 @@ export function createProjectSession(
           canRetry: Boolean(result?.retry),
         },
         timeline: buildTimeline(rows, outbox, state),
+        drafts,
+        attachNotice,
+        preparingAttachments: Boolean(active?.files.length),
       });
     }
   }
@@ -353,7 +384,7 @@ export function createProjectSession(
       while (active && pattern) {
         const entry = outbox.find((e) => e.delivery.kind === "sending");
         if (!entry) return;
-        const { requestId, body, questionId } = entry;
+        const { requestId, body, questionId, attachmentIds } = entry;
         const lifetime = active.controller.signal;
         const signal = AbortSignal.any([
           lifetime,
@@ -362,7 +393,12 @@ export function createProjectSession(
         try {
           const job = await sendInstruction(
             pattern.id,
-            { requestId, body, questionId: questionId ?? undefined },
+            {
+              requestId,
+              body,
+              questionId: questionId ?? undefined,
+              attachmentIds: attachmentIds.length > 0 ? [...attachmentIds] : undefined,
+            },
             signal,
           );
           lifetime.throwIfAborted();
@@ -387,12 +423,17 @@ export function createProjectSession(
   }
 
   let nextSequence = 0;
-  function enqueue(body: InstructionBody, questionId: string | null) {
+  function enqueue(
+    body: InstructionBody,
+    questionId: string | null,
+    attachmentIds: readonly string[] = [],
+  ) {
     outbox = [
       ...outbox,
       {
         body,
         questionId,
+        attachmentIds,
         requestId: newRequestId(),
         seq: nextSequence++,
         generation,
@@ -401,6 +442,75 @@ export function createProjectSession(
     ];
     publishOpen();
     void drain();
+  }
+
+  function setAttachmentState(key: string, state: AttachmentDraft["state"]) {
+    drafts = drafts.map((draft) => (draft.key === key ? { ...draft, state } : draft));
+    publishOpen();
+  }
+
+  async function upload(draft: AttachmentDraft, lifetime: AbortSignal) {
+    const { key, requestId, blob } = draft;
+    const controller = new AbortController();
+    uploads.set(key, controller);
+    const cancelled = AbortSignal.any([controller.signal, lifetime]);
+    const signal = AbortSignal.any([cancelled, AbortSignal.timeout(deps.uploadTimeoutMs ?? 60000)]);
+    try {
+      const asset = await uploadAsset(blob, requestId, signal);
+      signal.throwIfAborted();
+      assetImages.seed(asset.id, blob);
+      if (!cancelled.aborted) setAttachmentState(key, { kind: "ready", assetId: asset.id });
+    } catch (error) {
+      if (!cancelled.aborted) setAttachmentState(key, uploadFailure(error));
+    } finally {
+      if (uploads.get(key) === controller) uploads.delete(key);
+    }
+  }
+
+  async function prepareAttachment(file: Blob): Promise<Blob | string> {
+    if (!file.type.startsWith("image/")) return "画像ファイルではありません。";
+    let blob: Blob;
+    try {
+      ({ blob } = await (deps.prepareImage ?? prepareImage)(file));
+    } catch {
+      return "この画像を読み込めませんでした。PNGやJPEGの画像を選んでください。";
+    }
+    if (blob.size > attachmentLimits.maxBytes)
+      return "画像を縮小しても大きすぎるため添えられません（7.5MBまで）。";
+    return blob;
+  }
+
+  async function prepareAttachments({ files, controller }: ActiveSession) {
+    const lifetime = controller.signal;
+    for (let file = files[0]; file && !lifetime.aborted; file = files[0]) {
+      if (drafts.length >= attachmentLimits.maxPerInstruction) {
+        attachNotice = "画像は一つの指示に3枚まで添えられます。";
+        files.length = 0;
+        publishOpen();
+        return;
+      }
+      const result = await prepareAttachment(file);
+      if (lifetime.aborted) return;
+      files.shift();
+      const hasMore = files.length > 0;
+      if (typeof result === "string") {
+        attachNotice = result;
+      } else {
+        const requestId = newRequestId();
+        const draft: AttachmentDraft = {
+          key: requestId,
+          requestId,
+          blob: result,
+          previewUrl: URL.createObjectURL(result),
+          state: { kind: "uploading" },
+        };
+        attachNotice = null;
+        drafts = [...drafts, draft];
+        void upload(draft, lifetime);
+      }
+      publishOpen();
+      if (!hasMore) return;
+    }
   }
 
   async function operate(request: OperationRequest) {
@@ -446,7 +556,11 @@ export function createProjectSession(
       active?.controller.abort();
       const controller = new AbortController();
       const latch = wakeLatch(controller.signal, deps.wait ?? delay);
-      active = { controller, latch };
+      active = { controller, latch, files: [] };
+      if (drafts.length > 0) {
+        drafts = drafts.map((draft) => ({ ...draft, previewUrl: URL.createObjectURL(draft.blob) }));
+        publishOpen();
+      }
       void poll(controller.signal, latch);
       void drain();
       controller.signal.addEventListener(
@@ -454,6 +568,21 @@ export function createProjectSession(
         () => {
           if (active?.controller !== controller) return;
           active = null;
+          uploads.clear();
+          drafts = drafts.map((draft) => {
+            URL.revokeObjectURL(draft.previewUrl);
+            return {
+              ...draft,
+              previewUrl: "",
+              state:
+                draft.state.kind === "uploading"
+                  ? uploadFailure(controller.signal.reason)
+                  : draft.state,
+            };
+          });
+          const previousImages = assetImages;
+          assetImages = createAssetImages(fetchAsset);
+          previousImages.dispose();
           if (operation !== null) lastResult = null;
           operation = null;
           for (const target of ["project", "pattern"] as const) {
@@ -532,8 +661,49 @@ export function createProjectSession(
         return false;
       }
     },
+    get assetImages() {
+      return assetImages;
+    },
+    attach(files) {
+      if (!active || view.kind !== "open" || files.length === 0) return;
+      const preparing = active.files.length > 0;
+      active.files.push(...files);
+      if (!preparing) {
+        const session = active;
+        publishOpen();
+        void prepareAttachments(session);
+      }
+    },
+    detach(key) {
+      const draft = drafts.find((draft) => draft.key === key);
+      if (!draft) return;
+      uploads.get(key)?.abort();
+      uploads.delete(key);
+      URL.revokeObjectURL(draft.previewUrl);
+      drafts = drafts.filter((draft) => draft.key !== key);
+      publishOpen();
+    },
+    retryAttachment(key) {
+      if (!active) return;
+      const draft = drafts.find((draft) => draft.key === key);
+      if (draft?.state.kind !== "failed" || !draft.state.retryable) return;
+      const lifetime = active.controller.signal;
+      setAttachmentState(key, { kind: "uploading" });
+      if (!lifetime.aborted && drafts.some((draft) => draft.key === key))
+        void upload(draft, lifetime);
+    },
     send(body) {
-      if (active && view.kind === "open") enqueue(body, null);
+      if (!active || view.kind !== "open" || active.files.length > 0) return false;
+      const attachmentIds: string[] = [];
+      for (const draft of drafts) {
+        if (draft.state.kind !== "ready") return false;
+        attachmentIds.push(draft.state.assetId);
+      }
+      for (const draft of drafts) URL.revokeObjectURL(draft.previewUrl);
+      drafts = [];
+      attachNotice = null;
+      enqueue(body, null, attachmentIds);
+      return true;
     },
     answer(question, body) {
       if (
