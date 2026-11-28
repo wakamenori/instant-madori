@@ -7,6 +7,7 @@ import type { AiRequest, AiResponse, AiResult, Conversation, Reply } from "../sr
 import { scriptedAi } from "../src/ai/scripted.ts";
 import type { ScriptStep } from "../src/ai/scripted.ts";
 import { selectAi } from "../src/ai/select.ts";
+import { outputTokenLimit } from "../src/limits.ts";
 
 const script: ScriptStep[] = [
   {
@@ -45,7 +46,7 @@ const roomAdded: Reply = {
 };
 
 function request(conversation: Conversation): AiRequest {
-  return { conversation, maxOutputTokens: 4096 };
+  return { conversation, maxOutputTokens: outputTokenLimit(4096) };
 }
 
 function after(conversation: Conversation, response: AiResponse, reply: Reply): Conversation {
@@ -192,19 +193,49 @@ await test("scripted AI", async (t) => {
 });
 
 await test("AI selection", async (t) => {
-  for (const ENVIRONMENT of ["local", "staging"]) {
-    await t.test(`${ENVIRONMENT} answers from the script`, async () => {
-      const result = await selectAi({ ENVIRONMENT }).roundTrip(request(opening));
-      assert.equal(result.kind, "ok");
+  const unexpectedSmokeCheck = () => assert.fail("Smoke identity is staging-only");
+  const opus = "claude-opus-5-5";
+  for (const key of [undefined, "", "   ", " fake-test-key "]) {
+    const env = { ANTHROPIC_API_KEY: key };
+    await t.test(`selection with ${key?.trim() ? "a key" : JSON.stringify(key)}`, async () => {
+      const local = selectAi({ ...env, ENVIRONMENT: "local" });
+      const staging = selectAi({ ...env, ENVIRONMENT: "staging" });
+      const production = selectAi({ ...env, ENVIRONMENT: "production" });
+      const expected = key?.trim() ? opus : "none";
+
+      assert.equal((await local.forNewJob(unexpectedSmokeCheck)).model, "scripted");
+      assert.equal((await staging.forNewJob(() => Promise.resolve(true))).model, "scripted");
+      assert.equal((await staging.forNewJob(() => Promise.resolve(false))).model, expected);
+      assert.equal((await production.forNewJob(unexpectedSmokeCheck)).model, expected);
+      assert.equal(local.continuing("scripted").model, "scripted");
+      assert.equal(staging.continuing("scripted").model, "scripted");
+      assert.equal(production.continuing("scripted").model, "none");
+      assert.equal(local.continuing(opus).model, "none");
+      for (const roster of [staging, production]) {
+        assert.equal(roster.continuing(opus).model, expected);
+        assert.equal(roster.continuing("unknown-model").model, "none");
+      }
+      if (!key?.trim()) {
+        const ai = await staging.forNewJob(() => Promise.resolve(false));
+        const result = await ai.roundTrip(request(opening));
+        assert.equal(result.kind === "failed" && result.reason, "no_provider");
+      }
     });
   }
 
-  for (const ENVIRONMENT of ["production", "", "Local", "staging ", "preview"]) {
-    await t.test(`${JSON.stringify(ENVIRONMENT)} cannot use the scripted AI`, async () => {
-      const result = await selectAi({ ENVIRONMENT }).roundTrip(request(opening));
-      assert.equal(result.kind === "failed" && result.reason, "no_provider");
-    });
+  for (const ENVIRONMENT of ["", "Local", "staging ", "preview"]) {
+    const roster = selectAi({ ENVIRONMENT, ANTHROPIC_API_KEY: "fake-test-key" });
+    assert.equal((await roster.forNewJob(unexpectedSmokeCheck)).model, "none");
+    assert.equal(roster.continuing("scripted").model, "none");
+    assert.equal(roster.continuing(opus).model, "none");
   }
+});
+
+await test("output token limits must be positive safe integers", () => {
+  for (const value of [0, -1, 1.5, NaN, Infinity, 2 ** 53]) {
+    assert.throws(() => outputTokenLimit(value), RangeError);
+  }
+  assert.equal(outputTokenLimit(16_000), 16_000);
 });
 
 await test("stored turns preserve thinking, tool input bytes, origin and usage", async () => {

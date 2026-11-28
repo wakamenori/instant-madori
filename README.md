@@ -318,7 +318,11 @@ GitHubはmainへのpushの前後のコミットを比較し、変更したファ
 
 成功したデプロイごとに、検証用の固定パターンに案が一件増えます。R2には、AIが適用した住宅操作の一括ごとに版2のスナップショット（住宅データ、表示データ、平面図、検査結果とマニフェスト）と、AIとの往復の記録を保存します。案のあるパターンでは一括は一つです。D1では `messages` が指示とAIの説明の二行、`jobs`、`snapshots`、`revisions` が各一行、`requests` が指示の受付と案件名の変更で二行増えます。保留を解いたときは `requests` がさらに一行増えます。stagingではこの増加分を検証用データとして保存します。
 
-runnerは、`MADORI_ENV_FILE` が指す `.env` から、マイグレーションには `CLOUDFLARE_API_TOKEN`、デプロイには加えて `STAGING_ACCESS_CLIENT_ID`、疎通確認には `STAGING_ACCESS_CLIENT_ID` と `STAGING_ACCESS_CLIENT_SECRET` を読みます。Client IDはログにマスクしてから、デプロイの `--var ACCESS_VERIFIER_CLIENT_ID:<Client ID>` でWorkerへ渡します。空の値や空白だけならデプロイ前に失敗します。Client IDはリポジトリに保存しません。service tokenはAccessアプリの `non_identity` のポリシーで許可し、期限は1年です。
+stagingのAIは、ジョブの持ち主で決まります。疎通の確認の検証用ユーザー（`staging:verifier`）のジョブだけが台本のAIを使い、運用する人や下の実際のAIの検証用ユーザーのジョブは、AnthropicのClaude Opus 5.5を使います。デプロイごとの疎通の確認に費用をかけないためです。APIキーはWorkerの秘密情報 `ANTHROPIC_API_KEY` としてstagingだけに置き、リポジトリ、`.dev.vars`、ローカルの検査には置きません。キーが無いstagingでは、実際のAIのジョブは台本のAIへ戻らず、提供元の接続がない失敗（`ai_unavailable`）で終わります。localは常に台本のAIを使います。
+
+実際のAIは、二つ目のservice tokenを、もう一人の検証用ユーザー（subjectは `staging:ai-verifier`、メールアドレスは `ai-verifier@staging.invalid`）として使って確かめます。疎通の確認の検証用ユーザーとは別の内部ユーザーなので、案件も別になり、`JOB_TEST_HOLD` の待ちもかかりません。このユーザーで指示を送るたびに、実際の費用がかかります。費用は試行ごとの予約で一指示5米ドルまでに止まります。試行ごとの予約額と確定額は `ai_attempts` に、利用量と時間はWorkers Logsの `ai.attempt` の行に残ります。
+
+runnerは、`MADORI_ENV_FILE` が指す `.env` から、マイグレーションには `CLOUDFLARE_API_TOKEN`、デプロイには加えて `STAGING_ACCESS_CLIENT_ID` と、あれば `STAGING_AI_ACCESS_CLIENT_ID`、疎通確認には `STAGING_ACCESS_CLIENT_ID` と `STAGING_ACCESS_CLIENT_SECRET` を読みます。Client IDはログにマスクしてから、デプロイの `--var ACCESS_VERIFIER_CLIENT_ID:<Client ID>` と `--var ACCESS_AI_VERIFIER_CLIENT_ID:<Client ID>` でWorkerへ渡します。疎通確認のClient IDが空の値や空白だけならデプロイ前に失敗します。実際のAIの検証用のClient IDが無ければ、その設定を渡さずにデプロイし、そのservice tokenは403 `forbidden` になります。二つのClient IDが同じなら、Workerは設定の誤りとして要求を500で拒みます。Client IDはリポジトリに保存しません。service tokenはどちらもAccessアプリの `non_identity` のポリシーで許可し、期限は1年です。実際のAIの検証用のClient Secretはworkflowでは使わず、検証する人とエージェントが、メインのチェックアウトの `.env` に `STAGING_AI_ACCESS_CLIENT_ID` と `STAGING_AI_ACCESS_CLIENT_SECRET` として持ちます。
 
 stagingをデプロイし直す方法は、このworkflowだけです。試験用のブランチも同じ方法を使います。
 
@@ -384,12 +388,58 @@ CLOUDFLARE_ACCOUNT_ID=4a67230af28ec94d9c70ca48572d8e9f mise exec -- node --env-f
 5. `workers_dev` を無効にしたまま `pnpm --filter @madori/worker exec wrangler deploy --env staging` でデプロイし、公開前にWorkerを作ります。
 6. Worker宛先（`destinations: [{"type": "worker", "worker_id": "<WorkerのID>"}]`）のAccessアプリと招待ポリシーを作成します。WorkerのIDは `GET /accounts/{account_id}/workers/scripts` の `tag` です。APIで作る場合は、Accessのアプリとポリシーを編集できるトークンを使います。
 7. Accessアプリのaudienceを `ACCESS_AUD` に設定し、`workers_dev` を有効にします。service tokenをAccessで許可して `.env` に設定し、そのrefを上記のworkflowでデプロイします。ログインせずに `/` へアクセスすると、Accessのログイン画面へリダイレクトされることを確かめます。
+8. Anthropicのコンソールで、stagingだけが使うAPIキーを作り、`pnpm --filter @madori/worker exec wrangler secret put ANTHROPIC_API_KEY --env staging` で置きます。値は入力の求めに貼り、コマンドの引数やファイルに残しません。このコマンドはWorkerの新しい版を作るので、続けて上記のworkflowでデプロイし直し、検証用のClient IDを渡し直します。キーは、下の費用の照合でstagingの分だけを数えられるよう、ほかの用途と共有しません。
 
 `GEOMETRY_INSTANCE_TYPE` と `GEOMETRY_IDLE_TIMEOUT_MS` は環境別の設定です。値の根拠は[検証3](docs/verification/verification-03.md)にあります。休止時間は10分のままです。接続用DOが操作の開始・終了時刻を保存し、最後の操作の完了から休止時間が過ぎたらアラームでContainerを止めます。操作には応答本文の読取りを含み、操作中は止めません。停止ログ `container.idle_stopped` の `ms` は最後の操作からの経過時間です。DOが再起動しても保存した期限を戻します。実行環境の停止猶予は休止時間に60秒を足した値にするため、休止時間の設定範囲は60,000〜21,540,000 msです。停止に失敗した場合は記録を残し、1秒から倍増し休止時間を上限とする間隔で再試行します。ローカルの確認は[検証4](docs/verification/verification-04.md)に記録します。Workers Logsを有効にしているので、接続用DOの `container.ready`（`mode: cold` の `ms` が起動時間）とContainer内の `geometry.request`（`vmHwmKib` がメモリの最大値）を、Workers Logsの検索APIで読めます。検索には `Workers Observability Write` の権限を持つトークンが要ります。検証3で使った取得と集計のスクリプトは[記録フォルダ](docs/verification/evidence/verification-03/)にあります。
 
 Container接続用DOと内部プロトコルは `apps/worker/src/geometry/` に置き、`services/` から呼びます。パターンごとの調整DOは `objects/`、ジョブのWorkflowは `workflows/` に置き、どちらも `services/` だけを呼びます。ジョブの形状処理は、パターンごとの接続用DOとそのContainerで行います。
 
 内部APIの本文は `crates/geometry-api` で定義し、`pnpm generate:geometry` でJSON Schema・Zod・TypeScript型を再生成します。Rustをビルドする `pnpm check` でも再生成し、RustとNodeのテストが生成結果の一致を検査します。
+
+### AIの費用を提供元の報告と照合する
+
+D1の `ai_attempts` は、AIの試行ごとに予約額と、応答の利用量から求めた確定額を持ちます。応答を受け取れなかった試行は確定額を持たず、予約額のまま数えます。月に一度、閉じた月について、この数え方がAnthropicの請求を下回っていないことを、Anthropicの利用量と費用の報告と比べて確かめます。読むだけで、行は書き換えません（計画5.2）。
+
+Anthropicの値は、月が終わってから約7日まで修正されるので、終わってから7日を過ぎた月を照合します。報告を読むには、組織の管理者がコンソールで作るAdmin APIのキー（`sk-ant-admin` で始まる）が要ります。このキーは照合する人の手元だけに置き、リポジトリ、runner、Workerには置きません。stagingのAPIキーのID（`apikey_` で始まる。秘密ではない）は、コンソールのAPIキーの一覧で確かめます。
+
+1. D1から、照合する月（例は2026-11）と前の月の数を読みます。`tail_` で始まる列は、月の最後の10分に予約した試行です。一つの試行は予約から540秒以内に終わるので、次の月に請求されることがあります。台本のAIの試行は利用量0で精算されるので、モデルで除きます。
+
+   ```sh
+   pnpm --filter @madori/worker exec wrangler d1 execute DB --remote --env staging --json --command "
+   SELECT a.month,
+     count(*) AS attempts,
+     count(a.charged) AS settled,
+     coalesce(sum(a.charged), 0) AS charged,
+     coalesce(sum(CASE WHEN a.charged IS NULL THEN a.reserved END), 0) AS unsettled_reserve,
+     coalesce(sum(a.cache_write_1h_tokens), 0) AS write_1h_tokens,
+     count(CASE WHEN a.reserved_at >= strftime('%Y-%m-%dT%H:%M:%fZ', a.month || '-01', '+1 month', '-10 minutes') THEN 1 END) AS tail_attempts,
+     coalesce(sum(CASE WHEN a.reserved_at >= strftime('%Y-%m-%dT%H:%M:%fZ', a.month || '-01', '+1 month', '-10 minutes') THEN a.counted END), 0) AS tail_counted
+   FROM ai_attempts AS a JOIN jobs AS j ON j.id = a.job_id
+   WHERE a.month IN ('2026-10', '2026-11') AND j.ai_model = 'claude-opus-5-5'
+   GROUP BY a.month"
+   ```
+
+2. Anthropicから、同じ月の費用と利用量を、stagingのAPIキーに絞って読みます。範囲はUTCの月初から次の月初までで、31日以内なので一回で読めます。応答の `data_refreshed_at` が範囲の終わりより後であることを確かめます。
+
+   ```sh
+   read -rs ANTHROPIC_ADMIN_KEY && export ANTHROPIC_ADMIN_KEY
+   for kind in cost usage; do
+     curl -sS --globoff "https://api.anthropic.com/v1/organizations/analytics/$kind?starting_at=2026-11-01T00:00:00Z&ending_at=2026-12-01T00:00:00Z&api_key_ids[]=<stagingのAPIキーのID>&group_by[]=model" \
+       -H "anthropic-version: 2026-10-21" \
+       -H "anthropic-beta: analytics-usage-cost-2026-08-24" \
+       -H "x-api-key: $ANTHROPIC_ADMIN_KEY"
+   done
+   ```
+
+   費用は、`claude-opus-5-5` の行の `cost.list_amount` を使います。`list_amount` は表示の料金での額で、D1が使う料金の表（`apps/worker/src/limits.ts`）と同じ基準です。`amount` は割引の後の額なので比べません。どちらも小数6桁のセントの文字列で、マイクロ米ドルにするには10,000を掛けます。利用量の `requests` は要求の数です。
+
+3. 照合する月の費用をP（マイクロ米ドル）とし、D1の照合する月の行と、前の月の `tail_counted` と `tail_attempts` で次を確かめます。
+
+   - 上限：P ≤ `charged` + `unsettled_reserve` + 前の月の `tail_counted`。精算されない試行は請求されうる額の上限で数えており、前の月の最後に予約した試行はこの月に請求されうるためです。超えたら、D1がAnthropicの請求より少なく数えています。
+   - 下限：P ≥ `charged` − `settled` − 3 × `write_1h_tokens` − `tail_counted`。確定額は試行ごとに1マイクロ米ドル未満を切り上げます。接続は5分のキャッシュの書込みしか頼まないので、`write_1h_tokens` は、応答が書込みの内訳を返さず1時間の料金で数えた分です。5分の料金との差は、1トークンあたり3マイクロ米ドルです。この月の最後に予約した試行は次の月に請求されうるので、その分も差し引きます。下回ったら、D1が多く数えすぎています。
+   - 要求の数：`requests` ≤ `attempts` + 前の月の `tail_attempts`。推論の前に断られた要求は請求されず、数に入らないことがあります。
+
+   外れたときは、料金の表とAnthropicの料金の表示、そのAPIキーをほかの用途に使っていないか、`data_refreshed_at`、月の境目の試行を順に確かめます。最終の額は請求書で確かめます。
 
 ### stagingのContainerを計測する
 

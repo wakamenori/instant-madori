@@ -1,5 +1,5 @@
 import type { turnCodec } from "../ai/turns.ts";
-import type { Ai } from "../ai/round-trip.ts";
+import type { AiRoster } from "../ai/select.ts";
 import type { JobStepName } from "../log.ts";
 import type { JobStepResult } from "./jobs.ts";
 import type { JobTestHold } from "./job-test-hold.ts";
@@ -89,7 +89,7 @@ export type JobWorkflowDeps = StoreDeps<
   StoreDeps<"snapshots", "write" | "open"> &
   StoreDeps<"work", "read" | "keep"> &
   Pick<ServiceDeps, "geometry" | "wakePattern"> & {
-    ai: Ai;
+    ai: AiRoster;
     turns: typeof turnCodec;
     testHold: JobTestHold | null;
   };

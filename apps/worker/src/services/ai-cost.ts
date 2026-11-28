@@ -1,15 +1,28 @@
 import type { JobExecutionRight } from "../storage/job-execution.ts";
 import type { AiCostDeps } from "./deps.ts";
-import type { Ai, AiRequest, AiResult } from "../ai/round-trip.ts";
+import type { Ai, AiRequest, AiResult, Usage } from "../ai/round-trip.ts";
 import type { limits } from "../limits.ts";
+import { describeError, logEvent } from "../log.ts";
 import { estimateAttempt, settleAttempt } from "./cost.ts";
 
 export type AiCostLimit = keyof typeof limits.aiCost;
 type AiFailure = Extract<AiResult, { kind: "failed" }>;
-const settlesAtZero = { no_provider: true, script_ended: true, rejected: true } satisfies Record<
-  AiFailure["reason"],
-  boolean
->;
+
+const zeroUsage: Usage = {
+  uncachedInputTokens: 0,
+  outputTokens: 0,
+  cacheReadTokens: 0,
+  cacheWrite5mTokens: 0,
+  cacheWrite1hTokens: 0,
+};
+const failureUsage = {
+  rejected: () => zeroUsage,
+  script_ended: () => zeroUsage,
+  no_provider: () => zeroUsage,
+  unusable: (response) => response.usage,
+} satisfies {
+  [Reason in AiFailure["reason"]]: (response: AiFailure & { reason: Reason }) => Usage;
+};
 
 export async function meteredRoundTrip(
   deps: AiCostDeps & { ai: Ai },
@@ -18,31 +31,61 @@ export async function meteredRoundTrip(
 ): Promise<AiResult | { kind: "limited"; limit: AiCostLimit } | { kind: "execution_lost" }> {
   const estimate = estimateAttempt(request);
   const attemptId = deps.runtime.newId();
+  const now = deps.runtime.now();
+  const { jobId, generation } = right.reference;
+  const fields = { jobId, generation, attemptId, reservedMicroUsd: estimate.reserve };
+
   const result = await deps.store.aiCost.reserve(right, {
     attemptId,
     reserve: estimate.reserve,
     estimatedInputTokens: estimate.inputTokens,
     estimatedOutputTokens: estimate.outputTokens,
-    now: deps.runtime.now(),
+    now,
   });
-  if (result.kind !== "reserved") return result;
-  const response = await deps.ai.roundTrip(request);
-  if (response.kind === "failed" && !settlesAtZero[response.reason]) return response;
-  const usage =
-    response.kind === "ok"
-      ? response.assistant.usage
-      : {
-          uncachedInputTokens: 0,
-          outputTokens: 0,
-          cacheReadTokens: 0,
-          cacheWrite5mTokens: 0,
-          cacheWrite1hTokens: 0,
-        };
-  await deps.store.aiCost.settle(right.reference, {
-    attemptId,
-    charge: settleAttempt(estimate, usage).amount,
-    usage,
-    now: deps.runtime.now(),
-  });
-  return response;
+  if (result.kind !== "reserved") {
+    logEvent("info", "ai.attempt", { ...fields, outcome: result.kind });
+    return result;
+  }
+  const sentAt = Date.parse(deps.runtime.now());
+  const elapsed = () => Date.parse(deps.runtime.now()) - sentAt;
+  let aiMs: number | undefined;
+  try {
+    const response = await deps.ai.roundTrip(request);
+    aiMs = elapsed();
+    const usage =
+      response.kind === "ok"
+        ? response.assistant.usage
+        : response.reason === "unusable"
+          ? failureUsage.unusable(response)
+          : failureUsage[response.reason]();
+    const charged = settleAttempt(estimate, usage).amount;
+    await deps.store.aiCost.settle(right.reference, {
+      attemptId,
+      charge: charged,
+      usage,
+      now: deps.runtime.now(),
+    });
+    const refused = response.kind === "failed" && "provider" in response && response.provider;
+    logEvent("info", "ai.attempt", {
+      ...fields,
+      ...usage,
+      aiMs,
+      outcome: "settled",
+      chargedMicroUsd: charged,
+      ...(refused && {
+        providerStatus: refused.status,
+        providerError: refused.errorType,
+        ...(refused.requestId && { providerRequestId: refused.requestId }),
+      }),
+    });
+    return response;
+  } catch (error) {
+    logEvent("error", "ai.attempt", {
+      ...fields,
+      aiMs: aiMs ?? elapsed(),
+      outcome: "unsettled",
+      error: describeError(error),
+    });
+    throw error;
+  }
 }

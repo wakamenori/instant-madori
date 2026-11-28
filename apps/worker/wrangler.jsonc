@@ -59,7 +59,8 @@
     "JobWorkflow": { "type": "workflow", "name": "instant-madori-job" },
   },
   // Type generation reads secret names from here, not from the generated .dev.vars.
-  // Staging must not set ACCESS_JWKS, so it declares no secrets.
+  // Staging must not set ACCESS_JWKS, so it declares no required secrets.
+  // Staging holds ANTHROPIC_API_KEY via wrangler secret put --env staging. Local never has it.
   "secrets": { "required": ["ACCESS_JWKS"] },
   "vars": {
     "ENVIRONMENT": "local",

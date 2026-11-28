@@ -1,3 +1,5 @@
+import type { OutputTokenLimit } from "../limits.ts";
+
 /**
  * Every type here is plain data that a Workflow step can return. JSON the model reads or writes
  * travels as text, because `unknown` or a recursive JSON type fails `Rpc.Serializable`.
@@ -12,7 +14,10 @@ type ContentPart =
       readonly bytes: Uint8Array;
     };
 
-/** Every tool is strict. The provider adapter sends `strict: true`. */
+/**
+ * Sent without `strict`: Anthropic rejects the strict grammar of the generated tools as too large,
+ * so the Worker's own validation of every call is the guard.
+ */
 export interface ToolSpec {
   readonly name: string;
   readonly description: string;
@@ -66,7 +71,7 @@ export interface Conversation {
 
 export interface AiRequest {
   readonly conversation: Conversation;
-  readonly maxOutputTokens: number;
+  readonly maxOutputTokens: OutputTokenLimit;
 }
 
 export type StopReason = "end" | "tool_calls" | "output_limit" | "refusal";
@@ -85,11 +90,29 @@ export interface AiResponse {
   readonly stop: StopReason;
 }
 
-interface AiFailure {
-  readonly kind: "failed";
-  readonly reason: "rejected" | "script_ended" | "no_provider";
-  readonly detail: string;
+export type ProviderErrorType =
+  | "invalid_request_error"
+  | "authentication_error"
+  | "billing_error"
+  | "permission_error"
+  | "not_found_error"
+  | "request_too_large"
+  | "other";
+
+/** How the provider refused a request, without its message text. */
+export interface ProviderRefusal {
+  readonly status: number;
+  readonly errorType: ProviderErrorType;
+  readonly requestId: `req_${string}` | null;
 }
+
+type AiFailure = { readonly kind: "failed"; readonly detail: string } & (
+  | {
+      readonly reason: "rejected" | "script_ended" | "no_provider";
+      readonly provider?: ProviderRefusal;
+    }
+  | { readonly reason: "unusable"; readonly usage: Usage }
+);
 
 export type AiResult = AiResponse | AiFailure;
 

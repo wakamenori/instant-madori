@@ -35,6 +35,7 @@ const envSchema = z
     /** Local development only: the public JWKS of the generated development key. */
     ACCESS_JWKS: z.string().min(1).optional(),
     ACCESS_VERIFIER_CLIENT_ID: z.string().trim().min(1).optional(),
+    ACCESS_AI_VERIFIER_CLIENT_ID: z.string().trim().min(1).optional(),
   })
   .transform((env, context) => {
     const hold = jobTestHoldSettingSchema.safeParse(env);
@@ -52,11 +53,24 @@ const envSchema = z
       });
       return z.NEVER;
     }
-    if (env.ACCESS_VERIFIER_CLIENT_ID !== undefined && env.ENVIRONMENT !== "staging") {
+    for (const field of ["ACCESS_VERIFIER_CLIENT_ID", "ACCESS_AI_VERIFIER_CLIENT_ID"] as const) {
+      if (env[field] !== undefined && env.ENVIRONMENT !== "staging") {
+        context.addIssue({
+          code: "custom",
+          path: [field],
+          message: "verifier service tokens require ENVIRONMENT=staging",
+        });
+        return z.NEVER;
+      }
+    }
+    if (
+      env.ACCESS_AI_VERIFIER_CLIENT_ID !== undefined &&
+      env.ACCESS_AI_VERIFIER_CLIENT_ID === env.ACCESS_VERIFIER_CLIENT_ID
+    ) {
       context.addIssue({
         code: "custom",
-        path: ["ACCESS_VERIFIER_CLIENT_ID"],
-        message: "the verifier service token requires ENVIRONMENT=staging",
+        path: ["ACCESS_AI_VERIFIER_CLIENT_ID"],
+        message: "verifier service tokens require distinct Client IDs",
       });
       return z.NEVER;
     }
@@ -78,6 +92,9 @@ const envSchema = z
         ...(env.ACCESS_VERIFIER_CLIENT_ID === undefined
           ? {}
           : { verifierClientId: env.ACCESS_VERIFIER_CLIENT_ID }),
+        ...(env.ACCESS_AI_VERIFIER_CLIENT_ID === undefined
+          ? {}
+          : { aiVerifierClientId: env.ACCESS_AI_VERIFIER_CLIENT_ID }),
       },
     };
   });

@@ -211,6 +211,22 @@ await test("Verifier service tokens", async (t) => {
     );
   });
 
+  await t.test("the AI service token has a separate fixed identity", async () => {
+    const aiVerifierClientId = "ai-verifier-client.access";
+    const claims = { ...serviceClaims, common_name: aiVerifierClientId };
+    await assert.rejects(
+      verifyClaims(claims, enabled),
+      (error) => error instanceof ApiFailure && error.code === "forbidden",
+    );
+    const bothEnabled = { ...enabled, aiVerifierClientId };
+    assert.deepEqual(identityFields(await verifyClaims(claims, bothEnabled)), {
+      issuer: key.issuer,
+      subject: "staging:ai-verifier",
+      email: "ai-verifier@staging.invalid",
+    });
+    assert.equal((await verifyClaims(serviceClaims, bothEnabled)).subject, "staging:verifier");
+  });
+
   for (const [label, claims, config] of [
     ["an unconfigured service token", serviceClaims, access],
     ["a different Client ID", { ...serviceClaims, common_name: "other.access" }, enabled],

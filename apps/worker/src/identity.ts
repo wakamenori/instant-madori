@@ -1,4 +1,5 @@
 export const verifierSubject = "staging:verifier";
+export const aiVerifierSubject = "staging:ai-verifier";
 
 export class VerifiedIdentity {
   readonly #issuer: string;

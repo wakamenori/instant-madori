@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { receivedTurn } from "../src/ai/round-trip.ts";
 import type { AiRequest, Conversation, Usage } from "../src/ai/round-trip.ts";
-import { microUsd } from "../src/limits.ts";
+import { microUsd, outputTokenLimit } from "../src/limits.ts";
 import { estimateAttempt, settleAttempt } from "../src/services/cost.ts";
 
 function png(width: number, height: number): Uint8Array {
@@ -41,7 +41,7 @@ const first: AiRequest = {
     ],
     rounds: [],
   },
-  maxOutputTokens: 32_000,
+  maxOutputTokens: outputTokenLimit(32_000),
 };
 
 const usage: Usage = {
@@ -104,7 +104,7 @@ await test("a tool reply extends the previous attempt's billed input and output"
 function openingTokens(part: Conversation["opening"][number]): number {
   return estimateAttempt({
     conversation: { system: "", tools: [], opening: [part], rounds: [] },
-    maxOutputTokens: 0,
+    maxOutputTokens: outputTokenLimit(1),
   }).inputTokens;
 }
 
