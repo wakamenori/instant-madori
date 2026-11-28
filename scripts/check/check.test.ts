@@ -13,13 +13,20 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { text } from "node:stream/consumers";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { after, test, type TestContext } from "node:test";
 import { minimumFreeBytes, requireFreeDisk, withDockerSlot } from "../shared/docker-slots.ts";
-import { assertStepSucceeded, runChecks, runGroup, StepFailed, type CheckGates } from "./check.ts";
+import {
+  assertStepSucceeded,
+  markdownReaderTests,
+  runChecks,
+  runGroup,
+  StepFailed,
+  type CheckGates,
+} from "./check.ts";
 import { nodeTestFlags, type TestResult } from "./test-results.ts";
 
 const ungated: CheckGates = { dockerStage: (stage) => stage(), rustStage: () => {} };
@@ -56,6 +63,127 @@ const resultsDir = join(wasmBindingsOnly, "results");
 after(() => {
   process.chdir(original);
   rmSync(wasmBindingsOnly, { recursive: true, force: true });
+});
+
+void test("docs mode resets results and runs only Markdown checks without Wasm or gates", async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "madori-docs-check-"));
+  process.chdir(directory);
+  t.after(() => {
+    process.chdir(wasmBindingsOnly);
+    rmSync(directory, { recursive: true, force: true });
+  });
+  const results = join(directory, "results");
+  mkdirSync(results);
+  writeFileSync(join(results, "rust.jsonl"), "stale");
+  const commands = new Map<string, string[]>();
+  await runChecks(
+    "--docs",
+    [],
+    (label, command, args, _env, output) => {
+      if (commands.size === 0) {
+        assert.deepEqual(readdirSync(results), []);
+        assert.equal(command, "pnpm");
+      } else {
+        assert.equal(command, process.execPath);
+        assert.equal(output, "capture");
+      }
+      commands.set(label, args);
+      return Promise.resolve();
+    },
+    {
+      dockerStage: () => assert.fail("Docker gate called"),
+      rustStage: () => assert.fail("Rust gate called"),
+    },
+    results,
+  );
+  assert.deepEqual(
+    [...commands.keys()],
+    [
+      "Format Markdown",
+      "Upstream boundary",
+      "Migration immutability",
+      "Secret scan",
+      "Document paths",
+      "Skill argument placeholders",
+      "TypeScript tests (Markdown readers)",
+    ],
+  );
+  assert.deepEqual(commands.get("Format Markdown")?.slice(0, 4), [
+    "exec",
+    "prettier",
+    "--write",
+    "**/*.md",
+  ]);
+  assert.deepEqual(commands.get("TypeScript tests (Markdown readers)"), [
+    ...nodeTestFlags(results, "typescript"),
+    ...markdownReaderTests,
+  ]);
+  assert(
+    commands
+      .get("TypeScript tests (Markdown readers)")
+      ?.includes(`--test-reporter-destination=${join(results, "typescript.jsonl")}`),
+  );
+});
+
+void test("docs mode reports layout, migration and reader test failures together", async () => {
+  const failingScripts = ["scripts/check/check-layout.ts", "scripts/check/check-migrations.ts"];
+  await assert.rejects(
+    runChecks(
+      "--docs",
+      [],
+      (label, command, [script]) =>
+        command === process.execPath &&
+        (failingScripts.some((path) => path === script) ||
+          label === "TypeScript tests (Markdown readers)")
+          ? Promise.reject(new StepFailed(label, "1"))
+          : Promise.resolve(),
+      ungated,
+      resultsDir,
+    ),
+    {
+      message:
+        "Upstream boundary failed (1); Migration immutability failed (1); TypeScript tests (Markdown readers) failed (1)",
+    },
+  );
+});
+
+void test("the default check runs all of the docs mode scripts and discovers its reader tests", async () => {
+  const docsScripts = new Set<string>();
+  const docsReaders: string[] = [];
+  await runChecks(
+    "--docs",
+    [],
+    (label, command, args) => {
+      if (label === "TypeScript tests (Markdown readers)")
+        docsReaders.push(...args.filter((arg) => /\.test\.(?:ts|mjs)$/.test(arg)));
+      else if (command === process.execPath && args[0]) docsScripts.add(args[0]);
+      return Promise.resolve();
+    },
+    ungated,
+    resultsDir,
+  );
+  assert(docsScripts.size > 0);
+  assert(docsReaders.length > 0);
+  for (const reader of docsReaders) {
+    assert(existsSync(join(original, reader)), reader);
+    mkdirSync(dirname(reader), { recursive: true });
+    writeFileSync(reader, "");
+  }
+  const defaultScripts = new Set<string>();
+  const defaultReaders: string[] = [];
+  await runChecks(
+    "default",
+    [],
+    (label, command, args) => {
+      if (label === "TypeScript tests") defaultReaders.push(...args);
+      else if (command === process.execPath && args[0]) defaultScripts.add(args[0]);
+      return Promise.resolve();
+    },
+    ungated,
+    resultsDir,
+  );
+  for (const script of docsScripts) assert(defaultScripts.has(script), script);
+  for (const reader of docsReaders) assert(defaultReaders.includes(reader), reader);
 });
 
 void test("import boundaries read TypeScript after ESLint fixes and formatting", async () => {
@@ -186,6 +314,7 @@ void test("a TypeScript test failure lets the remaining checks run", async (t) =
       [["[check] TypeScript tests failed (1). The remaining steps still run, then check fails."]],
     );
     assert(steps.includes("Rust tests"));
+    assert(steps.includes("Markdown reader list"));
     if (mode === "--full") {
       assert.deepEqual(
         steps.slice(steps.indexOf("TypeScript tests") + 1),
@@ -300,6 +429,9 @@ void test(
       "Rust tests",
     ]);
     assert(!readdirSync(wasmBindingsOnly).some((path) => path.startsWith("madori-rust-wire-")));
+    assert(
+      !readdirSync(wasmBindingsOnly).some((path) => path.startsWith("madori-markdown-reads-")),
+    );
   },
 );
 
@@ -544,7 +676,7 @@ process.on("SIGTERM", () => {
     if (existsSync(process.env.STEP_DIRECTORY + "/release")) process.exit(1);
   }, 10);
 });
-writeFileSync(marker + ".tmp", "");
+writeFileSync(marker + ".tmp", project);
 renameSync(marker + ".tmp", marker + ".pid");
 setTimeout(() => process.exit(1), 15000);
 `,
@@ -574,11 +706,17 @@ setTimeout(() => process.exit(1), 15000);
   const running = () =>
     readdirSync(directory)
       .filter((path) => path.endsWith(".pid"))
-      .map((path) => Number(path.slice(0, -4)));
+      .map((path) => ({
+        pid: Number(path.slice(0, -4)),
+        config: readFileSync(join(directory, path), "utf8"),
+      }));
+  const interruptedProjects = ["apps/worker", "apps/worker/tests"] as const;
   try {
     const deadline = Date.now() + 10000;
     while (
-      running().length < 2 ||
+      !interruptedProjects.every((project) =>
+        running().some(({ config }) => config === `${project}/tsconfig.json`),
+      ) ||
       !output.includes("TypeScript types: apps/worker/tests/rpc: ") ||
       !output.includes("TypeScript types: scripts failed (7)")
     ) {
@@ -588,7 +726,7 @@ setTimeout(() => process.exit(1), 15000);
       );
       await sleep(10);
     }
-    const pids = running();
+    const pids = running().map(({ pid }) => pid);
     assert(existsSync(join(directory, "results")), "check used the given results directory");
     check.kill("SIGINT");
     while (!pids.every((pid) => existsSync(join(directory, `${pid}.stopping`)))) {
@@ -603,8 +741,7 @@ setTimeout(() => process.exit(1), 15000);
     for (const [project, status] of [
       ["apps/worker/tests/rpc", ": \\d+\\.\\d+s"],
       ["scripts", " failed \\(7\\) after \\d+\\.\\d+s"],
-      ["apps/worker", " interrupted"],
-      ["apps/worker/tests", " interrupted"],
+      ...interruptedProjects.map((project) => [project, " interrupted"] as const),
     ] as const) {
       const label = `TypeScript types: ${project}`;
       const config = `${project}/tsconfig.json`;
@@ -673,12 +810,37 @@ void test("local change selection controls every Rust build and the mixed TypeSc
     const gated: string[] = [];
     const commands = new Map<string, string[]>();
     const outputs = new Map<string, string | undefined>();
+    let record: string | undefined;
     await runChecks(
       mode,
       [],
-      (label, _command, args, _env, output) => {
+      (label, command, args, env, output) => {
         commands.set(label, args);
         outputs.set(label, output);
+        if (label === "TypeScript tests") {
+          record = env?.MADORI_MARKDOWN_READS;
+          assert(record);
+          assert.equal(dirname(dirname(record)), dirname(resultsDir));
+          assert(existsSync(dirname(record)));
+          assert.equal(command, process.execPath);
+          assert.equal(
+            env?.NODE_OPTIONS,
+            [
+              process.env.NODE_OPTIONS,
+              `--import=${new URL("./record-markdown-reads.ts", import.meta.url).href}`,
+            ]
+              .filter(Boolean)
+              .join(" "),
+          );
+        }
+        if (label === "Markdown reader list") {
+          assert.equal(command, process.execPath);
+          assert.deepEqual(args, [
+            "scripts/check/markdown-reads.ts",
+            record,
+            ...markdownReaderTests,
+          ]);
+        }
         return Promise.resolve();
       },
       { ...ungated, rustStage: (label) => gated.push(label) },
@@ -696,6 +858,13 @@ void test("local change selection controls every Rust build and the mixed TypeSc
     assert(!gated.includes("TypeScript tests"));
     assert.equal(gated.includes(wireLabel), build);
     assert.equal(outputs.get("TypeScript tests"), build ? "capture" : "inherit");
+    assert.equal(outputs.get("Markdown reader list"), outputs.get("TypeScript tests"));
+    const typeScriptSteps = [...commands.keys()].filter(
+      (label) => label === "TypeScript tests" || label === "Markdown reader list",
+    );
+    assert.deepEqual(typeScriptSteps, ["TypeScript tests", "Markdown reader list"]);
+    assert(record);
+    assert(!existsSync(dirname(record)));
     const ts = commands.get("TypeScript tests");
     assert(ts);
     assert(ts.includes("apps/worker/tests/example.test.ts"));
@@ -878,6 +1047,40 @@ void test("shows usage without cargo", (t) => {
   );
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Usage: pnpm check/u);
+});
+
+void test("docs mode rejects Rust and other check modes in the same invocation", () => {
+  const cli = fileURLToPath(new URL("./check.ts", import.meta.url));
+  for (const flag of ["--rust", "--fast", "--full"]) {
+    const result = spawnSync(process.execPath, [cli, "--docs", flag], { encoding: "utf8" });
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, /Usage: pnpm check.*--docs/u);
+  }
+});
+
+void test("docs mode does not invoke cargo", (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "docs-no-cargo-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const log = join(directory, "calls");
+  writeFileSync(log, "");
+  writeFileSync(join(directory, "cargo"), '#!/bin/sh\necho "$@" >> "$LOG"\n', { mode: 0o755 });
+  const result = spawnSync(
+    process.execPath,
+    [fileURLToPath(new URL("./check.ts", import.meta.url)), "--docs"],
+    {
+      encoding: "utf8",
+      env: {
+        PATH: directory,
+        TMPDIR: directory,
+        LOG: log,
+        MADORI_TEST_RESULTS_DIR: join(directory, "results"),
+      },
+    },
+  );
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(result.stderr, /spawn pnpm ENOENT/u);
+  assert.doesNotMatch(result.stderr, /\[rustup\]/u);
+  assert.equal(readFileSync(log, "utf8"), "");
 });
 
 function setCi(t: TestContext, value?: string) {

@@ -23,13 +23,32 @@ import { assertContainerE2eFiles } from "./layout-contract.ts";
 import { rustSkipBase } from "./rust-inputs.ts";
 import { cargoTestFlags, nodeTestFlags, readArtifact, resetResults } from "./test-results.ts";
 
-const usage = `Usage: pnpm check [--fast | --full] [--rust]
+const usage = `Usage: pnpm check [--fast | --full] [--rust] or pnpm check --docs
+  --docs  Format Markdown, run document checks and run tests that read Markdown.
   --fast  Autofix, TypeScript types/lint, Rust native/Wasm Clippy, local static checks.
   default All fast checks, TypeScript tests and Rust tests.
   --rust  Run the Rust build steps for this mode even if Rust inputs are unchanged.
   --full  Also rebuild Wasm bindings, build apps, check local integration and audit dependencies.
-All modes modify service source through formatters and automatic lint fixes.
-Run pnpm setup once before checking. No mode stages files or deploys resources.`;
+Checks apply formatting and automatic fixes for the selected mode.
+Run pnpm setup once before checking code. No mode stages files or deploys resources.`;
+
+type CheckMode = "--docs" | "--fast" | "default" | "--full";
+
+export const markdownReaderTests = [
+  ".claude/skills/madori-coordinator/scripts/records.test.mjs",
+  "metrics/build/factory.test.ts",
+  "metrics/ingest/pollers.test.ts",
+  "scripts/check/import-boundaries.test.ts",
+  "scripts/check/markdown-reads.test.ts",
+] as const;
+
+const documentChecks = [
+  ["Upstream boundary", "scripts/check/check-layout.ts"],
+  ["Migration immutability", "scripts/check/check-migrations.ts"],
+  ["Secret scan", "scripts/check/check-secrets.ts"],
+  ["Document paths", "scripts/check/check-doc-paths.ts"],
+  ["Skill argument placeholders", "scripts/check/check-skill-arguments.ts"],
+] as const;
 
 const cacheDirectory = "node_modules/.cache/madori-check";
 const prettierCacheFlags = [
@@ -151,6 +170,41 @@ type RunStep = (
 
 type TestStep = () => Promise<void>;
 
+function documentCheckTasks(run: RunStep) {
+  return documentChecks.map(
+    ([label, path]) =>
+      () =>
+        run(label, process.execPath, [path], undefined, "capture"),
+  );
+}
+
+async function runDocsChecks(run: RunStep, resultsDir: string) {
+  await resetResults(resultsDir);
+  await run("Format Markdown", "pnpm", [
+    "exec",
+    "prettier",
+    "--write",
+    "**/*.md",
+    "--log-level",
+    "warn",
+    ...prettierCacheFlags,
+  ]);
+  await runGroup(
+    [
+      ...documentCheckTasks(run),
+      () =>
+        run(
+          "TypeScript tests (Markdown readers)",
+          process.execPath,
+          [...nodeTestFlags(resultsDir, "typescript"), ...markdownReaderTests],
+          undefined,
+          "capture",
+        ),
+    ],
+    staticConcurrency(),
+  );
+}
+
 async function runTestLanes(lanes: readonly (readonly TestStep[])[]): Promise<StepFailed[]> {
   let stopped = false;
   const outcomes = await Promise.allSettled(
@@ -213,13 +267,14 @@ export type CheckGates = {
 };
 
 export async function runChecks(
-  mode: "--fast" | "default" | "--full",
+  mode: CheckMode,
   crates: ReturnType<typeof serviceCrates>,
   run: RunStep,
   gates: CheckGates,
   resultsDir = resolve(process.env.MADORI_TEST_RESULTS_DIR ?? "target/test-results"),
   forceRust = false,
 ): Promise<void> {
+  if (mode === "--docs") return runDocsChecks(run, resultsDir);
   const base = rustSkipBase(
     process.cwd(),
     forceRust || mode === "--full",
@@ -313,11 +368,8 @@ export async function runChecks(
     run("Unused TypeScript code and dependencies", "pnpm", ["exec", "knip"], undefined, "capture"),
   );
   for (const [label, path] of [
-    ["Upstream boundary", "scripts/check/check-layout.ts"],
     ["Resolved TypeScript import boundaries", "scripts/check/check-imports.ts"],
-    ["Secret scan", "scripts/check/check-secrets.ts"],
     ["SQL connection state", "scripts/check/check-sql.ts"],
-    ["Migration immutability", "scripts/check/check-migrations.ts"],
   ] as const) {
     staticTasks.push(() => script(label, path, "capture"));
   }
@@ -330,11 +382,7 @@ export async function runChecks(
       run(label, "mise", ["exec", "--", ...commandArgs], undefined, "capture"),
     );
   }
-  staticTasks.push(
-    () => script("Document paths", "scripts/check/check-doc-paths.ts", "capture"),
-    () =>
-      script("Skill argument placeholders", "scripts/check/check-skill-arguments.ts", "capture"),
-  );
+  staticTasks.push(...documentCheckTasks(run));
 
   const clippyTargets = [
     { label: "native", args: ["--workspace", "--all-targets"] },
@@ -403,10 +451,39 @@ export async function runChecks(
       `--test-skip-pattern=${wireFixturePattern}`,
       ...tests.sort(),
     ];
-    const typeScriptTests = (output: StepOutput) =>
-      run("TypeScript tests", process.execPath, typeScriptArgs, undefined, output);
+    const typeScriptTests = async (output: StepOutput, rustLane?: readonly TestStep[]) => {
+      const recordDir = await mkdtemp(join(dirname(resultsDir), "madori-markdown-reads-"));
+      const record = join(recordDir, "reads.jsonl");
+      const recorder = "scripts/check/record-markdown-reads.ts";
+      const env = {
+        ...process.env,
+        NODE_OPTIONS: [
+          process.env.NODE_OPTIONS,
+          `--import=${new URL(recorder, repositoryRoot).href}`,
+        ]
+          .filter(Boolean)
+          .join(" "),
+        MADORI_MARKDOWN_READS: record,
+      };
+      const lane = [
+        () => run("TypeScript tests", process.execPath, typeScriptArgs, env, output),
+        () =>
+          run(
+            "Markdown reader list",
+            process.execPath,
+            ["scripts/check/markdown-reads.ts", record, ...markdownReaderTests],
+            undefined,
+            output,
+          ),
+      ];
+      try {
+        return await runTestLanes(rustLane ? [lane, rustLane] : [lane]);
+      } finally {
+        await rm(recordDir, { recursive: true, force: true });
+      }
+    };
     if (base) {
-      failedTests.push(...(await runTestLanes([[() => typeScriptTests("inherit")]])));
+      failedTests.push(...(await typeScriptTests("inherit")));
     } else {
       const wireDir = await mkdtemp(join(dirname(resultsDir), "madori-rust-wire-"));
       console.log(
@@ -415,25 +492,22 @@ export async function runChecks(
       let laneFailure: { error: unknown } | undefined;
       try {
         failedTests.push(
-          ...(await runTestLanes([
-            [() => typeScriptTests("capture")],
-            [
-              () => cargo("Rust tests", cargoTestFlags(resultsDir), "capture"),
-              () => {
-                gates.rustStage(wireFixture.label);
-                return run(
-                  wireFixture.label,
-                  process.execPath,
-                  [
-                    ...nodeTestFlags(wireDir, "typescript"),
-                    `--test-name-pattern=${wireFixturePattern}`,
-                    wireFixture.path,
-                  ],
-                  undefined,
-                  "capture",
-                );
-              },
-            ],
+          ...(await typeScriptTests("capture", [
+            () => cargo("Rust tests", cargoTestFlags(resultsDir), "capture"),
+            () => {
+              gates.rustStage(wireFixture.label);
+              return run(
+                wireFixture.label,
+                process.execPath,
+                [
+                  ...nodeTestFlags(wireDir, "typescript"),
+                  `--test-name-pattern=${wireFixturePattern}`,
+                  wireFixture.path,
+                ],
+                undefined,
+                "capture",
+              );
+            },
           ])),
         );
       } catch (error) {
@@ -510,12 +584,21 @@ async function main() {
     return;
   }
   const modes = args.filter((arg) => arg !== "--rust");
-  if (modes.length > 1 || (modes.length === 1 && modes[0] !== "--fast" && modes[0] !== "--full")) {
+  const requested = modes[0];
+  const forceRust = args.includes("--rust");
+  if (
+    modes.length > 1 ||
+    (requested !== undefined &&
+      requested !== "--docs" &&
+      requested !== "--fast" &&
+      requested !== "--full") ||
+    (requested === "--docs" && forceRust)
+  ) {
     throw new Error(usage);
   }
-  const mode = modes[0] === "--fast" || modes[0] === "--full" ? modes[0] : "default";
+  const mode = requested ?? "default";
   process.chdir(fileURLToPath(repositoryRoot));
-  if (!checkRustupCargo()) return;
+  if (mode !== "--docs" && !checkRustupCargo()) return;
 
   const logDirectory = mkdtempSync(join(tmpdir(), "madori-check-logs-"));
   let nextLog = 0;
@@ -572,7 +655,7 @@ async function main() {
   }
 
   try {
-    const crates = serviceCrates();
+    const crates = mode === "--docs" ? [] : serviceCrates();
     const slots = machineSlots();
     await runChecks(
       mode,
@@ -588,7 +671,7 @@ async function main() {
         rustStage: (label) => requireFreeDisk(slots, label),
       },
       undefined,
-      args.includes("--rust"),
+      forceRust,
     );
     console.log(
       `\n[check] Passed (${mode}, ${((performance.now() - started) / 1000).toFixed(1)}s).`,

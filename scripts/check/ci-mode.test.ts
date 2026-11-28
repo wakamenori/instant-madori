@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { statSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, posix } from "node:path";
@@ -40,6 +40,8 @@ void test("Container, display, dependency, upstream and CI changes need the full
     "crates/housing/src/lib.rs",
     "pnpm-lock.yaml",
     "third_party/solidcraft/crates/doc/src/lib.rs",
+    "third_party/solidcraft/README.md",
+    "crates/housing/README.md",
     ".github/workflows/check.yml",
   ]) {
     assert.equal(checkModeFor(["docs/plan.md", file]), "full", file);
@@ -57,6 +59,18 @@ void test("other service changes use the default check", () => {
     "default",
   );
   assert.equal(checkModeFor([]), "default");
+});
+
+void test("only Markdown changes outside full-check paths use the docs check", () => {
+  const files = [
+    "docs/plan.md",
+    "README.md",
+    ".claude/skills/x/SKILL.md",
+    ".github/ISSUE_TEMPLATE/bug.md",
+    "metrics/README.md",
+  ];
+  for (const file of files) assert.equal(checkModeFor([file]), "docs", file);
+  assert.equal(checkModeFor(files), "docs");
 });
 
 void test("job orchestration changes require the real Container path", () => {
@@ -125,7 +139,7 @@ void test("every script only the full check runs, and each module it imports, se
   assert(fullOnly.includes("apps/worker/tests/container.e2e.ts"), fullOnly.join("\n"));
   assert(fullOnly.includes("scripts/check/smoke.ts"), fullOnly.join("\n"));
   const missed = runtimeImportClosure(["scripts/check/check.ts", ...fullOnly]).filter(
-    (file) => checkModeFor([file]) === "default",
+    (file) => checkModeFor([file]) !== "full",
   );
   assert.deepEqual(
     missed,
@@ -134,15 +148,60 @@ void test("every script only the full check runs, and each module it imports, se
   );
 });
 
-void test("the CLI prints --full or nothing for the paths CI pipes in", () => {
-  const cli = fileURLToPath(new URL("./ci-mode.ts", import.meta.url));
+const cli = fileURLToPath(new URL("./ci-mode.ts", import.meta.url));
+
+function cliFlag(paths: string | Buffer) {
+  const result = spawnSync(process.execPath, [cli], { input: paths, encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+  return result.stdout;
+}
+
+void test("the CLI prints the flag for NUL-separated paths", () => {
   for (const [file, expected] of [
     ["deny.toml", "--full"],
     ["apps/worker/tests/support/settle-jobs.ts", "--full"],
-    ["docs/plan.md", ""],
+    ["docs/plan.md", "--docs"],
+    ["apps/web/src/App.tsx", ""],
   ] as const) {
-    const result = spawnSync(process.execPath, [cli], { input: file + "\n", encoding: "utf8" });
-    assert.equal(result.status, 0, result.stderr);
-    assert.equal(result.stdout, expected, file);
+    assert.equal(cliFlag(file + "\0"), expected, file);
   }
+  assert.equal(cliFlag("README.md\0deny.toml\0"), "--full");
+});
+
+void test("the workflow diff keeps both sides of renames and preserves tabs in full-check paths", (t) => {
+  const workflow = readFileSync(join(root, ".github/workflows/check.yml"), "utf8");
+  const diff = workflow.match(
+    /git diff (.+) "\$BASE\.\.\.HEAD" \| node scripts\/check\/ci-mode\.ts/,
+  );
+  assert(diff?.[1], "The mode step should pipe changed paths into ci-mode.ts");
+  const gitDiffArgs = diff[1].split(" ");
+  const directory = mkdtempSync(join(tmpdir(), "madori-mode-diff-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const git = (...args: string[]) =>
+    execFileSync(
+      "git",
+      [
+        "-c",
+        "core.hooksPath=/dev/null",
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.invalid",
+        ...args,
+      ],
+      { cwd: directory },
+    );
+  git("init", "-q");
+  writeFileSync(join(directory, "example.ts"), "export const value = 1;\n");
+  git("add", ".");
+  git("commit", "-qm", "initial");
+  git("mv", "example.ts", "example.md");
+  git("commit", "-qm", "rename");
+  assert.equal(cliFlag(git("diff", ...gitDiffArgs, "HEAD~1...HEAD")), "");
+
+  mkdirSync(join(directory, "apps/geometry"), { recursive: true });
+  writeFileSync(join(directory, "apps/geometry/name\twith-tab.md"), "");
+  git("add", ".");
+  git("commit", "-qm", "add geometry document");
+  assert.equal(cliFlag(git("diff", ...gitDiffArgs, "HEAD~1...HEAD")), "--full");
 });

@@ -62,17 +62,22 @@ const fullCheckPrefixes = [
 ];
 const fullCheckNames = ["package.json", "Cargo.toml", "Dockerfile"];
 
-export function checkModeFor(files: readonly string[]): "default" | "full" {
-  return files.some(
-    (file) =>
-      fullCheckPrefixes.some((prefix) => file === prefix || file.startsWith(prefix)) ||
-      fullCheckNames.includes(file.split("/").at(-1) ?? ""),
+type CiMode = "docs" | "default" | "full";
+const flags = { docs: "--docs", default: "", full: "--full" } satisfies Record<CiMode, string>;
+
+export function checkModeFor(files: readonly string[]): CiMode {
+  if (
+    files.some(
+      (file) =>
+        fullCheckPrefixes.some((prefix) => file === prefix || file.startsWith(prefix)) ||
+        fullCheckNames.includes(file.split("/").at(-1) ?? ""),
+    )
   )
-    ? "full"
-    : "default";
+    return "full";
+  return files.length > 0 && files.every((file) => file.endsWith(".md")) ? "docs" : "default";
 }
 
 if (import.meta.main) {
-  const files = readFileSync(0, "utf8").split("\n").filter(Boolean);
-  process.stdout.write(checkModeFor(files) === "full" ? "--full" : "");
+  const files = readFileSync(0, "utf8").split("\0").filter(Boolean);
+  process.stdout.write(flags[checkModeFor(files)]);
 }
