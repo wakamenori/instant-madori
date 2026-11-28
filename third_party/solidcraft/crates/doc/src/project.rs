@@ -12,6 +12,7 @@
 
 use solidcraft_geom::prelude::*;
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use solidcore_record::{Plane, Seg2, Vec2, Vec3};
 use solidcraft_geom::Mesh;
@@ -213,17 +214,23 @@ pub struct Resolved {
     pub vertex_index: Option<usize>,
 }
 
+struct CacheKey {
+    text: String,
+    _meshes: Vec<Arc<Mesh>>,
+}
+
 /// Resolutions of body-based references, keyed by the reference, the sketch plane and the
 /// identity of every body's display mesh: re-resolving an unchanged model (every sketch edit
-/// does) is free.
-static CACHE: std::sync::Mutex<Vec<(String, Resolved)>> = std::sync::Mutex::new(Vec::new());
+/// does) is free. Each entry keeps its meshes alive so their addresses cannot be reused
+/// while the entry can still match.
+static CACHE: std::sync::Mutex<Vec<(CacheKey, Resolved)>> = std::sync::Mutex::new(Vec::new());
 const CACHE_SIZE: usize = 64;
 
 fn is_sketch_curve(src: &LinkSource) -> bool {
     matches!(src, LinkSource::SketchCurve { .. })
 }
 
-fn cache_key(st: &ModelState, plane: &Plane, kind: LinkKind, src: &LinkSource) -> Option<String> {
+fn cache_key(st: &ModelState, plane: &Plane, kind: LinkKind, src: &LinkSource) -> Option<CacheKey> {
     // An intersection with a sketch curve (#11048) changes with that sketch, not with the meshes.
     let body_based = matches!(
         src,
@@ -237,15 +244,10 @@ fn cache_key(st: &ModelState, plane: &Plane, kind: LinkKind, src: &LinkSource) -
     if !body_based {
         return None;
     }
-    let bodies: Vec<String> = st
-        .bodies
-        .iter()
-        .map(|b| {
-            let m = b.mesh();
-            format!("{}@{:p}/{}/{:?}", b.name, std::sync::Arc::as_ptr(&m), m.triangles.len(), m.bounds())
-        })
-        .collect();
-    Some(format!("{kind:?}|{src:?}|{plane:?}|{}", bodies.join(";")))
+    let meshes: Vec<_> = st.bodies.iter().map(|body| body.mesh()).collect();
+    let bodies: Vec<String> =
+        st.bodies.iter().zip(&meshes).map(|(b, m)| format!("{}@{:p}/{}/{:?}", b.name, Arc::as_ptr(m), m.triangles.len(), m.bounds())).collect();
+    Some(CacheKey { text: format!("{kind:?}|{src:?}|{plane:?}|{}", bodies.join(";")), _meshes: meshes })
 }
 
 /// Resolve a link source against the model state before the sketch.
@@ -269,7 +271,7 @@ pub fn resolve_at(
     let key = cache_key(st, plane, kind, src);
     if let Some(k) = &key
         && let Ok(c) = CACHE.lock()
-        && let Some((_, r)) = c.iter().find(|(x, _)| x == k)
+        && let Some((_, r)) = c.iter().find(|(x, _)| x.text == k.text)
     {
         return Ok(r.clone());
     }
