@@ -40,6 +40,8 @@ Docker DesktopのVMには、12 GBのメモリを割り当てる。Dockerの中�
 
 ## 独自変更
 
+### `crates/io`がgitを読まない
+
 `crates/io`に`external-workspace`機能を加えた。サービスは、ルートの`Cargo.toml`の依存指定でこの機能を有効にする。有効にすると、`crates/io/build.rs`の`git()`が常に`None`を返し、build.rsはgitを読まない。評価キャッシュの識別値`SOLIDCRAFT_EVALUATION_SOURCE`と、記録用のコミット`SOLIDCRAFT_SOURCE_COMMIT`は、どちらも`unknown`になる。build.rsは`<git-dir>/logs/HEAD`の変更では再実行されない。この機能を有効にしない、upstreamを単独でビルドするときの動作は変えない。`scripts/check/boundaries.ts`の`geometry-cache-trust`の行が、madori-geometryの依存でこの機能が有効であることを検査する。
 
 評価キャッシュを信頼しない理由。upstreamのbuild.rsは、自身のCargo.lock・設定から識別値を作る。一方、サービスのビルドは、親workspaceのCargo.lock・プロファイルで依存を解決する。識別値が同じでも、実際のビルドが異なる可能性がある。`trust-unknown-source`機能はサービスで有効にしない。
@@ -51,6 +53,24 @@ gitの読み取りを`git()`の一か所で止めるので、upstreamが`git()`�
 この変更はupstreamに提案しない。upstreamのリポジトリではHEADがSolidCraftのコミットで、コミットごとに埋め直すのは意図した動作である。この変更は独自の`external-workspace`機能の上にあるので、提案するには、親workspaceの中でビルドする使い方そのものを提案する必要がある。upstreamがcrateを他のworkspaceの依存として扱うようになったら、提案するかを決め直す。upstreamが同じ目的の仕組みを持ったら、その更新を取り込むときにこの独自変更を外す。
 
 将来キャッシュを利用する場合は、実際のサービス側の依存解決・ビルド条件・形状評価コードを識別できる方式を実装し、異なるビルドのキャッシュを誤採用しないことを確認してから有効にする。
+
+### ブラウザでは環境照明の表を使うときまで作らない
+
+`crates/viewport-gpu/src/view.rs`を変えた。upstreamの`Renderer::new`は、面の材質の仕上げを照らす環境照明の表（反射のmipmap、拡散光、BRDF）を毎回計算し、`prepare`は毎回その表をGPUに送る。計算はnativeのreleaseで0.2〜0.3 sかかる。nativeのMetal・Vulkan・D3D12（FXC）は、パイプラインを作る間に別のスレッドで計算するので、待ち時間にならない。ブラウザにはスレッドが無く、`concurrent`の仕事は`join`のときに呼び出し側で順に動くので、計算の時間がそのまま`Viewer.create`の時間に加わり、案を開いてから3Dを描くまでが延びていた。
+
+wasm32では、`Renderer::new`は表を計算しない。`prepare`は、`sky.w`のbit 2（材質の仕上げを求める印）が立ったframeでだけ表を送り、表がまだ無ければその場で計算する。サービスのビューアは`sky`を常に0で描くので、表を計算も送信もしない。シェーダーが表（group 0のbinding 3〜6）を読むのは`finished()`の中だけで、`finished()`は`finishes()`が真のときだけ呼ばれるので、描画の結果は変わらない。
+
+nativeの動作は変えない。upstreamのデスクトップは、起動時に別のスレッドでrendererを作り、`sky`が0のMSAAの確認を描くときに表を送る。nativeで送る時期を遅らせると、その送信は、仕上げを求める最初のframeを描くwindowのスレッドへ移る。GLとDXCでは、表の計算も同じスレッドへ移る。
+
+upstreamの更新で`crates/viewport-gpu`が変わったら、次の三つを確かめる。
+
+- `Renderer::new`の表の計算と、`prepare`の送信が、wasm32の条件を保っている。
+- シェーダーで、表を読む箇所が`finished()`の外に増えていない。
+- verify-madoriで、更新前のWasmと交互に読み込み、3Dの準備ができるまでの時間と3Dの画素を比べる。
+
+upstreamが、使うときまで表を作らない仕組みを持ったら、その更新を取り込むときにこの独自変更を外し、`solidcraft.json`の`localPatches`から`crates/viewport-gpu/src/view.rs`を消す。upstreamへの提案は、運用者の了解を得てから行う。提案するときは、デスクトップがどこで表を前もって送るかをupstreamと決める。
+
+### `crates/doc`の投影のキャッシュがメッシュを保持する
 
 `crates/doc/src/project.rs` の投影キャッシュでは、キーに使う表示メッシュをエントリが保持する。同じプロセスで住宅を続けて作ると、前の住宅のメッシュが解放された後に次の住宅のメッシュが同じアドレスに置かれ、形状サービスが前の住宅の投影を返すことがあった。エントリを追い出すまで、そのキーに使ったメッシュは解放されない（最大64件）。これはupstreamでも起こり得る不具合なので、今後upstreamに修正を提案する。upstreamの更新で `project.rs` が変わったら、`houses_built_one_after_another_project_their_own_bulges` が引き続き通ることを確かめる。upstreamで同じ方法でキャッシュを修正したら、この独自変更を外す。
 

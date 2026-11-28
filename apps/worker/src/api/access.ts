@@ -1,4 +1,4 @@
-import { verifierSubject } from "../identity.ts";
+import { aiVerifierSubject, freezeIdentity, verifierSubject } from "../identity.ts";
 import { accessAssertionHeader } from "@madori/contracts";
 import {
   createLocalJWKSet,
@@ -9,7 +9,6 @@ import {
 } from "jose";
 import type { JWTVerifyGetKey } from "jose";
 import { z } from "zod";
-import { freezeIdentity } from "../identity.ts";
 import type { VerifiedIdentity } from "../services/identity.ts";
 import type { AccessConfig } from "./config.ts";
 import { ApiFailure } from "./http.ts";
@@ -99,11 +98,13 @@ export async function verifyAccessToken(
   const claims = claimsSchema.safeParse(payload);
   if (!claims.success) throw new ApiFailure("forbidden");
   if (claims.data.common_name !== undefined) {
-    if (claims.data.common_name !== access.verifierClientId) throw new ApiFailure("forbidden");
+    const isAiVerifier = claims.data.common_name === access.aiVerifierClientId;
+    if (!isAiVerifier && claims.data.common_name !== access.verifierClientId)
+      throw new ApiFailure("forbidden");
     return freezeIdentity({
       issuer: access.issuer,
-      subject: verifierSubject,
-      email: "verifier@staging.invalid",
+      subject: isAiVerifier ? aiVerifierSubject : verifierSubject,
+      email: isAiVerifier ? "ai-verifier@staging.invalid" : "verifier@staging.invalid",
     } as VerifiedIdentity);
   }
   return freezeIdentity({

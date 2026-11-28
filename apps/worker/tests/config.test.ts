@@ -61,6 +61,40 @@ await test("Verifier configuration", async (t) => {
   }
 });
 
+await test("AI verifier service tokens are staging-only and have a separate Client ID", () => {
+  const smokeId = "smoke-client.access";
+  const aiId = "ai-client.access";
+  const config = loadConfig({
+    ...remote,
+    ACCESS_VERIFIER_CLIENT_ID: smokeId,
+    ACCESS_AI_VERIFIER_CLIENT_ID: aiId,
+  });
+  assert.equal(config.access.verifierClientId, smokeId);
+  assert.equal(config.access.aiVerifierClientId, aiId);
+
+  for (const ENVIRONMENT of ["local", "production"]) {
+    const env = ENVIRONMENT === "local" ? local : { ...remote, ENVIRONMENT };
+    assert.throws(() => loadConfig({ ...env, ACCESS_AI_VERIFIER_CLIENT_ID: aiId }), {
+      name: "ConfigError",
+      message: /ACCESS_AI_VERIFIER_CLIENT_ID/u,
+    });
+  }
+  for (const invalid of [` ${smokeId} `, "", "   "]) {
+    assert.throws(
+      () =>
+        loadConfig({
+          ...remote,
+          ACCESS_VERIFIER_CLIENT_ID: smokeId,
+          ACCESS_AI_VERIFIER_CLIENT_ID: invalid,
+        }),
+      {
+        name: "ConfigError",
+        message: /ACCESS_AI_VERIFIER_CLIENT_ID/u,
+      },
+    );
+  }
+});
+
 await test("Job test hold configuration fails closed", () => {
   for (const env of [local, remote, { ...remote, ENVIRONMENT: "production" }]) {
     loadConfig({ ...env, JOB_TEST_HOLD: "none" });

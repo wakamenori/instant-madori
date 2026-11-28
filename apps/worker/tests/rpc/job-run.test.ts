@@ -14,7 +14,7 @@ import { test } from "node:test";
 import {
   acceptInstruction,
   claimNextJob,
-  runJob,
+  runJob as runWorkflowJob,
   stopJob,
   jobReferenceSchema,
 } from "../../src/services/jobs.ts";
@@ -31,6 +31,28 @@ import { jobInstanceId, jobRuns } from "../../src/workflows/job-runs.ts";
 import { applyJobMigrations, openJobDatabase, now } from "./jobs-support.ts";
 
 import { stepEngine } from "./job-steps.ts";
+function runJob(
+  deps: Omit<JobWorkflowDeps, "ai"> & { ai: Ai },
+  job: JobExecutionReference,
+  steps: Parameters<typeof runWorkflowJob>[2],
+) {
+  const { ai } = deps;
+  return runWorkflowJob(
+    {
+      ...deps,
+      ai: {
+        forNewJob: () => Promise.resolve(ai),
+        continuing: (model) => {
+          assert.equal(model, ai.model);
+          return ai;
+        },
+      },
+    },
+    job,
+    steps,
+  );
+}
+
 await test("Job runs restore D1 execution rights across retries and lost responses", async (t) => {
   const db = await openJobDatabase();
   t.after(() => db.dispose());
@@ -46,7 +68,7 @@ await test("Job runs restore D1 execution rights across retries and lost respons
   };
   const fullOutput = {
     uncachedInputTokens: 10,
-    outputTokens: 32_000,
+    outputTokens: 16_000,
     cacheReadTokens: 0,
     cacheWrite1hTokens: 0,
     cacheWrite5mTokens: 0,
@@ -145,7 +167,7 @@ await test("Job runs restore D1 execution rights across retries and lost respons
     const wakes: string[] = [];
     const calls: string[] = [];
     const summaries: string[] = [];
-    const deps: JobWorkflowDeps = {
+    const deps: Omit<JobWorkflowDeps, "ai"> & { ai: Ai } = {
       ...base,
       wakePattern: (id) => {
         wakes.push(id);

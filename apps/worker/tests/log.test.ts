@@ -17,6 +17,7 @@ type OpenStringKey =
   | "patternId"
   | "heldBy"
   | "jobId"
+  | "attemptId"
   | "questionId"
   | "messageId"
   | "revisionId"

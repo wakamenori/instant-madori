@@ -12,6 +12,7 @@ void test("numbered rows share their key with local acceptances; pending deliver
     requestId: "b",
     seq: 2,
     questionId: null,
+    attachmentIds: [],
     generation: 0,
     delivery: { kind: "sending" },
   } as const;
@@ -160,6 +161,7 @@ void test("local accepted answers use the exact question ID and can anchor their
         requestId: "answer-request",
         body: checked.body,
         questionId: "m4",
+        attachmentIds: [],
         seq: 0,
         generation: 0,
         delivery: { kind: "accepted", job: { jobId: "answer", messageId: "m6", number: 6 } },

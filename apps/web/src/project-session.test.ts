@@ -1102,3 +1102,249 @@ for (const reopen of [heldState, askingState, { ...answeredState, runningJob: an
     );
   });
 }
+
+const imageFile = new Blob(["image to decode"], { type: "image/png" });
+const preparedImage = new Blob(["prepared jpeg"], { type: "image/jpeg" });
+const asset = {
+  id: crypto.randomUUID(),
+  mediaType: "image/jpeg",
+  bytes: preparedImage.size,
+  width: 2,
+  height: 1,
+  sha256: "a".repeat(64),
+  createdAt,
+};
+const assetRequestId = crypto.randomUUID();
+const uploadPath = `POST /api/assets?requestId=${assetRequestId}`;
+function uploadResponse(id = asset.id) {
+  return Response.json({ asset: { ...asset, id } }, { status: 201 });
+}
+
+void test("an instruction waits for its attachment, resends the same IDs, and can reopen the saved image", async (t) => {
+  const { promise: upload, resolve: finishUpload } = deferredResponse();
+  const posts: unknown[] = [];
+  const paths = router(t, {
+    [uploadPath]: (init) => {
+      assert.equal(init.body, preparedImage);
+      assert.equal(new Headers(init.headers).get("content-type"), "image/jpeg");
+      return upload;
+    },
+    [`POST ${messagesPath}`]: (init) => {
+      assert.ok(typeof init.body === "string");
+      posts.push(JSON.parse(init.body));
+      if (posts.length === 1) return Promise.reject(new TypeError("offline"));
+      return Response.json({ job }, { status: 202 });
+    },
+    [`GET ${messagesPath}`]: () =>
+      Response.json({
+        messages: posts.length > 1 ? [{ ...row, attachmentIds: [asset.id] }] : [],
+        nextCursor: null,
+      }),
+    [`GET /api/assets/${asset.id}`]: () => new Response(preparedImage),
+  });
+  const messageRequestId = crypto.randomUUID();
+  const ids = [assetRequestId, messageRequestId];
+  const session = start(t, {
+    newRequestId: () => {
+      const id = ids.shift();
+      assert.ok(id);
+      return id;
+    },
+    prepareImage: (file) => {
+      assert.equal(file, imageFile);
+      return Promise.resolve({ blob: preparedImage });
+    },
+  });
+  await t.waitFor(() => openView(session));
+  session.attach([imageFile]);
+  assert.equal(session.send(body()), false);
+  await t.waitFor(() => assert.equal(openView(session).drafts[0]?.state.kind, "uploading"));
+  assert.equal(session.send(body()), false);
+  assert.deepEqual(posts, []);
+  finishUpload(uploadResponse());
+  await t.waitFor(() => assert.equal(openView(session).drafts[0]?.state.kind, "ready"));
+  assert.equal(session.send(body()), true);
+  assert.deepEqual(openView(session).drafts, []);
+  assert.deepEqual(
+    paths.filter((path) => path.startsWith("POST")),
+    [uploadPath, `POST ${messagesPath}`],
+  );
+  await t.waitFor(() => {
+    const entry = openView(session).timeline[0];
+    assert.ok(entry?.kind === "local" && entry.delivery.kind === "unsent");
+    assert.deepEqual(entry.attachmentIds, [asset.id]);
+  });
+  assert.equal(session.assetImages.get(asset.id)?.kind, "ready");
+  session.resend(messageRequestId);
+  await t.waitFor(() => assert.equal(openView(session).timeline[0]?.kind, "server"));
+  const request = { requestId: messageRequestId, body: row.body, attachmentIds: [asset.id] };
+  assert.deepEqual(posts, [request, request]);
+  assert.ok(!paths.includes(`GET /api/assets/${asset.id}`));
+
+  const reopened = start(t);
+  await t.waitFor(() => {
+    const entry = openView(reopened).timeline[0];
+    assert.ok(entry?.kind === "server");
+    assert.deepEqual(entry.message.attachmentIds, [asset.id]);
+  });
+  await reopened.assetImages.load(asset.id);
+  assert.equal(reopened.assetImages.get(asset.id)?.kind, "ready");
+  assert.equal(paths.filter((path) => path === `GET /api/assets/${asset.id}`).length, 1);
+});
+
+void test("oversized prepared images are refused before upload and leave a text-only instruction", async (t) => {
+  const posts: unknown[] = [];
+  const paths = router(t, {
+    [`POST ${messagesPath}`]: (init) => {
+      assert.ok(typeof init.body === "string");
+      posts.push(JSON.parse(init.body));
+      return Response.json({ job }, { status: 202 });
+    },
+  });
+  const oversized = new Blob([new Uint8Array(7_499_998)], { type: "image/jpeg" });
+  const session = start(t, {
+    newRequestId: () => assetRequestId,
+    prepareImage: () => Promise.resolve({ blob: oversized }),
+  });
+  await t.waitFor(() => openView(session));
+  session.attach([imageFile]);
+  await t.waitFor(() =>
+    assert.equal(
+      openView(session).attachNotice,
+      "画像を縮小しても大きすぎるため添えられません（7.5MBまで）。",
+    ),
+  );
+  assert.deepEqual(openView(session).drafts, []);
+  assert.equal(session.send(body()), true);
+  assert.deepEqual(posts, [{ requestId: assetRequestId, body: row.body }]);
+  assert.equal(openView(session).attachNotice, null);
+  assert.ok(!paths.some((path) => path.startsWith("POST /api/assets")));
+});
+
+void test("two batches accept only the first three images and send their IDs in selection order", async (t) => {
+  const uploadIds = Array.from({ length: 3 }, () => crypto.randomUUID());
+  const assetIds = Array.from({ length: 3 }, () => crypto.randomUUID());
+  const messageId = crypto.randomUUID();
+  const ids = [...uploadIds, messageId];
+  const first = deferredResponse();
+  const posts: unknown[] = [];
+  const paths = router(t, {
+    ...Object.fromEntries(
+      uploadIds.map((id, index) => [
+        `POST /api/assets?requestId=${id}`,
+        () => (index === 0 ? first.promise : uploadResponse(assetIds[index])),
+      ]),
+    ),
+    [`POST ${messagesPath}`]: (init) => {
+      assert.ok(typeof init.body === "string");
+      posts.push(JSON.parse(init.body));
+      return Response.json({ job }, { status: 202 });
+    },
+  });
+  const session = start(t, {
+    newRequestId: () => {
+      const id = ids.shift();
+      assert.ok(id);
+      return id;
+    },
+    prepareImage: () => Promise.resolve({ blob: preparedImage }),
+  });
+  await t.waitFor(() => openView(session));
+  session.attach([imageFile, imageFile]);
+  session.attach([imageFile, imageFile]);
+  await t.waitFor(() => {
+    const view = openView(session);
+    assert.equal(view.attachNotice, "画像は一つの指示に3枚まで添えられます。");
+    assert.deepEqual(
+      view.drafts.map(({ state }) => state.kind),
+      ["uploading", "ready", "ready"],
+    );
+  });
+  first.resolve(uploadResponse(assetIds[0]));
+  await t.waitFor(() =>
+    assert.ok(openView(session).drafts.every(({ state }) => state.kind === "ready")),
+  );
+  assert.equal(session.send(body()), true);
+  assert.deepEqual(
+    paths.filter((path) => path.startsWith("POST /api/assets")),
+    uploadIds.map((id) => `POST /api/assets?requestId=${id}`),
+  );
+  assert.deepEqual(posts, [{ requestId: messageId, body: row.body, attachmentIds: assetIds }]);
+});
+
+void test("retry keeps the upload request ID and detaching aborts the request", async (t) => {
+  let attempts = 0;
+  let uploadSignal: AbortSignal | null | undefined;
+  const pending = deferredResponse();
+  const paths = router(t, {
+    [uploadPath]: (init) => {
+      attempts++;
+      assert.equal(init.body, preparedImage);
+      if (attempts === 1) return Promise.reject(new TypeError("offline"));
+      uploadSignal = init.signal;
+      return pending.promise;
+    },
+  });
+  const session = start(t, {
+    newRequestId: () => assetRequestId,
+    prepareImage: () => Promise.resolve({ blob: preparedImage }),
+  });
+  await t.waitFor(() => openView(session));
+  session.attach([imageFile]);
+  await t.waitFor(() =>
+    assert.deepEqual(openView(session).drafts[0]?.state, {
+      kind: "failed",
+      retryable: true,
+      message: "通信できず画像を登録できませんでした。再試行してください。",
+    }),
+  );
+  const draft = openView(session).drafts[0];
+  assert.ok(draft);
+  assert.equal(session.send(body()), false);
+  session.retryAttachment(draft.key);
+  session.detach(draft.key);
+  assert.equal(uploadSignal?.aborted, true);
+  assert.deepEqual(openView(session).drafts, []);
+  pending.resolve(uploadResponse());
+  await nextTurn();
+  assert.deepEqual(openView(session).drafts, []);
+  assert.equal(session.assetImages.get(asset.id), undefined);
+  assert.deepEqual(
+    paths.filter((path) => path.startsWith("POST")),
+    [uploadPath, uploadPath],
+  );
+});
+
+void test("stopping uploads marks drafts retryable and a restarted session can finish registration", async (t) => {
+  const pending = deferredResponse();
+  const signals: AbortSignal[] = [];
+  router(t, {
+    [uploadPath]: (init) => {
+      assert.ok(init.signal);
+      signals.push(init.signal);
+      return signals.length === 1 ? pending.promise : uploadResponse();
+    },
+  });
+  const session = createProjectSession(parseProjectId(project.id), {
+    newRequestId: () => assetRequestId,
+    prepareImage: () => Promise.resolve({ blob: preparedImage }),
+  });
+  const stop = session.start();
+  t.after(stop);
+  await t.waitFor(() => openView(session));
+  session.attach([imageFile]);
+  await t.waitFor(() => assert.equal(openView(session).drafts[0]?.state.kind, "uploading"));
+  const before = openView(session).drafts[0];
+  assert.ok(before);
+  stop();
+  assert.equal(signals[0]?.aborted, true);
+  const interrupted = openView(session).drafts[0]?.state;
+  assert.ok(interrupted?.kind === "failed" && interrupted.retryable);
+
+  t.after(session.start());
+  session.retryAttachment(before.key);
+  pending.resolve(uploadResponse());
+  await t.waitFor(() => assert.equal(openView(session).drafts[0]?.state.kind, "ready"));
+  assert.equal(signals.length, 2);
+  assert.notEqual(openView(session).drafts[0]?.previewUrl, before.previewUrl);
+});

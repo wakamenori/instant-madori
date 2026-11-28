@@ -2,5 +2,10 @@
   "repository": "https://github.com/tangency-labs/solidcraft",
   "commit": "7c0f565e915faf6235d95d8cbdc74f8efed07451",
   "initialCommit": "9325e3ac8cc1dcad67bc5d218274e89e8a9b26fc",
-  "localPatches": ["crates/doc/src/project.rs", "crates/io/Cargo.toml", "crates/io/build.rs"]
+  "localPatches": [
+    "crates/doc/src/project.rs",
+    "crates/io/Cargo.toml",
+    "crates/io/build.rs",
+    "crates/viewport-gpu/src/view.rs"
+  ]
 }

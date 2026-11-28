@@ -2,7 +2,7 @@ import { scriptedAi } from "../../src/ai/scripted.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Usage } from "../../src/ai/round-trip.ts";
-import { limits, microUsd } from "../../src/limits.ts";
+import { limits, microUsd, outputTokenLimit } from "../../src/limits.ts";
 import { estimateAttempt } from "../../src/services/cost.ts";
 import { meteredRoundTrip } from "../../src/services/ai-cost.ts";
 import { acceptInstruction, claimNextJob, stopJob } from "../../src/services/jobs.ts";
@@ -202,7 +202,7 @@ await test("AI attempt costs on real D1", async (t) => {
           opening: [{ kind: "text" as const, text: "hello" }],
           rounds: [],
         },
-        maxOutputTokens: 100,
+        maxOutputTokens: outputTokenLimit(100),
       };
       const estimate = estimateAttempt(request);
       const ai = scriptedAi([{ stop: "end", parts: [{ kind: "text", text: "answer" }], usage }]);

@@ -65,7 +65,9 @@ export function stalledPatternSweepDeps(
 }
 
 export function jobWorkflowDeps(
-  env: Pick<Env, "DB" | "BLOBS" | "GEOMETRY" | "PATTERNS" | "ENVIRONMENT" | "JOB_TEST_HOLD">,
+  env: Pick<Env, "DB" | "BLOBS" | "GEOMETRY" | "PATTERNS" | "ENVIRONMENT" | "JOB_TEST_HOLD"> & {
+    readonly ANTHROPIC_API_KEY?: string;
+  },
   runtime: Runtime,
 ): JobWorkflowDeps {
   const { jobs, snapshots, work, aiCost } = createStore(d1(env.DB), r2(env.BLOBS));

@@ -10,6 +10,8 @@ import {
   patternResponseSchema,
   patternListResponseSchema,
   apiErrorSchema,
+  assetMediaTypeSchema,
+  createAssetResponseSchema,
   createProjectResponseSchema,
   displayContentType,
   floorPlanContentType,
@@ -45,7 +47,8 @@ async function request<T>(
       | AcceptInstructionRequest
       | RenameRequest
       | StopJobRequest
-      | ReleaseQueueRequest;
+      | ReleaseQueueRequest
+      | Blob;
   },
 ): Promise<T> {
   signal.throwIfAborted();
@@ -55,8 +58,10 @@ async function request<T>(
         ? {}
         : {
             method: write.method,
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify(write.body),
+            headers: {
+              "content-type": write.body instanceof Blob ? write.body.type : "application/json",
+            },
+            body: write.body instanceof Blob ? write.body : JSON.stringify(write.body),
           };
     const response = await fetch(path, { ...init, signal });
     if (!response.ok) {
@@ -199,6 +204,27 @@ export function sendInstruction(
     },
     { method: "POST", body },
   );
+}
+
+export function uploadAsset(blob: Blob, requestId: string, signal: AbortSignal) {
+  return request(
+    `/api/assets?${new URLSearchParams({ requestId })}`,
+    signal,
+    async (response) => {
+      const result = createAssetResponseSchema.safeParse(await jsonBody(response));
+      if (!result.success) throw new ApiError("unexpected_response");
+      return result.data.asset;
+    },
+    { method: "POST", body: blob },
+  );
+}
+
+export function fetchAsset(id: string, signal: AbortSignal) {
+  return request(`/api/assets/${id}`, signal, async (response) => {
+    if (!assetMediaTypeSchema.safeParse(response.headers.get("content-type")).success)
+      throw new ApiError("unexpected_response");
+    return response.blob();
+  });
 }
 
 export function stopJob(jobId: string, body: StopJobRequest, signal: AbortSignal) {
