@@ -777,3 +777,55 @@ fn a_bulge_that_spans_the_room_draws_both_floor_parts() {
         3
     );
 }
+
+#[test]
+fn houses_built_one_after_another_project_their_own_bulges() {
+    let input = fixture();
+    let bulge = |along| {
+        modified(
+            &input,
+            vec![floor_add(
+                "bulge",
+                &shared(&input),
+                AddTo::Both {},
+                along,
+                [900., 2000.],
+                20.,
+            )],
+        )
+    };
+    let intended = bulge([2000., 2600.]);
+    let mut wrong = Vec::new();
+    for round in 0..8 {
+        for (along, square_mm) in [
+            ([2000., 2600.], 19_688_000.),
+            ([1500., 2700.], 19_676_000.),
+            ([2000., 2600.], 19_688_000.),
+        ] {
+            let house = bulge(along);
+            let model = Model::build(&house, None).unwrap();
+            let assessment = model.assess(&house);
+            let areas: Vec<_> = house
+                .rooms()
+                .map(|room| assessment.room_area(&room.data().id).unwrap())
+                .map(|area| area.unrounded_square_metres() * 1e6)
+                .collect();
+            if areas != [square_mm; 2] || !assessment.mismatches().is_empty() {
+                wrong.push(format!("round {round} along {along:?}: {areas:?}"));
+            }
+        }
+        let moved = Model::build(&bulge([2400., 3000.]), None).unwrap();
+        let missing = moved
+            .assess(&intended)
+            .mismatches()
+            .iter()
+            .filter(|m| matches!(m.reason, MismatchReason::MissingBulge { .. }))
+            .count();
+        if missing != 2 {
+            wrong.push(format!(
+                "round {round}: {missing} missing_bulge for the moved bulge"
+            ));
+        }
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
