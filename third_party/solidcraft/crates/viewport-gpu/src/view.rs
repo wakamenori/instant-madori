@@ -3909,7 +3909,10 @@ impl Renderer {
             let oit = jobs.spawn(oit);
             let blits = jobs.spawn(blits);
             let resets = jobs.spawn(resets);
-            let studio = jobs.spawn(crate::environment::tables);
+            // In the browser, joining a job runs it on this thread (`concurrent`). Building the
+            // studio here would hold up every viewer's first frame. The first frame that finishes
+            // faces builds it in `Environment::upload`.
+            let studio = (!cfg!(target_arch = "wasm32")).then(|| jobs.spawn(crate::environment::tables));
             let (tri, tri_marks, tri_planned, planned_marks, tri_instanced, instanced_marks) = tris.join();
             let (tri_cap, planned_cap, instanced_cap) = caps.join();
             let (tri_instanced_flat, flat_marks) = flat.join();
@@ -3984,7 +3987,9 @@ impl Renderer {
             let (depth_reset, section_stencil) = resets.join();
             let (pbr, pbr_palette, pbr_instanced) = pbr.join();
             let oit = oit.join();
-            environment.set(studio.join());
+            if let Some(studio) = studio {
+                environment.set(studio.join());
+            }
             Renderer {
                 product_depth: None,
                 product_highlights: false,
@@ -4593,7 +4598,9 @@ impl Renderer {
                 None,
             ));
         }
-        res.uniform_bgl.environment.upload(queue);
+        if !cfg!(target_arch = "wasm32") || wants_studio(cb.sky) {
+            res.uniform_bgl.environment.upload(queue);
+        }
         let tess = res.tess.as_ref().map(|t| (t, &mut *encoder));
         uploads.push(res.model.take_sharing(device, queue, &res.uniform, &res.uniform_bgl, cb.key, &cb.slot, tess, oit, Some(&mut res.moving), None));
         match &cb.moving {
@@ -5551,6 +5558,11 @@ pub fn clip_hatches(hatch: &[usize]) -> [usize; MAX_SECTION_PLANES] {
 /// Uniform bytes for a frame.
 pub fn uniform_bytes(cb: &Frame, w: f32, h: f32, linear: bool, reversed: bool) -> Vec<u8> {
     uniform_bytes_placing(cb, w, h, linear, reversed, IDENTITY)
+}
+
+/// The frame may give faces their material finish if `finishes()` in `shaders/viewport.wgsl` sees the `2` bit set in `sky.w`.
+fn wants_studio(sky: [f32; 4]) -> bool {
+    (sky[3] as u32) & 2 != 0
 }
 
 /// Uniform bytes for the frame's moving layer: its scene drawn moved by `model`.
