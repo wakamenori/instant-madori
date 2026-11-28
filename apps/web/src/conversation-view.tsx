@@ -46,6 +46,8 @@ function statusText(entry: TimelineEntry) {
       return "送信中…";
     case "unsent":
       return "未送信";
+    case "rejected":
+      return null;
   }
 }
 function badge(progress: Progress) {
@@ -79,7 +81,9 @@ export function ConversationLog({
     <ol className="conversation-log" ref={log}>
       {timeline.map((entry) => {
         const message = entry.kind === "server" ? entry.message : null;
-        const kind = message?.kind ?? "instruction";
+        const kind =
+          message?.kind ??
+          (entry.kind === "local" && entry.questionId !== null ? "answer" : "instruction");
         const appearance = appearances[kind];
         const status = statusText(entry);
         return (
@@ -88,21 +92,30 @@ export function ConversationLog({
             {status && <span className="delivery-badge">{status}</span>}
             <p>{entry.kind === "local" ? entry.body : entry.message.body}</p>
             {message && appearance.detail?.(message)}
-            {entry.kind === "local" && entry.delivery.kind === "unsent" && (
-              <div>
-                {entry.delivery.message}{" "}
-                <button type="button" onClick={() => onResend(entry.requestId)}>
-                  再送
-                </button>
-              </div>
-            )}
+            {entry.kind === "local" &&
+              (entry.delivery.kind === "unsent" || entry.delivery.kind === "rejected") && (
+                <div>
+                  {entry.delivery.kind === "unsent"
+                    ? entry.delivery.message
+                    : "質問は既に閉じていたため、回答として送れませんでした。"}{" "}
+                  <button type="button" onClick={() => onResend(entry.requestId)}>
+                    {entry.delivery.kind === "unsent" ? "再送" : "指示として送る"}
+                  </button>
+                </div>
+              )}
           </li>
         );
       })}
     </ol>
   );
 }
-export function InstructionForm({ onSend }: { onSend: (body: InstructionBody) => void }) {
+export function InstructionForm({
+  onSend,
+  hint,
+}: {
+  onSend: (body: InstructionBody) => void;
+  hint?: string | undefined;
+}) {
   const [text, setText] = useState("");
   const checked = checkInstruction(text);
   return (
@@ -122,6 +135,7 @@ export function InstructionForm({ onSend }: { onSend: (body: InstructionBody) =>
         value={text}
         onChange={(event) => setText(event.target.value)}
       />
+      {hint && <p>{hint}</p>}
       {!checked.ok && checked.message && <p role="alert">{checked.message}</p>}
       <button type="submit" disabled={!checked.ok}>
         送信

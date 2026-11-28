@@ -1,16 +1,23 @@
 import { checkInstruction } from "./conversation.ts";
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
+import { setImmediate as nextTurn } from "node:timers/promises";
 import {
   displayContentType,
   floorPlanStoreysHeader,
   renameRequestSchema,
   type RenameRequest,
   type PatternStateResponse,
+  acceptInstructionRequestSchema,
+  releaseQueueRequestSchema,
+  stopJobRequestSchema,
+  type AcceptInstructionRequest,
+  type ReleaseQueueRequest,
+  type StopJobRequest,
 } from "@madori/contracts";
 import { createProject } from "./api.ts";
 import { parseRoute, formatRoute, parseProjectId, projectRoute } from "./route.ts";
-import { createProjectSession, summarizeActivity } from "./project-session.ts";
+import { createProjectSession, type ProjectView } from "./project-session.ts";
 
 const createdAt = "2026-11-22T00:00:00Z";
 const project = {
@@ -50,18 +57,6 @@ function display(id: string, storeys = "", byte = 3) {
     },
   });
 }
-void test("held, running, queued and idle activity have descending precedence", () => {
-  const busy = { ...state, queuedJobs: [job], runningJob: job };
-  assert.deepEqual(summarizeActivity({ ...busy, queueHold: { job: held } }), {
-    kind: "held",
-    job: held,
-    queued: 1,
-  });
-  assert.deepEqual(summarizeActivity(busy), { kind: "working", queued: 1 });
-  assert.deepEqual(summarizeActivity({ ...busy, runningJob: null }), { kind: "queued", count: 1 });
-  assert.deepEqual(summarizeActivity(state), { kind: "idle" });
-});
-
 const projectPath = `/api/projects/${project.id}`;
 const patternPath = `/api/patterns/${pattern.id}`;
 const patternsPath = `GET /api/projects/${project.id}/patterns`;
@@ -106,7 +101,9 @@ function start(t: TestContext, deps?: Parameters<typeof createProjectSession>[1]
   t.after(session.start());
   return session;
 }
-function openView(session: ReturnType<typeof createProjectSession>) {
+function openView(
+  session: ReturnType<typeof createProjectSession>,
+): Extract<ProjectView, { kind: "open" }> {
   const view = session.getView();
   assert.equal(view.kind, "open");
   return view;
@@ -164,7 +161,7 @@ void test("a held queue sleeps with jobs waiting", async (t) => {
       return Promise.resolve();
     },
   });
-  await t.waitFor(() => assert.ok(openView(session).activity.kind === "held"));
+  await t.waitFor(() => assert.ok(openView(session).status.now.kind === "held"));
   assert.deepEqual(waits, []);
 });
 void test("missing and empty pattern lists report distinct failures", async (t) => {
@@ -200,7 +197,7 @@ void test("a poll failure preserves the revision and automatically retries", asy
       problems.push(view.problem);
     }
   });
-  await t.waitFor(() => assert.ok(openView(session).activity.kind === "idle"));
+  await t.waitFor(() => assert.ok(openView(session).status.now.kind === "idle"));
   assert.deepEqual(problems, ["読み込みに失敗しました。"]);
   assert.equal(openView(session).problem, null);
 });
@@ -404,7 +401,7 @@ void test("a rejected plan keeps its model and is reused on the next poll", asyn
       floorPlanResponse(revision.id, "<script/>"),
   });
   const session = start(t, { wait: () => Promise.resolve() });
-  await t.waitFor(() => assert.equal(openView(session).activity.kind, "idle"));
+  await t.waitFor(() => assert.equal(openView(session).status.now.kind, "idle"));
   const view = openView(session);
   assert.deepEqual(view.shown, {
     revision,
@@ -519,7 +516,7 @@ void test("an older poll finishing after a rename preserves the newer pattern", 
   await t.waitFor(() => assert.equal(reads, 2));
   assert.equal(await session.rename("pattern", saved.name), true);
   finishPoll(Response.json({ ...state, currentRevision: null, runningJob: job }));
-  await t.waitFor(() => assert.equal(openView(session).activity.kind, "working"));
+  await t.waitFor(() => assert.equal(openView(session).status.now.kind, "running"));
   assert.deepEqual(openView(session).pattern, saved);
 });
 
@@ -572,5 +569,536 @@ for (const failure of renameFailures) {
     fail = false;
     assert.equal(await session.rename("project", "北の家"), true);
     assert.deepEqual(openView(session).names.project, { kind: "idle" });
+  });
+}
+
+const withoutRevision = { ...state, currentRevision: null };
+const queued = { jobId: crypto.randomUUID(), messageId: crypto.randomUUID(), number: 2 };
+const question = {
+  messageId: crypto.randomUUID(),
+  number: 3,
+  body: "和室は必要ですか？",
+  choices: ["必要", "不要"],
+};
+const askingJob = { ...job, state: "awaiting_answer", question, answer: null } as const;
+const answerJob = { jobId: crypto.randomUUID(), messageId: crypto.randomUUID(), number: 4 };
+const askingState: PatternStateResponse = {
+  ...withoutRevision,
+  queueHold: { job: askingJob },
+  queuedJobs: [queued],
+  lastFinishedJob: askingJob,
+};
+const answeredState: PatternStateResponse = {
+  ...askingState,
+  queueHold: { job: { ...askingJob, answer: answerJob } },
+  lastFinishedJob: { ...answerJob, state: "cancelled" },
+};
+const runningState = { ...withoutRevision, runningJob: job };
+const heldState: PatternStateResponse = {
+  ...withoutRevision,
+  queueHold: { job: held },
+  queuedJobs: [queued],
+};
+const stopPath = `POST /api/jobs/${job.jobId}/stop`;
+const resumePath = `POST ${patternPath}/queue/resume`;
+const cancelPath = `POST ${patternPath}/queue/cancel`;
+const messagesPost = `POST ${messagesPath}`;
+
+function statuses(session: ReturnType<typeof createProjectSession>) {
+  const seen: string[] = [];
+  session.subscribe(() => {
+    const view = session.getView();
+    if (view.kind === "open") seen.push(view.status.now.kind);
+  });
+  return seen;
+}
+
+function operationToken(
+  session: ReturnType<typeof createProjectSession>,
+  kind: "stop" | "resume" | "cancel",
+) {
+  const { now } = openView(session).status;
+  if (kind === "stop") {
+    assert.ok(now.kind === "running" || now.kind === "answering");
+    assert.ok(now.stop);
+    return now.stop;
+  }
+  assert.ok(now.kind === "asking" || now.kind === "held");
+  assert.ok(now.release);
+  return now.release[kind];
+}
+
+function deferredResponse() {
+  let resolve!: (response: Response) => void;
+  const promise = new Promise<Response>((finish) => {
+    resolve = finish;
+  });
+  return { resolve, promise };
+}
+
+function waitingIntervals() {
+  const waits: number[] = [];
+  return {
+    waits,
+    wait: (ms: number) => {
+      waits.push(ms);
+      return Promise.resolve();
+    },
+  };
+}
+
+function newerRows() {
+  return Array.from({ length: 50 }, (_, index) => ({
+    ...row,
+    id: crypto.randomUUID(),
+    jobId: crypto.randomUUID(),
+    number: 54 - index,
+  }));
+}
+
+function ask(session: ReturnType<typeof createProjectSession>) {
+  const { now } = openView(session).status;
+  assert.equal(now.kind, "asking");
+  session.answer(now.question, body("必要"));
+}
+
+void test("an answer job inside a hold is polled through completion, then polling sleeps", async (t) => {
+  const states = [
+    { ...answeredState, queuedJobs: [answerJob, queued], lastFinishedJob: askingJob },
+    { ...answeredState, runningJob: answerJob, lastFinishedJob: askingJob },
+    answeredState,
+  ];
+  const paths = router(t, { [statePath]: () => Response.json(states.shift() ?? answeredState) });
+  const { waits, wait } = waitingIntervals();
+  const session = start(t, { wait });
+  const seen = statuses(session);
+  await t.waitFor(() => assert.equal(openView(session).status.now.kind, "held"));
+  await nextTurn();
+  assert.deepEqual(seen, ["answering", "answering", "held"]);
+  assert.deepEqual(waits, [1000, 1000]);
+  assert.equal(paths.filter((path) => path === statePath).length, 3);
+});
+
+void test("reopening restores an open question from state even if the latest conversation page omits it", async (t) => {
+  const messages = newerRows();
+  const current = {
+    ...askingState,
+    queuedJobs: messages
+      .map((entry) => ({
+        jobId: entry.jobId,
+        messageId: entry.id,
+        number: entry.number,
+      }))
+      .reverse(),
+  };
+  const { waits, wait } = waitingIntervals();
+  router(t, {
+    [statePath]: () => Response.json(current),
+    [`GET ${messagesPath}`]: () => Response.json({ messages, nextCursor: "older" }),
+  });
+  const session = start(t, { wait });
+  await t.waitFor(() => assert.equal(session.getView().kind, "open"));
+  const view = openView(session);
+  const { now, receipt } = view.status;
+  assert.equal(now.kind, "asking");
+  assert.equal(now.held, 50);
+  assert.deepEqual(now.question, {
+    messageId: question.messageId,
+    body: question.body,
+    choices: question.choices,
+  });
+  assert.equal(receipt, null);
+  assert.equal(view.timeline.length, 50);
+  assert.ok(
+    view.timeline.every((entry) => entry.kind === "server" && entry.message.kind === "instruction"),
+  );
+  assert.deepEqual(waits, []);
+});
+
+for (const accepted of [true, false]) {
+  void test(
+    accepted
+      ? "an accepted answer absent from the latest page no longer blocks release after refresh"
+      : "a failed answer POST blocks release until the refreshed state is published",
+    async (t) => {
+      const messages = newerRows();
+      const response = deferredResponse();
+      const refreshed = deferredResponse();
+      let posting = false;
+      const { waits, wait } = waitingIntervals();
+      const paths = router(t, {
+        [statePath]: () => (posting ? refreshed.promise : Response.json(askingState)),
+        [`GET ${messagesPath}`]: () => Response.json({ messages, nextCursor: "older" }),
+        [messagesPost]: () => {
+          posting = true;
+          return response.promise;
+        },
+      });
+      const session = start(t, { wait });
+      await t.waitFor(() => assert.equal(session.getView().kind, "open"));
+      assert.ok(operationToken(session, "resume"));
+      ask(session);
+      let view = openView(session);
+      assert.equal(view.inputInFlight, true);
+      assert.equal(view.status.now.kind, "asking");
+      assert.equal(view.status.now.release, null);
+      response.resolve(
+        accepted
+          ? Response.json({ job: answerJob }, { status: 202 })
+          : Response.json({ error: "internal_error" }, { status: 500 }),
+      );
+      await t.waitFor(() => {
+        const entry = openView(session).timeline.find((row) => row.kind === "local");
+        assert.ok(entry?.kind === "local");
+        assert.equal(entry.delivery.kind, accepted ? "accepted" : "unsent");
+      });
+      view = openView(session);
+      assert.equal(view.inputInFlight, true);
+      assert.equal(view.status.now.kind, "asking");
+      assert.equal(view.status.now.release, null);
+      const after = accepted ? answeredState : askingState;
+      refreshed.resolve(Response.json(after));
+      await t.waitFor(() => assert.equal(openView(session).inputInFlight, false));
+      assert.equal(openView(session).status.now.kind, accepted ? "held" : "asking");
+      assert.ok(operationToken(session, "resume"));
+      assert.ok(
+        openView(session).timeline.every(
+          (entry) => entry.kind === "local" || entry.message.id !== answerJob.messageId,
+        ),
+      );
+      assert.ok(paths.includes(messagesPost));
+      assert.deepEqual(waits, []);
+    },
+  );
+}
+
+void test("a non-overlapping latest page replaces previously loaded rows", async (t) => {
+  const latestPage = newerRows();
+  let latest = false;
+  router(t, {
+    [`GET ${messagesPath}`]: () =>
+      Response.json(
+        latest
+          ? { messages: latestPage, nextCursor: "older" }
+          : { messages: [row], nextCursor: null },
+      ),
+  });
+  const session = start(t);
+  await t.waitFor(() => assert.equal(openView(session).timeline.length, 1));
+  latest = true;
+  session.retry();
+  await t.waitFor(() => assert.equal(openView(session).timeline.length, 50));
+  assert.deepEqual(
+    openView(session).timeline.map((entry) => entry.key),
+    latestPage.map(({ id }) => `message:${id}`).reverse(),
+  );
+});
+
+void test("stop posts once, holds the action pending through refresh, and confirms the stop with another job running", async (t) => {
+  const response = deferredResponse();
+  const refreshed = deferredResponse();
+  const requests: StopJobRequest[] = [];
+  router(t, {
+    [statePath]: () => (requests.length === 0 ? Response.json(runningState) : refreshed.promise),
+    [stopPath]: (init) => {
+      assert.ok(typeof init.body === "string");
+      requests.push(stopJobRequestSchema.parse(JSON.parse(init.body)));
+      return response.promise;
+    },
+  });
+  const session = start(t);
+  await t.waitFor(() => assert.equal(session.getView().kind, "open"));
+  const token = operationToken(session, "stop");
+  session.act(token);
+  session.act(token);
+  assert.equal(openView(session).status.pending, "stop");
+  assert.equal(requests.length, 1);
+  response.resolve(Response.json({ outcome: "stopped", job: { ...job, state: "cancelled" } }));
+  await nextTurn();
+  session.act(token);
+  assert.equal(openView(session).status.pending, "stop");
+  assert.equal(requests.length, 1);
+  refreshed.resolve(Response.json({ ...withoutRevision, runningJob: queued }));
+  await t.waitFor(() => assert.deepEqual(openView(session).status.receipt, { kind: "stopped" }));
+  assert.equal(openView(session).status.pending, null);
+  const nextToken = operationToken(session, "stop");
+  assert.ok(nextToken.kind === "stop");
+  assert.equal(nextToken.jobId, queued.jobId);
+});
+
+void test("when the job finishes before stop, the receipt and new revision arrive together", async (t) => {
+  let finished = false;
+  const completed = { ...job, state: "completed", revision: next } as const;
+  router(t, {
+    [statePath]: () =>
+      Response.json(
+        finished
+          ? { ...withoutRevision, currentRevision: next, lastFinishedJob: completed }
+          : runningState,
+      ),
+    [stopPath]: () => {
+      finished = true;
+      return Response.json({ outcome: "already_finished", job: completed });
+    },
+    [`GET /api/revisions/${next.id}/view`]: () => display(next.id),
+  });
+  const session = start(t);
+  await t.waitFor(() => assert.equal(session.getView().kind, "open"));
+  session.act(operationToken(session, "stop"));
+  await t.waitFor(() =>
+    assert.deepEqual(openView(session).status.receipt, {
+      kind: "finished_first",
+      ending: "completed",
+      revision: next,
+    }),
+  );
+  assert.deepEqual(openView(session).shown?.revision, next);
+});
+
+for (const result of ["state", "an error"] as const) {
+  void test(`an earlier state read that returns ${result} after the stop response is discarded`, async (t) => {
+    const stale = deferredResponse();
+    const response = deferredResponse();
+    let reads = 0;
+    const cancelled = { ...job, state: "cancelled" } as const;
+    router(t, {
+      [statePath]: () => {
+        reads++;
+        if (reads === 1) return Response.json(runningState);
+        if (reads === 2) return stale.promise;
+        return Response.json({ ...withoutRevision, lastFinishedJob: cancelled });
+      },
+      [stopPath]: () => response.promise,
+    });
+    const session = start(t);
+    const seen = statuses(session);
+    await t.waitFor(() => assert.equal(session.getView().kind, "open"));
+    session.retry();
+    await t.waitFor(() => assert.equal(reads, 2));
+    session.act(operationToken(session, "stop"));
+    response.resolve(Response.json({ outcome: "stopped", job: cancelled }));
+    await nextTurn();
+    stale.resolve(
+      result === "state"
+        ? Response.json({ ...runningState, queuedJobs: [queued], runningJob: null })
+        : Response.json({ error: "internal_error" }, { status: 500 }),
+    );
+    await t.waitFor(() => assert.deepEqual(openView(session).status.receipt, { kind: "stopped" }));
+    assert.deepEqual(seen, ["running", "running", "idle"]);
+    assert.equal(reads, 3);
+  });
+}
+
+function releaseBody(init: RequestInit) {
+  assert.ok(typeof init.body === "string");
+  return releaseQueueRequestSchema.parse(JSON.parse(init.body));
+}
+
+void test("a conflicting resume refreshes the hold and exposes the new token", async (t) => {
+  const requests: ReleaseQueueRequest[] = [];
+  router(t, {
+    [statePath]: () =>
+      Response.json(
+        requests.length === 0
+          ? heldState
+          : {
+              ...askingState,
+              queueHold: { job: { ...askingJob, jobId: answerJob.jobId } },
+            },
+      ),
+    [resumePath]: (init) => {
+      requests.push(releaseBody(init));
+      return versionConflict();
+    },
+  });
+  const session = start(t);
+  await t.waitFor(() => assert.equal(session.getView().kind, "open"));
+  session.act(operationToken(session, "resume"));
+  await t.waitFor(() => assert.deepEqual(openView(session).status.receipt, { kind: "conflict" }));
+  assert.deepEqual(
+    requests.map(({ heldBy }) => heldBy),
+    [held.jobId],
+  );
+  const action = operationToken(session, "resume");
+  assert.ok(action.kind === "resume");
+  assert.equal(action.heldBy, answerJob.jobId);
+});
+
+for (const how of ["resume", "cancel"] as const) {
+  void test(
+    how === "resume"
+      ? "successful resume keeps polling through starting and running to idle"
+      : "cancelling closes the question and the session sleeps",
+    async (t) => {
+      const requests: ReleaseQueueRequest[] = [];
+      const resumed = [
+        { ...withoutRevision, queuedJobs: [queued] },
+        { ...withoutRevision, runningJob: queued },
+      ];
+      const cancelled = { ...queued, state: "cancelled" };
+      router(t, {
+        [statePath]: () =>
+          Response.json(
+            requests.length === 0
+              ? askingState
+              : how === "resume"
+                ? (resumed.shift() ?? withoutRevision)
+                : withoutRevision,
+          ),
+        [how === "resume" ? resumePath : cancelPath]: (init) => {
+          requests.push(releaseBody(init));
+          return Response.json({ jobs: [how === "resume" ? queued : cancelled] });
+        },
+      });
+      const { waits, wait } = waitingIntervals();
+      const session = start(t, { wait });
+      const seen = statuses(session);
+      const receipts: unknown[] = [];
+      session.subscribe(() => {
+        const view = session.getView();
+        if (view.kind === "open" && view.status.receipt) receipts.push(view.status.receipt);
+      });
+      await t.waitFor(() => assert.equal(session.getView().kind, "open"));
+      session.act(operationToken(session, how));
+      await t.waitFor(() => assert.equal(openView(session).status.now.kind, "idle"));
+      assert.deepEqual(
+        requests.map(({ heldBy }) => heldBy),
+        [askingJob.jobId],
+      );
+      assert.deepEqual(receipts, [{ kind: "released", how, count: 1, closedQuestion: true }]);
+      assert.deepEqual(
+        seen,
+        how === "resume"
+          ? ["asking", "asking", "starting", "running", "idle"]
+          : ["asking", "asking", "idle"],
+      );
+      assert.deepEqual(waits, how === "resume" ? [1000, 1000] : []);
+      if (how === "resume") assert.equal(openView(session).status.receipt, null);
+    },
+  );
+}
+
+void test("an uncertain resume stays retryable after another instruction, and the retry replays the same request", async (t) => {
+  const requests: ReleaseQueueRequest[] = [];
+  let instructionAccepted = false;
+  router(t, {
+    [statePath]: () =>
+      Response.json(
+        requests.length > 1
+          ? withoutRevision
+          : {
+              ...heldState,
+              queuedJobs: instructionAccepted ? [queued, answerJob] : [queued],
+            },
+      ),
+    [messagesPost]: () => {
+      instructionAccepted = true;
+      return Response.json({ job: answerJob }, { status: 202 });
+    },
+    [resumePath]: (init) => {
+      requests.push(releaseBody(init));
+      return requests.length === 1
+        ? Response.json({ error: "internal_error" }, { status: 500 })
+        : Response.json({ jobs: [queued, answerJob] });
+    },
+  });
+  const session = start(t);
+  await t.waitFor(() => assert.equal(session.getView().kind, "open"));
+  session.act(operationToken(session, "resume"));
+  await t.waitFor(() => assert.equal(openView(session).status.canRetry, true));
+  assert.deepEqual(openView(session).status.receipt, {
+    kind: "failed",
+    action: "resume",
+    uncertain: true,
+  });
+  session.send(body());
+  await t.waitFor(() => {
+    const { status } = openView(session);
+    assert.equal(status.now.kind, "held");
+    assert.equal(status.now.held, 2);
+    assert.equal(status.canRetry, true);
+  });
+  session.retryOperation();
+  await t.waitFor(() =>
+    assert.deepEqual(openView(session).status.receipt, {
+      kind: "released",
+      how: "resume",
+      closedQuestion: false,
+      count: 2,
+    }),
+  );
+  assert.equal(requests.length, 2);
+  assert.deepEqual(requests[1], requests[0]);
+});
+
+void test("answer retries carry the same question and rejected answers can become new instructions", async (t) => {
+  const requests: AcceptInstructionRequest[] = [];
+  const routerResponse = deferredResponse();
+  router(t, {
+    [statePath]: () => Response.json(askingState),
+    [messagesPost]: (init) => {
+      assert.ok(typeof init.body === "string");
+      const request: AcceptInstructionRequest = acceptInstructionRequestSchema.parse(
+        JSON.parse(init.body),
+      );
+      requests.push(request);
+      if (requests.length === 1) throw new TypeError("offline");
+      if (requests.length === 2) return versionConflict();
+      return routerResponse.promise;
+    },
+  });
+  const session = start(t);
+  await t.waitFor(() => assert.equal(session.getView().kind, "open"));
+  ask(session);
+  function answerRow() {
+    const entry = openView(session).timeline.find((row) => row.kind === "local");
+    assert.ok(entry?.kind === "local");
+    return entry;
+  }
+  await t.waitFor(() => assert.equal(answerRow().delivery.kind, "unsent"));
+  const { requestId } = answerRow();
+  assert.equal(answerRow().questionId, question.messageId);
+  session.resend(requestId);
+  await t.waitFor(() => assert.equal(answerRow().delivery.kind, "rejected"));
+  assert.equal(answerRow().questionId, question.messageId);
+  session.resend(requestId);
+  assert.deepEqual(requests[0], {
+    requestId,
+    questionId: question.messageId,
+    body: "必要",
+    attachmentIds: [],
+  });
+  assert.deepEqual(requests[1], requests[0]);
+  const newInstruction = answerRow();
+  assert.notEqual(newInstruction.requestId, requestId);
+  assert.equal(newInstruction.questionId, null);
+  assert.deepEqual(requests[2], {
+    requestId: newInstruction.requestId,
+    body: "必要",
+    attachmentIds: [],
+  });
+  routerResponse.resolve(Response.json({ job: queued }, { status: 202 }));
+});
+
+for (const reopen of [heldState, askingState, { ...answeredState, runningJob: answerJob }]) {
+  void test(`reopening reproduces the ${reopen.runningJob ? "answering" : reopen.queueHold?.job.state} status without an operation receipt`, async (t) => {
+    router(t, { [statePath]: () => Response.json(reopen) });
+    const first = start(t);
+    const second = start(t);
+    await t.waitFor(() => {
+      assert.equal(first.getView().kind, "open");
+      assert.equal(second.getView().kind, "open");
+    });
+    assert.deepEqual(openView(second).status, {
+      now: openView(first).status.now,
+      pending: null,
+      receipt: null,
+      canRetry: false,
+    });
+    const now = openView(second).status.now;
+    assert.equal(
+      now.kind,
+      reopen.runningJob ? "answering" : reopen === askingState ? "asking" : "held",
+    );
   });
 }

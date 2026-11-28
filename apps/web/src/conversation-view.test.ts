@@ -49,10 +49,18 @@ void test("conversation kinds, revision, choices and delivery states appear in t
     { kind: "accepted", progress: { kind: "accepted" } },
     { kind: "sending" },
     { kind: "unsent", message: "接続を確認" },
+    { kind: "rejected" },
   ];
   for (const [index, delivery] of deliveries.entries()) {
     const requestId = `request-${index}`;
-    timeline.push({ kind: "local", key: requestId, requestId, body: "指示", delivery });
+    timeline.push({
+      kind: "local",
+      key: requestId,
+      requestId,
+      questionId: delivery.kind === "rejected" ? "q" : null,
+      body: delivery.kind === "rejected" ? "回答本文" : "指示",
+      delivery,
+    });
   }
   const html = renderToStaticMarkup(
     createElement(ConversationLog, { timeline, onResend: () => {} }),
@@ -65,6 +73,7 @@ void test("conversation kinds, revision, choices and delivery states appear in t
     notice: "お知らせ",
   }))
     assert.match(html, new RegExp(`class="entry entry-${kind}"[^>]*><strong>${speaker}</strong>`));
+  assert.match(html, /class="entry entry-answer"><strong>回答<\/strong> <p>回答本文<\/p>/);
   assert.match(html, /entry-notice" role="note"/);
   assert.match(html, /<ul class="choices"><li>南<\/li><li>北<\/li><\/ul>/);
   for (const label of [
@@ -77,6 +86,8 @@ void test("conversation kinds, revision, choices and delivery states appear in t
     "未送信",
     "接続を確認",
     ">再送</button>",
+    "質問は既に閉じていたため、回答として送れませんでした。",
+    ">指示として送る</button>",
   ])
     assert.ok(html.includes(label), label);
 });
